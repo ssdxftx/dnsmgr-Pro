@@ -16,7 +16,16 @@
         <n-icon size="22" :component="GlobeOutline" color="#3b6df0" />
         <span v-if="!collapsed" class="logo-text">聚合 DNS</span>
       </div>
-      <n-menu :value="activeKey" :collapsed="collapsed" :collapsed-width="64" :options="menuOptions" @update:value="onMenu" />
+      <n-menu
+        :value="activeKey"
+        :collapsed="collapsed"
+        :collapsed-width="64"
+        :options="menuOptions"
+        :expanded-keys="expandedKeys"
+        accordion
+        @update:value="onMenu"
+        @update:expanded-keys="expandedKeys = $event"
+      />
     </n-layout-sider>
 
     <!-- 移动端抽屉 -->
@@ -26,7 +35,14 @@
           <n-icon size="22" :component="GlobeOutline" color="#3b6df0" />
           <span class="logo-text">聚合 DNS</span>
         </div>
-        <n-menu :value="activeKey" :options="menuOptions" @update:value="onMenu" />
+        <n-menu
+          :value="activeKey"
+          :options="menuOptions"
+          :expanded-keys="expandedKeys"
+          accordion
+          @update:value="onMenu"
+          @update:expanded-keys="expandedKeys = $event"
+        />
       </n-drawer-content>
     </n-drawer>
 
@@ -55,10 +71,10 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { NIcon } from 'naive-ui';
-import { GlobeOutline, MenuOutline, PersonOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline } from '@vicons/ionicons5';
+import { NIcon, type MenuOption } from 'naive-ui';
+import { GlobeOutline, MenuOutline, PersonOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { clearToken } from '../api';
 
@@ -71,46 +87,101 @@ const collapsed = ref(false);
 const isMobile = ref(false);
 const drawerShow = ref(false);
 
-const menuOptions = [
-  { label: '仪表盘', key: 'dashboard', icon: () => h(NIcon, null, { default: () => h(SpeedometerOutline) }) },
-  { label: '域名管理', key: 'domains', icon: () => h(NIcon, null, { default: () => h(ServerOutline) }) },
-  { label: 'DNS 账户', key: 'dns-accounts', icon: () => h(NIcon, null, { default: () => h(LinkOutline) }) },
-  { label: 'CDN 账户', key: 'cdn-accounts', icon: () => h(NIcon, null, { default: () => h(CloudOutline) }) },
-  { label: 'CDN 域名', key: 'cdn-domains', icon: () => h(NIcon, null, { default: () => h(GlobeOutline) }) },
-  { label: '数据统计', key: 'statistics', icon: () => h(NIcon, null, { default: () => h(BarChartOutline) }) },
-  { label: '缓存刷新', key: 'cache-refresh', icon: () => h(NIcon, null, { default: () => h(RefreshOutline) }) },
-  { label: '自动预热', key: 'preheat-tasks', icon: () => h(NIcon, null, { default: () => h(TimeOutline) }) },
-  { label: '劫持检测', key: 'dns-check', icon: () => h(NIcon, null, { default: () => h(ShieldCheckmarkOutline) }) },
-  { label: '证书账户', key: 'cert-accounts', icon: () => h(NIcon, null, { default: () => h(ShieldCheckmarkOutline) }) },
-  { label: '证书订单', key: 'cert-orders', icon: () => h(NIcon, null, { default: () => h(ShieldCheckmarkOutline) }) },
-  { label: '部署账户', key: 'deploy-accounts', icon: () => h(NIcon, null, { default: () => h(RocketOutline) }) },
-  { label: '部署任务', key: 'deploy-tasks', icon: () => h(NIcon, null, { default: () => h(RocketOutline) }) },
-  { label: '容灾监控', key: 'dm-overview', icon: () => h(NIcon, null, { default: () => h(PulseOutline) }) },
-  { label: '切换策略', key: 'dm-tasks', icon: () => h(NIcon, null, { default: () => h(SwapHorizontalOutline) }) },
-  { label: '优选IP任务', key: 'optimize-tasks', icon: () => h(NIcon, null, { default: () => h(FlashOutline) }) },
-  { label: '定时切换策略', key: 'schedule-tasks', icon: () => h(NIcon, null, { default: () => h(TimeOutline) }) },
-  { label: '系统设置', key: 'system-settings', icon: () => h(NIcon, null, { default: () => h(SettingsOutline) }) },
-  { label: '用户管理', key: 'users', icon: () => h(NIcon, null, { default: () => h(PeopleOutline) }) },
-  { label: '操作日志', key: 'logs', icon: () => h(NIcon, null, { default: () => h(DocumentTextOutline) }) },
+function renderIcon(icon: Component) {
+  return () => h(NIcon, null, { default: () => h(icon) });
+}
+
+const menuOptions: MenuOption[] = [
+  { label: '仪表盘', key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
+  {
+    label: '域名管理',
+    key: 'group-domain',
+    icon: renderIcon(ServerOutline),
+    children: [
+      { label: '域名列表', key: 'domains', icon: renderIcon(ServerOutline) },
+      { label: 'DNS 账户', key: 'dns-accounts', icon: renderIcon(LinkOutline) },
+      { label: '到期提醒', key: 'expire-notice', icon: renderIcon(TimeOutline) },
+      { label: '劫持检测', key: 'dns-check', icon: renderIcon(ShieldCheckmarkOutline) },
+    ],
+  },
+  {
+    label: 'CDN 管理',
+    key: 'group-cdn',
+    icon: renderIcon(CloudOutline),
+    children: [
+      { label: 'CDN 账户', key: 'cdn-accounts', icon: renderIcon(CloudOutline) },
+      { label: 'CDN 域名', key: 'cdn-domains', icon: renderIcon(GlobeOutline) },
+      { label: 'CDN 站点设置', key: 'cdn-zones', icon: renderIcon(FolderOutline) },
+      { label: '缓存刷新', key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
+      { label: '自动预热', key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
+      { label: '数据统计', key: 'statistics', icon: renderIcon(BarChartOutline) },
+    ],
+  },
+  {
+    label: '容灾切换',
+    key: 'group-dm',
+    icon: renderIcon(PulseOutline),
+    children: [
+      { label: '运行概览', key: 'dm-overview', icon: renderIcon(PulseOutline) },
+      { label: '切换策略', key: 'dm-tasks', icon: renderIcon(SwapHorizontalOutline) },
+      { label: '定时切换', key: 'schedule-tasks', icon: renderIcon(TimeOutline) },
+    ],
+  },
+  {
+    label: 'CF 优选IP',
+    key: 'group-optimize',
+    icon: renderIcon(FlashOutline),
+    children: [
+      { label: '优选设置', key: 'optimize-settings', icon: renderIcon(SettingsOutline) },
+      { label: '任务管理', key: 'optimize-tasks', icon: renderIcon(FlashOutline) },
+    ],
+  },
+  {
+    label: 'SSL 证书',
+    key: 'group-cert',
+    icon: renderIcon(ShieldCheckmarkOutline),
+    children: [
+      { label: 'SSL 证书账户', key: 'cert-accounts', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: 'SSL 证书订单', key: 'cert-orders', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: '自动部署账户', key: 'deploy-accounts', icon: renderIcon(RocketOutline) },
+      { label: '自动部署任务', key: 'deploy-tasks', icon: renderIcon(RocketOutline) },
+      { label: '自动续签设置', key: 'cert-settings', icon: renderIcon(TimeOutline) },
+    ],
+  },
+  {
+    label: '系统设置',
+    key: 'group-system',
+    icon: renderIcon(SettingsOutline),
+    children: [
+      { label: '系统设置', key: 'system-settings', icon: renderIcon(SettingsOutline) },
+      { label: '用户管理', key: 'users', icon: renderIcon(PeopleOutline) },
+      { label: '操作日志', key: 'logs', icon: renderIcon(DocumentTextOutline) },
+    ],
+  },
 ];
 
 const activeKey = computed(() => {
+  if (route.path.startsWith('/dashboard')) return 'dashboard';
   if (route.path.startsWith('/domains')) return 'domains';
   if (route.path.startsWith('/dns-accounts')) return 'dns-accounts';
+  if (route.path.startsWith('/expire-notice')) return 'expire-notice';
+  if (route.path.startsWith('/dns-check')) return 'dns-check';
   if (route.path.startsWith('/cdn-accounts')) return 'cdn-accounts';
   if (route.path.startsWith('/cdn-domains')) return 'cdn-domains';
-  if (route.path.startsWith('/statistics')) return 'statistics';
+  if (route.path.startsWith('/cdn-zones')) return 'cdn-zones';
   if (route.path.startsWith('/cache-refresh')) return 'cache-refresh';
   if (route.path.startsWith('/preheat-tasks')) return 'preheat-tasks';
-  if (route.path.startsWith('/dns-check')) return 'dns-check';
+  if (route.path.startsWith('/statistics')) return 'statistics';
+  if (route.path.startsWith('/dm-overview')) return 'dm-overview';
+  if (route.path.startsWith('/dm-tasks')) return 'dm-tasks';
+  if (route.path.startsWith('/schedule-tasks')) return 'schedule-tasks';
+  if (route.path.startsWith('/optimize-settings')) return 'optimize-settings';
+  if (route.path.startsWith('/optimize-tasks')) return 'optimize-tasks';
   if (route.path.startsWith('/cert-accounts')) return 'cert-accounts';
   if (route.path.startsWith('/cert-orders')) return 'cert-orders';
   if (route.path.startsWith('/deploy-accounts')) return 'deploy-accounts';
   if (route.path.startsWith('/deploy-tasks')) return 'deploy-tasks';
-  if (route.path.startsWith('/dm-overview')) return 'dm-overview';
-  if (route.path.startsWith('/dm-tasks')) return 'dm-tasks';
-  if (route.path.startsWith('/optimize')) return 'optimize-tasks';
-  if (route.path.startsWith('/schedule-tasks')) return 'schedule-tasks';
+  if (route.path.startsWith('/cert-settings')) return 'cert-settings';
   if (route.path.startsWith('/system-settings')) return 'system-settings';
   if (route.path.startsWith('/users')) return 'users';
   if (route.path.startsWith('/logs')) return 'logs';
@@ -118,6 +189,43 @@ const activeKey = computed(() => {
 });
 
 const pageTitle = computed(() => (route.meta.title as string) || '聚合 DNS');
+
+const activeGroupMap: Record<string, string> = {
+  domains: 'group-domain',
+  'dns-accounts': 'group-domain',
+  'expire-notice': 'group-domain',
+  'dns-check': 'group-domain',
+  'cdn-accounts': 'group-cdn',
+  'cdn-domains': 'group-cdn',
+  'cdn-zones': 'group-cdn',
+  'cache-refresh': 'group-cdn',
+  'preheat-tasks': 'group-cdn',
+  statistics: 'group-cdn',
+  'dm-overview': 'group-dm',
+  'dm-tasks': 'group-dm',
+  'schedule-tasks': 'group-dm',
+  'optimize-settings': 'group-optimize',
+  'optimize-tasks': 'group-optimize',
+  'cert-accounts': 'group-cert',
+  'cert-orders': 'group-cert',
+  'deploy-accounts': 'group-cert',
+  'deploy-tasks': 'group-cert',
+  'cert-settings': 'group-cert',
+  'system-settings': 'group-system',
+  users: 'group-system',
+  logs: 'group-system',
+};
+
+const expandedKeys = ref<string[]>([]);
+
+watch(
+  activeKey,
+  (key) => {
+    const group = activeGroupMap[key];
+    expandedKeys.value = group ? [group] : [];
+  },
+  { immediate: true },
+);
 
 const userOptions = [
   { label: '安全设置（TOTP）', key: 'totp' },
