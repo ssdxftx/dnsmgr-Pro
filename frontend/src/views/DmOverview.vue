@@ -1,6 +1,6 @@
 <template>
   <div>
-    <n-grid :cols="3" :x-gap="16" :y-gap="16">
+    <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
         <n-card :bordered="false">
           <n-statistic label="调度运行状态">
@@ -34,10 +34,10 @@
 
     <n-card :bordered="false" style="margin-top: 16px" title="运行日志">
       <n-alert v-if="info.run_error" type="error" style="margin-bottom: 12px">运行错误：{{ info.run_error }}</n-alert>
-      <n-space>
-        <n-input-number v-model:value="days" :min="0" style="width: 200px" />
-        <n-button type="warning" @click="clean">清理日志</n-button>
-      </n-space>
+      <div class="clean-row">
+        <n-input-number v-model:value="days" :min="0" class="days-input" />
+        <n-button type="warning" class="clean-btn" @click="clean">清理日志</n-button>
+      </div>
       <n-text depth="3" style="display: block; margin-top: 8px">清理指定天数之前的切换日志记录</n-text>
     </n-card>
   </div>
@@ -74,3 +74,28 @@ function clean() {
 
 onMounted(load);
 </script>
+
+<style scoped>
+.clean-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.days-input {
+  width: 200px;
+}
+
+@media (max-width: 768px) {
+  .clean-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .days-input {
+    width: 100%;
+  }
+  :deep(.n-statistic-value) {
+    font-size: 22px;
+    word-break: break-word;
+  }
+}
+</style>

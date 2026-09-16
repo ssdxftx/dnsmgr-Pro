@@ -1,7 +1,7 @@
 <template>
   <div>
     <n-card :bordered="false" title="缓存刷新与预热">
-      <n-space vertical size="16">
+      <n-space vertical :size="16">
         <n-radio-group v-model:value="opType">
           <n-radio-button value="url">URL 刷新</n-radio-button>
           <n-radio-button value="dir">目录刷新</n-radio-button>

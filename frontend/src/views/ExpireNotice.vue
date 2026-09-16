@@ -9,10 +9,12 @@
           </n-space>
         </div>
       </template>
-      <n-form label-placement="left" label-width="150">
+      <n-form :label-placement="labelPlacement" :label-width="labelWidth">
         <n-form-item label="到期提醒天数">
           <n-input v-model:value="form.expire_noticedays" placeholder="留空则不开启到期提醒" />
-          <div class="hint">域名到期前多少天发送通知，可填写多个天数，用英文逗号隔开。例如填写 7,14 则在到期前 7 天与 14 天分别发送通知。</div>
+          <template #feedback>
+            <div class="hint">域名到期前多少天发送通知，可填写多个天数，用英文逗号隔开。例如填写 7,14 则在到期前 7 天与 14 天分别发送通知。</div>
+          </template>
         </n-form-item>
         <n-form-item label="邮件通知">
           <n-select v-model:value="form.expire_notice_mail" :options="onOffOptions" />
@@ -41,13 +43,26 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 
 const message = useMessage();
 const saving = ref(false);
+
+const isMobile = ref(false);
+const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
+const labelWidth = computed<number | undefined>(() => (isMobile.value ? undefined : 150));
+
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768;
+}
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
 const form = reactive<any>({
   expire_noticedays: '',
   expire_notice_mail: '0',
@@ -82,5 +97,16 @@ onMounted(load);
 <style scoped>
 .toolbar { display: flex; align-items: center; justify-content: space-between; }
 .title { font-size: 16px; font-weight: 600; }
-.hint { color: #18a058; font-size: 12px; margin-top: 4px; }
+.hint { color: #18a058; font-size: 12px; margin-top: 4px; line-height: 1.6; }
+
+@media (max-width: 768px) {
+  .toolbar { gap: 8px; }
+  :deep(.n-card__footer .n-space) {
+    width: 100%;
+    justify-content: space-between;
+  }
+  :deep(.n-card__footer .n-space .n-button) {
+    flex: 1;
+  }
+}
 </style>
