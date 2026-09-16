@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { query, table } from '../db.js';
 import { configGet, configSet, loadConfig } from '../config.js';
 import { ProxyAgent } from 'undici';
@@ -8,6 +9,11 @@ import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js
 import { checkLevel } from '../auth.js';
 
 // 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(String(a)).digest();
+  const hb = createHash('sha256').update(String(b)).digest();
+  return timingSafeEqual(ha, hb);
+}
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
     await (app as any).authenticate(req, reply);
@@ -127,7 +133,7 @@ export default async function systemRoutes(app: FastifyInstance) {
     if (cronType !== '1' || !cronKey) {
       return { code: -1, msg: '未开启当前方式' };
     }
-    if (key !== cronKey) {
+    if (!safeEqual(key, cronKey)) {
       return { code: -1, msg: '访问密钥错误' };
     }
     await runScheduleAll();
@@ -142,7 +148,7 @@ export default async function systemRoutes(app: FastifyInstance) {
   app.get('/api/system/cronkey', auth, async () => {
     let cronKey = await configGet('cron_key', '');
     if (!cronKey) {
-      cronKey = Math.random().toString(36).slice(2, 12);
+      cronKey = randomBytes(12).toString('base64url');
       await configSet('cron_key', cronKey);
     }
     const cronType = await configGet('cron_type', '0');

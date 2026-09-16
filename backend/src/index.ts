@@ -30,6 +30,7 @@ import { executeAll as runScheduleAll } from './lib/schedule/scheduleService.js'
 import { expireNoticeTask } from './lib/expire/expireNoticeService.js';
 import { executePreheatTasks } from './lib/cdn/preheatService.js';
 import { executeCheckTasks } from './lib/dns/checkService.js';
+import { applySecurityHeaders, createRateLimit } from './security.js';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[backend] 未捕获的异步异常:', reason?.message || reason);
@@ -51,9 +52,47 @@ function resolveWebDir(): string {
   return '';
 }
 
-const app = Fastify({ logger: false });
+function resolveTrustProxy(): boolean | string | number {
+  const raw = (process.env.DNSMGR_TRUST_PROXY || '').trim();
+  if (!raw) return false;
+  const low = raw.toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(low)) return true;
+  if (['0', 'false', 'no', 'off'].includes(low)) return false;
+  if (/^\d+$/.test(raw)) return Number(raw);
+  return raw;
+}
 
-await app.register(cors, { origin: true });
+const app = Fastify({
+  logger: false,
+  trustProxy: resolveTrustProxy(),
+  bodyLimit: Number(process.env.DNSMGR_BODY_LIMIT || 2 * 1024 * 1024),
+});
+
+applySecurityHeaders(app);
+
+// 同源部署下前端与后端同域，无需 CORS；如需跨域调用 API，用 DNSMGR_ALLOWED_ORIGINS 显式放行
+const allowedOrigins = (process.env.DNSMGR_ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+if (allowedOrigins.length) {
+  await app.register(cors, { origin: allowedOrigins });
+} else if (process.env.DNSMGR_CORS_REFLECT === '1') {
+  await app.register(cors, { origin: true });
+}
+
+// 登录/注册/安装等敏感接口限流，可经 DNSMGR_RATE_LIMIT=0 关闭
+if (process.env.DNSMGR_RATE_LIMIT !== '0') {
+  const authLimiter = createRateLimit({ windowMs: 60_000, max: 30 });
+  const setupLimiter = createRateLimit({ windowMs: 60_000, max: 15 });
+  const limitedAuthPaths = new Set(['/api/auth/login', '/api/auth/totp', '/api/register', '/api/register/send-code']);
+  app.addHook('onRequest', async (req: any, reply: any) => {
+    const url = String(req.raw.url || '').split('?')[0];
+    if (url.startsWith('/api/setup/')) return setupLimiter(req, reply);
+    if (limitedAuthPaths.has(url)) return authLimiter(req, reply);
+    return undefined;
+  });
+}
 
 // JWT 密钥取自数据库 sys_key；未安装时使用进程内随机密钥（仅 setup 阶段使用）
 let sysKey = randomBytes(24).toString('hex');
@@ -108,11 +147,12 @@ if (installed) {
 const webDir = resolveWebDir();
 if (webDir) {
   await app.register(fastifyStatic, { root: webDir, prefix: '/' });
+  const indexHtml = fs.readFileSync(path.join(webDir, 'index.html'));
   app.setNotFoundHandler((req: any, reply: any) => {
     if (req.raw.url && req.raw.url.startsWith('/api/')) {
       return reply.code(404).send({ code: -1, msg: '接口不存在', path: req.raw.url });
     }
-    return reply.type('text/html').send(fs.readFileSync(path.join(webDir, 'index.html')));
+    return reply.type('text/html').send(indexHtml);
   });
 }
 
