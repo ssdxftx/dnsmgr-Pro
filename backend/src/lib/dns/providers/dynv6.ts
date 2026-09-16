@@ -1,4 +1,5 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class Dynv6Dns implements DnsProvider {
   private token: string;
@@ -21,7 +22,7 @@ export class Dynv6Dns implements DnsProvider {
     const data = await this.sendRequest('GET', '/zones/by-name/' + this.domain);
     if (data && data.id !== undefined) {
       this.zoneID = data.id;
-      return this.zoneID;
+      return data.id;
     }
     this.error = '无法获取域名的Zone ID，请确认域名已添加到dynv6';
     return false;
@@ -136,8 +137,8 @@ export class Dynv6Dns implements DnsProvider {
     return { total: list.length, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   private encodeFqdn(Name: string): string {

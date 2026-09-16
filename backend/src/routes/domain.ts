@@ -126,12 +126,14 @@ export default async function domainRoutes(app: FastifyInstance) {
     return { code: 0, data };
   });
 
-  app.get('/api/domains/categories', auth, async () => {
+  app.get('/api/domains/categories', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const rows = await query(`SELECT * FROM ${table('domain_category')} ORDER BY sort ASC, id ASC`);
     return { code: 0, data: rows };
   });
 
   app.post('/api/domains/categories', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { name, remark } = req.body || {};
     if (!name) return { code: -1, msg: '分类名不能为空' };
     await query(`INSERT INTO ${table('domain_category')} (name, remark, sort, addtime) VALUES (?, ?, 0, NOW())`, [name, remark || '']);
@@ -140,6 +142,7 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   // 从 DNS 账户拉取云端域名列表（用于添加）
   app.get('/api/dns/accounts/:aid/pull', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { aid } = req.params as any;
     const acct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [aid]);
     if (!acct) return { code: -1, msg: '账户不存在' };

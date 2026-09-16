@@ -39,11 +39,16 @@ export async function api<T = any>(method: string, url: string, body?: any): Pro
   }
 
   const res = await fetch(fullUrl, { method, headers, body: payload });
-  const json = await res.json();
   if (res.status === 401) {
     clearToken();
     if (!location.pathname.startsWith('/login')) location.href = '/login';
     throw new Error('未登录');
   }
-  return json as T;
+  const text = await res.text();
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return { code: -1, msg: `服务器响应异常（HTTP ${res.status}）` } as T;
+  }
 }

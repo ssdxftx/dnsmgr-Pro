@@ -16,7 +16,7 @@ function isDomain(s: string): boolean {
 }
 
 export async function dnsResolve(host: string): Promise<string> {
-  const { lookup } = await import('node:dns');
+  const { lookup } = await import('node:dns/promises');
   try {
     const res = await lookup(host);
     return res.address;

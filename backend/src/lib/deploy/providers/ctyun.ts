@@ -50,7 +50,7 @@ export class CtyunDeploy implements DeployProvider {
   }
 
   private async deployCdnLike(endpoint: string, fullchain: string, privatekey: string, config: Record<string, any>): Promise<void> {
-    let param = { name: config.cert_name, key: privatekey, certs: fullchain };
+    let param: Record<string, any> = { name: config.cert_name, key: privatekey, certs: fullchain };
     try {
       await this.request('POST', endpoint, '/v1/cert/creat-cert', null, param);
     } catch (e: any) {

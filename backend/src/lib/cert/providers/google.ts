@@ -24,12 +24,12 @@ export class GoogleCert extends AcmeCertBase {
     }
 
     if (this.ext?.key) {
-      const kid = this.ac.registerEAB(true, eab.kid, eab.key, this.config.email);
+      const kid = await this.ac.registerEAB(true, eab.kid, eab.key, this.config.email);
       return { kid, key: this.ext.key };
     }
     const key = this.ac.generateRSAKey(2048);
     this.ac.loadAccountKey(key);
-    const kid = this.ac.registerEAB(true, eab.kid, eab.key, this.config.email);
+    const kid = await this.ac.registerEAB(true, eab.kid, eab.key, this.config.email);
     return { kid, key };
   }
 

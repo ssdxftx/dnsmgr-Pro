@@ -1,5 +1,6 @@
 import { Jdcloud } from '../../clients/Jdcloud.js';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class JdcloudDns implements DnsProvider {
   private client: Jdcloud;
@@ -78,8 +79,8 @@ export class JdcloudDns implements DnsProvider {
     return { total: data.totalCount || 0, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string): Promise<RecordInfo | false> {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = '-1', TTL = 600, MX = 1, Weight: number | null = null, _Remark: string | null = null) {

@@ -151,20 +151,20 @@ export class Dnspod implements DnsProvider {
     };
     if (Type === 'MX') param.MX = Number(MX);
     if (Remark != null) param.Remark = Remark;
-    return this.send('ModifyRecord', param) !== false;
+    return (await this.send('ModifyRecord', param)) !== false;
   }
 
   async updateDomainRecordRemark(RecordId: string, Remark: string | null): Promise<boolean> {
-    return this.send('ModifyRecordRemark', { Domain: this.domain, RecordId: Number(RecordId), Remark: Remark ?? '' }) !== false;
+    return (await this.send('ModifyRecordRemark', { Domain: this.domain, RecordId: Number(RecordId), Remark: Remark ?? '' })) !== false;
   }
 
   async deleteDomainRecord(RecordId: string) {
-    return this.send('DeleteRecord', { Domain: this.domain, RecordId: Number(RecordId) }) !== false;
+    return (await this.send('DeleteRecord', { Domain: this.domain, RecordId: Number(RecordId) })) !== false;
   }
 
   async setDomainRecordStatus(RecordId: string, Status: string) {
     const s = Status === '1' ? 'ENABLE' : 'DISABLE';
-    return this.send('ModifyRecordStatus', { Domain: this.domain, RecordId: Number(RecordId), Status: s }) !== false;
+    return (await this.send('ModifyRecordStatus', { Domain: this.domain, RecordId: Number(RecordId), Status: s })) !== false;
   }
 
   async getRecordLine() {
@@ -177,7 +177,7 @@ export class Dnspod implements DnsProvider {
   }
 
   async addDomain(Domain: string) {
-    return this.send('CreateDomain', { Domain }) !== false;
+    return (await this.send('CreateDomain', { Domain })) !== false;
   }
 
   private convertType(type: string): string {

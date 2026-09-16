@@ -5,7 +5,7 @@
         <div class="toolbar">
           <span class="title">CDN 域名</span>
           <n-space>
-            <n-button @click="window.location.href = '/cdn-zones'">站点设置</n-button>
+            <n-button @click="goZones">站点设置</n-button>
             <n-button type="primary" @click="openAdd">
               <template #icon><n-icon :component="AddOutline" /></template>
               接入域名
@@ -177,6 +177,10 @@ async function onAccountChange(aid: number) {
     const res = await api<any>('GET', `/cdn/accounts/${aid}/zones`);
     if (res.code === 0) zoneOptions.value = res.data.map((z: any) => ({ label: z.zoneName, value: z.zoneId }));
   }
+}
+
+function goZones() {
+  window.location.href = '/cdn-zones';
 }
 
 function openAdd() {

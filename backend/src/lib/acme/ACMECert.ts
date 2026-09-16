@@ -21,12 +21,12 @@ function extractCN(subject: string): string {
 export class ACMECert extends ACMEv2 {
   private alternateChains: string[] = [];
 
-  register(termsOfServiceAgreed = false, contacts: string[] = []): string {
+  async register(termsOfServiceAgreed = false, contacts: string[] = []): Promise<string> {
     return this._register(termsOfServiceAgreed, contacts);
   }
 
-  registerEAB(termsOfServiceAgreed: boolean, eabKid: string, eabHmac: string, contacts: string[] = []): string {
-    if (!this.resources) this.readDirectory();
+  async registerEAB(termsOfServiceAgreed: boolean, eabKid: string, eabHmac: string, contacts: string[] = []): Promise<string> {
+    if (!this.resources) await this.readDirectory();
 
     const protectedHeader = {
       alg: 'HS256',
@@ -49,9 +49,9 @@ export class ACMECert extends ACMEv2 {
     });
   }
 
-  private _register(termsOfServiceAgreed = false, contacts: string[] = [], extra: Record<string, any> = {}): string {
+  private async _register(termsOfServiceAgreed = false, contacts: string[] = [], extra: Record<string, any> = {}): Promise<string> {
     this.log('Registering account');
-    const ret = this.request('newAccount', {
+    const ret = await this.request('newAccount', {
       termsOfServiceAgreed: !!termsOfServiceAgreed,
       contact: this.makeContactsArray(contacts),
       ...extra,
@@ -60,15 +60,15 @@ export class ACMECert extends ACMEv2 {
     return this.kidHeader!.kid!;
   }
 
-  update(contacts: string[] = []): any {
+  async update(contacts: string[] = []): Promise<any> {
     this.log('Updating account');
-    const ret = this.request(this.getAccountID(), { contact: this.makeContactsArray(contacts) });
+    const ret = await this.request(await this.getAccountID(), { contact: this.makeContactsArray(contacts) });
     this.log('Account updated');
     return ret.body;
   }
 
-  getAccount(): string {
-    super.getAccount();
+  async getAccount(): Promise<string> {
+    await super.getAccount();
     return this.kidHeader!.kid!;
   }
 
@@ -76,50 +76,50 @@ export class ACMECert extends ACMEv2 {
     this.kidHeader!.kid = kid;
   }
 
-  deactivateAccount(): any {
+  async deactivateAccount(): Promise<any> {
     this.log('Deactivating account');
-    const ret = this.deactivate(this.getAccountID());
+    const ret = await this.deactivate(await this.getAccountID());
     this.log('Account deactivated');
     return ret;
   }
 
-  deactivate(url: string): any {
+  async deactivate(url: string): Promise<any> {
     this.log('Deactivating resource: ' + url);
-    const ret = this.request(url, { status: 'deactivated' });
+    const ret = await this.request(url, { status: 'deactivated' });
     this.log('Resource deactivated');
     return ret.body;
   }
 
-  getTermsURL(): string {
-    if (!this.resources) this.readDirectory();
+  async getTermsURL(): Promise<string> {
+    if (!this.resources) await this.readDirectory();
     if (!this.resources!.meta?.termsOfService) {
       throw new Error('Failed to get Terms Of Service URL');
     }
     return this.resources!.meta.termsOfService;
   }
 
-  getCAAIdentities(): string[] {
-    if (!this.resources) this.readDirectory();
+  async getCAAIdentities(): Promise<string[]> {
+    if (!this.resources) await this.readDirectory();
     if (!this.resources!.meta?.caaIdentities) {
       throw new Error('Failed to get CAA Identities');
     }
     return this.resources!.meta.caaIdentities;
   }
 
-  keyChange(newAccountKeyPem: string): any {
+  async keyChange(newAccountKeyPem: string): Promise<any> {
     this.loadAccountKey(newAccountKeyPem);
-    const account = this.getAccountID();
+    const account = await this.getAccountID();
     this.log('Account Key Roll-Over');
-    const ret = this.request(
+    const ret = await this.request(
       'keyChange',
-      this.jwsEncapsulate('keyChange', { account, oldKey: this.jwkHeader!.jwk }, true),
+      await this.jwsEncapsulate('keyChange', { account, oldKey: this.jwkHeader!.jwk }, true),
     );
     this.log('Account Key Roll-Over successful');
     this.loadAccountKey(newAccountKeyPem);
     return ret.body;
   }
 
-  revoke(pem: string): void {
+  async revoke(pem: string): Promise<void> {
     let cert: X509Certificate;
     try {
       cert = new X509Certificate(pem);
@@ -127,11 +127,11 @@ export class ACMECert extends ACMEv2 {
       throw new Error('Could not load certificate: ' + e.message);
     }
     this.log('Revoking certificate');
-    this.request('revokeCert', { certificate: b64u(cert.raw) });
+    await this.request('revokeCert', { certificate: b64u(cert.raw) });
     this.log('Certificate revoked');
   }
 
-  createOrder(domainConfig: Record<string, any>, settings: any = {}): any {
+  async createOrder(domainConfig: Record<string, any>, settings: any = {}): Promise<any> {
     settings = this.parseSettings(settings);
     const lowerConfig: Record<string, any> = {};
     for (const [k, v] of Object.entries(domainConfig)) lowerConfig[k.toLowerCase()] = v;
@@ -139,7 +139,7 @@ export class ACMECert extends ACMEv2 {
     let authzDeactivated = false;
 
     this.log('Creating Order');
-    const ret = this.request('newOrder', this.makeOrder(domains, settings));
+    const ret = await this.request('newOrder', this.makeOrder(domains, settings));
     const order = ret.body;
     const orderLocation = ret.headers['location'];
     this.log('Order created: ' + orderLocation);
@@ -154,7 +154,7 @@ export class ACMECert extends ACMEv2 {
       for (let idx = 0; idx < order.authorizations.length; idx++) {
         const authUrl = order.authorizations[idx];
         this.log('Fetching authorization ' + (idx + 1) + ' of ' + authCount);
-        const authRet = this.request(authUrl, '');
+        const authRet = await this.request(authUrl, '');
         const authorization = authRet.body;
 
         const domain = (authorization.wildcard ? '*.' : '') + authorization.identifier.value;
@@ -164,7 +164,7 @@ export class ACMECert extends ACMEv2 {
             this.log('Authorization of ' + domain + ' already valid, skipping validation');
           } else {
             this.log('Authorization of ' + domain + ' already valid, deactivating authorization');
-            this.deactivate(authUrl);
+            await this.deactivate(authUrl);
             authzDeactivated = true;
           }
           continue;
@@ -210,7 +210,7 @@ export class ACMECert extends ACMEv2 {
     if (order.challenges?.length) {
       for (const opts of order.challenges) {
         this.log('Notifying server for validation of ' + opts.domain);
-        this.request(opts.challenge_url, {});
+        await this.request(opts.challenge_url, {});
 
         this.log('Waiting for server challenge validation');
         await this.sleep(1000);
@@ -238,7 +238,7 @@ export class ACMECert extends ACMEv2 {
     }
 
     this.log('Finalizing Order');
-    let ret = this.request(order.finalize, { csr: b64u(pem2der(csr)) });
+    let ret = await this.request(order.finalize, { csr: b64u(pem2der(csr)) });
     ret = ret.body;
 
     if (ret.certificate) {
@@ -258,7 +258,7 @@ export class ACMECert extends ACMEv2 {
     const out: Record<string, string> = {};
     out[this.getTopIssuerCN(defaultChain)] = defaultChain;
     for (const link of this.alternateChains) {
-      const chain = this.requestCertificateRaw({ certificate: link }, true);
+      const chain = await this.requestCertificateRaw({ certificate: link }, true);
       out[this.getTopIssuerCN(chain)] = chain;
     }
     this.log('Received ' + Object.keys(out).length + ' chain(s): ' + Object.keys(out).join(', '));
@@ -361,11 +361,11 @@ export class ACMECert extends ACMEv2 {
     return (1 - Math.max(0, Math.min(1, used / total))) * 100;
   }
 
-  getARI(pem: string): { body: any; certId: string | null } {
+  async getARI(pem: string): Promise<{ body: any; certId: string | null }> {
     const id = this.getARICertID(pem);
-    if (!this.resources) this.readDirectory();
+    if (!this.resources) await this.readDirectory();
     if (!this.resources!.renewalInfo) throw new Error('ARI not supported');
-    const ret = this.httpRequest(this.resources!.renewalInfo + '/' + id);
+    const ret = await this.httpRequest(this.resources!.renewalInfo + '/' + id);
     const sw = ret.body.suggestedWindow;
     if (!sw || !sw.start || !sw.end) throw new Error('ARI suggestedWindow not present');
     sw.start = this.parseDate(sw.start);
@@ -437,7 +437,7 @@ export class ACMECert extends ACMEv2 {
   private async poll(initial: string, type: string, setRet: (v: any) => void): Promise<boolean> {
     const maxTries = 10;
     for (let i = 0; i < maxTries; i++) {
-      const ret = this.request(type);
+      const ret = await this.request(type);
       const body = ret.body;
       setRet(body);
       if (body.status !== initial) return body.status === 'valid';
@@ -450,13 +450,13 @@ export class ACMECert extends ACMEv2 {
     throw new Error('Aborted after ' + maxTries + ' tries');
   }
 
-  private requestCertificate(ret: any): string {
+  private async requestCertificate(ret: any): Promise<string> {
     return this.requestCertificateRaw(ret, false);
   }
 
-  private requestCertificateRaw(ret: any, alternate: boolean): string {
+  private async requestCertificateRaw(ret: any, alternate: boolean): Promise<string> {
     this.log('Requesting ' + (alternate ? 'alternate' : 'default') + ' certificate-chain');
-    const res = this.request(ret.certificate, '');
+    const res = await this.request(ret.certificate, '');
     if (res.headers['content-type'] !== 'application/pem-certificate-chain') {
       throw new Error('Unexpected content-type: ' + res.headers['content-type']);
     }

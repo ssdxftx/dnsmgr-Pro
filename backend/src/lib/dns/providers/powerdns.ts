@@ -1,4 +1,5 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 interface PdnsRecord {
   id: number;
@@ -68,7 +69,7 @@ export class PowerDns implements DnsProvider {
     return (await this.getDomainList(null, 1, 20)) !== false;
   }
 
-  async getDomainList(): Promise<DomainListResult | false> {
+  async getDomainList(_KeyWord: string | null = null, _PageNumber = 1, _PageSize = 20): Promise<DomainListResult | false> {
     const data = await this.send('GET', `/servers/${this.serverId}/zones`);
     if (!data) return false;
     const list = (Array.isArray(data) ? data : []).map((row: any) => ({
@@ -142,8 +143,8 @@ export class PowerDns implements DnsProvider {
     return { total: filtered.length, list: filtered };
   }
 
-  async getDomainRecordInfo(_RecordId: string): Promise<RecordInfo | false> {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   private normalizeValue(Type: string, Value: string, MX: number): string {

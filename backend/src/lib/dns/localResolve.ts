@@ -26,14 +26,13 @@ async function resolveDoh(domain: string, type: string): Promise<string[]> {
   const tid = TYPE_ID[type];
   if (!tid) return [];
   for (const base of DOH_SERVERS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
     try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 6000);
       const res = await fetch(`${base}?name=${encodeURIComponent(domain)}&type=${tid}`, {
         headers: { Accept: 'application/dns-json' },
         signal: controller.signal,
       });
-      clearTimeout(timer);
       if (!res.ok) continue;
       const data: any = await res.json();
       const out: string[] = [];
@@ -46,6 +45,8 @@ async function resolveDoh(domain: string, type: string): Promise<string[]> {
       if (out.length) return dedupe(out);
     } catch {
       continue;
+    } finally {
+      clearTimeout(timer);
     }
   }
   return [];

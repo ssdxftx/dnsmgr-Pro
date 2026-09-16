@@ -16,7 +16,7 @@ export class VolcengineCDN implements CdnProvider {
   private error = '';
 
   constructor(config: Record<string, any>) {
-    this.client = new Volcengine(config.AccessKeyId, config.SecretAccessKey, 'cdn.volcengineapi.com', 'CDN', '2021-03-01', 'cn-north-1');
+    this.client = new Volcengine(config.AccessKeyId, config.SecretAccessKey, 'cdn.volcengineapi.com', 'cdn', '2021-03-01', 'cn-north-1');
   }
 
   getError() {

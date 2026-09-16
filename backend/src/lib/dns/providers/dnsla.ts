@@ -1,4 +1,5 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 const typeList: Record<number, string> = { 1: 'A', 2: 'NS', 5: 'CNAME', 15: 'MX', 16: 'TXT', 28: 'AAAA', 33: 'SRV', 257: 'CAA', 256: 'URL转发' };
 
@@ -125,8 +126,8 @@ export class Dnsla implements DnsProvider {
     return { total: data.total || 0, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, Weight: number | null = null, _Remark: string | null = null) {

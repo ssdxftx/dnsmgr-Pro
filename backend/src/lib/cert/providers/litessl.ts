@@ -10,12 +10,12 @@ export class LitesslCert extends AcmeCertBase {
     if (!this.config.kid || !this.config.key) throw new Error('EAB密钥不能为空');
 
     if (this.ext?.key) {
-      const kid = this.ac.registerEAB(true, this.config.kid, this.config.key, this.config.email);
+      const kid = await this.ac.registerEAB(true, this.config.kid, this.config.key, this.config.email);
       return { kid, key: this.ext.key };
     }
     const key = this.ac.generateRSAKey(2048);
     this.ac.loadAccountKey(key);
-    const kid = this.ac.registerEAB(true, this.config.kid, this.config.key, this.config.email);
+    const kid = await this.ac.registerEAB(true, this.config.kid, this.config.key, this.config.email);
     return { kid, key };
   }
 }

@@ -128,8 +128,9 @@ export class BaiduCDN implements CdnProvider {
   }
 
   async setDomainStatus(domain: string, status: string) {
-    const q = status === 'offline' ? 'disable' : 'enable';
-    return (await this.call('POST', `/v2/domain/${domain}?${q}`)) !== false;
+    const action = status === 'offline' ? 'disable' : 'enable';
+    // BCE 签名需把查询参数与 path 分开，否则 '?' 会被编码进 canonicalUri 导致签名不匹配
+    return (await this.call('POST', `/v2/domain/${domain}`, { [action]: '' })) !== false;
   }
 
   async updateOrigin(domain: string, origin: string, originType: string, originHost: string, originProtocol: string, httpPort: number, httpsPort: number) {

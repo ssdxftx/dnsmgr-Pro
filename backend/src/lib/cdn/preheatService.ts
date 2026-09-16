@@ -50,6 +50,7 @@ async function insertTask(url: string, route: string, op: string, status: number
 async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: string[]): Promise<{ success: number; failed: number }> {
   const list = dedupe(urls);
   const grouped: Record<string, { route: string; provider: any; urls: string[] }> = {};
+  const providers: Record<string, any> = {};
   const failed: { url: string; msg: string }[] = [];
 
   for (const url of list) {
@@ -63,12 +64,13 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
       failed.push({ url, msg: `未找到加速域名 ${domain}` });
       continue;
     }
-    const provider = await cdnForZone(row.aid, row.zone_id);
+    const key = `${row.route}#${row.aid}#${row.zone_id || ''}`;
+    if (!(key in providers)) providers[key] = await cdnForZone(row.aid, row.zone_id);
+    const provider = providers[key];
     if (!provider) {
       failed.push({ url, msg: 'CDN 账户不存在' });
       continue;
     }
-    const key = `${row.route}#${row.aid}#${row.zone_id || ''}`;
     if (!grouped[key]) grouped[key] = { route: row.route, provider, urls: [] };
     grouped[key].urls.push(url);
   }
@@ -130,6 +132,8 @@ export async function executePreheatTasks(): Promise<number> {
   );
   let run = 0;
   for (const t of rows) {
+    const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
+    await query(`UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [fmtDateTime(next), t.id]);
     const urls = loadUrls(t.urls);
     if (urls.length) {
       try {
@@ -139,8 +143,6 @@ export async function executePreheatTasks(): Promise<number> {
         console.error('[preheat] 自动任务执行异常:', e?.message);
       }
     }
-    const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
-    await query(`UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [fmtDateTime(next), t.id]);
     run++;
   }
   return run;

@@ -1,9 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { fmtTimestamp } from '../lib/util.js';
+import { checkLevel } from '../auth.js';
 import { updateNexttime } from '../lib/schedule/scheduleService.js';
 
-const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
+// 定时切换解析接口仅管理员可用
+const authenticate = (app: FastifyInstance) => ({
+  preHandler: async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+    if (!req.user) return;
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+  },
+});
 
 function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';

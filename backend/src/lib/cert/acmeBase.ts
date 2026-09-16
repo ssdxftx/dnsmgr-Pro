@@ -31,7 +31,7 @@ export abstract class AcmeCertBase implements CertProvider {
     }
     if (!Object.keys(domainConfig).length) throw new Error('域名列表不能为空');
 
-    const order = this.ac.createOrder(domainConfig);
+    const order = await this.ac.createOrder(domainConfig);
 
     const dnsList: Record<string, any[]> = {};
     const seen = new Set<string>();
@@ -62,7 +62,7 @@ export abstract class AcmeCertBase implements CertProvider {
     if (keytype === 'ECC') {
       privateKey = this.ac.generateECKey(keysize || '384');
     } else {
-      privateKey = this.ac.generateRSAKey(keysize || '2048');
+      privateKey = this.ac.generateRSAKey(Number(keysize) || 2048);
     }
     const fullchain = await this.ac.finalizeOrder(domainList, order, privateKey);
     const certInfo = parseCertPem(fullchain);
@@ -77,7 +77,7 @@ export abstract class AcmeCertBase implements CertProvider {
   }
 
   async revoke(_order: any, pem: string): Promise<void> {
-    this.ac.revoke(pem);
+    await this.ac.revoke(pem);
   }
 
   async cancel(_order: any): Promise<void> {

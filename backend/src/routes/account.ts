@@ -118,6 +118,7 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/cdn/accounts/:id/zones', auth, async (req: any) => {
+    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     if (!acct) return { code: -1, msg: 'CDN账户不存在' };

@@ -4,6 +4,7 @@ import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { getSysKey } from './config.js';
 import { isInstalled } from './installer.js';
 import { migrate } from './migrate.js';
@@ -54,14 +55,15 @@ const app = Fastify({ logger: false });
 
 await app.register(cors, { origin: true });
 
-// JWT 密钥取自数据库 sys_key；未安装时使用临时密钥（仅 setup 阶段使用）
-let sysKey = 'dnsmgr-setup-default-key';
+// JWT 密钥取自数据库 sys_key；未安装时使用进程内随机密钥（仅 setup 阶段使用）
+let sysKey = randomBytes(24).toString('hex');
 try {
   sysKey = await getSysKey();
 } catch {
   // 未安装，忽略
 }
-await app.register(jwt, { secret: sysKey });
+// 业务令牌默认 7 天过期；TOTP 预令牌单独指定 5 分钟
+await app.register(jwt, { secret: sysKey, sign: { expiresIn: '7d' } });
 
 (app as any).decorate('authenticate', async function (req: any, reply: any) {
   try {

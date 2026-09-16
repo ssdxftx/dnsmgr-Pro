@@ -86,7 +86,7 @@ export async function performInstall(cfg: DbConfig, adminUsername: string, admin
 
   try {
     // 建表（IF NOT EXISTS：空库创建，现库跳过，均不删除已有数据）
-    const statements = SCHEMA_SQL.split(';')
+    const statements = SCHEMA_SQL.split(/;\s*(?:\r?\n|$)/)
       .map((s) => s.trim())
       .filter(Boolean);
     for (const stmt of statements) {

@@ -24,7 +24,7 @@ export class WestDeploy implements DeployProvider {
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {
     if (!config.sitename) throw new Error('FTP账号不能为空');
 
-    let params = { act: 'vhostssl', sitename: config.sitename, cmd: 'info' };
+    let params: Record<string, any> = { act: 'vhostssl', sitename: config.sitename, cmd: 'info' };
     let data: any;
     try {
       data = await this.execute('/vhost/', params);

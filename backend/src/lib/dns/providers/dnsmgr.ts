@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class DnsmgrDns implements DnsProvider {
   private uid: string;
@@ -131,8 +132,8 @@ export class DnsmgrDns implements DnsProvider {
     return false;
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null) {
@@ -140,7 +141,9 @@ export class DnsmgrDns implements DnsProvider {
     if (Type === 'MX' && MX) param.mx = Number(MX);
     if (Weight) param.weight = Number(Weight);
     if (Remark) param.remark = Remark;
-    return (await this.sendRequest('/api/record/add/' + this.domainid, param)) !== false;
+    const data = await this.sendRequest('/api/record/add/' + this.domainid, param);
+    if (data === false) return false;
+    return data && data.id ? String(data.id) : 'ok';
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null) {

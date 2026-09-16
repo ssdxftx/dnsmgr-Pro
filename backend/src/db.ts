@@ -32,7 +32,9 @@ export function currentPrefixValue(): string {
 
 // 安装向导保存配置后调用，用新数据库参数重建连接池（无需重启进程）
 export function reinitPool(cfg: DbConfig): void {
+  const old = pool;
   pool = buildPool(cfg);
+  if (old) old.end().catch(() => undefined);
 }
 
 export function getDbConfig(): DbConfig {

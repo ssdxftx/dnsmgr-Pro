@@ -32,7 +32,7 @@ export class BaiduDns implements DnsProvider {
     return (await this.getDomainList(null, 1, 20)) !== false;
   }
 
-  async getDomainList(KeyWord: string | null = null): Promise<DomainListResult | false> {
+  async getDomainList(KeyWord: string | null = null, _PageNumber = 1, _PageSize = 20): Promise<DomainListResult | false> {
     const data = await this.send('GET', '/v1/dns/zone', { name: KeyWord ?? undefined });
     if (!data) return false;
     const list = (data.zones || []).map((row: any) => ({
@@ -101,10 +101,13 @@ export class BaiduDns implements DnsProvider {
     };
   }
 
-  async addDomainRecord(Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+  async addDomainRecord(Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null): Promise<string | false> {
     const params: Record<string, any> = { rr: Name, type: Type, value: Value, line: Line, ttl: Number(TTL), description: Remark ?? undefined };
     if (Type === 'MX') params.priority = Number(MX);
-    return (await this.send('POST', '/v1/dns/zone/' + this.domain + '/record', { clientToken: this.clientToken() }, params)) !== false;
+    const data = await this.send('POST', '/v1/dns/zone/' + this.domain + '/record', { clientToken: this.clientToken() }, params);
+    if (data === false) return false;
+    // 百度 BCE DNS 创建记录接口不返回记录 ID，成功时返回占位标识
+    return data && data.id ? String(data.id) : 'ok';
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {

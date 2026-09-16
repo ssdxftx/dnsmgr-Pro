@@ -5,6 +5,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query, queryOne, table } from '../db.js';
+import { checkLevel } from '../auth.js';
 import { certConfig, certClassConfig } from '../lib/cert/factory.js';
 import { getCertProvider } from '../lib/cert/factory.js';
 import { getMainDomain } from '../lib/cert/utils.js';
@@ -110,7 +111,14 @@ async function checkOrder(order: any, domains: string[]) {
 }
 
 export default async function certRoutes(app: FastifyInstance) {
-  const auth = { preHandler: (app as any).authenticate };
+  // 证书与部署管理接口仅管理员可用
+  const auth = {
+    preHandler: async (req: any, reply: any) => {
+      await (app as any).authenticate(req, reply);
+      if (!req.user) return;
+      if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    },
+  };
 
   // ============ 元数据 ============
   app.get('/api/cert/providers', auth, async () => {
@@ -293,7 +301,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (aid == -1) {
       const certInfo = parseCertKey(fullchain, privatekey);
       if (certInfo.code === -1) return certInfo;
-      domList = certInfo.domains;
+      domList = certInfo.domains || [];
       const dupIds = await query(`SELECT id FROM ${table('cert_order')} WHERE issuetime = ?`, [certInfo.issuetime]);
       for (const d of dupIds) {
         const d2 = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [d.id]);
@@ -345,7 +353,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (aid == -1) {
       const certInfo = parseCertKey(fullchain, privatekey);
       if (certInfo.code === -1) return certInfo;
-      domList = certInfo.domains;
+      domList = certInfo.domains || [];
       order = {
         aid: 0,
         keytype: certInfo.keytype,

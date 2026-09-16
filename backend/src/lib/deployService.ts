@@ -32,8 +32,9 @@ export class CertDeployService {
 
     const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ?`, [task.aid]);
     if (!account) throw new Error('该自动部署账户不存在');
-    this.client = getDeployProvider(account.type, safeJson(account.config) || {});
-    if (!this.client) throw new Error('该自动部署任务类型不存在');
+    const client = getDeployProvider(account.type, safeJson(account.config) || {});
+    if (!client) throw new Error('该自动部署任务类型不存在');
+    this.client = client;
     this.info = safeJson(task.info) || {};
   }
 

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
@@ -19,7 +19,7 @@ function isNullOrEmpty(v: any): boolean {
 function genDigitCode(len = 6): string {
   const start = 10 ** (len - 1);
   const end = 10 ** len - 1;
-  return String(start + Math.floor(Math.random() * (end - start + 1)));
+  return String(randomInt(start, end + 1));
 }
 
 function genRegCode(): string {
@@ -80,7 +80,7 @@ export default async function registerRoutes(app: FastifyInstance) {
     const mode = await registerMode();
     const b = req.body || {};
     const username = (b.username || '').trim();
-    const password = (b.password || '').trim();
+    const password = String(b.password ?? '');
     const email = (b.email || '').trim().toLowerCase();
 
     if (username.length < 3 || username.length > 32) return { code: -1, msg: '用户名长度需为 3-32 个字符' };
@@ -143,9 +143,9 @@ export default async function registerRoutes(app: FastifyInstance) {
   app.post('/api/register/codes', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const b = req.body || {};
-    const count = Math.min(Math.max(Number(b.count || 1), 1), 100);
-    const days = Math.max(Number(b.days || 0), 0);
-    const maxUse = Math.max(Number(b.max_use || 0), 0);
+    const count = Math.min(Math.max(Math.floor(Number(b.count) || 1), 1), 100);
+    const days = Math.max(0, Math.floor(Number(b.days) || 0));
+    const maxUse = Math.max(0, Math.floor(Number(b.max_use) || 0));
     const remark = (b.remark || '').trim();
 
     const codes: string[] = [];

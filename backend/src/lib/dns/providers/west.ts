@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class WestDns implements DnsProvider {
   private username: string;
@@ -91,8 +92,8 @@ export class WestDns implements DnsProvider {
     return { total: data.total || 0, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string): Promise<RecordInfo | false> {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = '', TTL = 600, MX = 1, _Weight: number | null = null, _Remark: string | null = null) {

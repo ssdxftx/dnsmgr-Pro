@@ -273,7 +273,7 @@ export class WangsuDeploy implements DeployProvider {
 
     const deploymentTasks = {
       target: 'production',
-      actions: [{ action: 'deploy_cert', certificateId: result.cert_id, version: parseInt(result.version) }],
+      actions: [{ action: 'deploy_cert', certificateId: result.cert_id, version: parseInt(String(result.version)) }],
       name: 'Deploy certificate ' + certName,
     };
 

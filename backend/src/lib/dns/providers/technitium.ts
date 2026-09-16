@@ -1,4 +1,5 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class TechnitiumDns implements DnsProvider {
   private url: string;
@@ -136,8 +137,8 @@ export class TechnitiumDns implements DnsProvider {
     return false;
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   private buildValueParams(Type: string, Value: string, MX = 1): Record<string, any> {
@@ -205,7 +206,8 @@ export class TechnitiumDns implements DnsProvider {
       return false;
     }
     Object.assign(params, valParams);
-    return (await this.sendRequest('POST', '/zones/records/add', params)) !== false;
+    const data = await this.sendRequest('POST', '/zones/records/add', params);
+    return data === false ? false : 'ok';
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
