@@ -5,8 +5,16 @@ import { getDnsProvider } from '../lib/dns/factory.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
+import { checkLevel } from '../auth.js';
 
-const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
+// 所有 CDN 管理接口仅管理员可用
+const authenticate = (app: FastifyInstance) => ({
+  preHandler: async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+    if (!req.user) return;
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+  },
+});
 
 function parseStatTime(v: any): Date | null {
   if (v === undefined || v === null) return null;
@@ -47,20 +55,24 @@ function calcRecordName(accelDomain: string, dnsDomain: string): string {
   return accelDomain.slice(0, accelDomain.length - dnsDomain.length - 1);
 }
 
+function normalizeSetting(v: any): any {
+  if (Array.isArray(v)) {
+    return v.map(normalizeSetting).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  }
+  if (v && typeof v === 'object') {
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(v).sort()) out[k] = normalizeSetting(v[k]);
+    return out;
+  }
+  return v;
+}
+
 function zoneSettingDiff(current: Record<string, any>, target: Record<string, any>): Record<string, any> {
   const diff: Record<string, any> = {};
   for (const key of Object.keys(target)) {
     const value = target[key];
     const cur = current[key];
-    if (Array.isArray(value) && Array.isArray(cur)) {
-      const a: any = value;
-      const b: any = cur;
-      if (Array.isArray(a) && a.Algorithms) a.Algorithms.sort();
-      if (Array.isArray(b) && b.Algorithms) b.Algorithms.sort();
-      if (Array.isArray(a) && a.Version) a.Version.sort();
-      if (Array.isArray(b) && b.Version) b.Version.sort();
-      if (JSON.stringify(a) !== JSON.stringify(b)) diff[key] = value;
-    } else if (JSON.stringify(value) !== JSON.stringify(cur)) {
+    if (JSON.stringify(normalizeSetting(value)) !== JSON.stringify(normalizeSetting(cur))) {
       diff[key] = value;
     }
   }

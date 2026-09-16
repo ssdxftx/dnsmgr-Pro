@@ -47,7 +47,7 @@ export class HuaweiCloud {
 
     const headers: Record<string, string> = { Host: this.endpoint, 'X-Sdk-Date': date };
     if (body) headers['Content-Type'] = 'application/json';
-    headers.Authorization = this.sign(method, path, query, headers, body, time);
+    headers.Authorization = this.sign(method, path, query ?? null, headers, body, time);
 
     let url = 'https://' + this.endpoint + path;
     if (query && Object.keys(query).length) url += '?' + new URLSearchParams(query).toString();

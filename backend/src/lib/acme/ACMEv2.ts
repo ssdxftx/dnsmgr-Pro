@@ -79,8 +79,8 @@ export class ACMEv2 {
     this.thumbprint = b64u(createHash('sha256').update(JSON.stringify(this.jwkHeader.jwk)).digest());
   }
 
-  getAccountID(): string {
-    if (!this.kidHeader!.kid) this.getAccount();
+  async getAccountID(): Promise<string> {
+    if (!this.kidHeader!.kid) await this.getAccount();
     return this.kidHeader!.kid!;
   }
 
@@ -102,9 +102,9 @@ export class ACMEv2 {
     return new ACMEException(type, detail, subproblems);
   }
 
-  protected getAccount(): any {
+  protected async getAccount(): Promise<any> {
     this.log('Getting account info');
-    const ret = this.request('newAccount', { onlyReturnExisting: true });
+    const ret = await this.request('newAccount', { onlyReturnExisting: true });
     this.log('Account info retrieved');
     return ret;
   }
@@ -113,9 +113,9 @@ export class ACMEv2 {
     return token + '.' + this.thumbprint;
   }
 
-  protected readDirectory(): void {
+  protected async readDirectory(): Promise<void> {
     this.log('Initializing ACME v2 environment: ' + this.directory);
-    const ret = this.httpRequest(this.directory);
+    const ret = await this.httpRequest(this.directory);
     const body = ret.body;
     if (!body || typeof body !== 'object' || ['newNonce', 'newAccount', 'newOrder'].some((k) => body[k] === undefined)) {
       throw new Error('Failed to read directory: ' + this.directory);
@@ -124,9 +124,9 @@ export class ACMEv2 {
     this.log('Initialized');
   }
 
-  protected request(type: string, payload: any = '', retry = false): any {
+  protected async request(type: string, payload: any = '', retry = false): Promise<any> {
     if (!this.jwkHeader) throw new Error('use loadAccountKey to load an account key');
-    if (!this.resources) this.readDirectory();
+    if (!this.resources) await this.readDirectory();
 
     if (type.toLowerCase().startsWith('http')) {
       this.resources!['_tmp'] = type;
@@ -135,7 +135,7 @@ export class ACMEv2 {
 
     let ret;
     try {
-      ret = this.httpRequest(this.resources![type], JSON.stringify(this.jwsEncapsulate(type, payload)));
+      ret = await this.httpRequest(this.resources![type], JSON.stringify(await this.jwsEncapsulate(type, payload)));
     } catch (e) {
       if (!retry && e instanceof ACMEException && e.type === 'urn:ietf:params:acme:error:badNonce') {
         this.log('Replay-Nonce expired, retrying previous request');
@@ -155,18 +155,18 @@ export class ACMEv2 {
     return ret;
   }
 
-  protected jwsEncapsulate(type: string, payload: any, isInnerJws = false): any {
+  protected async jwsEncapsulate(type: string, payload: any, isInnerJws = false): Promise<any> {
     let protectedHeader: any;
     if (type === 'newAccount' || isInnerJws) {
       protectedHeader = { ...this.jwkHeader, jwk: this.jwkHeader!.jwk };
     } else {
-      this.getAccountID();
+      await this.getAccountID();
       protectedHeader = { ...this.kidHeader };
     }
 
     if (!isInnerJws) {
       if (!this.nonce) {
-        this.httpRequest(this.resources!['newNonce'], false);
+        await this.httpRequest(this.resources!['newNonce'], false);
       }
       protectedHeader.nonce = this.nonce;
       this.nonce = null;

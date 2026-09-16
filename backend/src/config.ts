@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { query, table } from './db.js';
 
 let cache: Record<string, string> = {};
@@ -29,5 +30,9 @@ export async function configSet(key: string, value: string): Promise<void> {
 
 export async function getSysKey(): Promise<string> {
   const k = await configGet('sys_key', '');
-  return k || 'dnsmgr-default-key';
+  if (k) return k;
+  // 缺失时生成并持久化随机密钥，避免使用固定弱密钥
+  const generated = randomBytes(24).toString('hex');
+  await configSet('sys_key', generated);
+  return generated;
 }

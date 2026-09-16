@@ -124,7 +124,7 @@ export class UnicloudDeploy implements DeployProvider {
         padding: constants.RSA_PKCS1_OAEP_PADDING,
         oaepHash: 'sha256',
         mgf1HashAlgorithm: 'sha256',
-      },
+      } as any,
       key
     );
 

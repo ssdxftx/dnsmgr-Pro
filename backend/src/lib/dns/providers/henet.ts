@@ -335,7 +335,7 @@ export class HenetDns implements DnsProvider {
           return record.RecordId;
         }
       }
-      return true;
+      return 'ok';
     }
     this.error = this.extractMessage(html) || '添加解析记录失败';
     return false;

@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 function formatTime(s: string | null): string | null {
   if (!s) return null;
@@ -133,8 +134,8 @@ export class BtDns implements DnsProvider {
     return { total: data.count || 0, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null) {
@@ -150,7 +151,9 @@ export class BtDns implements DnsProvider {
       remark: Remark ?? '',
       mx: Type === 'MX' ? Number(MX) : w,
     };
-    return (await this.execute('/api/v1/dns/record/create', param)) !== false;
+    const data = await this.execute('/api/v1/dns/record/create', param);
+    if (data === false) return false;
+    return data && data.record_id ? String(data.record_id) : 'ok';
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null) {

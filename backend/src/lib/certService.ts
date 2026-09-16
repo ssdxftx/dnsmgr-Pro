@@ -49,12 +49,12 @@ export async function buildPfx(fullchain: string, privatekey: string, pwd = '123
 
 export class CertOrderService {
   private client!: CertProvider;
-  private aid: number;
-  private atype: string;
+  private aid!: number;
+  private atype!: string;
   private order: any;
   private info: any;
   private dnsList: any;
-  private domainList: string[];
+  private domainList!: string[];
   private cnameDomainList: number[] = [];
   private domainsAliasList: Record<string, string> = {};
 

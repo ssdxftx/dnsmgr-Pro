@@ -99,7 +99,7 @@ export async function checkDomainRecords(
   let checked = 0;
   for (const r of list) {
     if (typeSet && !typeSet.has(r.Type)) continue;
-    if (r.Status === '0') continue;
+    if (String(r.Status) === '0') continue;
     const value = Array.isArray(r.Value) ? r.Value[0] : r.Value;
     if (value === undefined || value === null || value === '') continue;
     const fullDomain = (r.Name === '@' ? d.name : `${r.Name}.${d.name}`).toLowerCase();
@@ -142,12 +142,12 @@ export async function executeCheckTasks(): Promise<number> {
   );
   let run = 0;
   for (const t of rows) {
+    const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
+    await query(`UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [fmtDateTime(next), t.id]);
     const { issues } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
     if (issues && issues.length) {
       await notifyHijack(t, issues);
     }
-    const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
-    await query(`UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [fmtDateTime(next), t.id]);
     run++;
   }
   return run;

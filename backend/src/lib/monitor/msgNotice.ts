@@ -32,7 +32,7 @@ export async function sendMail(to: string, sub: string, msg: string): Promise<bo
     const apiKey = await configGet('mail_apikey');
     const from = await configGet('mail_name');
     if (!apiUser || !apiKey) return false;
-    const res = await fetch('http://api.sendcloud.net/apiv2/mail/send', {
+    const res = await fetch('https://api.sendcloud.net/apiv2/mail/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ apiUser, apiKey, from: from || '', fromName: SITENAME, to, subject: sub, html: msg }),

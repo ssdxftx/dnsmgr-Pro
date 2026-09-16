@@ -1,9 +1,17 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
+import { checkLevel } from '../auth.js';
 import { fmtDateTime, fmtTimestamp } from '../lib/util.js';
 
-const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
+// 容灾监控接口仅管理员可用
+const authenticate = (app: FastifyInstance) => ({
+  preHandler: async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+    if (!req.user) return;
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+  },
+});
 
 function fmt(ts: number): string {
   return fmtTimestamp(ts);

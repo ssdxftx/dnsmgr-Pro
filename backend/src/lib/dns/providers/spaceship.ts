@@ -1,4 +1,5 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class SpaceshipDns implements DnsProvider {
   private apiKey: string;
@@ -142,8 +143,8 @@ export class SpaceshipDns implements DnsProvider {
     return { total: data.total || 0, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   private convertRecordItem(Name: string, Type: string, Value: string, MX: number): Record<string, any> {
@@ -186,7 +187,7 @@ export class SpaceshipDns implements DnsProvider {
     const item = this.convertRecordItem(Name, Type, Value, Number(MX));
     item.ttl = Number(TTL);
     const data = await this.sendRequest('PUT', '/dns/records/' + this.domain, { force: false, items: [item] });
-    return data !== false;
+    return data === false ? false : 'ok';
   }
 
   async updateDomainRecord(_RecordId: string, Name: string, Type: string, Value: string, _Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, _Remark: string | null = null) {

@@ -15,9 +15,9 @@ function sleep(ms: number): Promise<void> {
 
 function whoisLookup(domain: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    lookup(domain, { follow: 2, timeout: 20000 }, (err: any, data: string) => {
+    lookup(domain, { follow: 2, timeout: 20000 }, (err: any, data: any) => {
       if (err) reject(new Error(err?.message || 'whois查询失败'));
-      else resolve(data);
+      else resolve(typeof data === 'string' ? data : String(data));
     });
   });
 }

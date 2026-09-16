@@ -3,8 +3,16 @@ import { query, queryOne, table } from '../db.js';
 import { configGet, configSet } from '../config.js';
 import { fmtDateTime } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
+import { checkLevel } from '../auth.js';
 
-const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
+// 优选IP接口仅管理员可用
+const authenticate = (app: FastifyInstance) => ({
+  preHandler: async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+    if (!req.user) return;
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+  },
+});
 
 function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';

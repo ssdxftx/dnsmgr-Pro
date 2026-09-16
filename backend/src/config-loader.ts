@@ -40,7 +40,8 @@ export function loadDbConfig(): DbConfig {
       if (saved.db_host) cfg.db_host = saved.db_host;
       if (saved.db_port) cfg.db_port = Number(saved.db_port);
       if (saved.db_user) cfg.db_user = saved.db_user;
-      if (saved.db_password) cfg.db_password = saved.db_password;
+      // 允许空密码：只要配置文件中显式提供了 db_password 字段就采用
+      if (typeof saved.db_password === 'string') cfg.db_password = saved.db_password;
       if (saved.db_name) cfg.db_name = saved.db_name;
       if (saved.db_prefix) cfg.db_prefix = saved.db_prefix;
     }

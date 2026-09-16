@@ -75,7 +75,7 @@
     </n-modal>
 
     <n-modal v-model:show="showCheck" preset="card" title="DNS 解析检测" style="max-width:460px">
-      <n-space vertical size="12">
+      <n-space vertical :size="12">
         <n-descriptions :column="1" size="small" label-placement="left" bordered>
           <n-descriptions-item label="主机记录">{{ checkResult.name }}.{{ displayTitle }}</n-descriptions-item>
           <n-descriptions-item label="记录类型">{{ checkResult.type }}</n-descriptions-item>

@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { findRecordById } from '../recordLookup.js';
 
 export class QingcloudDns implements DnsProvider {
   private access_key_id: string;
@@ -178,8 +179,8 @@ export class QingcloudDns implements DnsProvider {
     return { total: data.total_count || 0, list };
   }
 
-  async getDomainRecordInfo(_RecordId: string) {
-    return false;
+  async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
+    return findRecordById(this, RecordId);
   }
 
   private buildValue(Type: string, Value: string, MX: number): string {

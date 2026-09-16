@@ -46,7 +46,7 @@ export class BaiduCloud {
 
     const headers: Record<string, string> = { Host: this.endpoint, 'x-bce-date': date };
     if (body) headers['Content-Type'] = 'application/json';
-    headers.Authorization = this.sign(method, path, query, headers, time);
+    headers.Authorization = this.sign(method, path, query ?? null, headers, time);
 
     let url = 'https://' + this.endpoint + path;
     if (query && Object.keys(query).length) url += '?' + new URLSearchParams(query).toString();

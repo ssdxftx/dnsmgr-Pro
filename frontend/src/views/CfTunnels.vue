@@ -141,6 +141,7 @@ const columns: any[] = [
 
 const publicRows = ref<any[]>([]);
 const publicLoading = ref(false);
+const showPublic = ref(false);
 const publicForm = reactive<any>({ hostname: '', service: '', path: '' });
 const publicColumns: any[] = [
   { title: '主机名', key: 'hostname', minWidth: 180 },

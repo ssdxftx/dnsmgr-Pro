@@ -5,8 +5,16 @@ import { ProxyAgent } from 'undici';
 import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook } from '../lib/monitor/msgNotice.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
+import { checkLevel } from '../auth.js';
 
-const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
+// 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
+const authenticate = (app: FastifyInstance) => ({
+  preHandler: async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+    if (!req.user) return;
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+  },
+});
 
 export default async function systemRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
@@ -99,7 +107,7 @@ export default async function systemRoutes(app: FastifyInstance) {
           dispatcher: agent,
           signal: AbortSignal.timeout(8000),
           headers: { 'User-Agent': 'Mozilla/5.0' },
-        });
+        } as any);
         if (res.status >= 200 && res.status < 400) {
           return { code: 0, msg: '连通性测试成功！' };
         }
