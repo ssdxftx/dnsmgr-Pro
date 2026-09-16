@@ -138,6 +138,35 @@ kubectl -n dnsmgr-pro port-forward svc/dnsmgr-pro 8082:8082
 
 ---
 
+## 反向代理与 CDN 部署（安全与缓存）
+
+应用已内置一套面向公网/CDN 暴露的默认策略，无需额外配置即可工作：
+
+- **安全响应头**：所有响应自动附带 `X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy`、`Permissions-Policy`、`Cross-Origin-*`，HTML 文档附带 `Content-Security-Policy`，并发送 `Strict-Transport-Security`（仅 HTTPS 下由浏览器生效）。
+- **分级缓存（利于 CDN 命中率）**：
+  - `/assets/*`（Vite 带哈希指纹）：`Cache-Control: public, max-age=31536000, immutable`，可长期缓存
+  - HTML 入口与 SPA 回退：`Cache-Control: no-cache`，CDN 每次回源校验，发新版即时生效
+  - `/api/*`：`Cache-Control: no-store`，CDN 与浏览器均不缓存，避免敏感数据被缓存
+  - 其它静态文件：`public, max-age=86400`
+  - 同时发送 `CDN-Cache-Control`，便于 CDN 单独控制缓存而不影响浏览器
+- **前端分包**：`vue`/`naive-ui`/`echarts` 拆为独立 chunk，升级业务代码时依赖 chunk 命中缓存，提升二次访问速度。
+- **接口限流**：登录、TOTP、注册、发验证码、安装等接口按 IP 限流（默认 30 次/分钟，安装 15 次/分钟），返回 `429` 与 `Retry-After`。
+- **安装接口收敛**：`/api/setup/check` 仅在未安装时可用，已部署实例不会成为数据库连接探测入口。
+
+反向代理/CDN 场景建议设置以下环境变量：
+
+| 变量 | 说明 | 默认 |
+| --- | --- | --- |
+| `DNSMGR_TRUST_PROXY` | 位于 Nginx/CDN 之后时设为 `true`（或具体 IP/CIDR），使日志与限流使用真实客户端 IP，取 `X-Forwarded-For` | 关闭 |
+| `DNSMGR_ALLOWED_ORIGINS` | 允许跨域调用 API 的来源，逗号分隔；不设置则仅同源、不发送 CORS 头 | 同源 |
+| `DNSMGR_RATE_LIMIT` | 设为 `0` 关闭敏感接口限流 | 开启 |
+| `DNSMGR_HSTS` | 设为 `0` 关闭 HSTS 响应头 | 开启 |
+| `DNSMGR_BODY_LIMIT` | 请求体大小上限（字节） | 2097152 |
+
+代理层注意：CDN 需保留 `Cache-Control` 与 `X-Forwarded-For`/`X-Forwarded-Proto`，且不要缓存 `/api/*`；本应用已通过响应头声明，主流 CDN 默认遵守。
+
+---
+
 ## 技术栈与目录结构
 
 ```

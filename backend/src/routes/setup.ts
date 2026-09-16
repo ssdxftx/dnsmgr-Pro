@@ -9,8 +9,11 @@ export default async function setupRoutes(app: FastifyInstance) {
     return { code: 0, data: { installed } };
   });
 
-  // 测试数据库连接，并返回是否已初始化（已存在彩虹 DNS 数据表）
+  // 测试数据库连接，并返回是否已初始化（已存在彩虹 DNS 数据表）；仅未安装时可用，避免已部署实例被用作连接探测
   app.post('/api/setup/check', async (req: any) => {
+    if (await isInstalled()) {
+      return { code: -1, msg: '系统已安装' };
+    }
     const b = req.body || {};
     const cfg = {
       db_host: String(b.db_host || '').trim(),
