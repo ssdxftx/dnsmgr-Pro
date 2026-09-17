@@ -5,34 +5,30 @@
         <div class="toolbar">
           <n-space align="center">
             <n-button quaternary circle @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-            <span class="title">SSL 证书计划任务设置</span>
+            <span class="title">自动续签设置</span>
           </n-space>
         </div>
       </template>
 
-      <n-h4>自动续签</n-h4>
-      <n-form label-placement="left" label-width="150">
+      <n-form :label-placement="labelPlacement" :label-width="labelWidth">
+        <n-divider title-placement="left" class="section">自动续签</n-divider>
         <n-form-item label="到期前续签天数">
-          <n-input-number v-model:value="form.cert_renewdays" :min="1" style="width:200px" />
-          <div class="hint">证书到期前多少天自动续签（仅对开启自动续签的证书生效）</div>
+          <n-input-number v-model:value="form.cert_renewdays" :min="1" :max="90" style="width: 100%" />
+          <template #feedback>
+            <div class="hint">证书到期前多少天发送续签提醒（仅对开启自动续签的证书生效）。</div>
+          </template>
         </n-form-item>
-      </n-form>
-      <n-divider />
 
-      <n-h4>自动部署时段</n-h4>
-      <n-form label-placement="left" label-width="150">
+        <n-divider title-placement="left" class="section">自动部署时段</n-divider>
         <n-form-item label="运行时段（小时）">
-          <n-space align="center">
-            <n-select v-model:value="form.deploy_hour_start" :options="hourOptions" style="width:100px" />
-            <span>—</span>
-            <n-select v-model:value="form.deploy_hour_end" :options="hourOptions" style="width:100px" />
-          </n-space>
+          <div class="range-row">
+            <n-select v-model:value="form.deploy_hour_start" :options="hourOptions" style="flex: 1" />
+            <span class="range-sep">至</span>
+            <n-select v-model:value="form.deploy_hour_end" :options="hourOptions" style="flex: 1" />
+          </div>
         </n-form-item>
-      </n-form>
-      <n-divider />
 
-      <n-h4>通知设置</n-h4>
-      <n-form label-placement="left" label-width="150">
+        <n-divider title-placement="left" class="section">通知设置</n-divider>
         <n-form-item label="邮件通知">
           <n-select v-model:value="form.cert_notice_mail" :options="noticeOptions" />
         </n-form-item>
@@ -47,11 +43,14 @@
         </n-form-item>
         <n-form-item label="自定义 Webhook">
           <n-select v-model:value="form.cert_notice_custom_webhook" :options="noticeOptions" />
+          <template #feedback>
+            <div class="hint">「仅失败时」表示仅在续签或部署失败时发送通知。</div>
+          </template>
         </n-form-item>
       </n-form>
 
       <template #footer>
-        <n-space justify="end">
+        <n-space justify="end" class="footer-actions">
           <n-button @click="$router.back()">返回</n-button>
           <n-button type="primary" :loading="saving" @click="save">保存</n-button>
         </n-space>
@@ -61,14 +60,29 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 
 const message = useMessage();
 const saving = ref(false);
-const form = reactive<any>({
+
+const isMobile = ref(false);
+const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
+const labelWidth = computed<number | undefined>(() => (isMobile.value ? undefined : 150));
+
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768;
+}
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+
+// 后端未配置的项返回空字符串，这里统一回落到默认值，避免下拉框显示为空
+const DEFAULTS: Record<string, string | number> = {
   cert_renewdays: 7,
   deploy_hour_start: '0',
   deploy_hour_end: '23',
@@ -77,7 +91,9 @@ const form = reactive<any>({
   cert_notice_tgbot: '0',
   cert_notice_webhook: '0',
   cert_notice_custom_webhook: '0',
-});
+};
+
+const form = reactive<any>({ ...DEFAULTS });
 
 const hourOptions = Array.from({ length: 24 }, (_, i) => ({ label: String(i), value: String(i) }));
 const onOffOptions = [
@@ -92,8 +108,15 @@ const noticeOptions = [
 
 async function load() {
   const res = await api<any>('GET', '/cert/settings');
-  if (res.code === 0) Object.assign(form, res.data);
-  else message.error(res.msg);
+  if (res.code !== 0) return message.error(res.msg);
+  for (const [key, def] of Object.entries(DEFAULTS)) {
+    const v = res.data?.[key];
+    if (v === '' || v === null || v === undefined) {
+      form[key] = def;
+    } else {
+      form[key] = key === 'cert_renewdays' ? Number(v) || def : String(v);
+    }
+  }
 }
 
 async function save() {
@@ -108,7 +131,47 @@ onMounted(load);
 </script>
 
 <style scoped>
-.toolbar { display: flex; align-items: center; justify-content: space-between; }
-.title { font-size: 16px; font-weight: 600; }
-.hint { color: #18a058; font-size: 12px; margin-top: 4px; }
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.title {
+  font-size: 16px;
+  font-weight: 600;
+}
+.section {
+  margin: 24px 0 12px;
+}
+.section:first-child {
+  margin-top: 0;
+}
+.range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.range-sep {
+  flex: none;
+  color: #6b7280;
+}
+.hint {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 768px) {
+  .toolbar {
+    gap: 8px;
+  }
+  :deep(.n-card__footer .n-space) {
+    width: 100%;
+    justify-content: space-between;
+  }
+  :deep(.n-card__footer .n-space .n-button) {
+    flex: 1;
+  }
+}
 </style>
