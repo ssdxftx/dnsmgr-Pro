@@ -5,6 +5,9 @@
         <div class="toolbar">
           <span class="title">CDN 域名</span>
           <n-space>
+            <n-button v-if="canFreeCert" type="primary" secondary :disabled="!checkedIds.length" @click="openFreeCert(checkedIds)">
+              配置免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+            </n-button>
             <n-button @click="goZones">站点设置</n-button>
             <n-button type="primary" @click="openAdd">
               <template #icon><n-icon :component="AddOutline" /></template>
@@ -17,7 +20,14 @@
           </n-space>
         </div>
       </template>
-      <n-data-table :columns="columns" :data="domains" :loading="loading" :bordered="false" />
+      <n-data-table
+        :columns="columns"
+        :data="domains"
+        :loading="loading"
+        :bordered="false"
+        :row-key="(row: any) => row.id"
+        v-model:checked-row-keys="checkedIds"
+      />
       <n-empty class="list-empty" v-if="!loading && !domains.length" description="暂无 CDN 加速域名" />
     </n-card>
 
@@ -71,6 +81,35 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 平台免费证书弹窗 -->
+    <n-modal v-model:show="showCert" preset="card" title="平台免费证书" style="max-width:680px">
+      <n-spin :show="certRunning">
+        <n-alert type="info" :show-icon="true" class="cert-tip">
+          腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。
+        </n-alert>
+        <n-alert v-if="certSummary" :type="summaryType" :show-icon="true" class="cert-tip">{{ certSummary }}</n-alert>
+
+        <n-list v-if="certResults.length" bordered class="cert-list">
+          <n-list-item v-for="r in certResults" :key="r.id">
+            <div class="cert-head">
+              <span class="cert-name">{{ r.name || '#' + r.id }}</span>
+              <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
+            </div>
+            <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
+            <div v-if="r.records && r.records.length" class="cert-records">
+              <div v-for="(rec, i) in r.records" :key="i" class="cert-record">{{ rec.name }} {{ rec.type }} → {{ rec.value }}</div>
+            </div>
+          </n-list-item>
+        </n-list>
+      </n-spin>
+      <template #footer>
+        <n-space justify="end" class="cert-actions">
+          <n-button v-if="hasPending" :loading="certRunning" @click="checkPending">检查并部署</n-button>
+          <n-button @click="showCert = false">关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -97,9 +136,31 @@ const syncAid = ref<number | null>(null);
 const syncDid = ref<number>(0);
 const form = reactive<any>({ aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr' });
 
+const checkedIds = ref<number[]>([]);
+const showCert = ref(false);
+const certRunning = ref(false);
+const certResults = ref<any[]>([]);
+const certSummary = ref('');
+
+const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
+const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));
+const summaryType = computed(() => (certResults.value.some((r) => r.status === 'failed') ? 'warning' : 'success'));
+
+function statusText(status: string) {
+  if (status === 'applied') return '已部署';
+  if (status === 'pending') return '待验证';
+  return '失败';
+}
+function statusType(status: string): 'success' | 'warning' | 'error' {
+  if (status === 'applied') return 'success';
+  if (status === 'pending') return 'warning';
+  return 'error';
+}
+
 const isZoneType = computed(() => accountTypes.value[form.aid] === 'tencent_edgeone' || accountTypes.value[form.aid] === 'aliyun_esa');
 
-const columns = [
+const columns: any[] = [
+  { type: 'selection' },
   { title: 'ID', key: 'id', width: 60 },
   {
     title: '加速域名',
@@ -137,14 +198,15 @@ const columns = [
   {
     title: '操作',
     key: 'actions',
-    width: 160,
+    width: 240,
     render(row: any) {
-      return h(NSpace, null, {
-        default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }),
-        ],
-      });
+      const btns: any[] = [];
+      if (row.can_freecert) {
+        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openFreeCert([row.id]) }, { default: () => '免费证书' }));
+      }
+      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
+      return h(NSpace, null, { default: () => btns });
     },
   },
 ];
@@ -214,6 +276,32 @@ async function doSync() {
   } else message.error(res.msg);
 }
 
+async function openFreeCert(ids: number[]) {
+  const list = [...new Set(ids)].filter(Boolean);
+  if (!list.length) return message.warning('请先勾选要配置免费证书的加速域名');
+  certResults.value = [];
+  certSummary.value = '';
+  showCert.value = true;
+  await runFreeCert(list, false);
+}
+
+async function runFreeCert(ids: number[], checkOnly: boolean) {
+  certRunning.value = true;
+  const res = await api<any>('POST', checkOnly ? '/cdn/domains/freecert/check' : '/cdn/domains/freecert', { ids });
+  certRunning.value = false;
+  if (res.code === 0) {
+    certResults.value = res.data || [];
+    certSummary.value = res.msg || '';
+    loadDomains();
+  } else message.error(res.msg);
+}
+
+async function checkPending() {
+  const ids = certResults.value.filter((r) => r.status === 'pending').map((r) => r.id);
+  if (!ids.length) return;
+  await runFreeCert(ids, true);
+}
+
 function del(row: any) {
   dialog.warning({
     title: '删除加速域名',
@@ -246,5 +334,49 @@ onMounted(() => {
 .title {
   font-size: 16px;
   font-weight: 600;
+}
+.cert-tip + .cert-tip {
+  margin-top: 10px;
+}
+.cert-list {
+  margin-top: 12px;
+}
+.cert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cert-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+.cert-msg {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #6b7280;
+  word-break: break-word;
+}
+.cert-records {
+  margin-top: 6px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #f5f7fa;
+  font-size: 12px;
+  word-break: break-all;
+}
+.cert-record + .cert-record {
+  margin-top: 4px;
+}
+
+@media (max-width: 768px) {
+  .cert-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .cert-actions :deep(.n-button) {
+    flex: 1;
+  }
 }
 </style>

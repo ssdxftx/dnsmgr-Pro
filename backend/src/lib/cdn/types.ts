@@ -14,6 +14,19 @@ export interface CdnDomainItem {
   force_redirect?: boolean;
 }
 
+// 平台免费证书：pending 表示还需完成域名验证后才能部署
+export interface FreeCertRecord {
+  name: string;
+  type: string;
+  value: string;
+}
+
+export interface FreeCertResult {
+  status: 'applied' | 'pending' | 'failed';
+  message?: string;
+  records?: FreeCertRecord[];
+}
+
 export interface CdnProvider {
   getError(): string;
   check(): Promise<boolean>;
@@ -33,4 +46,10 @@ export interface CdnProvider {
   preheat?(urls: string[]): Promise<string | false>;
   getAccess?(domain: string): Promise<Record<string, any> | false>;
   setAccess?(domain: string, config: Record<string, any>): Promise<boolean>;
+  // 是否支持使用厂商提供的免费证书（如腾讯云 EdgeOne）
+  supportsFreeCert?(): boolean;
+  // 为加速域名申请并部署平台免费证书
+  applyFreeCert?(domain: string): Promise<FreeCertResult>;
+  // 检查免费证书申请结果，通过后完成部署
+  checkFreeCert?(domain: string): Promise<FreeCertResult>;
 }
