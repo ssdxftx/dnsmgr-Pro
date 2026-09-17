@@ -1,17 +1,23 @@
 import { query, queryOne, table } from '../../db.js';
 import { configGet } from '../../config.js';
 import { CertOrderService } from '../certService.js';
-import { certOrderSend } from '../monitor/msgNotice.js';
+import { CertDeployService } from '../deployService.js';
+import { certOrderSend, certDeploySend } from '../monitor/msgNotice.js';
 
 // 处理失败后再次尝试的冷却时间（分钟）
 const FAIL_RETRY_COOLDOWN_MIN = 5;
 // 提交 DNS 记录后等待生效的时间（秒），用于给调度器一个下次推进的时间点
 const DNS_WAIT_SECONDS = 300;
-// 单次调度最多处理的订单数，避免一次性打满上游接口
+// 单次调度最多处理的订单/任务数，避免一次性打满上游接口
 const RENEW_LIMIT = 5;
 const CONTINUE_LIMIT = 10;
+const DEPLOY_LIMIT = 10;
+// 与 CertDeployService.process() 的重试上限保持一致
+const DEPLOY_MAX_RETRY = 6;
 
 const FAIL_STATUSES = [-2, -3, -4, -5, -6, -7];
+// 调度器会推进的订单状态：0 已排队、1/2 进行中、负数失败待重试
+const ACTIVE_STATUSES = [0, 1, 2, ...FAIL_STATUSES];
 
 type QueryFn = <T = any>(sql: string, params?: any[]) => Promise<T[]>;
 
@@ -39,44 +45,93 @@ export async function findRenewOrders(days: number, q: QueryFn = query): Promise
   );
 }
 
-// 进行中的订单：等待验证/签发到期，或失败后已过冷却时间
+// 需要推进的订单：等待验证/签发到期，或已排队的续签订单。统一以数据库时钟为准
 export async function findRunningOrders(q: QueryFn = query): Promise<any[]> {
-  const placeholders = FAIL_STATUSES.map(() => '?').join(',');
+  const placeholders = ACTIVE_STATUSES.map(() => '?').join(',');
   return q(
     `SELECT id FROM ${table('cert_order')}
       WHERE isauto = 1 AND islock = 0
-        AND (
-          (status IN (0, 1, 2) AND retrytime IS NOT NULL AND retrytime <= NOW())
-          OR (status IN (${placeholders}) AND updatetime <= DATE_SUB(NOW(), INTERVAL ? MINUTE))
-        )
-      ORDER BY updatetime ASC LIMIT ?`,
-    [...FAIL_STATUSES, FAIL_RETRY_COOLDOWN_MIN, CONTINUE_LIMIT],
+        AND status IN (${placeholders})
+        AND retrytime IS NOT NULL AND retrytime <= NOW()
+      ORDER BY retrytime ASC LIMIT ?`,
+    [...ACTIVE_STATUSES, CONTINUE_LIMIT],
   );
 }
 
+// 待部署任务：仅处理证书已签发且未吊销、任务处于启用状态的任务
+export async function findDeployTasks(q: QueryFn = query): Promise<any[]> {
+  return q(
+    `SELECT D.id FROM ${table('cert_deploy')} D
+       JOIN ${table('cert_order')} O ON O.id = D.oid
+      WHERE D.active = 1 AND D.islock = 0 AND D.retry < ?
+        AND O.status = 3 AND O.fullchain IS NOT NULL AND O.privatekey IS NOT NULL
+        AND (D.status = 0 OR (D.status < 0 AND D.retrytime IS NOT NULL AND D.retrytime <= NOW()))
+      ORDER BY D.id ASC LIMIT ?`,
+    [DEPLOY_MAX_RETRY, DEPLOY_LIMIT],
+  );
+}
+
+// 记录下一次推进时间点：全部使用数据库时钟，避免应用与数据库时区不一致
+async function ensureNextRun(id: number): Promise<void> {
+  const row = await queryOne(`SELECT status, retrytime FROM ${table('cert_order')} WHERE id = ?`, [id]);
+  if (!row) return;
+  const status = Number(row.status);
+  if (status === 0 || FAIL_STATUSES.includes(status)) {
+    await query(`UPDATE ${table('cert_order')} SET retrytime = DATE_ADD(NOW(), INTERVAL ? MINUTE) WHERE id = ?`, [FAIL_RETRY_COOLDOWN_MIN, id]);
+  } else if ((status === 1 || status === 2) && !row.retrytime) {
+    await query(`UPDATE ${table('cert_order')} SET retrytime = DATE_ADD(NOW(), INTERVAL ? SECOND) WHERE id = ?`, [DNS_WAIT_SECONDS, id]);
+  }
+}
+
 async function processOrder(id: number): Promise<void> {
-  const service = new CertOrderService(id);
+  let error: any = null;
   try {
-    const code = await service.process();
-    if (code === 3) {
-      // 签发成功：每个处理周期只通知一次
-      const row = await queryOne(`SELECT issend FROM ${table('cert_order')} WHERE id = ?`, [id]);
-      if (!row?.issend) {
-        certOrderSend(id, true).catch(() => undefined);
-        console.log(`[cert] 订单 ${id} 自动续签成功`);
-      }
-    } else if (code === 1) {
-      // 等待 DNS 生效：补一个推进时间点，避免停留在无 retrytime 的等待态
-      await query(`UPDATE ${table('cert_order')} SET retrytime = IFNULL(retrytime, DATE_ADD(NOW(), INTERVAL ? SECOND)) WHERE id = ?`, [DNS_WAIT_SECONDS, id]);
-      console.log(`[cert] 订单 ${id} 已提交DNS记录，等待生效`);
-    }
+    await new CertOrderService(id).process();
   } catch (e: any) {
-    const row = await queryOne(`SELECT status, issend FROM ${table('cert_order')} WHERE id = ?`, [id]).catch(() => null);
-    // 仅在真正失败（状态为负）且本周期尚未通知时发送失败通知
-    if (row && row.status < 0 && !row.issend) {
-      certOrderSend(id, false).catch(() => undefined);
-    }
-    console.log(`[cert] 订单 ${id} 处理未完成: ${e?.message}`);
+    error = e;
+  }
+  await ensureNextRun(id).catch(() => undefined);
+
+  const row = await queryOne(`SELECT status, issend FROM ${table('cert_order')} WHERE id = ?`, [id]);
+  if (!row) return;
+  if (row.issend) {
+    if (error) console.log(`[cert] 订单 ${id} 处理未完成: ${error?.message}`);
+    return;
+  }
+  if (Number(row.status) === 3) {
+    // 每个处理周期只通知一次（续签重置时会把 issend 清 0）
+    certOrderSend(id, true).catch(() => undefined);
+    console.log(`[cert] 订单 ${id} 自动续签成功`);
+  } else if (Number(row.status) < 0) {
+    certOrderSend(id, false).catch(() => undefined);
+    console.log(`[cert] 订单 ${id} 处理失败: ${error?.message || '未知错误'}`);
+  } else if (error) {
+    console.log(`[cert] 订单 ${id} 处理未完成: ${error?.message}`);
+  }
+}
+
+async function processDeployTask(id: number): Promise<void> {
+  let error: any = null;
+  try {
+    await new CertDeployService(id).process();
+  } catch (e: any) {
+    error = e;
+  }
+
+  const row = await queryOne(`SELECT status, issend FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
+  if (!row) return;
+  if (row.issend) {
+    if (error) console.log(`[cert] 部署任务 ${id} 未完成: ${error?.message}`);
+    return;
+  }
+  if (Number(row.status) === 1) {
+    certDeploySend(id, true).catch(() => undefined);
+    console.log(`[cert] 部署任务 ${id} 自动部署成功`);
+  } else if (Number(row.status) < 0) {
+    certDeploySend(id, false).catch(() => undefined);
+    console.log(`[cert] 部署任务 ${id} 部署失败: ${error?.message || '未知错误'}`);
+  } else if (error) {
+    console.log(`[cert] 部署任务 ${id} 未完成: ${error?.message}`);
   }
 }
 
@@ -106,6 +161,14 @@ async function continueRunningOrders(): Promise<number> {
   return rows.length;
 }
 
+async function deployPendingTasks(): Promise<number> {
+  const rows = await findDeployTasks();
+  for (const row of rows) {
+    await processDeployTask(row.id);
+  }
+  return rows.length;
+}
+
 export async function certTaskRun(): Promise<void> {
   const start = parseHour(await configGet('deploy_hour_start', '0'), 0);
   const end = parseHour(await configGet('deploy_hour_end', '23'), 23);
@@ -114,7 +177,8 @@ export async function certTaskRun(): Promise<void> {
   const days = Number(await configGet('cert_renewdays', '7')) || 7;
   const renewed = await renewExpiringOrders(days);
   const continued = await continueRunningOrders();
-  if (renewed || continued) {
-    console.log(`[cert] 本轮调度：续签 ${renewed} 个、推进 ${continued} 个订单`);
+  const deployed = await deployPendingTasks();
+  if (renewed || continued || deployed) {
+    console.log(`[cert] 本轮调度：续签 ${renewed} 个、推进 ${continued} 个订单、部署 ${deployed} 个任务`);
   }
 }
