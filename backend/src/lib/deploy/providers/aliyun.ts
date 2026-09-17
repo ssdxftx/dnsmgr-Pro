@@ -51,6 +51,7 @@ export class AliyunDeploy implements DeployProvider {
     if (config.product === 'fc') return await this.deployFc(fullchain, privatekey, config, '2023-03-30');
     if (config.product === 'fc2') return await this.deployFc(fullchain, privatekey, config, '2021-04-06');
 
+    if (config.product === 'esa_upload') return await this.deployEsaUpload(fullchain, privatekey, config, info);
     const [certId, certName] = await this.getCertId(fullchain, privatekey, config);
     if (!certId) throw new Error('证书ID获取失败');
 
@@ -297,6 +298,98 @@ export class AliyunDeploy implements DeployProvider {
       this.log('ESA站点 ' + sitename + ' 证书 ' + existCert.Name + ' 更新成功');
     } else {
       this.log('ESA站点 ' + sitename + ' 证书添加成功！');
+    }
+  }
+
+  // ESA 直传证书：把本系统签发的证书直接上传到站点（Type=upload），无需先上传到证书中心
+  private async deployEsaUpload(fullchain: string, privatekey: string, config: Record<string, any>, info: any): Promise<void> {
+    const sitename = config.esa_sitename;
+    if (!sitename) throw new Error('ESA站点名称不能为空');
+
+    const client = this.makeClient(this.esaEndpoint(config), '2024-09-10');
+
+    let data: any;
+    try {
+      data = await client.request({ Action: 'ListSites', SiteName: sitename, SiteSearchType: 'exact' }, 'GET');
+    } catch (e: any) {
+      throw new Error('查询ESA站点列表失败：' + e.message);
+    }
+    if (!data.TotalCount) throw new Error('ESA站点 ' + sitename + ' 不存在');
+    const siteId = data.Sites[0].SiteId;
+
+    const sans = this.certSans(fullchain);
+    const certName = 'dnsmgr-' + (parseCertInfo(fullchain).subject || 'cert').replace(/\*\./g, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100);
+
+    try {
+      data = await client.request({ Action: 'ListCertificates', SiteId: siteId }, 'GET');
+    } catch (e: any) {
+      throw new Error('查询ESA站点证书列表失败：' + e.message);
+    }
+    const certs: any[] = data.Result || data.Certificates || [];
+    const custom = certs.filter((c: any) => c.Type !== 'free');
+    const sameSans = (c: any) => {
+      const cur = String(c.SAN || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .sort();
+      return cur.length > 0 && JSON.stringify(cur) === JSON.stringify([...sans].sort());
+    };
+    const existCert = custom.find((c: any) => c.Name === certName) || custom.find(sameSans) || null;
+
+    if (!existCert) {
+      try {
+        data = await client.request({ Action: 'ListInstanceQuotasWithUsage', SiteId: siteId, QuotaNames: 'customHttpCert' }, 'GET');
+      } catch (e: any) {
+        throw new Error('查询ESA站点证书配额失败：' + e.message);
+      }
+      if (data.Quotas && data.Quotas.length > 0 && parseInt(data.Quotas[0].Usage) >= parseInt(data.Quotas[0].QuotaValue) && custom.length) {
+        const oldest = custom
+          .slice()
+          .sort((a: any, b: any) => new Date(a.CreateTime || 0).getTime() - new Date(b.CreateTime || 0).getTime())[0];
+        try {
+          await client.request({ Action: 'DeleteCertificate', SiteId: siteId, Id: oldest.Id }, 'GET');
+          this.log('ESA站点 ' + sitename + ' 删除证书 ' + oldest.Name + ' 成功');
+        } catch (e: any) {
+          throw new Error('ESA站点 ' + sitename + ' 删除证书' + oldest.Name + '失败：' + e.message);
+        }
+      }
+    }
+
+    const param: Record<string, any> = {
+      Action: 'SetCertificate',
+      SiteId: siteId,
+      Type: 'upload',
+      Name: existCert ? existCert.Name : certName,
+      Certificate: fullchain,
+      PrivateKey: privatekey,
+    };
+    if (existCert) param.Id = existCert.Id;
+
+    try {
+      data = await client.request(param);
+    } catch (e: any) {
+      throw new Error('ESA站点 ' + sitename + ' 上传证书失败：' + e.message);
+    }
+    if (data && data.Id) {
+      info.cert_id = data.Id;
+      info.cert_name = param.Name;
+    }
+    this.log('ESA站点 ' + sitename + (existCert ? ' 证书更新成功' : ' 证书上传成功') + '（' + param.Name + '）');
+  }
+
+  private certSans(fullchain: string): string[] {
+    try {
+      const x = new X509Certificate(fullchain);
+      const list: string[] = [];
+      for (const line of (x.subjectAltName || '').split(',')) {
+        let d = line.trim();
+        if (d.startsWith('DNS:')) d = d.slice(4).trim();
+        if (d && !list.includes(d)) list.push(d);
+      }
+      return list;
+    } catch {
+      return [];
     }
   }
 

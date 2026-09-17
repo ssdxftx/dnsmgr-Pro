@@ -603,7 +603,7 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '操作成功' };
   });
 
-  const SETTINGS_KEYS = ['cert_renewdays', 'deploy_hour_start', 'deploy_hour_end', 'cert_notice_mail', 'cert_notice_wxtpl', 'cert_notice_tgbot', 'cert_notice_webhook', 'cert_notice_custom_webhook'];
+  const SETTINGS_KEYS = ['cert_renewdays', 'deploy_hour_start', 'deploy_hour_end', 'cdn_cert_aid', 'cert_notice_mail', 'cert_notice_wxtpl', 'cert_notice_tgbot', 'cert_notice_webhook', 'cert_notice_custom_webhook'];
 
   app.get('/api/cert/settings', auth, async () => {
     const data: Record<string, string | null> = {};

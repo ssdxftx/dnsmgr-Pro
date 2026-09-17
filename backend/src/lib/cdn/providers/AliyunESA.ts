@@ -1,5 +1,6 @@
+import { X509Certificate } from 'node:crypto';
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, FreeCertResult } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -370,6 +371,90 @@ export class AliyunESA implements CdnProvider {
       this.error = '修改阿里云 ESA HTTPS 配置失败：' + (e.message || String(e));
       return false;
     }
+  }
+
+  // ===== 站点证书：本系统签发后直传 ESA（Type=upload），站点下所有加速域名共用 =====
+
+  supportsCertApply() {
+    return true;
+  }
+
+  // 站点级证书作用域：站点根域 + 一级通配符
+  async getCertScope(domain: string): Promise<CertScope | false> {
+    const siteId = await this.findSite(domain);
+    if (!siteId) return false;
+    const siteName = (await this.getSiteName(siteId)) || this.getRootDomain(domain);
+    if (!siteName) return false;
+    return { siteId: String(siteId), siteName, domains: [siteName, '*.' + siteName] };
+  }
+
+  private certSans(fullchain: string): string[] {
+    try {
+      const x = new X509Certificate(fullchain);
+      const san = x.subjectAltName || '';
+      const list: string[] = [];
+      for (const line of san.split(',')) {
+        let d = line.trim();
+        if (d.startsWith('DNS:')) d = d.slice(4).trim();
+        if (d && !list.includes(d)) list.push(d);
+      }
+      return list;
+    } catch {
+      return [];
+    }
+  }
+
+  private certDisplayName(fullchain: string, sans: string[]): string {
+    let cn = sans[0] || 'cert';
+    try {
+      cn = new X509Certificate(fullchain).subject.match(/CN\s*=\s*([^,\n]+)/i)?.[1]?.trim() || cn;
+    } catch {
+      // ignore
+    }
+    return 'dnsmgr-' + cn.replace(/\*\./g, '').replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100);
+  }
+
+  // 直传到站点的证书若同名或同 SAN 则更新，避免重复占用自定义证书配额
+  async uploadCert(domain: string, fullchain: string, privatekey: string): Promise<FreeCertResult> {
+    const siteId = await this.findSite(domain);
+    if (!siteId) return { status: 'failed', message: '未找到该域名的 ESA 站点，请先在阿里云 ESA 控制台创建站点' };
+    const sid = Number(siteId);
+    const sans = this.certSans(fullchain);
+    const name = this.certDisplayName(fullchain, sans);
+    const list = await this.call({ Action: 'ListCertificates', SiteId: sid, PageNumber: 1, PageSize: 100 });
+    if (list === false) return { status: 'failed', message: this.error || '查询站点证书失败' };
+    const certs: any[] = list.Certificates || list.Result || [];
+    const custom = certs.filter((c: any) => c.Type !== 'free');
+    const sameSans = (c: any) => {
+      const cur = String(c.SAN || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .sort();
+      return cur.length > 0 && JSON.stringify(cur) === JSON.stringify([...sans].sort());
+    };
+    const existing = custom.find((c: any) => c.Name === name) || custom.find(sameSans) || null;
+    const param: Record<string, any> = {
+      Action: 'SetCertificate',
+      SiteId: sid,
+      Type: 'upload',
+      Name: existing?.Name || name,
+      Certificate: fullchain,
+      PrivateKey: privatekey,
+    };
+    if (existing?.Id) param.Id = existing.Id;
+    let res = await this.call(param);
+    // 自定义证书配额用满时，删除最旧的一张后重试一次
+    if (res === false && /CertQuotaCheckFailed|配额/i.test(this.error) && custom.length) {
+      const oldest = custom
+        .slice()
+        .sort((a: any, b: any) => new Date(a.CreateTime || 0).getTime() - new Date(b.CreateTime || 0).getTime())[0];
+      if (oldest?.Id && (await this.call({ Action: 'DeleteCertificate', SiteId: sid, Id: oldest.Id })) !== false) {
+        res = await this.call(param);
+      }
+    }
+    if (res === false) return { status: 'failed', message: this.error || '证书上传失败' };
+    return { status: 'applied', message: `证书 ${param.Name} 已上传到 ESA 站点 ${await this.getSiteName(siteId)}` };
   }
 
   async getZoneSetting(_zoneId: string): Promise<false> {
