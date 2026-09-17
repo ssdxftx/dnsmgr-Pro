@@ -46,6 +46,7 @@ const routes = [
       { path: 'system-settings', component: () => import('./views/SystemSet.vue'), meta: { title: '系统设置' } },
       { path: 'users', component: () => import('./views/UserList.vue'), meta: { title: '用户管理' } },
       { path: 'logs', component: () => import('./views/UserLog.vue'), meta: { title: '操作日志' } },
+      { path: 'about', component: () => import('./views/About.vue'), meta: { title: '关于' } },
     ],
   },
 ];
