@@ -8,6 +8,9 @@
             <n-button v-if="canFreeCert" type="primary" secondary :disabled="!checkedIds.length" @click="openFreeCert(checkedIds)">
               配置免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
             </n-button>
+            <n-button v-if="canCertApply" type="primary" secondary :disabled="!checkedIds.length" @click="openCertLink(checkedIds)">
+              申请证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+            </n-button>
             <n-button @click="goZones">站点设置</n-button>
             <n-button type="primary" @click="openAdd">
               <template #icon><n-icon :component="AddOutline" /></template>
@@ -82,10 +85,13 @@
       </template>
     </n-modal>
 
-    <!-- 平台免费证书弹窗 -->
-    <n-modal v-model:show="showCert" preset="card" title="平台免费证书" style="max-width:680px">
+    <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
+    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '证书申请（阿里云 ESA）' : '平台免费证书'" style="max-width:680px">
       <n-spin :show="certRunning">
-        <n-alert type="info" :show-icon="true" class="cert-tip">
+        <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
+          按 ESA 站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发；签发后点击「检查并部署」直传 ESA 站点并启用 HTTPS，站点下所有加速域名共用该证书。
+        </n-alert>
+        <n-alert v-else type="info" :show-icon="true" class="cert-tip">
           腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。
         </n-alert>
         <n-alert v-if="certSummary" :type="summaryType" :show-icon="true" class="cert-tip">{{ certSummary }}</n-alert>
@@ -96,6 +102,7 @@
               <span class="cert-name">{{ r.name || '#' + r.id }}</span>
               <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
             </div>
+            <div v-if="r.domains && r.domains.length" class="cert-scope">证书覆盖：{{ r.domains.join('、') }}</div>
             <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
             <div v-if="r.records && r.records.length" class="cert-records">
               <div v-for="(rec, i) in r.records" :key="i" class="cert-record">{{ rec.name }} {{ rec.type }} → {{ rec.value }}</div>
@@ -138,17 +145,19 @@ const form = reactive<any>({ aid: null, did: null, zone_id: null, name: '', orig
 
 const checkedIds = ref<number[]>([]);
 const showCert = ref(false);
+const certMode = ref<'free' | 'link'>('free');
 const certRunning = ref(false);
 const certResults = ref<any[]>([]);
 const certSummary = ref('');
 
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
+const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
 const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));
 const summaryType = computed(() => (certResults.value.some((r) => r.status === 'failed') ? 'warning' : 'success'));
 
 function statusText(status: string) {
   if (status === 'applied') return '已部署';
-  if (status === 'pending') return '待验证';
+  if (status === 'pending') return certMode.value === 'link' ? '待签发' : '待验证';
   return '失败';
 }
 function statusType(status: string): 'success' | 'warning' | 'error' {
@@ -198,11 +207,14 @@ const columns: any[] = [
   {
     title: '操作',
     key: 'actions',
-    width: 240,
+    width: 320,
     render(row: any) {
       const btns: any[] = [];
       if (row.can_freecert) {
         btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openFreeCert([row.id]) }, { default: () => '免费证书' }));
+      }
+      if (row.can_certapply) {
+        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertLink([row.id]) }, { default: () => '申请证书' }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
@@ -276,18 +288,28 @@ async function doSync() {
   } else message.error(res.msg);
 }
 
-async function openFreeCert(ids: number[]) {
+async function openCert(ids: number[], mode: 'free' | 'link') {
   const list = [...new Set(ids)].filter(Boolean);
-  if (!list.length) return message.warning('请先勾选要配置免费证书的加速域名');
+  if (!list.length) return message.warning(mode === 'link' ? '请先勾选要申请证书的加速域名' : '请先勾选要配置免费证书的加速域名');
+  certMode.value = mode;
   certResults.value = [];
   certSummary.value = '';
   showCert.value = true;
-  await runFreeCert(list, false);
+  await runCert(list, false);
 }
 
-async function runFreeCert(ids: number[], checkOnly: boolean) {
+function openFreeCert(ids: number[]) {
+  return openCert(ids, 'free');
+}
+
+function openCertLink(ids: number[]) {
+  return openCert(ids, 'link');
+}
+
+async function runCert(ids: number[], checkOnly: boolean) {
   certRunning.value = true;
-  const res = await api<any>('POST', checkOnly ? '/cdn/domains/freecert/check' : '/cdn/domains/freecert', { ids });
+  const base = certMode.value === 'link' ? '/cdn/domains/cert' : '/cdn/domains/freecert';
+  const res = await api<any>('POST', checkOnly ? base + '/check' : base, { ids });
   certRunning.value = false;
   if (res.code === 0) {
     certResults.value = res.data || [];
@@ -299,7 +321,7 @@ async function runFreeCert(ids: number[], checkOnly: boolean) {
 async function checkPending() {
   const ids = certResults.value.filter((r) => r.status === 'pending').map((r) => r.id);
   if (!ids.length) return;
-  await runFreeCert(ids, true);
+  await runCert(ids, true);
 }
 
 function del(row: any) {
@@ -357,6 +379,13 @@ onMounted(() => {
   line-height: 1.7;
   color: #6b7280;
   word-break: break-word;
+}
+.cert-scope {
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 1.7;
+  color: #2080f0;
+  word-break: break-all;
 }
 .cert-records {
   margin-top: 6px;

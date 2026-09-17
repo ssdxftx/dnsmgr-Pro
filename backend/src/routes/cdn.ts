@@ -1,7 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
+import { configGet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
+import { certConfig } from '../lib/cert/factory.js';
+import { ensureWildcardOrder } from '../lib/cdn/certLink.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
@@ -81,11 +84,21 @@ function zoneSettingDiff(current: Record<string, any>, target: Record<string, an
 
 const areaMap: Record<string, string> = { mainland: 'mainland_china', domestic: 'mainland_china', overseas: 'overseas', global: 'global' };
 
-function summarizeFreeCert(list: any[]): string {
+function parseIds(raw: any): number[] {
+  return [
+    ...new Set(
+      (Array.isArray(raw) ? raw : [])
+        .map((x: any) => Number(x))
+        .filter((n: number) => Number.isInteger(n) && n > 0),
+    ),
+  ] as number[];
+}
+
+function summarizeResults(list: any[], pendingLabel: string): string {
   const applied = list.filter((r) => r.status === 'applied').length;
   const pending = list.filter((r) => r.status === 'pending').length;
   const failed = list.filter((r) => r.status === 'failed').length;
-  return `成功 ${applied} 个，待验证 ${pending} 个，失败 ${failed} 个`;
+  return `成功 ${applied} 个，${pendingLabel} ${pending} 个，失败 ${failed} 个`;
 }
 
 export default async function cdnRoutes(app: FastifyInstance) {
@@ -124,7 +137,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
         .filter((a: any) => cdnConfig[a.type]?.freecert)
         .map((a: any) => a.id),
     );
-    const data = rows.map((r: any) => ({ ...r, routename: typeNames[r.route] || r.route, can_freecert: freeAids.has(r.aid) ? 1 : 0 }));
+    const certAids = new Set(
+      (await query(`SELECT id, type FROM ${table('cdn_account')}`))
+        .filter((a: any) => cdnConfig[a.type]?.certapply)
+        .map((a: any) => a.id),
+    );
+    const data = rows.map((r: any) => ({
+      ...r,
+      routename: typeNames[r.route] || r.route,
+      can_freecert: freeAids.has(r.aid) ? 1 : 0,
+      can_certapply: certAids.has(r.aid) ? 1 : 0,
+    }));
     return { code: 0, data };
   });
 
@@ -373,30 +396,95 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 批量为加速域名申请平台免费证书（如腾讯云 EdgeOne 免费证书）
   app.post('/api/cdn/domains/freecert', auth, async (req: any) => {
-    const ids = [
-      ...new Set(
-        (Array.isArray(req.body?.ids) ? req.body.ids : [])
-          .map((x: any) => Number(x))
-          .filter((n: number) => Number.isInteger(n) && n > 0),
-      ),
-    ] as number[];
+    const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要配置免费证书的加速域名' };
     const data = await runFreeCert(ids, false);
-    return { code: 0, msg: summarizeFreeCert(data), data };
+    return { code: 0, msg: summarizeResults(data, '待验证'), data };
   });
 
   // 检查免费证书申请结果，通过后部署到加速域名
   app.post('/api/cdn/domains/freecert/check', auth, async (req: any) => {
-    const ids = [
-      ...new Set(
-        (Array.isArray(req.body?.ids) ? req.body.ids : [])
-          .map((x: any) => Number(x))
-          .filter((n: number) => Number.isInteger(n) && n > 0),
-      ),
-    ] as number[];
+    const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runFreeCert(ids, true);
-    return { code: 0, msg: summarizeFreeCert(data), data };
+    return { code: 0, msg: summarizeResults(data, '待验证'), data };
+  });
+
+  // ===== 联动证书申请：按站点申请一张通配符证书，签发后直传站点并启用 HTTPS =====
+
+  async function runCertLink(ids: number[], checkOnly: boolean): Promise<any[]> {
+    const aid = Number(await configGet('cdn_cert_aid', '0')) || 0;
+    const account = aid ? await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]) : null;
+    const results: any[] = [];
+    for (const id of ids) {
+      const row = await loadCdnDomain(id);
+      if (!row) {
+        results.push({ id, status: 'failed', message: '加速域名不存在' });
+        continue;
+      }
+      const provider: any = await cdnForRow(row);
+      if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.uploadCert !== 'function') {
+        results.push({ id, name: row.name, status: 'failed', message: '该厂商暂不支持联动证书申请' });
+        continue;
+      }
+      const scope = await provider.getCertScope(row.name);
+      if (!scope) {
+        results.push({ id, name: row.name, status: 'failed', message: '未找到该域名的 ESA 站点，请先在阿里云 ESA 控制台创建站点' });
+        continue;
+      }
+      if (!aid || !account) {
+        results.push({ id, name: row.name, status: 'failed', message: '请先在「自动续签设置」中指定用于申请证书的账户' });
+        continue;
+      }
+      if (!certConfig[account.type]?.wildcard) {
+        results.push({ id, name: row.name, status: 'failed', message: `证书账户「${account.name}」不支持通配符证书，请更换 ACME 类账户` });
+        continue;
+      }
+      const rootRow = await queryOne(`SELECT id FROM ${table('domain')} WHERE name = ?`, [scope.siteName]);
+      if (!rootRow) {
+        results.push({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 未在本系统添加，无法自动完成 DNS 验证` });
+        continue;
+      }
+      const order = await ensureWildcardOrder(aid, scope.domains);
+      const status = Number(order.status);
+      if (status !== 3) {
+        const message =
+          status < 0
+            ? `证书订单处理失败：${order.error || '未知错误'}`
+            : checkOnly
+              ? '证书尚未签发完成，请稍后再检查'
+              : '已提交证书申请，系统将自动完成 DNS 验证与签发，签发后点击「检查并部署」完成上传';
+        results.push({ id, name: row.name, status: status < 0 ? 'failed' : 'pending', message, order_id: order.id, domains: scope.domains });
+        continue;
+      }
+      let up: any;
+      try {
+        up = await provider.uploadCert(row.name, order.fullchain, order.privatekey);
+      } catch (e: any) {
+        up = { status: 'failed', message: e?.message || String(e) };
+      }
+      if (up?.status === 'applied') {
+        await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [id]);
+      }
+      results.push({ id, name: row.name, status: up?.status || 'failed', message: up?.message, order_id: order.id, domains: scope.domains });
+    }
+    return results;
+  }
+
+  // 按站点申请/复用通配符证书，已签发则直传 ESA 站点
+  app.post('/api/cdn/domains/cert', auth, async (req: any) => {
+    const ids = parseIds(req.body?.ids);
+    if (!ids.length) return { code: -1, msg: '请选择要申请证书的加速域名' };
+    const data = await runCertLink(ids, false);
+    return { code: 0, msg: summarizeResults(data, '待签发'), data };
+  });
+
+  // 检查通配符证书签发结果，已签发则直传 ESA 站点
+  app.post('/api/cdn/domains/cert/check', auth, async (req: any) => {
+    const ids = parseIds(req.body?.ids);
+    if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
+    const data = await runCertLink(ids, true);
+    return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
   // 同步云端
