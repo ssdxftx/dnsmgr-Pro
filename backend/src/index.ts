@@ -31,6 +31,7 @@ import { executeAll as runScheduleAll } from './lib/schedule/scheduleService.js'
 import { expireNoticeTask } from './lib/expire/expireNoticeService.js';
 import { executePreheatTasks } from './lib/cdn/preheatService.js';
 import { executeCheckTasks } from './lib/dns/checkService.js';
+import { certTaskRun } from './lib/cert/certTaskService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
 
 process.on('unhandledRejection', (reason: any) => {
@@ -184,6 +185,10 @@ try {
       executeCheckTasks().catch((e: any) => console.error('[dnscheck] 自动检测调度异常:', e.message));
     }, 60 * 1000);
     console.log('[dnsmgr-backend] DNS 劫持检测调度器已启动');
+    setInterval(() => {
+      certTaskRun().catch((e: any) => console.error('[cert] SSL证书续签调度异常:', e.message));
+    }, 5 * 60 * 1000);
+    console.log('[dnsmgr-backend] SSL证书续签调度器已启动');
   }
 } catch (e) {
   console.error(e);

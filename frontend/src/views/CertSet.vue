@@ -19,13 +19,16 @@
           </template>
         </n-form-item>
 
-        <n-divider title-placement="left" class="section">自动部署时段</n-divider>
+        <n-divider title-placement="left" class="section">运行时段</n-divider>
         <n-form-item label="运行时段（小时）">
           <div class="range-row">
             <n-select v-model:value="form.deploy_hour_start" :options="hourOptions" style="flex: 1" />
             <span class="range-sep">至</span>
             <n-select v-model:value="form.deploy_hour_end" :options="hourOptions" style="flex: 1" />
           </div>
+          <template #feedback>
+            <div class="hint">自动续签与订单处理仅在该时段内进行，支持跨天（如 22 至 6）；起止相同表示不限时段。</div>
+          </template>
         </n-form-item>
 
         <n-divider title-placement="left" class="section">通知设置</n-divider>
