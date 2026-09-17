@@ -162,6 +162,8 @@ kubectl -n dnsmgr-pro port-forward svc/dnsmgr-pro 8082:8082
 | `DNSMGR_RATE_LIMIT` | 设为 `0` 关闭敏感接口限流 | 开启 |
 | `DNSMGR_HSTS` | 设为 `0` 关闭 HSTS 响应头 | 开启 |
 | `DNSMGR_BODY_LIMIT` | 请求体大小上限（字节） | 2097152 |
+| `DNSMGR_UPDATE_REPO` | 「关于」页检查更新所对比的仓库（`owner/repo`） | ssdxftx/dnsmgr-Pro |
+| `DNSMGR_UPDATE_TOKEN` | 检查更新用的 GitHub 令牌，私有仓库或需提高 API 限流额度时配置 | 空 |
 
 代理层注意：CDN 需保留 `Cache-Control` 与 `X-Forwarded-For`/`X-Forwarded-Proto`，且不要缓存 `/api/*`；本应用已通过响应头声明，主流 CDN 默认遵守。
 
@@ -180,11 +182,42 @@ dnsmgr-refactor/
 │       ├── installer.ts  # 安装/绑定逻辑
 │       └── index.ts      # 入口
 ├── frontend/         # Vue 3 + Naive UI + Vite
+├── scripts/          # 发布脚本（release.mjs：改版本 + 打标签 + 推送）
 ├── deploy/           # 容器编排清单（kubernetes.yaml）
 ├── Dockerfile        # 多阶段构建（前端构建 + 后端运行）
 ├── docker-compose.yml
 └── .env.example
 ```
+
+---
+
+## 版本管理与发布
+
+版本号遵循 `主版本.次版本.修订号`（SemVer），同时维护在 `frontend/package.json` 与 `backend/package.json`，二者保持一致。每次发布都会在仓库打上 `vX.Y.Z` 形式的标签，代码与标签在同一次推送中提交。
+
+### 查看版本与检查更新
+
+登录后台后进入「系统设置 → 关于」，可查看前后端版本、构建时间、运行环境、运行时长与项目仓库，并点击「检查更新」对比仓库标签判断是否有新版本；有新版本时会展示更新说明与下载入口。
+
+检查更新优先读取 git 协议的 refs 接口（不受 GitHub REST API 限流影响），再尝试读取 Release 补充更新说明：
+
+- 默认对比 `ssdxftx/dnsmgr-Pro`，可用 `DNSMGR_UPDATE_REPO=owner/repo` 覆盖。
+- 私有仓库或遇到接口限流时，可配置 `DNSMGR_UPDATE_TOKEN`（服务端环境变量，不会下发到前端）。
+
+### 发布新版本
+
+```bash
+# 1. 提交本次改动到暂存区
+git add <本次改动的文件>
+
+# 2. 升级版本号、提交、打标签并推送（代码与标签一次推送）
+node scripts/release.mjs 1.0.1
+
+# 3. 如需自定义提交信息
+node scripts/release.mjs 1.0.1 "feat: 关于页支持检查更新"
+```
+
+发布脚本要求当前处于 `main` 分支且暂存区非空，会自动同步写入 4 个版本文件（前后端 `package.json` 及其 `package-lock.json`）。
 
 ---
 
