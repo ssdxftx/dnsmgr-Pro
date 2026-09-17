@@ -82,11 +82,21 @@ docker run -d \
 
 > 应用与数据库分离，数据库可自建（MySQL 5.7+ / MariaDB）。`-v dnsmgr-pro-data:/app/data` 用于持久化安装配置，请务必保留。
 
+镜像标签（同时推送至 Docker Hub 与 GHCR，镜像内「关于」页显示的版本与容器标签一致）：
+
+| 触发方式 | 标签 | 说明 |
+| --- | --- | --- |
+| 发布版本标签 `vX.Y.Z` | `X.Y.Z`、`X.Y`、`X`、`latest` | 与项目版本一致；`latest` 仅在正式版本（非预发布）更新 |
+| 推送至 `main` / `master` | `edge` | 跟随主分支的最新构建，可能包含未发布改动 |
+| 任意构建 | `<完整 commit SHA>`、`sha-<短 SHA>` | 按提交精确定位 |
+
+发布时请使用 `node scripts/release.mjs`，工作流会校验 git 标签与 `backend/package.json` 版本是否一致，不一致将直接构建失败。
+
 ### 方式二：Docker Compose（自建镜像）
 
 ```bash
 # 克隆仓库
-git clone https://github.com/2091655292/dnsmgr-Pro.git dnsmgr-pro
+git clone https://github.com/ssdxftx/dnsmgr-Pro.git dnsmgr-pro
 cd dnsmgr-pro
 
 # 构建并启动
@@ -218,6 +228,8 @@ node scripts/release.mjs 1.0.1 "feat: 关于页支持检查更新"
 ```
 
 发布脚本要求当前处于 `main` 分支且暂存区非空，会自动同步写入 4 个版本文件（前后端 `package.json` 及其 `package-lock.json`）。
+
+发布后 GitHub Actions 会自动构建并推送容器镜像：版本标签 `vX.Y.Z` 生成同名数字标签（`X.Y.Z`、`X.Y`、`X`）与 `latest`，同时因推送到 `main` 还会生成一个 `edge` 构建。详见「部署方式 → 方式一」中的镜像标签说明。
 
 ---
 
