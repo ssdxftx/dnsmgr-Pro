@@ -1,7 +1,7 @@
-import { ProxyAgent, fetch as undiciFetch } from 'undici';
+import { fetch as undiciFetch } from 'undici';
 import { domainToASCII } from 'node:url';
 import { randomBytes } from 'node:crypto';
-import { configGet } from '../../config.js';
+import { getConfiguredProxyAgent } from '../proxy.js';
 
 export class EnhanceError extends Error {
   status: number;
@@ -21,18 +21,9 @@ function normalizeHostname(hostname: any): string {
 
 async function getDispatcher(proxy: boolean): Promise<any> {
   if (!proxy) return undefined;
-  const server = String((await configGet('proxy_server', '')) || '').trim();
-  const port = Number((await configGet('proxy_port', '')) || 0);
-  if (!server || !port) throw new EnhanceError('代理服务器或端口未配置', 400);
-  const user = String((await configGet('proxy_user', '')) || '').trim();
-  const pwd = String((await configGet('proxy_pwd', '')) || '').trim();
-  const type = String((await configGet('proxy_type', '')) || 'http').trim();
-  let scheme = 'http';
-  if (type === 'https') scheme = 'https';
-  else if (type === 'sock4' || type === 'socks4') scheme = 'socks4';
-  else if (type === 'sock5' || type === 'sock5h') scheme = 'socks5';
-  const authPart = user && pwd ? `${encodeURIComponent(user)}:${encodeURIComponent(pwd)}@` : '';
-  return new ProxyAgent(`${scheme}://${authPart}${server}:${port}`);
+  const agent = await getConfiguredProxyAgent();
+  if (!agent) throw new EnhanceError('代理服务器或端口未配置', 400);
+  return agent;
 }
 
 export class CloudflareEnhanceService {

@@ -74,7 +74,7 @@
 import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NIcon, type MenuOption } from 'naive-ui';
-import { GlobeOutline, MenuOutline, PersonOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline } from '@vicons/ionicons5';
+import { GlobeOutline, MenuOutline, PersonOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { clearToken } from '../api';
 
@@ -156,6 +156,7 @@ const menuOptions: MenuOption[] = [
       { label: '系统设置', key: 'system-settings', icon: renderIcon(SettingsOutline) },
       { label: '用户管理', key: 'users', icon: renderIcon(PeopleOutline) },
       { label: '操作日志', key: 'logs', icon: renderIcon(DocumentTextOutline) },
+      { label: '关于', key: 'about', icon: renderIcon(InformationCircleOutline) },
     ],
   },
 ];
@@ -185,6 +186,7 @@ const activeKey = computed(() => {
   if (route.path.startsWith('/system-settings')) return 'system-settings';
   if (route.path.startsWith('/users')) return 'users';
   if (route.path.startsWith('/logs')) return 'logs';
+  if (route.path.startsWith('/about')) return 'about';
   return 'dashboard';
 });
 
@@ -214,6 +216,7 @@ const activeGroupMap: Record<string, string> = {
   'system-settings': 'group-system',
   users: 'group-system',
   logs: 'group-system',
+  about: 'group-system',
 };
 
 const expandedKeys = ref<string[]>([]);

@@ -22,6 +22,7 @@ import cloudflareRoutes from './routes/cloudflare.js';
 import expireRoutes from './routes/expire.js';
 import registerRoutes from './routes/register.js';
 import setupRoutes from './routes/setup.js';
+import aboutRoutes from './routes/about.js';
 import preheatRoutes from './routes/preheat.js';
 import dnsCheckRoutes from './routes/dnscheck.js';
 import { startMonitorScheduler } from './lib/monitor/scheduler.js';
@@ -141,6 +142,7 @@ if (installed) {
   await app.register(registerRoutes);
   await app.register(preheatRoutes);
   await app.register(dnsCheckRoutes);
+  await app.register(aboutRoutes);
 }
 
 // 静态资源与 SPA 回退（容器内 serve 前端构建产物；本地未构建则不注册）

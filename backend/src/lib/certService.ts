@@ -81,6 +81,10 @@ export class CertOrderService {
     this.dnsList = safeJson(order.dns);
   }
 
+  private async ensureLoaded() {
+    if (!this.client) await this.load();
+  }
+
   private saveLog(txt: string) {
     if (!this.order.processid) return;
     mkdirSync(LOG_DIR, { recursive: true });
@@ -383,12 +387,14 @@ export class CertOrderService {
   }
 
   async revoke() {
+    await this.ensureLoaded();
     this.client.setLogger((txt) => this.saveLog(txt));
     await this.client.revoke(this.info, this.order.fullchain);
     await this.saveResult(4);
   }
 
   async cancel() {
+    await this.ensureLoaded();
     this.client.setLogger((txt) => this.saveLog(txt));
     if (this.order.status == 1 || this.order.status == 2 || this.order.status < -2) {
       try {
@@ -424,6 +430,7 @@ export class CertOrderService {
   }
 
   async reset() {
+    await this.ensureLoaded();
     await query(
       `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
       [this.oid],
