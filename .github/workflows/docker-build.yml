@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - master
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 env:
@@ -20,6 +22,24 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      # 版本标签来自仓库的 vX.Y.Z 标签，并要求与项目 package.json 版本一致
+      - name: Resolve project version
+        id: version
+        run: |
+          PKG_VERSION="$(node -p "require('./backend/package.json').version")"
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "${TAG_VERSION}" != "${PKG_VERSION}" ]]; then
+              echo "::error::标签 ${GITHUB_REF_NAME} 与项目版本 ${PKG_VERSION} 不一致，请使用 scripts/release.mjs 发布"
+              exit 1
+            fi
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -40,6 +60,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 发布标签（vX.Y.Z）：项目版本 + 主/次版本 + latest；分支推送：edge + sha
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.is_release == 'true' }}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ steps.version.outputs.is_release == 'true' && !contains(github.ref_name, '-') }}
+            type=raw,value=edge,enable=${{ steps.version.outputs.is_release != 'true' }}
+            type=raw,value=${{ github.sha }}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
       - name: Build and push to Docker Hub & GHCR
         uses: docker/build-push-action@v6
         with:
@@ -47,10 +88,7 @@ jobs:
           file: ./Dockerfile
           push: true
           platforms: linux/amd64,linux/arm64
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
-            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
