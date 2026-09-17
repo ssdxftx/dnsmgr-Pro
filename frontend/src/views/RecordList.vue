@@ -127,6 +127,7 @@ const displayTitle = computed(() => {
   return subFilter.value ? `${subFilter.value}.${domainName.value}` : domainName.value;
 });
 const access = ref<{ admin: boolean; readonly: boolean; writable: boolean }>({ admin: true, readonly: false, writable: true });
+const domainIndex = ref<Record<string, { id: number; sub: string }>>({});
 
 const loading = ref(false);
 const records = ref<any[]>([]);
@@ -175,7 +176,21 @@ const lineOptions = computed(() =>
 );
 
 const columns = [
-  { title: '主机记录', key: 'Name', width: 160 },
+  {
+    title: '主机记录',
+    key: 'Name',
+    width: 160,
+    render(row: any) {
+      const name = String(row.Name ?? '');
+      const target = resolveDomainTarget(name);
+      if (!target) return name || '@';
+      return h(
+        NButton,
+        { text: true, size: 'tiny', type: 'primary', title: `跳转到 ${fullRecordDomain(name)}`, onClick: () => jumpToDomain(name) },
+        { default: () => name },
+      );
+    },
+  },
   { title: '类型', key: 'Type', width: 90 },
   {
     title: '记录值',
@@ -250,12 +265,42 @@ async function loadLines() {
 async function loadDomainInfo() {
   const res = await api<any>('GET', '/domains');
   if (res.code === 0) {
-    const d = res.data.find((x: any) => x.id === domainId);
+    const list: any[] = res.data || [];
+    // 管理员可跳转到独立纳管的子域名；普通用户可跳转到被授权的子域名范围（name 形如 user1.example.com）
+    const index: Record<string, { id: number; sub: string }> = {};
+    for (const d of list) {
+      const key = String(d.name || '').toLowerCase();
+      if (key && !index[key]) index[key] = { id: d.id, sub: d._sub || '' };
+    }
+    domainIndex.value = index;
+    const d = list.find((x: any) => x.id === domainId);
     if (d) {
       domainName.value = d._base_name || d.name;
       accountType.value = d.account_type || '';
     }
   }
+}
+
+function fullRecordDomain(name: string): string {
+  const n = String(name || '').trim().replace(/\.$/, '');
+  if (!n || n === '@') return domainName.value;
+  return `${n}.${domainName.value}`;
+}
+
+// 主机记录对应的域名若在本系统内可访问，则返回跳转目标
+function resolveDomainTarget(name: string): { id: number; sub: string } | null {
+  const n = String(name || '').trim();
+  if (!n || n === '@') return null;
+  const hit = domainIndex.value[fullRecordDomain(n).toLowerCase()];
+  if (!hit) return null;
+  if (hit.id === domainId && (hit.sub || '') === subFilter.value) return null;
+  return hit;
+}
+
+function jumpToDomain(name: string) {
+  const target = resolveDomainTarget(name);
+  if (!target) return;
+  router.push({ path: `/domains/${target.id}/records`, query: target.sub ? { sub: target.sub } : {} });
 }
 
 function openValue(value: any) {

@@ -21,8 +21,8 @@
       <n-empty class="list-empty" v-if="!loading && !users.length" description="暂无用户" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '修改用户' : '添加用户'" style="max-width:520px" :mask-closable="false">
-      <n-form label-placement="left" label-width="110">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '修改用户' : '添加用户'" :style="modalStyle" :mask-closable="false">
+      <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
         <n-form-item label="用户名" required>
           <n-input v-model:value="form.username" />
         </n-form-item>
@@ -55,9 +55,11 @@
           <div class="perm-list">
             <div v-for="(p, idx) in form.permission" :key="idx" class="perm-item">
               <div class="perm-row">
-                <n-select v-model:value="p.domain" :options="domainOptions" placeholder="选择域名" filterable style="flex: 1" />
-                <n-select v-model:value="p.readonly" :options="modeOptions" style="width: 110px" />
-                <n-button size="small" type="error" quaternary @click="removePerm(idx)">删除</n-button>
+                <n-select v-model:value="p.domain" :options="domainOptions" placeholder="选择域名" filterable class="perm-domain" />
+                <div class="perm-actions">
+                  <n-select v-model:value="p.readonly" :options="modeOptions" class="perm-mode" />
+                  <n-button size="small" type="error" quaternary @click="removePerm(idx)">删除</n-button>
+                </div>
               </div>
               <n-input v-model:value="p.sub" placeholder="子域名前缀，如 user1 或 a.user1（留空=整域名）" />
               <n-date-picker v-model:value="p.expiretime" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" clearable placeholder="有效期至（留空=永久）" style="width: 100%" />
@@ -77,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -95,6 +97,20 @@ const editingId = ref<number | null>(null);
 const saving = ref(false);
 const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, permission: [] });
 const domainOptions = ref<any[]>([]);
+
+const isMobile = ref(false);
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768;
+}
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+
+// 手机端标签置顶并把弹窗限制在视口内，避免子域名分配的域名选择框被挤压
+const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
+const modalStyle = computed(() => (isMobile.value ? { width: 'calc(100vw - 24px)', maxWidth: '520px' } : { maxWidth: '520px' }));
 
 const apiOptions = [
   { label: '关闭', value: 0 },
@@ -330,5 +346,35 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+.perm-domain {
+  flex: 1;
+  min-width: 0;
+}
+.perm-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+.perm-mode {
+  width: 110px;
+}
+
+@media (max-width: 768px) {
+  .perm-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .perm-actions {
+    justify-content: space-between;
+  }
+  .perm-mode {
+    flex: 1;
+    width: auto;
+  }
+  .perm-actions :deep(.n-button) {
+    flex: none;
+  }
 }
 </style>
