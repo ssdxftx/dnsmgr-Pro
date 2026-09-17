@@ -27,7 +27,7 @@
             <n-select v-model:value="form.deploy_hour_end" :options="hourOptions" style="flex: 1" />
           </div>
           <template #feedback>
-            <div class="hint">自动续签与订单处理仅在该时段内进行，支持跨天（如 22 至 6）；起止相同表示不限时段。</div>
+            <div class="hint">自动续签与自动部署任务仅在该时段内进行，支持跨天（如 22 至 6）；起止相同表示不限时段。</div>
           </template>
         </n-form-item>
 
