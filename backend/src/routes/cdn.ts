@@ -81,6 +81,13 @@ function zoneSettingDiff(current: Record<string, any>, target: Record<string, an
 
 const areaMap: Record<string, string> = { mainland: 'mainland_china', domestic: 'mainland_china', overseas: 'overseas', global: 'global' };
 
+function summarizeFreeCert(list: any[]): string {
+  const applied = list.filter((r) => r.status === 'applied').length;
+  const pending = list.filter((r) => r.status === 'pending').length;
+  const failed = list.filter((r) => r.status === 'failed').length;
+  return `成功 ${applied} 个，待验证 ${pending} 个，失败 ${failed} 个`;
+}
+
 export default async function cdnRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
@@ -112,7 +119,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const q = req.query || {};
     const rows = await query(`SELECT * FROM ${table('cdn_domain')} ORDER BY id DESC`);
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
-    const data = rows.map((r: any) => ({ ...r, routename: typeNames[r.route] || r.route }));
+    const freeAids = new Set(
+      (await query(`SELECT id, type FROM ${table('cdn_account')}`))
+        .filter((a: any) => cdnConfig[a.type]?.freecert)
+        .map((a: any) => a.id),
+    );
+    const data = rows.map((r: any) => ({ ...r, routename: typeNames[r.route] || r.route, can_freecert: freeAids.has(r.aid) ? 1 : 0 }));
     return { code: 0, data };
   });
 
@@ -303,6 +315,88 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!(await provider.setHttps(row.name, !!https_enabled, !!force_redirect))) return { code: -1, msg: 'HTTPS 配置更新失败，' + provider.getError() };
     await query(`UPDATE ${table('cdn_domain')} SET https_enabled = ?, force_redirect = ? WHERE id = ?`, [https_enabled ? 1 : 0, force_redirect ? 1 : 0, id]);
     return { code: 0, msg: 'HTTPS 配置更新成功' };
+  });
+
+  // 免费证书 DNS 委派验证：联动域名在本系统内时尝试自动添加验证记录
+  async function addVerifyRecord(row: any, rec: any): Promise<string> {
+    const dnsDomain = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [row.did]);
+    if (!dnsDomain) return '未找到联动域名，请手动添加验证记录';
+    const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
+    if (!dnsAcct) return 'DNS账户不存在，请手动添加验证记录';
+    const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), dnsDomain.name, dnsDomain.thirdid);
+    if (!dns) return 'DNS模块不存在，请手动添加验证记录';
+    const rel = calcRecordName(row.name, dnsDomain.name);
+    const name = rel === '@' ? rec.name : `${rec.name}.${rel}`;
+    const recordId = await dns.addDomainRecord(name, rec.type, rec.value, 'default', 600);
+    if (recordId) return `已自动添加验证解析 ${name} ${rec.type} ${rec.value}`;
+    return `自动添加验证解析失败（${dns.getError()}），请手动添加 ${name} ${rec.type} ${rec.value}`;
+  }
+
+  async function runFreeCert(ids: number[], checkOnly: boolean): Promise<any[]> {
+    const results: any[] = [];
+    for (const id of ids) {
+      const row = await loadCdnDomain(id);
+      if (!row) {
+        results.push({ id, status: 'failed', message: '加速域名不存在' });
+        continue;
+      }
+      const name = row.name;
+      const provider: any = await cdnForRow(row);
+      if (!provider) {
+        results.push({ id, name, status: 'failed', message: 'CDN账户不存在' });
+        continue;
+      }
+      const fn = checkOnly ? provider.checkFreeCert : provider.applyFreeCert;
+      if (typeof fn !== 'function') {
+        results.push({ id, name, status: 'failed', message: '该厂商暂不支持配置平台免费证书' });
+        continue;
+      }
+      let r: any;
+      try {
+        r = await fn.call(provider, row.name);
+      } catch (e: any) {
+        r = { status: 'failed', message: e?.message || String(e) };
+      }
+      let message = r?.message || '';
+      if (r?.status === 'applied') {
+        await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [id]);
+        message = checkOnly ? '免费证书已部署' : '免费证书已申请并部署';
+      } else if (r?.status === 'pending' && Array.isArray(r.records) && r.records.length) {
+        const notes: string[] = [];
+        for (const rec of r.records) notes.push(await addVerifyRecord(row, rec));
+        message = (message || '需完成域名验证') + '；' + notes.join('；');
+      }
+      results.push({ id, name, status: r?.status || 'failed', message, records: r?.records || [] });
+    }
+    return results;
+  }
+
+  // 批量为加速域名申请平台免费证书（如腾讯云 EdgeOne 免费证书）
+  app.post('/api/cdn/domains/freecert', auth, async (req: any) => {
+    const ids = [
+      ...new Set(
+        (Array.isArray(req.body?.ids) ? req.body.ids : [])
+          .map((x: any) => Number(x))
+          .filter((n: number) => Number.isInteger(n) && n > 0),
+      ),
+    ] as number[];
+    if (!ids.length) return { code: -1, msg: '请选择要配置免费证书的加速域名' };
+    const data = await runFreeCert(ids, false);
+    return { code: 0, msg: summarizeFreeCert(data), data };
+  });
+
+  // 检查免费证书申请结果，通过后部署到加速域名
+  app.post('/api/cdn/domains/freecert/check', auth, async (req: any) => {
+    const ids = [
+      ...new Set(
+        (Array.isArray(req.body?.ids) ? req.body.ids : [])
+          .map((x: any) => Number(x))
+          .filter((n: number) => Number.isInteger(n) && n > 0),
+      ),
+    ] as number[];
+    if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
+    const data = await runFreeCert(ids, true);
+    return { code: 0, msg: summarizeFreeCert(data), data };
   });
 
   // 同步云端

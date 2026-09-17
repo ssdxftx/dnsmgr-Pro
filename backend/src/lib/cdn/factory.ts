@@ -23,6 +23,8 @@ export interface CdnProviderMeta {
   name: string;
   note?: string;
   config: Record<string, CdnFieldConfig>;
+  // 支持为加速域名一键配置厂商免费证书
+  freecert?: boolean;
 }
 
 export const cdnConfig: Record<string, CdnProviderMeta> = {
@@ -37,6 +39,7 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
   tencent_edgeone: {
     name: '腾讯云 EdgeOne',
     note: '接入前请先在腾讯云 EdgeOne 控制台创建站点（Zone）',
+    freecert: true,
     config: {
       SecretId: { name: 'SecretId', type: 'input', required: true },
       SecretKey: { name: 'SecretKey', type: 'input', required: true },

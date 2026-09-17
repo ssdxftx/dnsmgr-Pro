@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, FreeCertResult } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -359,6 +359,51 @@ export class TencentEdgeOne implements CdnProvider {
     } catch (e: any) {
       this.error = '修改腾讯云 EdgeOne HTTPS 配置失败：' + (e.message || String(e));
       return false;
+    }
+  }
+
+  supportsFreeCert() {
+    return true;
+  }
+
+  // 托管接入（NS / DNSPod）可直接自动验证申请并部署；
+  // CNAME 接入需先申请并通过 DNS 委派验证，返回待配置的解析记录
+  async applyFreeCert(domain: string): Promise<FreeCertResult> {
+    const zoneId = await this.findZone(domain);
+    if (!zoneId) return { status: 'failed', message: '未找到该域名的 EdgeOne 站点' };
+    try {
+      await this.client.request('ModifyHostsCertificate', { ZoneId: zoneId, Hosts: [domain], Mode: 'eofreecert' });
+      return { status: 'applied' };
+    } catch (e: any) {
+      this.error = e.message || String(e);
+    }
+    try {
+      const data = await this.client.request('ApplyFreeCertificate', { ZoneId: zoneId, Domain: domain, VerificationMethod: 'dns_challenge' });
+      const v = data?.DnsVerification || {};
+      const records = v.RecordValue && v.Subdomain
+        ? [{ name: String(v.RecordValue), type: String(v.RecordType || 'CNAME'), value: String(v.Subdomain) }]
+        : [];
+      return { status: 'pending', message: '已发起免费证书申请，需完成 DNS 委派验证后再部署', records };
+    } catch (e: any) {
+      return { status: 'failed', message: e.message || String(e) };
+    }
+  }
+
+  async checkFreeCert(domain: string): Promise<FreeCertResult> {
+    const zoneId = await this.findZone(domain);
+    if (!zoneId) return { status: 'failed', message: '未找到该域名的 EdgeOne 站点' };
+    try {
+      const data = await this.client.request('CheckFreeCertificateVerification', { ZoneId: zoneId, Domain: domain });
+      if (!data?.CommonName) return { status: 'pending', message: '免费证书仍在申请中，请稍后再检查' };
+    } catch (e: any) {
+      // 验证尚未通过（如未检测到验证值），保留为待验证并带上原因
+      return { status: 'pending', message: e.message || String(e) };
+    }
+    try {
+      await this.client.request('ModifyHostsCertificate', { ZoneId: zoneId, Hosts: [domain], Mode: 'eofreecert_manual' });
+      return { status: 'applied' };
+    } catch (e: any) {
+      return { status: 'failed', message: e.message || String(e) };
     }
   }
 
