@@ -25,6 +25,8 @@ export interface CdnProviderMeta {
   config: Record<string, CdnFieldConfig>;
   // 支持为加速域名一键配置厂商免费证书
   freecert?: boolean;
+  // 支持联动证书申请：把本系统签发的证书直传到站点并启用 HTTPS
+  certapply?: boolean;
 }
 
 export const cdnConfig: Record<string, CdnProviderMeta> = {
@@ -56,6 +58,7 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
   aliyun_esa: {
     name: '阿里云 ESA',
     note: '边缘安全加速，接入前请先在阿里云 ESA 控制台创建站点',
+    certapply: true,
     config: {
       AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
       AccessKeySecret: { name: 'AccessKeySecret', type: 'input', required: true },

@@ -27,6 +27,13 @@ export interface FreeCertResult {
   records?: FreeCertRecord[];
 }
 
+// 站点级证书作用域：一张证书覆盖站点根域及其一级通配符
+export interface CertScope {
+  siteId: string;
+  siteName: string;
+  domains: string[];
+}
+
 export interface CdnProvider {
   getError(): string;
   check(): Promise<boolean>;
@@ -52,4 +59,10 @@ export interface CdnProvider {
   applyFreeCert?(domain: string): Promise<FreeCertResult>;
   // 检查免费证书申请结果，通过后完成部署
   checkFreeCert?(domain: string): Promise<FreeCertResult>;
+  // 是否支持联动证书申请：把本系统签发的证书直传到站点并启用 HTTPS
+  supportsCertApply?(): boolean;
+  // 返回站点级证书作用域（站点根域 + 通配符域名集），用于按站点申请一张通配符证书
+  getCertScope?(domain: string): Promise<CertScope | false>;
+  // 将已签发的证书（PEM）直传到站点，站点下所有加速域名共用
+  uploadCert?(domain: string, fullchain: string, privatekey: string): Promise<FreeCertResult>;
 }

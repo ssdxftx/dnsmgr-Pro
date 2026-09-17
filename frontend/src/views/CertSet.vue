@@ -31,6 +31,19 @@
           </template>
         </n-form-item>
 
+        <n-divider title-placement="left" class="section">CDN 证书联动</n-divider>
+        <n-form-item label="证书申请账户">
+          <n-select
+            v-model:value="form.cdn_cert_aid"
+            :options="certAccountOptions"
+            clearable
+            placeholder="选择用于申请通配符证书的账户"
+          />
+          <template #feedback>
+            <div class="hint">阿里云 ESA 加速域名一键申请证书时，使用该账户为站点申请通配符证书（需支持泛域名，建议 Let's Encrypt 等 ACME 账户）。</div>
+          </template>
+        </n-form-item>
+
         <n-divider title-placement="left" class="section">通知设置</n-divider>
         <n-form-item label="邮件通知">
           <n-select v-model:value="form.cert_notice_mail" :options="noticeOptions" />
@@ -89,6 +102,7 @@ const DEFAULTS: Record<string, string | number> = {
   cert_renewdays: 7,
   deploy_hour_start: '0',
   deploy_hour_end: '23',
+  cdn_cert_aid: '',
   cert_notice_mail: '0',
   cert_notice_wxtpl: '0',
   cert_notice_tgbot: '0',
@@ -97,6 +111,13 @@ const DEFAULTS: Record<string, string | number> = {
 };
 
 const form = reactive<any>({ ...DEFAULTS });
+const certAccountOptions = ref<any[]>([]);
+
+async function loadCertAccounts() {
+  const res = await api<any>('GET', '/cert/accounts?deploy=0&limit=200');
+  if (res.code !== 0) return;
+  certAccountOptions.value = (res.data || []).map((a: any) => ({ label: `${a.id} - ${a.typename}（${a.name}）`, value: String(a.id) }));
+}
 
 const hourOptions = Array.from({ length: 24 }, (_, i) => ({ label: String(i), value: String(i) }));
 const onOffOptions = [
@@ -130,7 +151,10 @@ async function save() {
   else message.error(res.msg);
 }
 
-onMounted(load);
+onMounted(() => {
+  load();
+  loadCertAccounts();
+});
 </script>
 
 <style scoped>
