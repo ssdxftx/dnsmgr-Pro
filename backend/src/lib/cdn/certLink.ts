@@ -35,6 +35,40 @@ export function providerReady(type: string, config: Record<string, any>): boolea
   return true;
 }
 
+export const DEFAULT_LE_EMAIL = 'ssdxftx@gmail.com';
+
+// 查找或创建默认 Let's Encrypt 账户（固定邮箱）
+export async function ensureDefaultLetsEncrypt(q: QueryFn = query): Promise<number> {
+  const rows: any = await q(`SELECT id, config FROM ${table('cert_account')} WHERE type = 'letsencrypt' AND deploy = 0`);
+  for (const r of rows as any[]) {
+    if (safeJson(r.config).email === DEFAULT_LE_EMAIL) return Number(r.id);
+  }
+  const res: any = await q(
+    `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES ('letsencrypt', ?, ?, ?, 0, NOW())`,
+    ["默认Let's Encrypt", JSON.stringify({ email: DEFAULT_LE_EMAIL, mode: 'live', proxy: '0' }), '由 CDN 证书联动自动创建'],
+  );
+  return Number(res?.insertId || 0);
+}
+
+// 解析可用的证书账户：指定账户不可用（不存在/密钥不全/不支持泛域名）时回退默认 Let's Encrypt
+export async function resolveCertAccount(
+  configuredAid: number,
+  opts: { requireWildcard?: boolean } = {},
+  q: QueryFn = query,
+): Promise<{ aid: number; account: any; usingDefault: boolean }> {
+  const pick = async (id: number): Promise<any> => {
+    if (!id) return null;
+    const rows: any = await q(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0 LIMIT 1`, [id]);
+    return rows[0] || null;
+  };
+  const usable = (a: any): boolean =>
+    !!a && providerReady(a.type, safeJson(a.config)) && (!opts.requireWildcard || !!certConfig[a.type]?.wildcard);
+  const configured = await pick(configuredAid);
+  if (usable(configured)) return { aid: Number(configured.id), account: configured, usingDefault: false };
+  const aid = await ensureDefaultLetsEncrypt(q);
+  return { aid, account: await pick(aid), usingDefault: true };
+}
+
 // 精确匹配的已签发证书：绑定域名恰好包含目标子域名（通配符不参与精确匹配）
 export async function findExactCertOrders(name: string, q: QueryFn = query): Promise<any[]> {
   const need = domainToASCII(name.toLowerCase());
