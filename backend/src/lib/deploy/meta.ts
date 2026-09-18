@@ -1294,10 +1294,6 @@ export const deployConfig: Record<string, any> = {
             "label": "边缘安全加速ESA"
           },
           {
-            "value": "esa_upload",
-            "label": "边缘安全加速ESA（直传证书）"
-          },
-          {
             "value": "esa_saas",
             "label": "边缘安全加速ESA SaaS"
           },
@@ -1369,7 +1365,7 @@ export const deployConfig: Record<string, any> = {
         "name": "ESA站点域名",
         "type": "input",
         "placeholder": "ESA添加的站点主域名",
-        "show": "product=='esa' || product == 'esa_saas' || product == 'esa_upload'",
+        "show": "product=='esa' || product == 'esa_saas'",
         "required": true
       },
       "esa_saas_sitename": {

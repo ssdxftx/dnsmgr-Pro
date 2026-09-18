@@ -452,7 +452,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         continue;
       }
       const provider: any = await cdnForRow(row);
-      if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.uploadCert !== 'function') {
+      if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.getCertDeployPlan !== 'function') {
         results.push({ id, name: row.name, status: 'failed', message: '该厂商暂不支持联动证书申请' });
         continue;
       }
@@ -502,17 +502,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
         const task = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [deploy.taskId]);
         applied = Number(task?.status) === 1;
         message = applied ? '证书已部署，后续续签将自动更新' : task?.error || err || '证书部署失败';
-      } else if (typeof provider.uploadCert === 'function') {
-        let up: any;
-        try {
-          up = await provider.uploadCert(row.name, order.fullchain, order.privatekey);
-        } catch (e: any) {
-          up = { status: 'failed', message: e?.message || String(e) };
-        }
-        applied = up?.status === 'applied';
-        message = up?.message || '';
       } else {
-        message = '该厂商暂不支持证书部署';
+        message = '无法创建自动部署任务，请检查该 CDN 类型是否支持证书联动';
       }
       if (applied) {
         await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [id]);
