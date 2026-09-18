@@ -1,4 +1,3 @@
-import { X509Certificate } from 'node:crypto';
 import { TencentCloud } from '../../clients/TencentCloud.js';
 import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
@@ -412,15 +411,7 @@ export class TencentEdgeOne implements CdnProvider {
     }
   }
 
-  // ===== 站点证书：本系统签发后上传腾讯云 SSL，并按域名绑定 EdgeOne（Mode=sslcert）=====
-
-  supportsCertApply() {
-    return true;
-  }
-
-  private ssl(): TencentCloud {
-    return new TencentCloud(this.secretId, this.secretKey, 'ssl.tencentcloudapi.com', 'ssl', '2019-12-05');
-  }
+  // ===== 站点证书联动：解析站点作用域，交由证书自动部署任务上传绑定（复用现有部署逻辑）=====
 
   private async getZoneName(zoneId: string): Promise<string> {
     const data = await this.send('DescribeZones', { Limit: 100 });
@@ -438,65 +429,6 @@ export class TencentEdgeOne implements CdnProvider {
     const zoneName = await this.getZoneName(zoneId);
     if (!zoneName) return false;
     return { siteId: String(zoneId), siteName: zoneName, domains: [zoneName, '*.' + zoneName] };
-  }
-
-  // 证书别名带有效期起点：续签后产生新别名，避免与旧证书冲突
-  private certAlias(fullchain: string): string {
-    let cn = 'cert';
-    let from = 0;
-    try {
-      const x = new X509Certificate(fullchain);
-      cn = (x.subject.match(/CN\s*=\s*([^,\n]+)/i)?.[1] || cn).trim().replace(/\*\./g, '');
-      from = Math.floor(new Date(x.validFrom).getTime() / 1000);
-    } catch {
-      // ignore
-    }
-    return 'dnsmgr-' + cn.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 80) + '-' + from;
-  }
-
-  // 上传证书到腾讯云 SSL；已存在同别名的证书时直接复用
-  private async ensureSslCert(fullchain: string, privatekey: string): Promise<string> {
-    const alias = this.certAlias(fullchain);
-    const ssl = this.ssl();
-    try {
-      const list = await ssl.request('DescribeCertificates', { SearchKey: alias, Limit: 100 });
-      const hit = (list.Certificates || []).find((c: any) => c.Alias === alias && c.CertificateId);
-      if (hit) return String(hit.CertificateId);
-    } catch {
-      // 查询失败则继续尝试上传
-    }
-    const data = await ssl.request('UploadCertificate', {
-      CertificatePublicKey: fullchain,
-      CertificatePrivateKey: privatekey,
-      CertificateType: 'SVR',
-      Alias: alias,
-      Repeatable: false,
-    });
-    if (!data?.CertificateId) throw new Error('上传证书失败，CertificateId 为空');
-    return String(data.CertificateId);
-  }
-
-  // 把已签发证书上传到腾讯云 SSL，并绑定到 EdgeOne 加速域名
-  async uploadCert(domain: string, fullchain: string, privatekey: string): Promise<FreeCertResult> {
-    const zoneId = await this.findZone(domain);
-    if (!zoneId) return { status: 'failed', message: '未找到该域名的 EdgeOne 站点' };
-    let certId: string;
-    try {
-      certId = await this.ensureSslCert(fullchain, privatekey);
-    } catch (e: any) {
-      return { status: 'failed', message: '上传证书到腾讯云 SSL 失败：' + (e.message || String(e)) };
-    }
-    try {
-      await this.client.request('ModifyHostsCertificate', {
-        ZoneId: zoneId,
-        Hosts: [domain],
-        Mode: 'sslcert',
-        ServerCertInfo: [{ CertId: certId }],
-      });
-    } catch (e: any) {
-      return { status: 'failed', message: '绑定 EdgeOne 域名证书失败：' + (e.message || String(e)) };
-    }
-    return { status: 'applied', message: `证书已上传（CertId=${certId}）并绑定到 ${domain}` };
   }
 
   // 复用 CDN 账户密钥生成自动部署任务计划：由证书调度器在签发/续签后自动上传并绑定
