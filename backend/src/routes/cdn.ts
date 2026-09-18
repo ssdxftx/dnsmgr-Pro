@@ -217,7 +217,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 接入域名 + 联动 DNS + 自动同步
   app.post('/api/cdn/domains', auth, async (req: any) => {
-    const { aid, did, name, origin, origin_type, service_area, zone_id } = req.body || {};
+    const { aid, did, name, origin, origin_type, service_area, zone_id, cert_mode } = req.body || {};
     if (!aid || !name || !origin) return { code: -1, msg: '必填参数不能为空' };
     const dnsDomain = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
     if (!dnsDomain) return { code: -1, msg: '请选择要联动解析的域名' };
@@ -232,6 +232,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!acct) return { code: -1, msg: 'CDN账户不存在' };
     const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
+    const certMode = cert_mode === 'freecert' || cert_mode === 'certapply' ? cert_mode : 'none';
+    if (certMode === 'freecert' && !cdnConfig[acct.type]?.freecert) return { code: -1, msg: '该 CDN 类型不支持配置平台免费证书' };
+    if (certMode === 'certapply' && !cdnConfig[acct.type]?.certapply) return { code: -1, msg: '该 CDN 类型不支持联动证书申请' };
     const cname = await provider.createDomain(name, origin, origin_type || 'ipaddr', service_area || 'mainland_china', zone_id || null);
     if (!cname) return { code: -1, msg: '接入加速域名失败，' + provider.getError() };
 
@@ -248,11 +251,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
       } else dnsError = 'DNS模块不存在';
     } else dnsError = 'DNS账户不存在';
 
-    await query(
+    const insertRes: any = await query(
       `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, service_area, cname, dns_record, status, addtime)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', NOW())`,
       [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', service_area || 'mainland_china', cname, dnsRecord],
     );
+    const newId = Number(insertRes?.insertId || 0);
 
     let msg = dnsRecord
       ? `接入成功，已自动添加 CNAME 解析记录 ${recordName} → ${cname}`
@@ -260,6 +264,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
     const sync = await syncFromCloud(aid, did);
     if (sync.code === 0 && sync.added > 0) msg += `；同时从云端同步了 ${sync.added} 个已有加速域名`;
+
+    // 按接入时选择的证书配置处理：平台免费证书 / 联动证书申请
+    if (newId && certMode === 'freecert') {
+      const r: any = (await runFreeCert([newId], false))[0];
+      if (r) msg += `；免费证书：${r.message || r.status}`;
+    } else if (newId && certMode === 'certapply') {
+      const r: any = (await runCertLink([newId], false))[0];
+      if (r) msg += `；证书申请：${r.message || r.status}`;
+    }
 
     return { code: 0, msg };
   });
