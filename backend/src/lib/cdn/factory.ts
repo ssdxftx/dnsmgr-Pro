@@ -42,6 +42,7 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
     name: '腾讯云 EdgeOne',
     note: '接入前请先在腾讯云 EdgeOne 控制台创建站点（Zone）',
     freecert: true,
+    certapply: true,
     config: {
       SecretId: { name: 'SecretId', type: 'input', required: true },
       SecretKey: { name: 'SecretKey', type: 'input', required: true },

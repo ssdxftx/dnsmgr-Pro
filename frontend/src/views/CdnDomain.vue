@@ -58,6 +58,18 @@
             <n-radio value="domain">域名源站</n-radio>
           </n-radio-group>
         </n-form-item>
+        <n-form-item v-if="showCertMode" label="证书配置">
+          <n-radio-group v-model:value="form.cert_mode">
+            <n-space :wrap="true">
+              <n-radio v-for="o in certModeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio>
+            </n-space>
+          </n-radio-group>
+          <template #feedback>
+            <div class="cert-hint">
+              平台免费证书由 CDN 厂商直接签发部署；项目申请证书会按站点申请通配符证书（需先在「自动续签设置」中指定证书申请账户），签发后自动上传绑定。
+            </div>
+          </template>
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -86,10 +98,10 @@
     </n-modal>
 
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
-    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '证书申请（阿里云 ESA）' : '平台免费证书'" style="max-width:680px">
+    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '证书申请' : '平台免费证书'" style="max-width:680px">
       <n-spin :show="certRunning">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
-          按 ESA 站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发；签发后点击「检查并部署」直传 ESA 站点并启用 HTTPS，站点下所有加速域名共用该证书。
+          按站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发；签发后点击「检查并部署」上传到 CDN 站点并启用 HTTPS。同一站点复用同一张证书。
         </n-alert>
         <n-alert v-else type="info" :show-icon="true" class="cert-tip">
           腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。
@@ -132,6 +144,7 @@ const loading = ref(false);
 const domains = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
+const providerCaps = ref<Record<string, { freecert?: boolean; certapply?: boolean }>>({});
 const dnsDomainOptions = ref<any[]>([]);
 const zoneOptions = ref<any[]>([]);
 
@@ -141,7 +154,7 @@ const saving = ref(false);
 const syncing = ref(false);
 const syncAid = ref<number | null>(null);
 const syncDid = ref<number>(0);
-const form = reactive<any>({ aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr' });
+const form = reactive<any>({ aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr', cert_mode: 'none' });
 
 const checkedIds = ref<number[]>([]);
 const showCert = ref(false);
@@ -167,6 +180,16 @@ function statusType(status: string): 'success' | 'warning' | 'error' {
 }
 
 const isZoneType = computed(() => accountTypes.value[form.aid] === 'tencent_edgeone' || accountTypes.value[form.aid] === 'aliyun_esa');
+
+// 按所选账户类型的厂商能力，动态给出证书配置选项
+const certModeOptions = computed(() => {
+  const caps = providerCaps.value[accountTypes.value[form.aid]] || {};
+  const opts: any[] = [{ label: '什么都不做', value: 'none' }];
+  if (caps.freecert) opts.push({ label: '自动配置平台免费证书', value: 'freecert' });
+  if (caps.certapply) opts.push({ label: '项目申请证书上传绑定', value: 'certapply' });
+  return opts;
+});
+const showCertMode = computed(() => certModeOptions.value.length > 1);
 
 const columns: any[] = [
   { type: 'selection' },
@@ -243,6 +266,11 @@ async function loadDnsDomains() {
   if (res.code === 0) dnsDomainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id }));
 }
 
+async function loadProviders() {
+  const res = await api<any>('GET', '/cdn/providers');
+  if (res.code === 0) providerCaps.value = res.data || {};
+}
+
 async function onAccountChange(aid: number) {
   form.zone_id = null;
   zoneOptions.value = [];
@@ -258,7 +286,7 @@ function goZones() {
 }
 
 function openAdd() {
-  Object.assign(form, { aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr' });
+  Object.assign(form, { aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr', cert_mode: 'none' });
   zoneOptions.value = [];
   showAdd.value = true;
 }
@@ -344,6 +372,7 @@ onMounted(() => {
   loadDomains();
   loadAccounts();
   loadDnsDomains();
+  loadProviders();
 });
 </script>
 
@@ -359,6 +388,11 @@ onMounted(() => {
 }
 .cert-tip + .cert-tip {
   margin-top: 10px;
+}
+.cert-hint {
+  color: #6b7280;
+  font-size: 12px;
+  line-height: 1.6;
 }
 .cert-list {
   margin-top: 12px;
