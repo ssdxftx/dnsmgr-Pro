@@ -92,6 +92,9 @@ export async function migrate(): Promise<void> {
   );
   await ensureColumn('dns_check_task', 'uid', "int(11) unsigned NOT NULL DEFAULT '0'");
   await ensureColumn('dns_check_task', 'sub', 'varchar(255) DEFAULT NULL');
+
+  // 证书联动：签发成功后按 link 记录自动创建 CDN 部署任务
+  await ensureColumn('cert_order', 'link', 'text DEFAULT NULL');
 }
 
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {

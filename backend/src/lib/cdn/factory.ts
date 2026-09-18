@@ -27,6 +27,8 @@ export interface CdnProviderMeta {
   freecert?: boolean;
   // 支持联动证书申请：把本系统签发的证书直传到站点并启用 HTTPS
   certapply?: boolean;
+  // 支持「与项目联动」：按精确子域名选择/签发证书，确认后自动部署
+  certlink?: boolean;
 }
 
 export const cdnConfig: Record<string, CdnProviderMeta> = {
@@ -42,7 +44,7 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
     name: '腾讯云 EdgeOne',
     note: '接入前请先在腾讯云 EdgeOne 控制台创建站点（Zone）',
     freecert: true,
-    certapply: true,
+    certlink: true,
     config: {
       SecretId: { name: 'SecretId', type: 'input', required: true },
       SecretKey: { name: 'SecretKey', type: 'input', required: true },
