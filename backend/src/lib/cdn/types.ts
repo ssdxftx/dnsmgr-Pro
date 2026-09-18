@@ -34,6 +34,15 @@ export interface CertScope {
   domains: string[];
 }
 
+// 自动部署任务计划：复用 CDN 账户密钥，供证书续签后自动更新
+export interface CertDeployPlan {
+  accountType: string;
+  accountConfig: Record<string, any>;
+  accountName?: string;
+  product: string;
+  config: Record<string, any>;
+}
+
 export interface CdnProvider {
   getError(): string;
   check(): Promise<boolean>;
@@ -65,4 +74,6 @@ export interface CdnProvider {
   getCertScope?(domain: string): Promise<CertScope | false>;
   // 将已签发的证书（PEM）直传到站点，站点下所有加速域名共用
   uploadCert?(domain: string, fullchain: string, privatekey: string): Promise<FreeCertResult>;
+  // 生成自动部署任务计划（复用 CDN 账户密钥），使证书续签后自动更新
+  getCertDeployPlan?(domain: string, scope: CertScope): Promise<CertDeployPlan | false>;
 }

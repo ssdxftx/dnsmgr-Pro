@@ -1,16 +1,20 @@
 import { X509Certificate } from 'node:crypto';
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem, CertScope, FreeCertResult } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
 export class AliyunESA implements CdnProvider {
   private client: Aliyun;
+  private accessKeyId: string;
+  private accessKeySecret: string;
   private error = '';
   private siteId: string | null = null;
 
   constructor(config: Record<string, any>) {
-    this.client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, 'esa.aliyuncs.com', '2024-09-10');
+    this.accessKeyId = config.AccessKeyId || '';
+    this.accessKeySecret = config.AccessKeySecret || '';
+    this.client = new Aliyun(this.accessKeyId, this.accessKeySecret, 'esa.aliyuncs.com', '2024-09-10');
   }
 
   getError() {
@@ -455,6 +459,18 @@ export class AliyunESA implements CdnProvider {
     }
     if (res === false) return { status: 'failed', message: this.error || '证书上传失败' };
     return { status: 'applied', message: `证书 ${param.Name} 已上传到 ESA 站点 ${await this.getSiteName(siteId)}` };
+  }
+
+  // 复用 CDN 账户密钥生成自动部署任务计划：由证书调度器在签发/续签后自动上传
+  async getCertDeployPlan(_domain: string, scope: CertScope): Promise<CertDeployPlan | false> {
+    if (!scope?.siteName) return false;
+    return {
+      accountType: 'aliyun',
+      accountConfig: { AccessKeyId: this.accessKeyId, AccessKeySecret: this.accessKeySecret },
+      accountName: 'CDN 证书联动（阿里云）',
+      product: 'esa_upload',
+      config: { esa_sitename: scope.siteName },
+    };
   }
 
   async getZoneSetting(_zoneId: string): Promise<false> {
