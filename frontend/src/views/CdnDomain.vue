@@ -74,7 +74,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showAdd = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="doAdd">提交接入</n-button>
+          <n-button type="primary" :loading="saving" @click="doAdd">{{ form.cert_mode === 'certlink' ? '下一步' : '提交接入' }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -129,6 +129,69 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 与项目联动：证书选择弹窗 -->
+    <n-modal v-model:show="showLink" preset="card" title="与项目联动 · 选择证书" style="max-width: 680px">
+      <n-spin :show="linkLoading">
+        <div v-if="linkTarget" class="link-target">目标域名：<b>{{ linkTarget.name }}</b></div>
+
+        <template v-if="linkCandidates">
+          <template v-if="linkCandidates.exact && linkCandidates.exact.length">
+            <n-alert type="success" :show-icon="true" class="cert-tip">
+              已找到与目标子域名精确匹配的证书，将直接复用绑定，不再重新签发。
+            </n-alert>
+            <n-radio-group v-model:value="linkChoice" class="link-group">
+              <n-space vertical>
+                <n-radio v-for="c in linkCandidates.exact" :key="'o' + c.oid" :value="'order:' + c.oid">
+                  <div class="link-cert">
+                    <div class="link-name">{{ c.name }}（证书 #{{ c.oid }}）</div>
+                    <div class="link-meta">颁发机构：{{ c.issuer || '未知' }} · 到期时间：{{ (c.expiretime || '').slice(0, 10) }}</div>
+                    <div class="link-meta">绑定域名：{{ (c.domains || []).join('、') }}</div>
+                  </div>
+                </n-radio>
+              </n-space>
+            </n-radio-group>
+          </template>
+
+          <template v-else>
+            <template v-if="linkCandidates.providers && linkCandidates.providers.length">
+              <n-alert type="info" :show-icon="true" class="cert-tip">
+                未找到精确匹配证书，请选择证书提供商自动签发（仅包含目标子域名 {{ linkTarget?.name }}）。
+              </n-alert>
+              <n-radio-group v-model:value="linkChoice" class="link-group">
+                <n-space vertical>
+                  <n-radio v-for="p in linkCandidates.providers" :key="'a' + p.aid" :value="'aid:' + p.aid">
+                    {{ p.typename }}（{{ p.name }}）
+                  </n-radio>
+                </n-space>
+              </n-radio-group>
+            </template>
+            <template v-else-if="linkCandidates.defaultLe">
+              <n-alert type="warning" :show-icon="true" class="cert-tip">
+                当前没有可用的证书提供商，将自动使用默认 Let's Encrypt（{{ linkCandidates.defaultLe.email }}）签发精确子域名证书。
+              </n-alert>
+              <n-radio-group v-model:value="linkChoice" class="link-group">
+                <n-space vertical>
+                  <n-radio value="default">{{ linkCandidates.defaultLe.typename }}（{{ linkCandidates.defaultLe.email }}）</n-radio>
+                </n-space>
+              </n-radio-group>
+            </template>
+          </template>
+
+          <n-alert v-if="linkError" type="error" :show-icon="true" class="cert-tip">{{ linkError }}</n-alert>
+        </template>
+        <n-alert v-else-if="linkError" type="error" :show-icon="true" class="cert-tip">{{ linkError }}</n-alert>
+      </n-spin>
+
+      <template #footer>
+        <n-space justify="end" class="cert-actions">
+          <n-button @click="showLink = false">取消</n-button>
+          <n-button type="primary" :loading="linkSubmitting" :disabled="!linkCanConfirm" @click="confirmLink">
+            {{ linkTarget?.id ? '确认并部署' : '确认并接入' }}
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -144,7 +207,7 @@ const loading = ref(false);
 const domains = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
-const providerCaps = ref<Record<string, { freecert?: boolean; certapply?: boolean }>>({});
+const providerCaps = ref<Record<string, { freecert?: boolean; certapply?: boolean; certlink?: boolean }>>({});
 const dnsDomainOptions = ref<any[]>([]);
 const zoneOptions = ref<any[]>([]);
 
@@ -162,6 +225,15 @@ const certMode = ref<'free' | 'link'>('free');
 const certRunning = ref(false);
 const certResults = ref<any[]>([]);
 const certSummary = ref('');
+
+// 与项目联动：证书选择弹窗
+const showLink = ref(false);
+const linkLoading = ref(false);
+const linkSubmitting = ref(false);
+const linkCandidates = ref<any>(null);
+const linkChoice = ref('');
+const linkError = ref('');
+const linkTarget = ref<{ id?: number; name: string } | null>(null);
 
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
 const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
@@ -187,9 +259,11 @@ const certModeOptions = computed(() => {
   const opts: any[] = [{ label: '什么都不做', value: 'none' }];
   if (caps.freecert) opts.push({ label: '自动配置平台免费证书', value: 'freecert' });
   if (caps.certapply) opts.push({ label: '项目申请证书上传绑定', value: 'certapply' });
+  if (caps.certlink) opts.push({ label: '与项目联动', value: 'certlink' });
   return opts;
 });
 const showCertMode = computed(() => certModeOptions.value.length > 1);
+const linkCanConfirm = computed(() => !!linkChoice.value && !!linkCandidates.value);
 
 const columns: any[] = [
   { type: 'selection' },
@@ -230,7 +304,7 @@ const columns: any[] = [
   {
     title: '操作',
     key: 'actions',
-    width: 320,
+    width: 400,
     render(row: any) {
       const btns: any[] = [];
       if (row.can_freecert) {
@@ -238,6 +312,9 @@ const columns: any[] = [
       }
       if (row.can_certapply) {
         btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertLink([row.id]) }, { default: () => '申请证书' }));
+      }
+      if (row.can_certlink) {
+        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openLinkDialog({ id: row.id, name: row.name }) }, { default: () => '与项目联动' }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
@@ -294,14 +371,70 @@ function openAdd() {
 async function doAdd() {
   if (!form.aid || !form.did || !form.name || !form.origin) return message.warning('请填写完整的账户、联动域名、加速域名和源站');
   if (isZoneType.value && !form.zone_id) return message.warning('请选择站点');
+  // 与项目联动：先弹出证书选择弹窗，确认后再创建域名
+  if (form.cert_mode === 'certlink') {
+    await openLinkDialog({ name: form.name });
+    return;
+  }
+  await submitDomain({});
+}
+
+async function submitDomain(extra: Record<string, any>) {
   saving.value = true;
-  const res = await api('POST', '/cdn/domains', form);
+  const res = await api('POST', '/cdn/domains', { ...form, ...extra });
   saving.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showAdd.value = false;
     loadDomains();
   } else message.error(res.msg);
+}
+
+// 与项目联动：加载证书候选（精确匹配证书 / 可用提供商 / 默认 LE）
+async function openLinkDialog(target: { id?: number; name: string }) {
+  linkTarget.value = target;
+  linkCandidates.value = null;
+  linkChoice.value = '';
+  linkError.value = '';
+  showLink.value = true;
+  linkLoading.value = true;
+  const res = await api<any>('GET', `/cdn/cert/candidates?name=${encodeURIComponent(target.name)}`);
+  linkLoading.value = false;
+  if (res.code !== 0) {
+    linkError.value = res.msg || '获取证书候选失败';
+    return;
+  }
+  const d = res.data || {};
+  linkCandidates.value = d;
+  if (d.exact && d.exact.length) linkChoice.value = `order:${d.exact[0].oid}`;
+  else if (d.providers && d.providers.length) linkChoice.value = '';
+  else if (d.defaultLe) linkChoice.value = 'default';
+}
+
+async function confirmLink() {
+  if (!linkChoice.value) return message.warning('请选择证书或证书提供商');
+  const t = linkTarget.value;
+  if (!t) return;
+  const extra =
+    linkChoice.value === 'default'
+      ? { cert_use_default: 1 }
+      : linkChoice.value.startsWith('order:')
+        ? { cert_order_id: Number(linkChoice.value.slice(6)) }
+        : { cert_aid: Number(linkChoice.value.slice(4)) };
+  linkSubmitting.value = true;
+  linkError.value = '';
+  const url = t.id ? `/cdn/domains/${t.id}/certlink` : '/cdn/domains';
+  const res = await api<any>('POST', url, t.id ? extra : { ...form, ...extra });
+  linkSubmitting.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    showLink.value = false;
+    if (!t.id) showAdd.value = false;
+    loadDomains();
+  } else {
+    // 不关闭弹窗，便于重试或更换证书提供商
+    linkError.value = res.msg || '操作失败，请重试或更换证书提供商';
+  }
 }
 
 async function doSync() {
@@ -393,6 +526,28 @@ onMounted(() => {
   color: #6b7280;
   font-size: 12px;
   line-height: 1.6;
+}
+.link-target {
+  margin-bottom: 12px;
+  font-size: 13px;
+  word-break: break-all;
+}
+.link-group {
+  display: block;
+  width: 100%;
+}
+.link-cert {
+  padding-bottom: 2px;
+}
+.link-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+.link-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
 }
 .cert-list {
   margin-top: 12px;
