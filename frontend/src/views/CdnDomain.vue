@@ -66,7 +66,7 @@
           </n-radio-group>
           <template #feedback>
             <div class="cert-hint">
-              平台免费证书由 CDN 厂商直接签发部署；项目申请证书会按站点申请通配符证书（需先在「自动续签设置」中指定证书申请账户），签发后自动上传绑定。
+              平台免费证书由 CDN 厂商直接签发部署；项目申请证书会按站点申请通配符证书（需先在「自动续签设置」中指定证书申请账户），并创建自动部署任务，签发后自动上传绑定，后续续签自动更新。
             </div>
           </template>
         </n-form-item>
@@ -101,7 +101,7 @@
     <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '证书申请' : '平台免费证书'" style="max-width:680px">
       <n-spin :show="certRunning">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
-          按站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发；签发后点击「检查并部署」上传到 CDN 站点并启用 HTTPS。同一站点复用同一张证书。
+          按站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发，并创建自动部署任务；签发后自动上传到 CDN 并启用 HTTPS，后续续签自动更新。也可点击「检查并部署」立即处理。
         </n-alert>
         <n-alert v-else type="info" :show-icon="true" class="cert-tip">
           腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。

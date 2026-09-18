@@ -1,6 +1,6 @@
 import { X509Certificate } from 'node:crypto';
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, FreeCertResult } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -497,6 +497,18 @@ export class TencentEdgeOne implements CdnProvider {
       return { status: 'failed', message: '绑定 EdgeOne 域名证书失败：' + (e.message || String(e)) };
     }
     return { status: 'applied', message: `证书已上传（CertId=${certId}）并绑定到 ${domain}` };
+  }
+
+  // 复用 CDN 账户密钥生成自动部署任务计划：由证书调度器在签发/续签后自动上传并绑定
+  async getCertDeployPlan(domain: string, scope: CertScope): Promise<CertDeployPlan | false> {
+    if (!scope?.siteId) return false;
+    return {
+      accountType: 'tencent',
+      accountConfig: { SecretId: this.secretId, SecretKey: this.secretKey },
+      accountName: 'CDN 证书联动（腾讯云）',
+      product: 'teo',
+      config: { site_id: scope.siteId, domain },
+    };
   }
 
   async getZoneSetting(zoneId: string) {
