@@ -3,6 +3,7 @@ import { configGet } from '../../config.js';
 import { CertOrderService } from '../certService.js';
 import { CertDeployService } from '../deployService.js';
 import { certOrderSend, certDeploySend } from '../monitor/msgNotice.js';
+import { processOrderLink } from '../cdn/certLink.js';
 
 // 处理失败后再次尝试的冷却时间（分钟）
 const FAIL_RETRY_COOLDOWN_MIN = 5;
@@ -94,6 +95,10 @@ async function processOrder(id: number): Promise<void> {
 
   const row = await queryOne(`SELECT status, issend FROM ${table('cert_order')} WHERE id = ?`, [id]);
   if (!row) return;
+  if (Number(row.status) === 3) {
+    // 与项目联动：签发成功后按订单 link 自动创建 CDN 部署任务（签发失败则不创建）
+    await processOrderLink(id).catch((e: any) => console.log(`[cert] 订单 ${id} 创建联动部署任务失败: ${e?.message}`));
+  }
   if (row.issend) {
     if (error) console.log(`[cert] 订单 ${id} 处理未完成: ${error?.message}`);
     return;

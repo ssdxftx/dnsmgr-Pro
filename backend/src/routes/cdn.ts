@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
+import { domainToASCII } from 'node:url';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
-import { ensureWildcardOrder, ensureDeployAccount, ensureDeployTask } from '../lib/cdn/certLink.js';
+import { ensureWildcardOrder, ensureExactOrder, ensureCertDeploy, findExactCertOrders, providerReady } from '../lib/cdn/certLink.js';
 import { CertDeployService } from '../lib/deployService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
@@ -143,11 +144,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
         .filter((a: any) => cdnConfig[a.type]?.certapply)
         .map((a: any) => a.id),
     );
+    const linkAids = new Set(
+      (await query(`SELECT id, type FROM ${table('cdn_account')}`))
+        .filter((a: any) => cdnConfig[a.type]?.certlink)
+        .map((a: any) => a.id),
+    );
     const data = rows.map((r: any) => ({
       ...r,
       routename: typeNames[r.route] || r.route,
       can_freecert: freeAids.has(r.aid) ? 1 : 0,
       can_certapply: certAids.has(r.aid) ? 1 : 0,
+      can_certlink: linkAids.has(r.aid) ? 1 : 0,
     }));
     return { code: 0, data };
   });
@@ -218,7 +225,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 接入域名 + 联动 DNS + 自动同步
   app.post('/api/cdn/domains', auth, async (req: any) => {
-    const { aid, did, name, origin, origin_type, service_area, zone_id, cert_mode } = req.body || {};
+    const { aid, did, name, origin, origin_type, service_area, zone_id, cert_mode, cert_order_id, cert_aid, cert_use_default } = req.body || {};
     if (!aid || !name || !origin) return { code: -1, msg: '必填参数不能为空' };
     const dnsDomain = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
     if (!dnsDomain) return { code: -1, msg: '请选择要联动解析的域名' };
@@ -233,9 +240,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!acct) return { code: -1, msg: 'CDN账户不存在' };
     const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
-    const certMode = cert_mode === 'freecert' || cert_mode === 'certapply' ? cert_mode : 'none';
+    const certMode = ['freecert', 'certapply', 'certlink'].includes(cert_mode) ? cert_mode : 'none';
     if (certMode === 'freecert' && !cdnConfig[acct.type]?.freecert) return { code: -1, msg: '该 CDN 类型不支持配置平台免费证书' };
     if (certMode === 'certapply' && !cdnConfig[acct.type]?.certapply) return { code: -1, msg: '该 CDN 类型不支持联动证书申请' };
+    if (certMode === 'certlink' && !cdnConfig[acct.type]?.certlink) return { code: -1, msg: '该 CDN 类型不支持与项目联动' };
     const cname = await provider.createDomain(name, origin, origin_type || 'ipaddr', service_area || 'mainland_china', zone_id || null);
     if (!cname) return { code: -1, msg: '接入加速域名失败，' + provider.getError() };
 
@@ -266,13 +274,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const sync = await syncFromCloud(aid, did);
     if (sync.code === 0 && sync.added > 0) msg += `；同时从云端同步了 ${sync.added} 个已有加速域名`;
 
-    // 按接入时选择的证书配置处理：平台免费证书 / 联动证书申请
+    // 按接入时选择的证书配置处理：平台免费证书 / 联动证书申请 / 与项目联动
     if (newId && certMode === 'freecert') {
       const r: any = (await runFreeCert([newId], false))[0];
       if (r) msg += `；免费证书：${r.message || r.status}`;
     } else if (newId && certMode === 'certapply') {
       const r: any = (await runCertLink([newId], false))[0];
       if (r) msg += `；证书申请：${r.message || r.status}`;
+    } else if (newId && certMode === 'certlink') {
+      const r = await applyCertLink(newId, provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
+      msg += `；证书：${r.message}`;
     }
 
     return { code: 0, msg };
@@ -426,21 +437,6 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // ===== 联动证书申请：按站点申请一张通配符证书，签发后直传站点并启用 HTTPS =====
 
-  // 为站点级证书创建自动部署任务：复用 CDN 账户密钥，证书签发/续签后自动上传更新
-  async function ensureCertDeploy(row: any, provider: any, scope: any, order: any): Promise<{ taskId: number; created: boolean } | false> {
-    if (typeof provider.getCertDeployPlan !== 'function') return false;
-    let plan: any;
-    try {
-      plan = await provider.getCertDeployPlan(row.name, scope);
-    } catch {
-      plan = false;
-    }
-    if (!plan?.accountType || !plan?.config) return false;
-    const deployAid = await ensureDeployAccount(plan);
-    if (!deployAid) return false;
-    return await ensureDeployTask(deployAid, Number(order.id), plan.config);
-  }
-
   async function runCertLink(ids: number[], checkOnly: boolean): Promise<any[]> {
     const aid = Number(await configGet('cdn_cert_aid', '0')) || 0;
     const account = aid ? await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]) : null;
@@ -475,7 +471,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         continue;
       }
       const order = await ensureWildcardOrder(aid, scope.domains);
-      const deploy: any = await ensureCertDeploy(row, provider, scope, order).catch(() => false);
+      const deploy: any = await ensureCertDeploy(provider, row, scope, Number(order.id)).catch(() => false);
       const status = Number(order.status);
       if (status !== 3) {
         let message: string;
@@ -527,6 +523,104 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runCertLink(ids, true);
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
+  });
+
+  // ===== 与项目联动：精确子域名证书选择 / 签发 / 自动部署 =====
+
+  const DEFAULT_LE_EMAIL = 'ssdxftx@gmail.com';
+
+  // 查找或创建默认 Let's Encrypt 账户（固定邮箱）
+  async function defaultLetsEncryptAid(): Promise<number> {
+    const rows = await query(`SELECT id, config FROM ${table('cert_account')} WHERE type = 'letsencrypt' AND deploy = 0`);
+    for (const r of rows as any[]) {
+      if (safeJson(r.config).email === DEFAULT_LE_EMAIL) return Number(r.id);
+    }
+    const cfg = JSON.stringify({ email: DEFAULT_LE_EMAIL, mode: 'live', proxy: '0' });
+    const res: any = await query(
+      `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES ('letsencrypt', ?, ?, ?, 0, NOW())`,
+      ["默认Let's Encrypt", cfg, '由 CDN 证书联动自动创建'],
+    );
+    return Number(res?.insertId || 0);
+  }
+
+  // 为加速域名选择已有证书或新建精确子域名证书，并创建自动部署任务
+  async function applyCertLink(domainId: number, provider: any, opts: { certOrderId?: any; certAid?: any; useDefault?: boolean }): Promise<any> {
+    const row = await loadCdnDomain(domainId);
+    if (!row) return { status: 'failed', message: '加速域名不存在' };
+    if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.getCertDeployPlan !== 'function') {
+      return { status: 'failed', message: '该厂商不支持与项目联动' };
+    }
+    const scope = await provider.getCertScope(row.name);
+    if (!scope) return { status: 'failed', message: '未找到该域名的加速站点，请先在控制台创建站点' };
+    const need = domainToASCII(row.name.toLowerCase());
+
+    const orderId = Number(opts.certOrderId || 0);
+    if (orderId) {
+      const order = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [orderId]);
+      if (!order) return { status: 'failed', message: '所选证书不存在' };
+      if (Number(order.status) !== 3 || !order.fullchain || !order.privatekey) return { status: 'failed', message: '所选证书尚未签发完成' };
+      const exact = await queryOne(`SELECT id FROM ${table('cert_domain')} WHERE oid = ? AND LOWER(domain) = ?`, [orderId, need]);
+      if (!exact) return { status: 'failed', message: `所选证书未精确包含 ${row.name}，不能用于该域名` };
+      // 记录联动，续签后仍自动更新
+      await query(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [JSON.stringify({ cdnDomainId: domainId }), orderId]);
+      const task: any = await ensureCertDeploy(provider, row, scope, orderId).catch(() => false);
+      if (!task) return { status: 'failed', message: '创建自动部署任务失败' };
+      try {
+        await new CertDeployService(task.taskId).process(true);
+      } catch {
+        // 具体错误从任务记录读取，确保不静默失败
+      }
+      const t = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [task.taskId]);
+      if (Number(t?.status) === 1) {
+        await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
+        return { status: 'applied', message: `已使用项目证书并部署到 ${row.name}` };
+      }
+      return { status: 'failed', message: t?.error || '证书部署失败，可在自动部署任务中重试' };
+    }
+
+    // 新建精确子域名订单（不含根域/通配符/额外 SAN）
+    let aid = Number(opts.certAid || 0);
+    if (!aid && opts.useDefault) aid = await defaultLetsEncryptAid();
+    if (!aid) return { status: 'failed', message: '请选择证书提供商' };
+    const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]);
+    if (!account) return { status: 'failed', message: '证书提供商不存在' };
+    if (!providerReady(account.type, safeJson(account.config))) return { status: 'failed', message: `证书提供商「${account.name}」密钥未配置完整` };
+    const order = await ensureExactOrder(aid, row.name, JSON.stringify({ cdnDomainId: domainId }));
+    if (Number(order.status) === 3) {
+      const task: any = await ensureCertDeploy(provider, row, scope, Number(order.id)).catch(() => false);
+      if (task) await new CertDeployService(task.taskId).process(true).catch(() => undefined);
+      await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
+      return { status: 'applied', message: `已复用已签发证书并部署到 ${row.name}` };
+    }
+    return { status: 'pending', message: `已提交证书签发（仅包含 ${row.name}），签发后将自动部署到 CDN`, order_id: order.id };
+  }
+
+  // 与项目联动 - 证书候选：精确匹配的已签发证书 + 可用签发提供商（无则默认 Let's Encrypt）
+  app.get('/api/cdn/cert/candidates', auth, async (req: any) => {
+    const raw = String(req.query?.name || '').trim();
+    if (!raw) return { code: -1, msg: '请提供加速域名' };
+    const exact = await findExactCertOrders(raw);
+    const accts = await query(`SELECT * FROM ${table('cert_account')} WHERE deploy = 0 ORDER BY id ASC`);
+    const providers = (accts as any[])
+      .filter((a) => providerReady(a.type, safeJson(a.config)))
+      .map((a) => ({ aid: Number(a.id), type: a.type, typename: certConfig[a.type]?.name || a.type, name: a.name }));
+    let defaultLe: any = null;
+    if (!providers.length) {
+      const aid = await defaultLetsEncryptAid();
+      defaultLe = { aid, email: DEFAULT_LE_EMAIL, typename: certConfig['letsencrypt']?.name || "Let's Encrypt" };
+    }
+    return { code: 0, data: { name: raw, exact, providers, defaultLe } };
+  });
+
+  // 对已接入的加速域名执行「与项目联动」（选择已有证书或新建签发）
+  app.post('/api/cdn/domains/:id/certlink', auth, async (req: any) => {
+    const { id } = req.params as any;
+    const row = await loadCdnDomain(id);
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const provider: any = await cdnForRow(row);
+    const { cert_order_id, cert_aid, cert_use_default } = req.body || {};
+    const r = await applyCertLink(Number(id), provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
+    return { code: r.status === 'failed' ? -1 : 0, msg: r.message, data: r };
   });
 
   // 同步云端
