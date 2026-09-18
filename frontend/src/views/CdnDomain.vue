@@ -44,7 +44,9 @@
           <n-select v-model:value="form.zone_id" :options="zoneOptions" placeholder="选择站点" />
         </n-form-item>
         <n-form-item label="联动域名">
-          <n-select v-model:value="form.did" :options="dnsDomainOptions" placeholder="彩虹 DNS 域名（用于联动解析）" />
+          <n-tag v-if="matchedDomain" type="success" :bordered="false">{{ matchedDomain }}</n-tag>
+          <span v-else-if="form.name" class="link-warn">未匹配到已添加的域名，请先在「域名管理」中添加该域名</span>
+          <span v-else class="link-hint">填写加速域名后自动匹配</span>
         </n-form-item>
         <n-form-item label="加速域名">
           <n-input v-model:value="form.name" placeholder="如 www.example.com" />
@@ -196,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, CloudDownloadOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -208,7 +210,9 @@ const domains = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
 const providerCaps = ref<Record<string, { freecert?: boolean; certapply?: boolean; certlink?: boolean }>>({});
-const dnsDomainOptions = ref<any[]>([]);
+const dnsDomains = ref<any[]>([]);
+const dnsDomainOptions = computed(() => dnsDomains.value.map((d: any) => ({ label: d.name, value: d.id })));
+const matchedDomain = ref('');
 const zoneOptions = ref<any[]>([]);
 
 const showAdd = ref(false);
@@ -340,8 +344,33 @@ async function loadAccounts() {
 
 async function loadDnsDomains() {
   const res = await api<any>('GET', '/domains');
-  if (res.code === 0) dnsDomainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id }));
+  if (res.code === 0) dnsDomains.value = res.data.map((d: any) => ({ id: d.id, name: d.name }));
 }
+
+// 根据加速域名自动匹配已添加的域名（取最长后缀匹配），无需用户选择
+function matchDnsDomain(name: string) {
+  const n = String(name || '').trim().toLowerCase();
+  form.did = null;
+  matchedDomain.value = '';
+  if (!n) return;
+  let best: any = null;
+  for (const d of dnsDomains.value) {
+    const dn = String(d.name || '').toLowerCase();
+    if (!dn) continue;
+    if (n === dn || n.endsWith('.' + dn)) {
+      if (!best || dn.length > String(best.name).length) best = d;
+    }
+  }
+  if (best) {
+    form.did = best.id;
+    matchedDomain.value = best.name;
+  }
+}
+
+watch(
+  () => form.name,
+  (v) => matchDnsDomain(v),
+);
 
 async function loadProviders() {
   const res = await api<any>('GET', '/cdn/providers');
@@ -369,7 +398,8 @@ function openAdd() {
 }
 
 async function doAdd() {
-  if (!form.aid || !form.did || !form.name || !form.origin) return message.warning('请填写完整的账户、联动域名、加速域名和源站');
+  if (!form.aid || !form.name || !form.origin) return message.warning('请填写完整的账户、加速域名和源站');
+  if (!form.did) return message.warning('未匹配到联动域名，请确认加速域名属于已在「域名管理」中添加的域名');
   if (isZoneType.value && !form.zone_id) return message.warning('请选择站点');
   // 与项目联动：先弹出证书选择弹窗，确认后再创建域名
   if (form.cert_mode === 'certlink') {
@@ -531,6 +561,15 @@ onMounted(() => {
   margin-bottom: 12px;
   font-size: 13px;
   word-break: break-all;
+}
+.link-hint {
+  color: #9ca3af;
+  font-size: 13px;
+}
+.link-warn {
+  color: #f0a020;
+  font-size: 13px;
+  line-height: 1.6;
 }
 .link-group {
   display: block;
