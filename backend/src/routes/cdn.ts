@@ -5,7 +5,16 @@ import { configGet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
-import { ensureWildcardOrder, ensureExactOrder, ensureCertDeploy, findExactCertOrders, providerReady } from '../lib/cdn/certLink.js';
+import {
+  ensureWildcardOrder,
+  ensureExactOrder,
+  ensureCertDeploy,
+  findExactCertOrders,
+  providerReady,
+  resolveCertAccount,
+  ensureDefaultLetsEncrypt,
+  DEFAULT_LE_EMAIL,
+} from '../lib/cdn/certLink.js';
 import { CertDeployService } from '../lib/deployService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
@@ -438,8 +447,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // ===== 联动证书申请：按站点申请一张通配符证书，签发后直传站点并启用 HTTPS =====
 
   async function runCertLink(ids: number[], checkOnly: boolean): Promise<any[]> {
-    const aid = Number(await configGet('cdn_cert_aid', '0')) || 0;
-    const account = aid ? await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]) : null;
+    // 指定账户不可用时回退默认 Let's Encrypt（固定邮箱），未配置也能签发
+    const configuredAid = Number(await configGet('cdn_cert_aid', '0')) || 0;
+    const { aid, account, usingDefault } = await resolveCertAccount(configuredAid, { requireWildcard: true });
+    const le = usingDefault ? "（默认 Let's Encrypt）" : '';
     const results: any[] = [];
     for (const id of ids) {
       const row = await loadCdnDomain(id);
@@ -457,12 +468,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
         results.push({ id, name: row.name, status: 'failed', message: '未找到该域名的 ESA 站点，请先在阿里云 ESA 控制台创建站点' });
         continue;
       }
-      if (!aid || !account) {
-        results.push({ id, name: row.name, status: 'failed', message: '请先在「自动续签设置」中指定用于申请证书的账户' });
-        continue;
-      }
-      if (!certConfig[account.type]?.wildcard) {
-        results.push({ id, name: row.name, status: 'failed', message: `证书账户「${account.name}」不支持通配符证书，请更换 ACME 类账户` });
+      if (!account) {
+        results.push({ id, name: row.name, status: 'failed', message: '无法准备证书账户（默认 Let\'s Encrypt 创建失败）' });
         continue;
       }
       const rootRow = await queryOne(`SELECT id FROM ${table('domain')} WHERE name = ?`, [scope.siteName]);
@@ -478,9 +485,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
         if (status < 0) {
           message = `证书订单处理失败：${order.error || '未知错误'}`;
         } else if (deploy) {
-          message = '证书尚在申请中，已创建自动部署任务，签发后会自动上传并绑定；也可稍后点击「检查并部署」立即处理';
+          message = `已提交证书申请${le}，并已创建自动部署任务，签发后会自动上传并绑定；也可稍后点击「检查并部署」立即处理`;
         } else {
-          message = checkOnly ? '证书尚未签发完成，请稍后再检查' : '已提交证书申请，系统将自动完成 DNS 验证与签发，签发后点击「检查并部署」完成上传';
+          message = checkOnly ? '证书尚未签发完成，请稍后再检查' : `已提交证书申请${le}，系统将自动完成 DNS 验证与签发，签发后点击「检查并部署」完成上传`;
         }
         results.push({ id, name: row.name, status: status < 0 ? 'failed' : 'pending', message, order_id: order.id, domains: scope.domains });
         continue;
@@ -527,22 +534,6 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // ===== 与项目联动：精确子域名证书选择 / 签发 / 自动部署 =====
 
-  const DEFAULT_LE_EMAIL = 'ssdxftx@gmail.com';
-
-  // 查找或创建默认 Let's Encrypt 账户（固定邮箱）
-  async function defaultLetsEncryptAid(): Promise<number> {
-    const rows = await query(`SELECT id, config FROM ${table('cert_account')} WHERE type = 'letsencrypt' AND deploy = 0`);
-    for (const r of rows as any[]) {
-      if (safeJson(r.config).email === DEFAULT_LE_EMAIL) return Number(r.id);
-    }
-    const cfg = JSON.stringify({ email: DEFAULT_LE_EMAIL, mode: 'live', proxy: '0' });
-    const res: any = await query(
-      `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES ('letsencrypt', ?, ?, ?, 0, NOW())`,
-      ["默认Let's Encrypt", cfg, '由 CDN 证书联动自动创建'],
-    );
-    return Number(res?.insertId || 0);
-  }
-
   // 为加速域名选择已有证书或新建精确子域名证书，并创建自动部署任务
   async function applyCertLink(domainId: number, provider: any, opts: { certOrderId?: any; certAid?: any; useDefault?: boolean }): Promise<any> {
     const row = await loadCdnDomain(domainId);
@@ -580,7 +571,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
     // 新建精确子域名订单（不含根域/通配符/额外 SAN）
     let aid = Number(opts.certAid || 0);
-    if (!aid && opts.useDefault) aid = await defaultLetsEncryptAid();
+    if (!aid && opts.useDefault) aid = await ensureDefaultLetsEncrypt();
     if (!aid) return { status: 'failed', message: '请选择证书提供商' };
     const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]);
     if (!account) return { status: 'failed', message: '证书提供商不存在' };
@@ -606,7 +597,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       .map((a) => ({ aid: Number(a.id), type: a.type, typename: certConfig[a.type]?.name || a.type, name: a.name }));
     let defaultLe: any = null;
     if (!providers.length) {
-      const aid = await defaultLetsEncryptAid();
+      const aid = await ensureDefaultLetsEncrypt();
       defaultLe = { aid, email: DEFAULT_LE_EMAIL, typename: certConfig['letsencrypt']?.name || "Let's Encrypt" };
     }
     return { code: 0, data: { name: raw, exact, providers, defaultLe } };
