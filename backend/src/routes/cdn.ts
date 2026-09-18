@@ -4,7 +4,8 @@ import { configGet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
-import { ensureWildcardOrder } from '../lib/cdn/certLink.js';
+import { ensureWildcardOrder, ensureDeployAccount, ensureDeployTask } from '../lib/cdn/certLink.js';
+import { CertDeployService } from '../lib/deployService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
@@ -425,6 +426,21 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // ===== 联动证书申请：按站点申请一张通配符证书，签发后直传站点并启用 HTTPS =====
 
+  // 为站点级证书创建自动部署任务：复用 CDN 账户密钥，证书签发/续签后自动上传更新
+  async function ensureCertDeploy(row: any, provider: any, scope: any, order: any): Promise<{ taskId: number; created: boolean } | false> {
+    if (typeof provider.getCertDeployPlan !== 'function') return false;
+    let plan: any;
+    try {
+      plan = await provider.getCertDeployPlan(row.name, scope);
+    } catch {
+      plan = false;
+    }
+    if (!plan?.accountType || !plan?.config) return false;
+    const deployAid = await ensureDeployAccount(plan);
+    if (!deployAid) return false;
+    return await ensureDeployTask(deployAid, Number(order.id), plan.config);
+  }
+
   async function runCertLink(ids: number[], checkOnly: boolean): Promise<any[]> {
     const aid = Number(await configGet('cdn_cert_aid', '0')) || 0;
     const account = aid ? await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]) : null;
@@ -459,27 +475,49 @@ export default async function cdnRoutes(app: FastifyInstance) {
         continue;
       }
       const order = await ensureWildcardOrder(aid, scope.domains);
+      const deploy: any = await ensureCertDeploy(row, provider, scope, order).catch(() => false);
       const status = Number(order.status);
       if (status !== 3) {
-        const message =
-          status < 0
-            ? `证书订单处理失败：${order.error || '未知错误'}`
-            : checkOnly
-              ? '证书尚未签发完成，请稍后再检查'
-              : '已提交证书申请，系统将自动完成 DNS 验证与签发，签发后点击「检查并部署」完成上传';
+        let message: string;
+        if (status < 0) {
+          message = `证书订单处理失败：${order.error || '未知错误'}`;
+        } else if (deploy) {
+          message = '证书尚在申请中，已创建自动部署任务，签发后会自动上传并绑定；也可稍后点击「检查并部署」立即处理';
+        } else {
+          message = checkOnly ? '证书尚未签发完成，请稍后再检查' : '已提交证书申请，系统将自动完成 DNS 验证与签发，签发后点击「检查并部署」完成上传';
+        }
         results.push({ id, name: row.name, status: status < 0 ? 'failed' : 'pending', message, order_id: order.id, domains: scope.domains });
         continue;
       }
-      let up: any;
-      try {
-        up = await provider.uploadCert(row.name, order.fullchain, order.privatekey);
-      } catch (e: any) {
-        up = { status: 'failed', message: e?.message || String(e) };
+      // 已签发：优先执行自动部署任务（与续签同一条链路），无计划时回退直传
+      let applied = false;
+      let message = '';
+      if (deploy?.taskId) {
+        let err = '';
+        try {
+          await new CertDeployService(deploy.taskId).process(true);
+        } catch (e: any) {
+          err = e?.message || String(e);
+        }
+        const task = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [deploy.taskId]);
+        applied = Number(task?.status) === 1;
+        message = applied ? '证书已部署，后续续签将自动更新' : task?.error || err || '证书部署失败';
+      } else if (typeof provider.uploadCert === 'function') {
+        let up: any;
+        try {
+          up = await provider.uploadCert(row.name, order.fullchain, order.privatekey);
+        } catch (e: any) {
+          up = { status: 'failed', message: e?.message || String(e) };
+        }
+        applied = up?.status === 'applied';
+        message = up?.message || '';
+      } else {
+        message = '该厂商暂不支持证书部署';
       }
-      if (up?.status === 'applied') {
+      if (applied) {
         await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [id]);
       }
-      results.push({ id, name: row.name, status: up?.status || 'failed', message: up?.message, order_id: order.id, domains: scope.domains });
+      results.push({ id, name: row.name, status: applied ? 'applied' : 'failed', message, order_id: order.id, domains: scope.domains });
     }
     return results;
   }
