@@ -68,12 +68,8 @@ export interface CdnProvider {
   applyFreeCert?(domain: string): Promise<FreeCertResult>;
   // 检查免费证书申请结果，通过后完成部署
   checkFreeCert?(domain: string): Promise<FreeCertResult>;
-  // 是否支持联动证书申请：把本系统签发的证书直传到站点并启用 HTTPS
-  supportsCertApply?(): boolean;
   // 返回站点级证书作用域（站点根域 + 通配符域名集），用于按站点申请一张通配符证书
   getCertScope?(domain: string): Promise<CertScope | false>;
-  // 将已签发的证书（PEM）直传到站点，站点下所有加速域名共用
-  uploadCert?(domain: string, fullchain: string, privatekey: string): Promise<FreeCertResult>;
-  // 生成自动部署任务计划（复用 CDN 账户密钥），使证书续签后自动更新
+  // 生成自动部署任务计划（复用 CDN 账户密钥），证书签发/续签后由部署任务自动上传
   getCertDeployPlan?(domain: string, scope: CertScope): Promise<CertDeployPlan | false>;
 }
