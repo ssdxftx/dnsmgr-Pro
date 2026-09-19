@@ -95,6 +95,21 @@ export async function migrate(): Promise<void> {
 
   // 证书联动：签发成功后按 link 记录自动创建 CDN 部署任务
   await ensureColumn('cert_order', 'link', 'text DEFAULT NULL');
+
+  // 证书联动执行阶段日志：让前端实时看到「订单 -> 签发 -> 部署账户 -> 部署任务 -> 部署」进度
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('cert_link_log')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      did int(11) unsigned NOT NULL,
+      oid int(11) unsigned NOT NULL DEFAULT '0',
+      node varchar(32) NOT NULL,
+      status varchar(16) NOT NULL DEFAULT 'doing',
+      message varchar(500) DEFAULT NULL,
+      addtime datetime NOT NULL,
+      PRIMARY KEY (id),
+      KEY did (did)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 }
 
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {

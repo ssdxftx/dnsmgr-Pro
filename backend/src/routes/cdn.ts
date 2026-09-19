@@ -9,10 +9,12 @@ import {
   ensureWildcardOrder,
   ensureExactOrder,
   ensureCertDeploy,
+  ensureCertDeployForDomain,
   findExactCertOrders,
   providerReady,
   resolveCertAccount,
   ensureDefaultLetsEncrypt,
+  linkLog,
   DEFAULT_LE_EMAIL,
 } from '../lib/cdn/certLink.js';
 import { CertDeployService } from '../lib/deployService.js';
@@ -285,6 +287,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (sync.code === 0 && sync.added > 0) msg += `；同时从云端同步了 ${sync.added} 个已有加速域名`;
 
     // 按接入时选择的证书配置处理：平台免费证书 / 联动证书申请 / 与项目联动
+    let certResult: any = null;
     if (newId && certMode === 'freecert') {
       const r: any = (await runFreeCert([newId], false))[0];
       if (r) msg += `；免费证书：${r.message || r.status}`;
@@ -293,10 +296,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (r) msg += `；证书申请：${r.message || r.status}`;
     } else if (newId && certMode === 'certlink') {
       const r = await applyCertLink(newId, provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
+      certResult = r;
       msg += `；证书：${r.message}`;
     }
 
-    return { code: 0, msg };
+    return { code: 0, msg, data: { id: newId, cert: certResult } };
   });
 
   // 删除
@@ -546,10 +550,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const row = await loadCdnDomain(domainId);
     if (!row) return { status: 'failed', message: '加速域名不存在' };
     if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.getCertDeployPlan !== 'function') {
+      await linkLog(domainId, 0, 'order', 'fail', '该厂商不支持与项目联动');
       return { status: 'failed', message: '该厂商不支持与项目联动' };
     }
     const scope = await provider.getCertScope(row.name);
-    if (!scope) return { status: 'failed', message: '未找到该域名的加速站点，请先在控制台创建站点' };
+    if (!scope) {
+      await linkLog(domainId, 0, 'order', 'fail', '未找到该域名的加速站点，请先在控制台创建站点');
+      return { status: 'failed', message: '未找到该域名的加速站点，请先在控制台创建站点' };
+    }
     const need = domainToASCII(row.name.toLowerCase());
 
     const orderId = Number(opts.certOrderId || 0);
@@ -561,6 +569,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (!exact) return { status: 'failed', message: `所选证书未精确包含 ${row.name}，不能用于该域名` };
       // 记录联动，续签后仍自动更新
       await query(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [JSON.stringify({ cdnDomainId: domainId }), orderId]);
+      await linkLog(domainId, orderId, 'issue', 'ok', `已选用项目内已签发证书 #${orderId}`);
       const task: any = await ensureCertDeploy(provider, row, scope, orderId).catch(() => false);
       if (!task) return { status: 'failed', message: '创建自动部署任务失败' };
       try {
@@ -571,9 +580,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const t = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [task.taskId]);
       if (Number(t?.status) === 1) {
         await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
-        return { status: 'applied', message: `已使用项目证书并部署到 ${row.name}` };
+        await linkLog(domainId, orderId, 'deploy', 'ok', '证书已上传并绑定到 CDN 加速域名，部署完成');
+        return { status: 'applied', message: `已使用项目证书并部署到 ${row.name}`, order_id: orderId };
       }
-      return { status: 'failed', message: t?.error || '证书部署失败，可在自动部署任务中重试' };
+      await linkLog(domainId, orderId, 'deploy', 'fail', '部署失败：' + (t?.error || '未知错误，可在自动部署任务中重试'));
+      return { status: 'failed', message: t?.error || '证书部署失败，可在自动部署任务中重试', order_id: orderId };
     }
 
     // 新建精确子域名订单（不含根域/通配符/额外 SAN）
@@ -585,13 +596,20 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!providerReady(account.type, safeJson(account.config))) return { status: 'failed', message: `证书提供商「${account.name}」密钥未配置完整` };
     const order = await ensureExactOrder(aid, row.name, JSON.stringify({ cdnDomainId: domainId }));
     if (Number(order.status) === 3) {
+      await linkLog(domainId, Number(order.id), 'issue', 'ok', `已复用已签发证书 #${order.id}`);
       const task: any = await ensureCertDeploy(provider, row, scope, Number(order.id)).catch(() => false);
       if (task) await new CertDeployService(task.taskId).process(true).catch(() => undefined);
       await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
-      return { status: 'applied', message: `已复用已签发证书并部署到 ${row.name}` };
+      const t = task ? await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [task.taskId]) : null;
+      if (Number(t?.status) === 1) {
+        await linkLog(domainId, Number(order.id), 'deploy', 'ok', '证书已上传并绑定到 CDN 加速域名，部署完成');
+        return { status: 'applied', message: `已复用已签发证书并部署到 ${row.name}`, order_id: Number(order.id) };
+      }
+      return { status: 'failed', message: t?.error || '证书部署失败，可在自动部署任务中重试', order_id: Number(order.id) };
     }
+    await linkLog(domainId, Number(order.id), 'order', 'doing', `已创建证书订单 #${order.id}，正在提交签发`);
     kickOrderProcessing(Number(order.id));
-    return { status: 'pending', message: `已提交证书签发（仅包含 ${row.name}），签发后将自动部署到 CDN`, order_id: order.id };
+    return { status: 'pending', message: `已提交证书签发（仅包含 ${row.name}），签发后将自动部署到 CDN`, order_id: Number(order.id) };
   }
 
   // 与项目联动 - 证书候选：精确匹配的已签发证书 + 可用签发提供商（无则默认 Let's Encrypt）
@@ -619,7 +637,82 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider: any = await cdnForRow(row);
     const { cert_order_id, cert_aid, cert_use_default } = req.body || {};
     const r = await applyCertLink(Number(id), provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
-    return { code: r.status === 'failed' ? -1 : 0, msg: r.message, data: r };
+    return { code: r.status === 'failed' ? -1 : 0, msg: r.message, data: { ...r, domain_id: Number(id) } };
+  });
+
+  // 查找该加速域名已绑定的联动证书订单（按 link 中的 cdnDomainId 精确匹配）
+  async function findLinkedOrder(did: number): Promise<any | null> {
+    const rows = await query(`SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE link LIKE ? ORDER BY id DESC LIMIT 50`, ['%cdnDomainId%']);
+    for (const r of rows as any[]) {
+      try {
+        if (Number(JSON.parse(r.link)?.cdnDomainId) === did) return r;
+      } catch {
+        // 忽略非 JSON 的 link
+      }
+    }
+    return null;
+  }
+
+  // 与项目联动 - 实时进度日志：返回各阶段日志与当前订单/部署任务状态，供前端轮询
+  app.get('/api/cdn/domains/:id/certlink/log', auth, async (req: any) => {
+    const { id } = req.params as any;
+    const row = await loadCdnDomain(id);
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const did = Number(id);
+    const logs = await query(
+      `SELECT node, status, message, addtime FROM ${table('cert_link_log')} WHERE did = ? ORDER BY id ASC LIMIT 200`,
+      [did],
+    );
+    const order = await findLinkedOrder(did);
+    let domains: string[] = [];
+    let deploy: any = null;
+    if (order) {
+      domains = (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [order.id])).map((r: any) => r.domain);
+      const ds = await query(`SELECT id, status, error, active FROM ${table('cert_deploy')} WHERE oid = ? ORDER BY id DESC LIMIT 1`, [order.id]);
+      deploy = ds[0] || null;
+    }
+    const deployOk = deploy && Number(deploy.status) === 1;
+    const done = !!order && Number(order.status) === 3 && !!deployOk;
+    const failed = (!!order && Number(order.status) < 0) || (!!deploy && Number(deploy.status) < 0);
+    return {
+      code: 0,
+      data: {
+        name: row.name,
+        order: order ? { id: Number(order.id), status: Number(order.status), error: order.error, expiretime: order.expiretime, domains } : null,
+        deploy: deploy ? { id: Number(deploy.id), status: Number(deploy.status), error: deploy.error, active: Number(deploy.active) } : null,
+        logs,
+        done,
+        failed,
+      },
+    };
+  });
+
+  // 与项目联动 - 立即推进：证书未签发则触发处理，已签发则创建并执行自动部署任务
+  app.post('/api/cdn/domains/:id/certlink/run', auth, async (req: any) => {
+    const { id } = req.params as any;
+    const row = await loadCdnDomain(id);
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const did = Number(id);
+    const order = await findLinkedOrder(did);
+    if (!order) return { code: -1, msg: '未找到该域名的联动证书订单，请重新发起「与项目联动」' };
+    if (Number(order.status) !== 3) {
+      await linkLog(did, Number(order.id), 'order', 'doing', '手动触发：证书尚未签发，已提交立即处理');
+      kickOrderProcessing(Number(order.id));
+      return { code: 0, msg: '证书尚未签发，已触发立即处理，请稍后查看进度' };
+    }
+    const task: any = await ensureCertDeployForDomain(did, Number(order.id)).catch(() => false);
+    if (!task) return { code: -1, msg: '创建自动部署任务失败，请查看进度日志了解原因' };
+    try {
+      await new CertDeployService(task.taskId).process(true);
+    } catch {
+      // 具体错误从任务记录读取
+    }
+    const t = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [task.taskId]);
+    if (Number(t?.status) === 1) {
+      await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [did]);
+      return { code: 0, msg: '证书已部署到 CDN 加速域名' };
+    }
+    return { code: -1, msg: t?.error || '部署未完成，请稍后在进度日志查看或重试' };
   });
 
   // 同步云端
