@@ -16,6 +16,33 @@ function safeJson(s: any): Record<string, any> {
   }
 }
 
+// 证书联动阶段：order=证书订单、issue=签发、account=部署账户、task=部署任务、deploy=部署到 CDN
+export type LinkNode = 'order' | 'issue' | 'account' | 'task' | 'deploy';
+export type LinkStatus = 'doing' | 'ok' | 'fail';
+
+// 记录联动执行阶段，供前端实时查看；日志写入失败不影响主流程
+export async function linkLog(
+  did: number,
+  oid: number,
+  node: LinkNode,
+  status: LinkStatus,
+  message: string,
+  q: QueryFn = query,
+): Promise<void> {
+  try {
+    await q(`INSERT INTO ${table('cert_link_log')} (did, oid, node, status, message, addtime) VALUES (?, ?, ?, ?, ?, NOW())`, [
+      Number(did || 0),
+      Number(oid || 0),
+      node,
+      status,
+      String(message || '').slice(0, 500),
+    ]);
+  } catch {
+    // 忽略日志写入错误
+  }
+}
+
+
 // 解析证书字段的 show 条件（仅支持 key=='value' 形式，其余视为显示）
 export function showOk(show: string, config: Record<string, any>): boolean {
   const m = String(show).match(/^\s*(\w+)\s*==\s*'([^']*)'\s*$/);
@@ -128,7 +155,14 @@ export async function ensureWildcardOrder(aid: number, domains: string[], q: Que
 // 精确子域名订单：只绑定目标子域名，不含根域/通配符/额外 SAN
 export async function ensureExactOrder(aid: number, domain: string, link: string | null = null, q: QueryFn = query): Promise<any> {
   const existing = await findOrderByDomains(aid, [domain], q);
-  if (existing) return existing;
+  if (existing) {
+    // 复用已有订单时也要补写联动信息，否则签发成功后不会创建部署任务
+    if (link && existing.link !== link) {
+      await q(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [link, existing.id]);
+      existing.link = link;
+    }
+    return existing;
+  }
   return await createOrder(aid, [domain], link, q);
 }
 
@@ -179,33 +213,64 @@ export async function ensureCertDeploy(
   orderId: number,
   q: QueryFn = query,
 ): Promise<{ taskId: number; created: boolean } | false> {
-  if (!provider || typeof provider.getCertDeployPlan !== 'function' || !scope) return false;
-  let plan: any;
+  const did = Number(row?.id || 0);
+  if (!provider || typeof provider.getCertDeployPlan !== 'function' || !scope) {
+    await linkLog(did, orderId, 'account', 'fail', '该厂商或站点不支持自动部署', q);
+    return false;
+  }
+  let plan: any = false;
+  let planErr = '';
   try {
     plan = await provider.getCertDeployPlan(row.name, scope);
-  } catch {
+  } catch (e: any) {
     plan = false;
+    planErr = e?.message || String(e);
   }
-  if (!plan?.accountType || !plan?.config) return false;
+  if (!plan?.accountType || !plan?.config) {
+    await linkLog(did, orderId, 'account', 'fail', '无法生成部署计划' + (planErr ? '：' + planErr : ''), q);
+    return false;
+  }
+  // 关键：产品类型必须写入任务配置，否则部署时无法识别要上传/绑定到哪个云产品
+  const taskConfig = { ...plan.config, product: plan.product };
   const deployAid = await ensureDeployAccount(plan, q);
-  if (!deployAid) return false;
-  return await ensureDeployTask(deployAid, orderId, plan.config, q);
+  if (!deployAid) {
+    await linkLog(did, orderId, 'account', 'fail', '创建自动部署账户失败（密钥或配置不完整）', q);
+    return false;
+  }
+  await linkLog(did, orderId, 'account', 'ok', `已准备自动部署账户 #${deployAid}（${plan.accountName || plan.accountType}）`, q);
+  const task = await ensureDeployTask(deployAid, orderId, taskConfig, q);
+  await linkLog(did, orderId, 'task', 'ok', `${task.created ? '已创建' : '已复用'}自动部署任务 #${task.taskId}，等待部署`, q);
+  return task;
 }
 
 // 按加速域名 ID 解析厂商与站点作用域，创建自动部署任务（供订单签发成功后回调）
 export async function ensureCertDeployForDomain(cdnDomainId: number, orderId: number): Promise<{ taskId: number; created: boolean } | false> {
+  const did = Number(cdnDomainId || 0);
   const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [cdnDomainId]);
-  if (!row) return false;
+  if (!row) {
+    await linkLog(did, orderId, 'account', 'fail', '加速域名不存在，无法创建部署任务');
+    return false;
+  }
   const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [row.aid]);
-  if (!acct) return false;
+  if (!acct) {
+    await linkLog(did, orderId, 'account', 'fail', 'CDN 账户不存在，无法创建部署任务');
+    return false;
+  }
   const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
-  if (!provider || typeof provider.getCertScope !== 'function') return false;
+  if (!provider || typeof provider.getCertScope !== 'function') {
+    await linkLog(did, orderId, 'account', 'fail', '该 CDN 类型不支持证书联动部署');
+    return false;
+  }
   if (row.zone_id) {
     if (typeof provider.setZoneId === 'function') provider.setZoneId(row.zone_id);
     if (typeof provider.setSiteId === 'function') provider.setSiteId(row.zone_id);
   }
   const scope = await provider.getCertScope(row.name);
-  if (!scope) return false;
+  if (!scope) {
+    await linkLog(did, orderId, 'account', 'fail', '未找到该域名的加速站点（Zone/Site），请先在控制台创建');
+    return false;
+  }
+  await linkLog(did, orderId, 'account', 'ok', `已定位加速站点 ${scope.siteName || scope.siteId}`);
   const task = await ensureCertDeploy(provider, row, scope, orderId);
   if (task) await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [row.id]);
   return task;
@@ -222,5 +287,43 @@ export async function processOrderLink(orderId: number): Promise<void> {
     return;
   }
   if (!link?.cdnDomainId) return;
+  await linkLog(Number(link.cdnDomainId), orderId, 'issue', 'ok', '证书已签发，开始创建 CDN 自动部署任务');
   await ensureCertDeployForDomain(Number(link.cdnDomainId), orderId);
+}
+
+// 证书订单处理失败时写入联动阶段日志（仅针对带 CDN 联动的订单，成功由 processOrderLink 记录）
+export async function logOrderFailure(orderId: number, error?: string): Promise<void> {
+  const order = await queryOne(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [orderId]);
+  if (!order?.link) return;
+  let link: any;
+  try {
+    link = JSON.parse(order.link);
+  } catch {
+    return;
+  }
+  if (!link?.cdnDomainId) return;
+  await linkLog(Number(link.cdnDomainId), orderId, 'issue', 'fail', '证书签发失败：' + (error || '未知错误'));
+}
+
+// 部署任务执行完成后，把结果写入联动阶段日志（仅针对带 CDN 联动的订单）
+export async function logDeployResult(taskId: number, status: number, error?: string): Promise<void> {
+  const task = await queryOne(`SELECT oid FROM ${table('cert_deploy')} WHERE id = ?`, [taskId]);
+  const oid = Number(task?.oid || 0);
+  if (!oid) return;
+  const order = await queryOne(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [oid]);
+  if (!order?.link) return;
+  let link: any;
+  try {
+    link = JSON.parse(order.link);
+  } catch {
+    return;
+  }
+  if (!link?.cdnDomainId) return;
+  const did = Number(link.cdnDomainId);
+  if (status === 1) {
+    await linkLog(did, oid, 'deploy', 'ok', '证书已上传并绑定到 CDN 加速域名，部署完成');
+    await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [did]);
+  } else if (status < 0) {
+    await linkLog(did, oid, 'deploy', 'fail', '部署失败：' + (error || '未知错误，可在自动部署任务中重试'));
+  }
 }

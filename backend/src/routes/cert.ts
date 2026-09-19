@@ -11,6 +11,7 @@ import { getCertProvider } from '../lib/cert/factory.js';
 import { getMainDomain } from '../lib/cert/utils.js';
 import { CertOrderService, buildPfx, STATUS_LABEL } from '../lib/certService.js';
 import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
+import { processOrderLink } from '../lib/cdn/certLink.js';
 import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider } from '../lib/deploy/factory.js';
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
@@ -410,6 +411,8 @@ export default async function certRoutes(app: FastifyInstance) {
       if (reset == 1) await service.reset();
       const code = await service.process(true);
       if (code === 3) {
+        // 签发成功后立即创建 CDN 联动部署任务（若订单带联动标记）
+        await processOrderLink(Number(id)).catch(() => {});
         certOrderSend(Number(id), true).catch(() => {});
         return { code: 0, msg: '证书已签发成功！' };
       }

@@ -194,11 +194,40 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 与项目联动：实时进度日志 -->
+    <n-modal v-model:show="showLinkLog" preset="card" title="证书联动进度" style="max-width: 720px" @after-leave="closeLinkLog">
+      <n-spin :show="linkLogLoading">
+        <div class="link-target">目标域名：<b>{{ linkLogName }}</b></div>
+        <n-alert v-if="linkLogState.summary" :type="linkLogState.type" :show-icon="true" class="cert-tip">{{ linkLogState.summary }}</n-alert>
+        <div v-if="linkLog?.order" class="link-meta">
+          证书订单 #{{ linkLog.order.id }}：{{ orderStatusText(linkLog.order.status) }}
+          <span v-if="linkLog.order.domains && linkLog.order.domains.length">（{{ linkLog.order.domains.join('、') }}）</span>
+        </div>
+        <div v-if="linkLog?.deploy" class="link-meta">自动部署任务 #{{ linkLog.deploy.id }}：{{ deployStatusText(linkLog.deploy.status) }}</div>
+        <div class="link-log-list" v-if="linkLog && linkLog.logs && linkLog.logs.length">
+          <div v-for="(l, i) in linkLog.logs" :key="i" class="link-log-item">
+            <n-tag :type="logStatusType(l.status)" size="tiny" :bordered="false">{{ logStatusText(l.status) }}</n-tag>
+            <span class="link-log-node">{{ nodeText(l.node) }}</span>
+            <span class="link-log-msg">{{ l.message }}</span>
+            <span class="link-log-time">{{ (l.addtime || '').slice(5, 19) }}</span>
+          </div>
+        </div>
+        <n-empty v-else size="small" description="暂无执行日志" />
+      </n-spin>
+      <template #footer>
+        <n-space justify="end" class="cert-actions">
+          <n-button :loading="linkLogLoading" @click="fetchLinkLog">刷新</n-button>
+          <n-button type="primary" :loading="linkLogRetrying" @click="retryLink">立即检查并部署</n-button>
+          <n-button @click="showLinkLog = false">关闭</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch } from 'vue';
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, CloudDownloadOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -238,6 +267,91 @@ const linkCandidates = ref<any>(null);
 const linkChoice = ref('');
 const linkError = ref('');
 const linkTarget = ref<{ id?: number; name: string } | null>(null);
+
+// 与项目联动：实时进度日志
+const showLinkLog = ref(false);
+const linkLogLoading = ref(false);
+const linkLogRetrying = ref(false);
+const linkLog = ref<any>(null);
+const linkLogDomainId = ref<number | null>(null);
+const linkLogName = ref('');
+let linkLogTimer: any = null;
+
+const linkLogState = computed(() => {
+  const d = linkLog.value;
+  if (!d) return { type: 'info' as const, summary: '' };
+  if (d.done) return { type: 'success' as const, summary: '证书已签发并部署到 CDN，HTTPS 已启用；后续续签将自动更新。' };
+  if (d.failed) return { type: 'error' as const, summary: d.deploy?.error || d.order?.error || '执行失败，可点击「立即检查并部署」重试。' };
+  if (d.order && Number(d.order.status) === 3) return { type: 'warning' as const, summary: '证书已签发，正在创建自动部署任务并部署到 CDN，请稍候…' };
+  return { type: 'info' as const, summary: '证书正在申请/签发中，系统会自动完成后续部署，请稍候…' };
+});
+
+function nodeText(node: string) {
+  return ({ order: '证书订单', issue: '证书签发', account: '部署账户', task: '部署任务', deploy: '部署到CDN' } as any)[node] || node;
+}
+function logStatusText(s: string) {
+  return s === 'ok' ? '完成' : s === 'fail' ? '失败' : '进行中';
+}
+function logStatusType(s: string): 'success' | 'error' | 'warning' {
+  return s === 'ok' ? 'success' : s === 'fail' ? 'error' : 'warning';
+}
+function orderStatusText(s: number) {
+  if (Number(s) === 3) return '已签发';
+  if (Number(s) < 0) return '处理失败';
+  if (Number(s) === 0) return '排队中';
+  return '签发中';
+}
+function deployStatusText(s: number) {
+  if (Number(s) === 1) return '部署成功';
+  if (Number(s) < 0) return '部署失败';
+  return '等待部署';
+}
+
+async function openLinkLog(domainId: number, name: string) {
+  linkLogDomainId.value = Number(domainId);
+  linkLogName.value = name;
+  linkLog.value = null;
+  showLinkLog.value = true;
+  await fetchLinkLog();
+  startLinkLogTimer();
+}
+
+async function fetchLinkLog() {
+  if (!linkLogDomainId.value) return;
+  linkLogLoading.value = true;
+  const res = await api<any>('GET', `/cdn/domains/${linkLogDomainId.value}/certlink/log`);
+  linkLogLoading.value = false;
+  if (res.code === 0) {
+    linkLog.value = res.data;
+    if (res.data?.done || res.data?.failed) stopLinkLogTimer();
+  }
+}
+
+async function retryLink() {
+  if (!linkLogDomainId.value) return;
+  linkLogRetrying.value = true;
+  const res = await api<any>('POST', `/cdn/domains/${linkLogDomainId.value}/certlink/run`, {});
+  linkLogRetrying.value = false;
+  message[res.code === 0 ? 'success' : 'error'](res.msg);
+  await fetchLinkLog();
+  if (!linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
+}
+
+function startLinkLogTimer() {
+  stopLinkLogTimer();
+  linkLogTimer = setInterval(() => fetchLinkLog(), 3000);
+}
+function stopLinkLogTimer() {
+  if (linkLogTimer) {
+    clearInterval(linkLogTimer);
+    linkLogTimer = null;
+  }
+}
+function closeLinkLog() {
+  stopLinkLogTimer();
+  linkLogDomainId.value = null;
+  linkLog.value = null;
+}
 
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
 const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
@@ -319,6 +433,7 @@ const columns: any[] = [
       }
       if (row.can_certlink) {
         btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openLinkDialog({ id: row.id, name: row.name }) }, { default: () => '与项目联动' }));
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openLinkLog(row.id, row.name) }, { default: () => '联动进度' }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
@@ -461,6 +576,10 @@ async function confirmLink() {
     showLink.value = false;
     if (!t.id) showAdd.value = false;
     loadDomains();
+    // 新签发证书需要时间，打开实时进度日志让用户看到执行阶段
+    const cert = t.id ? res.data : res.data?.cert;
+    const domainId = t.id ? Number(t.id) : Number(res.data?.id || 0);
+    if (domainId && cert?.status !== 'applied') openLinkLog(domainId, t.name);
   } else {
     // 不关闭弹窗，便于重试或更换证书提供商
     linkError.value = res.msg || '操作失败，请重试或更换证书提供商';
@@ -536,6 +655,10 @@ onMounted(() => {
   loadAccounts();
   loadDnsDomains();
   loadProviders();
+});
+
+onUnmounted(() => {
+  stopLinkLogTimer();
 });
 </script>
 
@@ -625,6 +748,38 @@ onMounted(() => {
 }
 .cert-record + .cert-record {
   margin-top: 4px;
+}
+.link-log-list {
+  margin-top: 12px;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  padding: 4px 10px;
+}
+.link-log-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed #f0f1f3;
+  font-size: 12px;
+}
+.link-log-item:last-child {
+  border-bottom: none;
+}
+.link-log-node {
+  color: #2080f0;
+  white-space: nowrap;
+}
+.link-log-msg {
+  flex: 1;
+  color: #4b5563;
+  word-break: break-word;
+}
+.link-log-time {
+  color: #9ca3af;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {
