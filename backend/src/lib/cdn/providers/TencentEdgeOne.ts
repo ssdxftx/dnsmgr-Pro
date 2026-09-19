@@ -179,14 +179,15 @@ export class TencentEdgeOne implements CdnProvider {
     const protoMap: Record<string, string> = { http: 'HTTP', https: 'HTTPS', follow: 'FOLLOW' };
     const OriginInfo: Record<string, any> = { OriginType: 'IP_DOMAIN', Origin: origin.trim() };
     if (originHost) OriginInfo.HostHeader = originHost;
-    return (
-      (await this.send('ModifyAccelerationDomain', {
-        ZoneId: zoneId,
-        DomainName: domain,
-        OriginInfo,
-        OriginProtocol: protoMap[originProtocol] ?? 'FOLLOW',
-      })) !== false
-    );
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      DomainName: domain,
+      OriginInfo,
+      OriginProtocol: protoMap[originProtocol] ?? 'FOLLOW',
+    };
+    if (httpPort) param.HttpOriginPort = Number(httpPort);
+    if (httpsPort) param.HttpsOriginPort = Number(httpsPort);
+    return (await this.send('ModifyAccelerationDomain', param)) !== false;
   }
 
   async setCacheRules(domain: string, rules: any[]) {

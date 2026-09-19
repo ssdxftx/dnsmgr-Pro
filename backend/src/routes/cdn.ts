@@ -250,6 +250,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.post('/api/cdn/domains', auth, async (req: any) => {
     const { aid, did, name, origin, origin_type, service_area, zone_id, cert_mode, cert_order_id, cert_aid, cert_use_default } = req.body || {};
     if (!aid || !name || !origin) return { code: -1, msg: '必填参数不能为空' };
+    const originHost = String(req.body?.origin_host || '');
+    const protoRaw = String(req.body?.origin_protocol || 'follow');
+    const originProtocol = ['follow', 'http', 'https'].includes(protoRaw) ? protoRaw : 'follow';
+    const httpPort = Number(req.body?.http_port) > 0 ? Number(req.body.http_port) : 80;
+    const httpsPort = Number(req.body?.https_port) > 0 ? Number(req.body.https_port) : 443;
     const dnsDomain = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
     if (!dnsDomain) return { code: -1, msg: '请选择要联动解析的域名' };
     const suffix = '.' + dnsDomain.name;
@@ -270,6 +275,18 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const cname = await provider.createDomain(name, origin, origin_type || 'ipaddr', service_area || 'mainland_china', zone_id || null);
     if (!cname) return { code: -1, msg: '接入加速域名失败，' + provider.getError() };
 
+    // 应用回源协议 / 端口 / HOST（非默认值时），失败不回滚，可在详情页重试
+    let originError = '';
+    const needOriginUpdate = !!(originHost || originProtocol !== 'follow' || httpPort !== 80 || httpsPort !== 443);
+    if (needOriginUpdate) {
+      try {
+        const ok = await provider.updateOrigin(name, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort);
+        if (!ok) originError = provider.getError() || '未知错误';
+      } catch (e: any) {
+        originError = e?.message || String(e);
+      }
+    }
+
     const recordName = calcRecordName(name, dnsDomain.name);
     let dnsRecord: string | null = null;
     let dnsError = '';
@@ -284,15 +301,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
     } else dnsError = 'DNS账户不存在';
 
     const insertRes: any = await query(
-      `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, service_area, cname, dns_record, status, cert_mode, addtime)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
-      [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
+      `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, cert_mode, addtime)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
+      [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort, service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
     );
     const newId = Number(insertRes?.insertId || 0);
 
     let msg = dnsRecord
       ? `接入成功，已自动添加 CNAME 解析记录 ${recordName} → ${cname}`
       : `接入成功，但自动添加解析失败（${dnsError}），请手动添加 CNAME ${recordName} → ${cname}`;
+    if (originError) msg += `；回源配置应用失败（${originError}），可在域名详情页重试`;
 
     const sync = await syncFromCloud(aid, did);
     if (sync.code === 0 && sync.added > 0) msg += `；同时从云端同步了 ${sync.added} 个已有加速域名`;
