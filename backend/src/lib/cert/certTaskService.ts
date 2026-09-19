@@ -3,7 +3,7 @@ import { configGet } from '../../config.js';
 import { CertOrderService } from '../certService.js';
 import { CertDeployService } from '../deployService.js';
 import { certOrderSend, certDeploySend } from '../monitor/msgNotice.js';
-import { processOrderLink } from '../cdn/certLink.js';
+import { processOrderLink, logDeployResult, logOrderFailure } from '../cdn/certLink.js';
 
 // 处理失败后再次尝试的冷却时间（分钟）
 const FAIL_RETRY_COOLDOWN_MIN = 5;
@@ -109,6 +109,7 @@ async function processOrder(id: number): Promise<void> {
     console.log(`[cert] 订单 ${id} 自动续签成功`);
   } else if (Number(row.status) < 0) {
     certOrderSend(id, false).catch(() => undefined);
+    logOrderFailure(id, error?.message || row.error || '未知错误').catch(() => undefined);
     console.log(`[cert] 订单 ${id} 处理失败: ${error?.message || '未知错误'}`);
   } else if (error) {
     console.log(`[cert] 订单 ${id} 处理未完成: ${error?.message}`);
@@ -131,9 +132,11 @@ async function processDeployTask(id: number): Promise<void> {
   }
   if (Number(row.status) === 1) {
     certDeploySend(id, true).catch(() => undefined);
+    logDeployResult(id, 1).catch(() => undefined);
     console.log(`[cert] 部署任务 ${id} 自动部署成功`);
   } else if (Number(row.status) < 0) {
     certDeploySend(id, false).catch(() => undefined);
+    logDeployResult(id, -1, error?.message || '未知错误').catch(() => undefined);
     console.log(`[cert] 部署任务 ${id} 部署失败: ${error?.message || '未知错误'}`);
   } else if (error) {
     console.log(`[cert] 部署任务 ${id} 未完成: ${error?.message}`);
@@ -177,9 +180,8 @@ async function deployPendingTasks(): Promise<number> {
 // 新建订单后立即在后台推进一次，用户无需再点「处理」；与调度器通过订单锁互斥
 export function kickOrderProcessing(id: number): void {
   if (!id) return;
-  new CertOrderService(id)
-    .process()
-    .catch((e: any) => console.log(`[cert] 订单 ${id} 立即处理未完成: ${e?.message}`));
+  // 复用调度器的完整处理流程（含签发成功后创建 CDN 联动部署任务）
+  processOrder(id).catch((e: any) => console.log(`[cert] 订单 ${id} 立即处理未完成: ${e?.message}`));
 }
 
 export async function certTaskRun(): Promise<void> {
