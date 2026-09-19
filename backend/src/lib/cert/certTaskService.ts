@@ -46,15 +46,15 @@ export async function findRenewOrders(days: number, q: QueryFn = query): Promise
   );
 }
 
-// 需要推进的订单：等待验证/签发到期，或已排队的续签订单。统一以数据库时钟为准
+// 需要推进的订单：等待验证/签发到期，或刚创建/已排队的订单。统一以数据库时钟为准
 export async function findRunningOrders(q: QueryFn = query): Promise<any[]> {
   const placeholders = ACTIVE_STATUSES.map(() => '?').join(',');
   return q(
     `SELECT id FROM ${table('cert_order')}
-      WHERE isauto = 1 AND islock = 0
-        AND status IN (${placeholders})
-        AND retrytime IS NOT NULL AND retrytime <= NOW()
-      ORDER BY retrytime ASC LIMIT ?`,
+       WHERE isauto = 1 AND islock = 0
+         AND status IN (${placeholders})
+         AND (retrytime IS NULL OR retrytime <= NOW())
+       ORDER BY retrytime ASC LIMIT ?`,
     [...ACTIVE_STATUSES, CONTINUE_LIMIT],
   );
 }
@@ -172,6 +172,14 @@ async function deployPendingTasks(): Promise<number> {
     await processDeployTask(row.id);
   }
   return rows.length;
+}
+
+// 新建订单后立即在后台推进一次，用户无需再点「处理」；与调度器通过订单锁互斥
+export function kickOrderProcessing(id: number): void {
+  if (!id) return;
+  new CertOrderService(id)
+    .process()
+    .catch((e: any) => console.log(`[cert] 订单 ${id} 立即处理未完成: ${e?.message}`));
 }
 
 export async function certTaskRun(): Promise<void> {
