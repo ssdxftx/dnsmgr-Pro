@@ -8,13 +8,29 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      platforms:
+        description: '构建平台（默认仅 amd64；需要 arm64 时选择多架构）'
+        type: choice
+        default: linux/amd64
+        options:
+          - linux/amd64
+          - linux/amd64,linux/arm64
 
 env:
   IMAGE_NAME: dnsmgr-pro
+  # 标签发布固定只构建 amd64，避免 arm64 QEMU 模拟导致的长时间构建
+  RELEASE_PLATFORMS: linux/amd64
+
+# 同一 ref 只保留最新一次构建，避免排队堆积
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
       packages: write
@@ -22,6 +38,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # 需要完整标签信息，用于判断该提交是否已有发布标签
+          fetch-depth: 0
 
       # 版本标签来自仓库的 vX.Y.Z 标签，并要求与项目 package.json 版本一致
       - name: Resolve project version
@@ -41,19 +60,46 @@ jobs:
           echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
 
+      # 分支推送时，如果该提交已经带有发布标签，说明标签构建会产出正式镜像，跳过分支重复构建
+      - name: Detect duplicate release build
+        id: dupe
+        if: github.ref_type == 'branch'
+        run: |
+          if git describe --tags --exact-match "$GITHUB_SHA" 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "该提交已存在发布标签，跳过分支构建（正式镜像由标签构建产出）"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve build platforms
+        id: platforms
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "platforms=${{ inputs.platforms }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up QEMU
+        if: steps.dupe.outputs.skip != 'true' && contains(steps.platforms.outputs.platforms, 'arm64')
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
+        if: steps.dupe.outputs.skip != 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        if: steps.dupe.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GitHub Container Registry
+        if: steps.dupe.outputs.skip != 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -63,6 +109,7 @@ jobs:
       # 发布标签（vX.Y.Z）：项目版本 + 主/次版本 + latest；分支推送：edge + sha
       - name: Docker metadata
         id: meta
+        if: steps.dupe.outputs.skip != 'true'
         uses: docker/metadata-action@v5
         with:
           images: |
@@ -82,13 +129,15 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and push to Docker Hub & GHCR
+        if: steps.dupe.outputs.skip != 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ steps.platforms.outputs.platforms }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # 只读缓存，避免 mode=max 缓存导出在并发时拖慢/挂住构建
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          provenance: false
