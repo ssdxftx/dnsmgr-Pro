@@ -107,7 +107,7 @@ export async function findOrderByDomains(aid: number, domains: string[], q: Quer
 // 新建证书订单并绑定域名（可指定 link 联动信息）
 export async function createOrder(aid: number, domains: string[], link: string | null = null, q: QueryFn = query): Promise<any> {
   const res: any = await q(`INSERT INTO ${table('cert_order')} SET ?`, [
-    { aid, keytype: 'RSA', keysize: 2048, addtime: new Date(), updatetime: new Date(), issuer: '', status: 0, isauto: 1, link },
+    { aid, keytype: 'RSA', keysize: 2048, addtime: new Date(), updatetime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date(), link },
   ]);
   const id = Number(res?.insertId || 0);
   let sort = 1;
