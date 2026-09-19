@@ -314,15 +314,21 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg, data: { id: newId, cert: certResult } };
   });
 
-  // 删除
+  // 删除：可选同时删除云端加速域名（delete_cloud=1）；云端删除失败时不删除本地记录，便于重试
   app.delete('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;
+    const deleteCloud = ['1', 'true'].includes(String(req.query?.delete_cloud || '').toLowerCase());
     const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '加速域名不存在' };
-    const provider = await cdnForRow(row);
-    if (provider) await provider.deleteDomain(row.name);
+    if (deleteCloud) {
+      const provider = await cdnForRow(row);
+      if (!provider) return { code: -1, msg: 'CDN账户不存在，无法删除云端加速域名' };
+      if (!(await provider.deleteDomain(row.name))) {
+        return { code: -1, msg: `删除云端加速域名失败：${provider.getError() || '未知错误'}（本地记录未删除，可重试或改为仅删除本地）` };
+      }
+    }
     await query(`DELETE FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
-    return { code: 0, msg: '删除成功（若已联动解析，请手动删除对应 CNAME 记录）' };
+    return { code: 0, msg: deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）' };
   });
 
   // 状态
