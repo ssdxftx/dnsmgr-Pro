@@ -361,7 +361,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, CloudDownloadOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 
@@ -938,19 +938,48 @@ async function checkPending() {
 }
 
 function del(row: any) {
+  const state = reactive({ alsoCloud: false });
   dialog.warning({
     title: '删除加速域名',
-    content: `确定删除 ${row.name} 吗？`,
+    content: () =>
+      h('div', null, [
+        h('div', { style: 'margin-bottom:10px' }, `确定删除 ${row.name} 吗？`),
+        h(
+          NCheckbox,
+          {
+            checked: state.alsoCloud,
+            'onUpdate:checked': (v: boolean) => (state.alsoCloud = v),
+          },
+          { default: () => '同时删除云端加速域名（云端删除后不可恢复）' },
+        ),
+        h('div', { style: 'margin-top:6px;color:#9ca3af;font-size:12px' }, '不勾选时仅删除本系统记录，云端加速域名保留。'),
+      ]),
     positiveText: '删除',
     negativeText: '取消',
     onPositiveClick: async () => {
-      const res = await api('DELETE', `/cdn/domains/${row.id}`);
-      if (res.code === 0) {
-        message.success('删除成功');
-        loadDomains();
-      } else message.error(res.msg);
+      if (state.alsoCloud) {
+        // 删除云端域名需要二次确认
+        dialog.warning({
+          title: '二次确认',
+          content: `将同时删除云端加速域名 ${row.name}，删除后云端资源不可恢复，确定继续吗？`,
+          positiveText: '确认删除',
+          negativeText: '取消',
+          onPositiveClick: () => doDelete(row, true),
+        });
+        return true;
+      }
+      await doDelete(row, false);
+      return true;
     },
   });
+}
+
+async function doDelete(row: any, deleteCloud: boolean) {
+  const res = await api('DELETE', `/cdn/domains/${row.id}${deleteCloud ? '?delete_cloud=1' : ''}`);
+  if (res.code === 0) {
+    message.success(res.msg);
+    loadDomains();
+  } else message.error(res.msg);
 }
 
 onMounted(() => {
