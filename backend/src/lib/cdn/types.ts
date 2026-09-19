@@ -43,6 +43,28 @@ export interface CertDeployPlan {
   config: Record<string, any>;
 }
 
+// 云端加速域名当前证书项（用于证书管理弹窗展示）
+export interface CloudCertItem {
+  id: string;
+  name?: string;
+  commonName?: string;
+  san?: string[];
+  issuer?: string;
+  notBefore?: string;
+  notAfter?: string;
+  createdAt?: string;
+  source?: 'platform' | 'custom' | 'unknown';
+}
+
+// 云端加速域名当前证书信息
+export interface DomainCertInfo {
+  httpsEnabled?: boolean;
+  mode?: string;
+  source: 'platform' | 'custom' | 'none' | 'unknown';
+  sourceLabel: string;
+  certs: CloudCertItem[];
+}
+
 export interface CdnProvider {
   getError(): string;
   check(): Promise<boolean>;
@@ -72,4 +94,6 @@ export interface CdnProvider {
   getCertScope?(domain: string): Promise<CertScope | false>;
   // 生成自动部署任务计划（复用 CDN 账户密钥），证书签发/续签后由部署任务自动上传
   getCertDeployPlan?(domain: string, scope: CertScope): Promise<CertDeployPlan | false>;
+  // 查询加速域名在云端的当前证书配置（用于证书管理弹窗展示云端真实状态）
+  getDomainCertInfo?(domain: string): Promise<DomainCertInfo | false>;
 }

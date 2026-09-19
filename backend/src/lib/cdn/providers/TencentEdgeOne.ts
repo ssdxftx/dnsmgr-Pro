@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -441,6 +441,59 @@ export class TencentEdgeOne implements CdnProvider {
       product: 'teo',
       config: { site_id: scope.siteId, domain },
     };
+  }
+
+  // 查询加速域名在 EdgeOne 云端的当前证书配置
+  async getDomainCertInfo(domain: string): Promise<DomainCertInfo | false> {
+    const zoneId = await this.findZone(domain);
+    if (!zoneId) return false;
+    const data = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Offset: 0, Limit: 200 });
+    if (!data) return false;
+    const item = (data.AccelerationDomains || []).find((d: any) => d.DomainName === domain);
+    if (!item) return false;
+    const cert = item.Certificate || {};
+    const mode = String(cert.Mode || 'disable');
+    const ids: string[] = (cert.List || []).map((c: any) => String(c?.CertId || '')).filter(Boolean);
+    const mutual = cert.ClientCertInfo?.Switch === 'on';
+    const httpsEnabled = (mode && mode !== 'disable') || mutual;
+    let source: DomainCertInfo['source'] = 'unknown';
+    if (mode === 'disable') source = 'none';
+    else if (mode.startsWith('eofreecert')) source = 'platform';
+    else if (mode === 'sslcert') source = 'custom';
+    const sourceLabel =
+      source === 'platform'
+        ? '平台免费证书（EdgeOne 自动签发）'
+        : source === 'custom'
+          ? '由本项目管理上传'
+          : source === 'none'
+            ? '未配置证书'
+            : `未知（${mode}）`;
+    const certs: any[] = ids.map((id) => ({ id, source: source === 'platform' ? 'platform' : 'custom' }));
+    // sslcert：用腾讯云 SSL 接口补全证书名称 / 覆盖域名 / 有效期
+    if (mode === 'sslcert' && ids.length) {
+      const ssl = new TencentCloud(this.secretId, this.secretKey, 'ssl.tencentcloudapi.com', 'ssl', '2019-12-05');
+      try {
+        const res: any = await ssl.request('DescribeCertificates', { CertificateIds: ids });
+        const map = new Map<string, any>();
+        for (const c of res?.Certificates || []) map.set(String(c.CertificateId || ''), c);
+        for (const it of certs) {
+          const c = map.get(it.id);
+          if (!c) continue;
+          it.name = c.Alias || c.Domain || undefined;
+          it.commonName = c.Domain || c.CommonName || undefined;
+          it.san = String(c.SubjectAltName || c.Domain || '')
+            .split(',')
+            .map((s: string) => s.trim())
+            .filter(Boolean);
+          it.issuer = c.Issuer || undefined;
+          it.notBefore = c.CertBeginTime || c.NotBefore || undefined;
+          it.notAfter = c.CertEndTime || c.NotAfter || undefined;
+        }
+      } catch {
+        // 补全失败时仅展示证书 ID
+      }
+    }
+    return { httpsEnabled, mode, source, sourceLabel, certs };
   }
 
   async getZoneSetting(zoneId: string) {

@@ -1,5 +1,5 @@
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -397,6 +397,46 @@ export class AliyunESA implements CdnProvider {
       product: 'esa',
       config: { esa_sitename: scope.siteName, region: 'cn-hangzhou' },
     };
+  }
+
+  // 查询加速域名在 ESA 云端的当前证书配置（站点级证书列表）
+  async getDomainCertInfo(domain: string): Promise<DomainCertInfo | false> {
+    const siteId = await this.findSite(domain);
+    if (!siteId) return false;
+    const data = await this.call({ Action: 'ListCertificates', SiteId: siteId });
+    if (!data) return false;
+    const list: any[] = data.Result || data.Certificates || [];
+    const certs = list
+      .map((c: any) => {
+        const san = String(c.SAN || c.SubjectAltName || '')
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean);
+        const isFree = String(c.Type || '').toLowerCase() === 'free';
+        return {
+          id: String(c.Id || c.CertificateId || ''),
+          name: c.Name || undefined,
+          commonName: san[0] || c.Name || undefined,
+          san,
+          issuer: c.Issuer || undefined,
+          notBefore: c.NotBefore || undefined,
+          notAfter: c.NotAfter || c.ExpireTime || undefined,
+          createdAt: c.CreateTime || undefined,
+          source: isFree ? ('platform' as const) : ('custom' as const),
+        };
+      })
+      .filter((c: any) => c.id);
+    // 优先展示覆盖目标域名的证书（精确或通配符），否则展示站点全部证书
+    const matched = certs.filter((c: any) => c.san.some((s: string) => s === domain || (s.startsWith('*.') && domain.endsWith(s.slice(1)))));
+    const use = matched.length ? matched : certs;
+    const source: DomainCertInfo['source'] = use.length === 0 ? 'none' : use.some((c: any) => c.source === 'platform') ? 'platform' : 'custom';
+    const sourceLabel =
+      source === 'platform'
+        ? '平台免费证书（ESA 站点证书）'
+        : source === 'custom'
+          ? '由本项目管理上传（ESA 站点证书）'
+          : '未配置证书';
+    return { httpsEnabled: use.length > 0, mode: source === 'platform' ? 'free' : source === 'custom' ? 'cas' : 'disable', source, sourceLabel, certs: use };
   }
 
   async getZoneSetting(_zoneId: string): Promise<false> {

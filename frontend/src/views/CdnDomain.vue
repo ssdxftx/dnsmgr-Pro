@@ -200,6 +200,41 @@
       <n-spin :show="certMgrBusy">
         <div class="link-target">加速域名：<b>{{ certMgrTarget?.name }}</b></div>
 
+        <!-- 云端当前证书 -->
+        <div class="cloud-cert">
+          <div class="cloud-cert-head">
+            <span class="cloud-cert-title">云端当前证书</span>
+            <n-button size="tiny" quaternary :loading="certMgrCloudLoading" @click="refreshCertStatus">刷新云端状态</n-button>
+          </div>
+          <n-spin :show="certMgrCloudLoading">
+            <template v-if="certMgrCloud">
+              <n-alert v-if="!certMgrCloud.supported || certMgrCloud.error" :type="certMgrCloud.supported ? 'warning' : 'default'" :show-icon="true" class="cert-tip">
+                {{ certMgrCloud.error }}
+              </n-alert>
+              <template v-else>
+                <div class="cloud-cert-row">
+                  <n-tag :type="cloudSourceType(certMgrCloud.source)" size="small" :bordered="false">{{ certMgrCloud.sourceLabel }}</n-tag>
+                  <span class="cloud-cert-meta">HTTPS：{{ certMgrCloud.httpsEnabled ? '已启用' : '未启用' }}</span>
+                  <span v-if="certMgrCloud.mode" class="cloud-cert-meta">模式：{{ certMgrCloud.mode }}</span>
+                </div>
+                <div v-if="certMgrCloud.certs && certMgrCloud.certs.length" class="cloud-cert-list">
+                  <div v-for="(c, i) in certMgrCloud.certs" :key="i" class="cloud-cert-item">
+                    <div class="cloud-cert-name">{{ c.name || c.commonName || c.id }}</div>
+                    <div class="cloud-cert-meta">证书 ID：{{ c.id }}</div>
+                    <div v-if="c.commonName" class="cloud-cert-meta">主域名：{{ c.commonName }}</div>
+                    <div v-if="c.san && c.san.length" class="cloud-cert-meta">覆盖域名：{{ c.san.join('、') }}</div>
+                    <div v-if="c.issuer" class="cloud-cert-meta">颁发机构：{{ c.issuer }}</div>
+                    <div v-if="c.notAfter" class="cloud-cert-meta">到期时间：{{ (c.notAfter || '').slice(0, 19).replace('T', ' ') }}</div>
+                  </div>
+                </div>
+                <div v-else class="cloud-cert-meta">云端未返回证书详情</div>
+              </template>
+            </template>
+            <div v-else class="cloud-cert-meta">未获取到云端证书信息</div>
+          </n-spin>
+        </div>
+        <n-alert v-if="certMgrMismatch" type="warning" :show-icon="true" class="cert-tip">本地记录与云端证书不一致，请以云端为准确认证书方式。</n-alert>
+
         <n-form-item label="证书方式" label-placement="left" label-width="90">
           <n-radio-group v-model:value="certMgrMode" @update:value="onCertMgrModeChange">
             <n-space vertical>
@@ -377,6 +412,9 @@ const certMgrChoice = ref('');
 const certMgrError = ref('');
 const certMgrFree = ref<any[]>([]);
 const certMgrApply = ref<any[]>([]);
+const certMgrCloud = ref<any>(null);
+const certMgrCloudLoading = ref(false);
+const certMgrMismatch = ref(false);
 
 // CDN证书部署进度：实时阶段日志
 const linkLogLoading = ref(false);
@@ -418,7 +456,6 @@ function deployStatusText(s: number) {
 // 证书管理：打开弹窗并按所选方式加载对应内容
 async function openCertMgr(row: any) {
   certMgrTarget.value = row;
-  certMgrMode.value = row.cert_mode || '';
   certMgrBusy.value = false;
   certMgrLoading.value = false;
   certMgrCandidates.value = null;
@@ -426,10 +463,53 @@ async function openCertMgr(row: any) {
   certMgrError.value = '';
   certMgrFree.value = [];
   certMgrApply.value = [];
+  certMgrCloud.value = null;
+  certMgrMismatch.value = false;
   linkLog.value = null;
   linkLogDomainId.value = Number(row.id);
+  certMgrMode.value = row.cert_mode || '';
   showCertMgr.value = true;
+  const status = await fetchCertStatus();
+  // 优先按云端真实状态预选证书方式，其次沿用本地记录
+  certMgrMode.value = inferModeFromCloud(status, row) || row.cert_mode || '';
   await onCertMgrModeChange(certMgrMode.value);
+}
+
+// 按云端证书状态推断证书管理方式
+function inferModeFromCloud(data: any, row: any): string {
+  const cloud = data?.cloud;
+  if (!cloud || !cloud.supported || cloud.error) return '';
+  const mode = String(cloud.mode || '');
+  if ((cloud.source === 'platform' || mode.startsWith('eofreecert') || mode === 'free') && row?.can_freecert) return 'freecert';
+  if ((mode === 'sslcert' || mode === 'cas') && row?.can_certlink && data?.linked?.orderId) return 'certlink';
+  if (mode === 'disable' || cloud.source === 'none') return '';
+  return '';
+}
+
+function cloudSourceType(s: string): 'success' | 'info' | 'default' | 'warning' {
+  if (s === 'platform') return 'success';
+  if (s === 'custom') return 'info';
+  if (s === 'none') return 'default';
+  return 'warning';
+}
+
+// 拉取云端证书状态（只读）
+async function fetchCertStatus(): Promise<any | null> {
+  if (!certMgrTarget.value) return null;
+  certMgrCloudLoading.value = true;
+  const res = await api<any>('GET', `/cdn/domains/${certMgrTarget.value.id}/cert_status`);
+  certMgrCloudLoading.value = false;
+  if (res.code !== 0) return null;
+  const data = res.data || {};
+  certMgrCloud.value = data.cloud || null;
+  const inferred = inferModeFromCloud(data, certMgrTarget.value);
+  certMgrMismatch.value = !!(data.cert_mode && inferred && data.cert_mode !== inferred);
+  return data;
+}
+
+async function refreshCertStatus() {
+  const data = await fetchCertStatus();
+  if (data) message.success('已刷新云端证书状态');
 }
 
 async function onCertMgrModeChange(mode: string) {
@@ -537,6 +617,8 @@ function closeCertMgr() {
   stopLinkLogTimer();
   certMgrTarget.value = null;
   certMgrCandidates.value = null;
+  certMgrCloud.value = null;
+  certMgrMismatch.value = false;
   linkLog.value = null;
   linkLogDomainId.value = null;
 }
@@ -1005,6 +1087,47 @@ onUnmounted(() => {
 .cert-divider {
   margin: 16px 0 8px;
   font-size: 13px;
+}
+.cloud-cert {
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #eef0f3;
+  border-radius: 6px;
+  background: #fafbfc;
+}
+.cloud-cert-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.cloud-cert-title {
+  font-size: 13px;
+  font-weight: 600;
+}
+.cloud-cert-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.cloud-cert-list {
+  margin-top: 8px;
+}
+.cloud-cert-item + .cloud-cert-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #f0f1f3;
+}
+.cloud-cert-name {
+  font-weight: 600;
+  word-break: break-all;
+}
+.cloud-cert-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+  word-break: break-all;
 }
 
 @media (max-width: 768px) {
