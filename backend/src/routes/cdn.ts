@@ -16,6 +16,7 @@ import {
   DEFAULT_LE_EMAIL,
 } from '../lib/cdn/certLink.js';
 import { CertDeployService } from '../lib/deployService.js';
+import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
@@ -451,6 +452,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const configuredAid = Number(await configGet('cdn_cert_aid', '0')) || 0;
     const { aid, account, usingDefault } = await resolveCertAccount(configuredAid, { requireWildcard: true });
     const le = usingDefault ? "（默认 Let's Encrypt）" : '';
+    const kicked = new Set<number>();
     const results: any[] = [];
     for (const id of ids) {
       const row = await loadCdnDomain(id);
@@ -481,6 +483,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const deploy: any = await ensureCertDeploy(provider, row, scope, Number(order.id)).catch(() => false);
       const status = Number(order.status);
       if (status !== 3) {
+        // 新建/待处理订单立即在后台开始申请，无需手动点「处理」
+        if (!kicked.has(Number(order.id))) {
+          kicked.add(Number(order.id));
+          kickOrderProcessing(Number(order.id));
+        }
         let message: string;
         if (status < 0) {
           message = `证书订单处理失败：${order.error || '未知错误'}`;
@@ -583,6 +590,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
       return { status: 'applied', message: `已复用已签发证书并部署到 ${row.name}` };
     }
+    kickOrderProcessing(Number(order.id));
     return { status: 'pending', message: `已提交证书签发（仅包含 ${row.name}），签发后将自动部署到 CDN`, order_id: order.id };
   }
 

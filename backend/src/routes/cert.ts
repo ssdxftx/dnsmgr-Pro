@@ -10,6 +10,7 @@ import { certConfig, certClassConfig } from '../lib/cert/factory.js';
 import { getCertProvider } from '../lib/cert/factory.js';
 import { getMainDomain } from '../lib/cert/utils.js';
 import { CertOrderService, buildPfx, STATUS_LABEL } from '../lib/certService.js';
+import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider } from '../lib/deploy/factory.js';
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
@@ -325,7 +326,7 @@ export default async function certRoutes(app: FastifyInstance) {
         privatekey,
       };
     } else {
-      order = { aid, keytype, keysize, addtime: new Date(), issuer: '', status: 0, isauto: 1 };
+      order = { aid, keytype, keysize, addtime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date() };
       domList = (domains || []).map((d: string) => d.trim()).filter(Boolean);
       domList = [...new Set(domList)];
       if (!domList.length) return { code: -1, msg: '绑定域名不能为空' };
@@ -339,6 +340,8 @@ export default async function certRoutes(app: FastifyInstance) {
     for (const domain of domList) {
       await query(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
     }
+    // 待处理订单立即在后台开始申请，无需用户手动点「处理」
+    if (Number(order.status) === 0) kickOrderProcessing(id);
     return { code: 0, msg: '添加证书订单成功！', data: id };
   });
 
