@@ -19,6 +19,14 @@ export interface CdnFieldConfig {
   required?: boolean;
 }
 
+// 接入向导能力：驱动前端分步弹窗的步骤与字段显隐
+export interface CdnAddFlow {
+  zone: { needed: boolean; label: string };
+  serviceArea: { needed: boolean };
+  origin: { protocol: boolean; ports: boolean; host: boolean; hostModes: string[] };
+  cert: string[];
+}
+
 export interface CdnProviderMeta {
   name: string;
   note?: string;
@@ -29,6 +37,8 @@ export interface CdnProviderMeta {
   certapply?: boolean;
   // 支持「与项目联动」：按精确子域名选择/签发证书，确认后自动部署
   certlink?: boolean;
+  // 接入向导能力（在下方按厂商合并生成）
+  addFlow?: CdnAddFlow;
 }
 
 export const cdnConfig: Record<string, CdnProviderMeta> = {
@@ -134,6 +144,42 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
     },
   },
 };
+
+// 接入向导默认能力：多数非站点型厂商需要服务区域，回源三项均支持
+const ADD_FLOW_DEFAULT: CdnAddFlow = {
+  zone: { needed: false, label: '站点' },
+  serviceArea: { needed: true },
+  origin: { protocol: true, ports: true, host: true, hostModes: ['accelerate', 'origin', 'custom'] },
+  cert: [],
+};
+
+// 按厂商覆盖接入向导能力（以各 provider 的 updateOrigin / createDomain 实现为准）
+const ADD_FLOW_OVERRIDES: Record<string, Partial<CdnAddFlow>> = {
+  tencent_edgeone: {
+    zone: { needed: true, label: '站点' },
+    serviceArea: { needed: false },
+    cert: ['freecert', 'certlink'],
+  },
+  aliyun_esa: {
+    zone: { needed: true, label: '站点' },
+    serviceArea: { needed: false },
+    origin: { protocol: false, ports: true, host: true, hostModes: ['accelerate', 'origin', 'custom'] },
+    cert: ['certapply'],
+  },
+  qiniu_cdn: {
+    origin: { protocol: false, ports: false, host: true, hostModes: ['accelerate', 'origin', 'custom'] },
+  },
+};
+
+for (const [type, meta] of Object.entries(cdnConfig)) {
+  const o = ADD_FLOW_OVERRIDES[type] || {};
+  meta.addFlow = {
+    zone: { ...ADD_FLOW_DEFAULT.zone, ...(o.zone || {}) },
+    serviceArea: { ...ADD_FLOW_DEFAULT.serviceArea, ...(o.serviceArea || {}) },
+    origin: { ...ADD_FLOW_DEFAULT.origin, ...(o.origin || {}) },
+    cert: o.cert ?? ADD_FLOW_DEFAULT.cert,
+  };
+}
 
 const providerMap: Record<string, new (config: Record<string, any>) => CdnProvider> = {
   tencent_cdn: TencentCDN,

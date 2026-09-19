@@ -34,23 +34,42 @@
       <n-empty class="list-empty" v-if="!loading && !domains.length" description="暂无 CDN 加速域名" />
     </n-card>
 
-    <!-- 接入域名弹窗 -->
-    <n-modal v-model:show="showAdd" preset="card" title="接入加速域名" style="max-width:600px" :mask-closable="false">
-      <n-form label-placement="left" label-width="110">
+    <!-- 接入域名弹窗（分步向导） -->
+    <n-modal v-model:show="showAdd" preset="card" title="接入加速域名" style="max-width:640px" :mask-closable="false">
+      <n-steps :current="addStep" size="small" class="add-steps">
+        <n-step title="账户与站点" />
+        <n-step title="加速域名" />
+        <n-step title="回源配置" />
+        <n-step title="证书设置" />
+      </n-steps>
+
+      <!-- 步骤1：账户与站点 -->
+      <n-form v-show="addStep === 1" label-placement="left" label-width="110" class="add-form">
         <n-form-item label="CDN 账户">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
         </n-form-item>
-        <n-form-item v-if="isZoneType" label="站点">
-          <n-select v-model:value="form.zone_id" :options="zoneOptions" placeholder="选择站点" />
+        <n-form-item v-if="addFlow.zone.needed" :label="addFlow.zone.label">
+          <n-select v-model:value="form.zone_id" :options="zoneOptions" :placeholder="'选择' + addFlow.zone.label" />
+        </n-form-item>
+        <n-form-item v-if="addFlow.serviceArea.needed" label="服务区域">
+          <n-select v-model:value="form.service_area" :options="serviceAreaOptions" />
+        </n-form-item>
+      </n-form>
+
+      <!-- 步骤2：加速域名 -->
+      <n-form v-show="addStep === 2" label-placement="left" label-width="110" class="add-form">
+        <n-form-item label="加速域名">
+          <n-input v-model:value="form.name" placeholder="如 www.example.com" />
         </n-form-item>
         <n-form-item label="联动域名">
           <n-tag v-if="matchedDomain" type="success" :bordered="false">{{ matchedDomain }}</n-tag>
           <span v-else-if="form.name" class="link-warn">未匹配到已添加的域名，请先在「域名管理」中添加该域名</span>
           <span v-else class="link-hint">填写加速域名后自动匹配</span>
         </n-form-item>
-        <n-form-item label="加速域名">
-          <n-input v-model:value="form.name" placeholder="如 www.example.com" />
-        </n-form-item>
+      </n-form>
+
+      <!-- 步骤3：回源配置 -->
+      <n-form v-show="addStep === 3" label-placement="left" label-width="110" class="add-form">
         <n-form-item label="源站地址">
           <n-input v-model:value="form.origin" placeholder="IP 或域名" />
         </n-form-item>
@@ -60,23 +79,66 @@
             <n-radio value="domain">域名源站</n-radio>
           </n-radio-group>
         </n-form-item>
-        <n-form-item v-if="showCertMode" label="证书配置">
+        <n-form-item v-if="addFlow.origin.protocol" label="回源协议">
+          <n-radio-group v-model:value="form.origin_protocol">
+            <n-radio value="follow">协议跟随</n-radio>
+            <n-radio value="http">HTTP</n-radio>
+            <n-radio value="https">HTTPS</n-radio>
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item v-if="addFlow.origin.ports" label="回源端口">
+          <n-space align="center">
+            <span class="port-label">HTTP</span>
+            <n-input-number v-model:value="form.http_port" :min="1" :max="65535" style="width:110px" placeholder="80" />
+            <span class="port-label">HTTPS</span>
+            <n-input-number v-model:value="form.https_port" :min="1" :max="65535" style="width:110px" placeholder="443" />
+          </n-space>
+        </n-form-item>
+        <n-form-item v-if="addFlow.origin.host" label="回源 HOST">
+          <n-space vertical style="width:100%">
+            <n-radio-group v-model:value="form.origin_host_mode">
+              <n-space :wrap="true">
+                <n-radio value="accelerate">使用加速域名</n-radio>
+                <n-radio value="origin">使用源站域名</n-radio>
+                <n-radio value="custom">自定义</n-radio>
+              </n-space>
+            </n-radio-group>
+            <n-input v-if="form.origin_host_mode === 'custom'" v-model:value="form.origin_host_custom" placeholder="请输入回源 HOST" />
+          </n-space>
+        </n-form-item>
+      </n-form>
+
+      <!-- 步骤4：证书设置 -->
+      <div v-show="addStep === 4" class="add-form">
+        <n-form-item v-if="certModeOptions.length > 1" label="证书设置" label-placement="left" label-width="110">
           <n-radio-group v-model:value="form.cert_mode">
-            <n-space :wrap="true">
+            <n-space vertical>
               <n-radio v-for="o in certModeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio>
             </n-space>
           </n-radio-group>
-          <template #feedback>
-            <div class="cert-hint">
-              平台免费证书由 CDN 厂商直接签发部署；项目申请证书会按站点申请通配符证书（需先在「自动续签设置」中指定证书申请账户），并创建自动部署任务，签发后自动上传绑定，后续续签自动更新。
-            </div>
-          </template>
         </n-form-item>
-      </n-form>
+        <n-alert v-else type="info" :show-icon="true" class="cert-tip">该 CDN 账户接入时暂不需要配置证书，可接入后在「证书管理」中设置。</n-alert>
+
+        <template v-if="form.cert_mode === 'certlink'">
+          <n-alert type="info" :show-icon="true" class="cert-tip">已选择「由本项目管理」，请先选择证书来源（精确匹配证书 / 证书提供商 / 默认 Let's Encrypt）。</n-alert>
+          <n-space align="center" class="cert-tip">
+            <n-button size="small" @click="pickCertSource">选择证书来源</n-button>
+            <span class="link-meta">{{ form.cert_choice_label || '未选择' }}</span>
+          </n-space>
+        </template>
+        <n-alert v-else-if="form.cert_mode === 'freecert'" type="info" :show-icon="true" class="cert-tip">平台免费证书由 CDN 厂商直接签发并部署到加速域名。</n-alert>
+        <n-alert v-else-if="form.cert_mode === 'certapply'" type="info" :show-icon="true" class="cert-tip">按站点申请一张通配符证书，签发后自动上传绑定，后续续签自动更新。</n-alert>
+      </div>
+
       <template #footer>
-        <n-space justify="end">
-          <n-button @click="showAdd = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="doAdd">{{ form.cert_mode === 'certlink' ? '下一步' : '提交接入' }}</n-button>
+        <n-space justify="space-between" class="cert-actions" style="width:100%">
+          <n-button v-if="addStep > 1" @click="addStep--">上一步</n-button>
+          <span v-else />
+          <n-space>
+            <n-button @click="showAdd = false">取消</n-button>
+            <n-button v-if="addStep < 4" type="primary" @click="nextAddStep">下一步</n-button>
+            <n-button v-else type="primary" :loading="saving" @click="submitAdd">提交接入</n-button>
+          </n-space>
         </n-space>
       </template>
     </n-modal>
@@ -132,8 +194,8 @@
       </template>
     </n-modal>
 
-    <!-- 与项目联动：证书选择弹窗 -->
-    <n-modal v-model:show="showLink" preset="card" title="由本项目管理 · 选择证书" style="max-width: 680px">
+    <!-- 由本项目管理：证书选择弹窗（选择器） -->
+    <n-modal v-model:show="showLink" preset="card" title="由本项目管理 · 选择证书" style="max-width: 680px" @after-leave="onLinkAfterLeave">
       <n-spin :show="linkLoading">
         <div v-if="linkTarget" class="link-target">目标域名：<b>{{ linkTarget.name }}</b></div>
 
@@ -187,10 +249,8 @@
 
       <template #footer>
         <n-space justify="end" class="cert-actions">
-          <n-button @click="showLink = false">取消</n-button>
-          <n-button type="primary" :loading="linkSubmitting" :disabled="!linkCanConfirm" @click="confirmLink">
-            {{ linkTarget?.id ? '确认并部署' : '确认并接入' }}
-          </n-button>
+          <n-button @click="finishLink(null)">取消</n-button>
+          <n-button type="primary" :disabled="!linkCanConfirm" @click="confirmLink">选择</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -371,11 +431,16 @@ const loading = ref(false);
 const domains = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
-const providerCaps = ref<Record<string, { freecert?: boolean; certapply?: boolean; certlink?: boolean }>>({});
+const providerCaps = ref<Record<string, any>>({});
 const dnsDomains = ref<any[]>([]);
 const dnsDomainOptions = computed(() => dnsDomains.value.map((d: any) => ({ label: d.name, value: d.id })));
 const matchedDomain = ref('');
 const zoneOptions = ref<any[]>([]);
+const serviceAreaOptions = [
+  { label: '中国大陆', value: 'mainland_china' },
+  { label: '中国大陆以外', value: 'overseas' },
+  { label: '全球', value: 'global' },
+];
 
 const showAdd = ref(false);
 const showSync = ref(false);
@@ -383,7 +448,24 @@ const saving = ref(false);
 const syncing = ref(false);
 const syncAid = ref<number | null>(null);
 const syncDid = ref<number>(0);
-const form = reactive<any>({ aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr', cert_mode: 'none' });
+const addStep = ref(1);
+const form = reactive<any>({
+  aid: null,
+  did: null,
+  zone_id: null,
+  service_area: 'mainland_china',
+  name: '',
+  origin: '',
+  origin_type: 'ipaddr',
+  origin_protocol: 'follow',
+  http_port: 80,
+  https_port: 443,
+  origin_host_mode: 'origin',
+  origin_host_custom: '',
+  cert_mode: 'none',
+  cert_choice: '',
+  cert_choice_label: '',
+});
 
 const checkedIds = ref<number[]>([]);
 const showCert = ref(false);
@@ -392,14 +474,14 @@ const certRunning = ref(false);
 const certResults = ref<any[]>([]);
 const certSummary = ref('');
 
-// 与项目联动：证书选择弹窗
+// 由本项目管理：证书选择弹窗（作为选择器返回所选项）
 const showLink = ref(false);
 const linkLoading = ref(false);
-const linkSubmitting = ref(false);
 const linkCandidates = ref<any>(null);
 const linkChoice = ref('');
 const linkError = ref('');
 const linkTarget = ref<{ id?: number; name: string } | null>(null);
+let linkResolve: ((v: string | null) => void) | null = null;
 
 // 证书管理：统一设置证书方式、申请/部署与进度
 const showCertMgr = ref(false);
@@ -672,7 +754,18 @@ function statusType(status: string): 'success' | 'warning' | 'error' {
   return 'error';
 }
 
-const isZoneType = computed(() => accountTypes.value[form.aid] === 'tencent_edgeone' || accountTypes.value[form.aid] === 'aliyun_esa');
+// 当前账户厂商的接入向导能力（步骤与字段显隐）
+const addFlow = computed<any>(() => {
+  const caps = providerCaps.value[accountTypes.value[form.aid]] || {};
+  return (
+    caps.addFlow || {
+      zone: { needed: false, label: '站点' },
+      serviceArea: { needed: false },
+      origin: { protocol: true, ports: true, host: true, hostModes: [] },
+      cert: [],
+    }
+  );
+});
 
 // 按所选账户类型的厂商能力，动态给出证书配置选项
 const certModeOptions = computed(() => {
@@ -683,7 +776,6 @@ const certModeOptions = computed(() => {
   if (caps.certlink) opts.push({ label: '由本项目管理', value: 'certlink' });
   return opts;
 });
-const showCertMode = computed(() => certModeOptions.value.length > 1);
 const linkCanConfirm = computed(() => !!linkChoice.value && !!linkCandidates.value);
 
 const columns: any[] = [
@@ -803,31 +895,89 @@ function goZones() {
 }
 
 function openAdd() {
-  Object.assign(form, { aid: null, did: null, zone_id: null, name: '', origin: '', origin_type: 'ipaddr', cert_mode: 'none' });
+  Object.assign(form, {
+    aid: null,
+    did: null,
+    zone_id: null,
+    service_area: 'mainland_china',
+    name: '',
+    origin: '',
+    origin_type: 'ipaddr',
+    origin_protocol: 'follow',
+    http_port: 80,
+    https_port: 443,
+    origin_host_mode: 'origin',
+    origin_host_custom: '',
+    cert_mode: 'none',
+    cert_choice: '',
+    cert_choice_label: '',
+  });
+  matchedDomain.value = '';
   zoneOptions.value = [];
+  addStep.value = 1;
   showAdd.value = true;
 }
 
-async function doAdd() {
-  if (!form.aid || !form.name || !form.origin) return message.warning('请填写完整的账户、加速域名和源站');
-  if (!form.did) return message.warning('未匹配到联动域名，请确认加速域名属于已在「域名管理」中添加的域名');
-  if (isZoneType.value && !form.zone_id) return message.warning('请选择站点');
-  // 与项目联动：先弹出证书选择弹窗，确认后再创建域名
-  if (form.cert_mode === 'certlink') {
-    await openLinkDialog({ name: form.name });
-    return;
+function nextAddStep() {
+  if (addStep.value === 1) {
+    if (!form.aid) return message.warning('请选择 CDN 账户');
+    if (addFlow.value.zone.needed && !form.zone_id) return message.warning('请选择' + addFlow.value.zone.label);
+    if (addFlow.value.serviceArea.needed && !form.service_area) return message.warning('请选择服务区域');
+  } else if (addStep.value === 2) {
+    if (!form.name) return message.warning('请输入加速域名');
+    if (!form.did) return message.warning('未匹配到联动域名，请确认加速域名属于已在「域名管理」中添加的域名');
+  } else if (addStep.value === 3) {
+    if (!form.origin) return message.warning('请输入源站地址');
+    if (addFlow.value.origin.host && form.origin_host_mode === 'custom' && !form.origin_host_custom) return message.warning('请输入回源 HOST');
   }
-  await submitDomain({});
+  addStep.value++;
 }
 
-async function submitDomain(extra: Record<string, any>) {
+function certChoiceLabel(choice: string): string {
+  if (choice === 'default') return "默认 Let's Encrypt";
+  if (choice.startsWith('order:')) return `证书 #${choice.slice(6)}`;
+  return `证书提供商 #${choice.slice(4)}`;
+}
+
+async function pickCertSource() {
+  if (!form.name) return message.warning('请先填写加速域名');
+  const choice = await openLinkDialog({ name: form.name });
+  if (!choice) return;
+  form.cert_choice = choice;
+  form.cert_choice_label = certChoiceLabel(choice);
+}
+
+async function submitAdd() {
+  if (form.cert_mode === 'certlink' && !form.cert_choice) return message.warning('请选择证书来源');
+  const host = form.origin_host_mode === 'accelerate' ? form.name : form.origin_host_mode === 'custom' ? form.origin_host_custom : '';
+  const payload: Record<string, any> = {
+    aid: form.aid,
+    did: form.did,
+    zone_id: form.zone_id,
+    service_area: form.service_area,
+    name: form.name,
+    origin: form.origin,
+    origin_type: form.origin_type,
+    origin_protocol: form.origin_protocol,
+    http_port: form.http_port,
+    https_port: form.https_port,
+    origin_host: host,
+    cert_mode: form.cert_mode,
+  };
+  if (form.cert_mode === 'certlink') Object.assign(payload, choiceExtra(form.cert_choice));
   saving.value = true;
-  const res = await api('POST', '/cdn/domains', { ...form, ...extra });
+  const res = await api<any>('POST', '/cdn/domains', payload);
   saving.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showAdd.value = false;
     loadDomains();
+    // 由本项目管理：新签发证书需要时间，打开证书管理实时查看执行阶段
+    const cert = res.data?.cert;
+    const domainId = Number(res.data?.id || 0);
+    if (domainId && form.cert_mode === 'certlink' && cert?.status !== 'applied') {
+      openCertMgr({ id: domainId, name: form.name, can_certlink: 1, cert_mode: 'certlink' });
+    }
   } else message.error(res.msg);
 }
 
@@ -843,8 +993,8 @@ function choiceExtra(choice: string): Record<string, any> {
   return { cert_aid: Number(choice.slice(4)) };
 }
 
-// 与项目联动：加载证书候选（精确匹配证书 / 可用提供商 / 默认 LE）
-async function openLinkDialog(target: { id?: number; name: string }) {
+// 由本项目管理：加载证书候选并作为选择器返回所选项（精确匹配证书 / 可用提供商 / 默认 LE）
+async function openLinkDialog(target: { id?: number; name: string }): Promise<string | null> {
   linkTarget.value = target;
   linkCandidates.value = null;
   linkChoice.value = '';
@@ -855,38 +1005,36 @@ async function openLinkDialog(target: { id?: number; name: string }) {
   linkLoading.value = false;
   if (res.code !== 0) {
     linkError.value = res.msg || '获取证书候选失败';
-    return;
+  } else {
+    const d = res.data || {};
+    linkCandidates.value = d;
+    if (d.exact && d.exact.length) linkChoice.value = `order:${d.exact[0].oid}`;
+    else if (d.defaultLe) linkChoice.value = 'default';
   }
-  const d = res.data || {};
-  linkCandidates.value = d;
-  if (d.exact && d.exact.length) linkChoice.value = `order:${d.exact[0].oid}`;
-  else if (d.providers && d.providers.length) linkChoice.value = '';
-  else if (d.defaultLe) linkChoice.value = 'default';
+  return new Promise((resolve) => {
+    linkResolve = resolve;
+  });
 }
 
-async function confirmLink() {
-  if (!linkChoice.value) return message.warning('请选择证书或证书提供商');
-  const t = linkTarget.value;
-  if (!t) return;
-  const extra = choiceExtra(linkChoice.value);
-  linkSubmitting.value = true;
-  linkError.value = '';
-  const url = t.id ? `/cdn/domains/${t.id}/certlink` : '/cdn/domains';
-  const res = await api<any>('POST', url, t.id ? extra : { ...form, ...extra });
-  linkSubmitting.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showLink.value = false;
-    if (!t.id) showAdd.value = false;
-    loadDomains();
-    // 新签发证书需要时间，打开证书管理让用户实时看到执行阶段
-    const cert = t.id ? res.data : res.data?.cert;
-    const domainId = t.id ? Number(t.id) : Number(res.data?.id || 0);
-    if (domainId && cert?.status !== 'applied') openCertMgr({ id: domainId, name: t.name, can_certlink: 1, cert_mode: 'certlink' });
-  } else {
-    // 不关闭弹窗，便于重试或更换证书提供商
-    linkError.value = res.msg || '操作失败，请重试或更换证书提供商';
+function finishLink(choice: string | null) {
+  showLink.value = false;
+  if (linkResolve) {
+    linkResolve(choice);
+    linkResolve = null;
   }
+}
+
+// 弹窗被遮罩/关闭按钮关掉时，按取消处理，避免向导一直等待
+function onLinkAfterLeave() {
+  if (linkResolve) {
+    linkResolve(null);
+    linkResolve = null;
+  }
+}
+
+function confirmLink() {
+  if (!linkChoice.value) return message.warning('请选择证书或证书提供商');
+  finishLink(linkChoice.value);
 }
 
 async function doSync() {
@@ -1157,6 +1305,16 @@ onUnmounted(() => {
   font-size: 12px;
   color: #6b7280;
   word-break: break-all;
+}
+.add-steps {
+  margin-bottom: 18px;
+}
+.add-form {
+  min-height: 200px;
+}
+.port-label {
+  font-size: 13px;
+  color: #6b7280;
 }
 
 @media (max-width: 768px) {
