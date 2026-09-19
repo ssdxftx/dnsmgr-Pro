@@ -689,6 +689,41 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: mode ? '证书管理方式已更新' : '已停用证书管理（不影响当前已部署证书）' };
   });
 
+  // 证书管理 - 云端状态：查询该加速域名在 CDN 云端的当前证书配置，并附本项目联动摘要
+  app.get('/api/cdn/domains/:id/cert_status', auth, async (req: any) => {
+    const { id } = req.params as any;
+    const row = await loadCdnDomain(id);
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const did = Number(id);
+    const provider: any = await cdnForRow(row);
+    let cloud: any;
+    if (!provider || typeof provider.getDomainCertInfo !== 'function') {
+      cloud = { supported: false, error: '该厂商暂不支持云端证书查询' };
+    } else {
+      try {
+        const info = await provider.getDomainCertInfo(row.name);
+        cloud = info
+          ? { supported: true, ...info }
+          : { supported: true, error: '未能获取云端证书信息（站点或域名不存在）' };
+      } catch (e: any) {
+        cloud = { supported: true, error: '查询云端证书失败：' + (e?.message || String(e)) };
+      }
+    }
+    const order = await findLinkedOrder(did);
+    let linked: any = null;
+    if (order) {
+      const ds = await query(`SELECT id, status, active FROM ${table('cert_deploy')} WHERE oid = ? ORDER BY id DESC LIMIT 1`, [order.id]);
+      linked = {
+        orderId: Number(order.id),
+        orderStatus: Number(order.status),
+        deployId: ds[0] ? Number(ds[0].id) : null,
+        deployStatus: ds[0] ? Number(ds[0].status) : null,
+        deployActive: ds[0] ? Number(ds[0].active) : null,
+      };
+    }
+    return { code: 0, data: { name: row.name, cert_mode: row.cert_mode || '', cloud, linked } };
+  });
+
   // 与项目联动 - 实时进度日志：返回各阶段日志与当前订单/部署任务状态，供前端轮询
   app.get('/api/cdn/domains/:id/certlink/log', auth, async (req: any) => {
     const { id } = req.params as any;
