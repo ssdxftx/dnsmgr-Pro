@@ -161,9 +161,20 @@ export default async function cdnRoutes(app: FastifyInstance) {
         .filter((a: any) => cdnConfig[a.type]?.certlink)
         .map((a: any) => a.id),
     );
+    // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
+    const linkedDids = new Set<number>();
+    for (const o of await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%cdnDomainId%'])) {
+      try {
+        const did = Number(JSON.parse((o as any).link)?.cdnDomainId);
+        if (did) linkedDids.add(did);
+      } catch {
+        // link 非 JSON 时忽略
+      }
+    }
     const data = rows.map((r: any) => ({
       ...r,
       routename: typeNames[r.route] || r.route,
+      cert_mode: r.cert_mode || (linkedDids.has(Number(r.id)) ? 'certlink' : ''),
       can_freecert: freeAids.has(r.aid) ? 1 : 0,
       can_certapply: certAids.has(r.aid) ? 1 : 0,
       can_certlink: linkAids.has(r.aid) ? 1 : 0,
@@ -273,9 +284,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     } else dnsError = 'DNS账户不存在';
 
     const insertRes: any = await query(
-      `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, service_area, cname, dns_record, status, addtime)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', NOW())`,
-      [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', service_area || 'mainland_china', cname, dnsRecord],
+      `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, service_area, cname, dns_record, status, cert_mode, addtime)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
+      [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
     );
     const newId = Number(insertRes?.insertId || 0);
 
@@ -438,6 +449,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要配置免费证书的加速域名' };
     const data = await runFreeCert(ids, false);
+    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'freecert');
     return { code: 0, msg: summarizeResults(data, '待验证'), data };
   });
 
@@ -446,6 +458,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runFreeCert(ids, true);
+    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'freecert');
     return { code: 0, msg: summarizeResults(data, '待验证'), data };
   });
 
@@ -532,6 +545,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要申请证书的加速域名' };
     const data = await runCertLink(ids, false);
+    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply');
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
@@ -540,6 +554,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runCertLink(ids, true);
+    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply');
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
@@ -637,6 +652,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider: any = await cdnForRow(row);
     const { cert_order_id, cert_aid, cert_use_default } = req.body || {};
     const r = await applyCertLink(Number(id), provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
+    if (r.status !== 'failed') await setCertMode(Number(id), 'certlink');
     return { code: r.status === 'failed' ? -1 : 0, msg: r.message, data: { ...r, domain_id: Number(id) } };
   });
 
@@ -652,6 +668,26 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
     return null;
   }
+
+  // 记录/切换证书管理方式：切换离开「由本项目管理」时停用其联动部署任务，切回时重新启用
+  async function setCertMode(did: number, mode: string): Promise<void> {
+    const normalized = ['freecert', 'certapply', 'certlink'].includes(mode) ? mode : null;
+    await query(`UPDATE ${table('cdn_domain')} SET cert_mode = ? WHERE id = ?`, [normalized, did]);
+    const linked = await findLinkedOrder(did);
+    if (!linked) return;
+    await query(`UPDATE ${table('cert_deploy')} SET active = ? WHERE oid = ?`, [normalized === 'certlink' ? 1 : 0, linked.id]);
+  }
+
+  // 显式设置证书管理方式（用于切换为「不使用证书」或已完成的切换）
+  app.post('/api/cdn/domains/:id/cert_mode', auth, async (req: any) => {
+    const { id } = req.params as any;
+    const row = await loadCdnDomain(id);
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const mode = String(req.body?.mode || '');
+    if (!['', 'freecert', 'certapply', 'certlink'].includes(mode)) return { code: -1, msg: '不支持的证书管理方式' };
+    await setCertMode(Number(id), mode);
+    return { code: 0, msg: mode ? '证书管理方式已更新' : '已停用证书管理（不影响当前已部署证书）' };
+  });
 
   // 与项目联动 - 实时进度日志：返回各阶段日志与当前订单/部署任务状态，供前端轮询
   app.get('/api/cdn/domains/:id/certlink/log', auth, async (req: any) => {

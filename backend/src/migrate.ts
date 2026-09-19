@@ -96,6 +96,9 @@ export async function migrate(): Promise<void> {
   // 证书联动：签发成功后按 link 记录自动创建 CDN 部署任务
   await ensureColumn('cert_order', 'link', 'text DEFAULT NULL');
 
+  // CDN 加速域名的证书管理方式：freecert（平台免费证书）/ certlink（由本项目管理）/ certapply（项目申请证书）
+  await ensureColumn('cdn_domain', 'cert_mode', 'varchar(20) DEFAULT NULL');
+
   // 证书联动执行阶段日志：让前端实时看到「订单 -> 签发 -> 部署账户 -> 部署任务 -> 部署」进度
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('cert_link_log')} (
