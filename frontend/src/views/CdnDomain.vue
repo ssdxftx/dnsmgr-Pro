@@ -6,10 +6,10 @@
           <span class="title">CDN 域名</span>
           <n-space>
             <n-button v-if="canFreeCert" type="primary" secondary :disabled="!checkedIds.length" @click="openFreeCert(checkedIds)">
-              配置免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+              平台免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
             </n-button>
             <n-button v-if="canCertApply" type="primary" secondary :disabled="!checkedIds.length" @click="openCertLink(checkedIds)">
-              申请证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+              项目申请证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
             </n-button>
             <n-button @click="goZones">站点设置</n-button>
             <n-button type="primary" @click="openAdd">
@@ -100,7 +100,7 @@
     </n-modal>
 
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
-    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '证书申请' : '平台免费证书'" style="max-width:680px">
+    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '项目申请证书' : '平台免费证书'" style="max-width:680px">
       <n-spin :show="certRunning">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
           按站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发，并创建自动部署任务；签发后自动上传到 CDN 并启用 HTTPS，后续续签自动更新。也可点击「检查并部署」立即处理。
@@ -133,7 +133,7 @@
     </n-modal>
 
     <!-- 与项目联动：证书选择弹窗 -->
-    <n-modal v-model:show="showLink" preset="card" title="与项目联动 · 选择证书" style="max-width: 680px">
+    <n-modal v-model:show="showLink" preset="card" title="由本项目管理 · 选择证书" style="max-width: 680px">
       <n-spin :show="linkLoading">
         <div v-if="linkTarget" class="link-target">目标域名：<b>{{ linkTarget.name }}</b></div>
 
@@ -195,31 +195,129 @@
       </template>
     </n-modal>
 
-    <!-- 与项目联动：实时进度日志 -->
-    <n-modal v-model:show="showLinkLog" preset="card" title="证书联动进度" style="max-width: 720px" @after-leave="closeLinkLog">
-      <n-spin :show="linkLogLoading">
-        <div class="link-target">目标域名：<b>{{ linkLogName }}</b></div>
-        <n-alert v-if="linkLogState.summary" :type="linkLogState.type" :show-icon="true" class="cert-tip">{{ linkLogState.summary }}</n-alert>
-        <div v-if="linkLog?.order" class="link-meta">
-          证书订单 #{{ linkLog.order.id }}：{{ orderStatusText(linkLog.order.status) }}
-          <span v-if="linkLog.order.domains && linkLog.order.domains.length">（{{ linkLog.order.domains.join('、') }}）</span>
-        </div>
-        <div v-if="linkLog?.deploy" class="link-meta">自动部署任务 #{{ linkLog.deploy.id }}：{{ deployStatusText(linkLog.deploy.status) }}</div>
-        <div class="link-log-list" v-if="linkLog && linkLog.logs && linkLog.logs.length">
-          <div v-for="(l, i) in linkLog.logs" :key="i" class="link-log-item">
-            <n-tag :type="logStatusType(l.status)" size="tiny" :bordered="false">{{ logStatusText(l.status) }}</n-tag>
-            <span class="link-log-node">{{ nodeText(l.node) }}</span>
-            <span class="link-log-msg">{{ l.message }}</span>
-            <span class="link-log-time">{{ (l.addtime || '').slice(5, 19) }}</span>
+    <!-- 证书管理：统一设置证书方式、申请/部署与进度 -->
+    <n-modal v-model:show="showCertMgr" preset="card" title="证书管理" style="max-width: 760px" :mask-closable="false" @after-leave="closeCertMgr">
+      <n-spin :show="certMgrBusy">
+        <div class="link-target">加速域名：<b>{{ certMgrTarget?.name }}</b></div>
+
+        <n-form-item label="证书方式" label-placement="left" label-width="90">
+          <n-radio-group v-model:value="certMgrMode" @update:value="onCertMgrModeChange">
+            <n-space vertical>
+              <n-radio value="">不使用证书（停用自动部署）</n-radio>
+              <n-radio v-if="certMgrTarget?.can_freecert" value="freecert">平台免费证书</n-radio>
+              <n-radio v-if="certMgrTarget?.can_certlink" value="certlink">由本项目管理</n-radio>
+              <n-radio v-if="certMgrTarget?.can_certapply" value="certapply">项目申请证书上传绑定</n-radio>
+            </n-space>
+          </n-radio-group>
+        </n-form-item>
+
+        <!-- 平台免费证书 -->
+        <template v-if="certMgrMode === 'freecert'">
+          <n-alert type="info" :show-icon="true" class="cert-tip">
+            腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。
+          </n-alert>
+          <n-list v-if="certMgrFree.length" bordered class="cert-list">
+            <n-list-item v-for="r in certMgrFree" :key="r.id">
+              <div class="cert-head">
+                <span class="cert-name">{{ r.name || certMgrTarget?.name }}</span>
+                <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
+              </div>
+              <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
+              <div v-if="r.records && r.records.length" class="cert-records">
+                <div v-for="(rec, i) in r.records" :key="i" class="cert-record">{{ rec.name }} {{ rec.type }} → {{ rec.value }}</div>
+              </div>
+            </n-list-item>
+          </n-list>
+        </template>
+
+        <!-- 由本项目管理 -->
+        <template v-else-if="certMgrMode === 'certlink'">
+          <n-spin :show="certMgrLoading">
+            <template v-if="certMgrCandidates">
+              <template v-if="certMgrCandidates.exact && certMgrCandidates.exact.length">
+                <n-alert type="success" :show-icon="true" class="cert-tip">已找到与目标子域名精确匹配的证书，将直接复用绑定，不再重新签发。</n-alert>
+                <n-radio-group v-model:value="certMgrChoice" class="link-group">
+                  <n-space vertical>
+                    <n-radio v-for="c in certMgrCandidates.exact" :key="'o' + c.oid" :value="'order:' + c.oid">
+                      <div class="link-cert">
+                        <div class="link-name">{{ c.name }}（证书 #{{ c.oid }}）</div>
+                        <div class="link-meta">颁发机构：{{ c.issuer || '未知' }} · 到期时间：{{ (c.expiretime || '').slice(0, 10) }}</div>
+                        <div class="link-meta">绑定域名：{{ (c.domains || []).join('、') }}</div>
+                      </div>
+                    </n-radio>
+                  </n-space>
+                </n-radio-group>
+              </template>
+              <template v-else>
+                <template v-if="certMgrCandidates.providers && certMgrCandidates.providers.length">
+                  <n-alert type="info" :show-icon="true" class="cert-tip">未找到精确匹配证书，请选择证书提供商自动签发（仅包含目标子域名 {{ certMgrTarget?.name }}）。</n-alert>
+                  <n-radio-group v-model:value="certMgrChoice" class="link-group">
+                    <n-space vertical>
+                      <n-radio v-for="p in certMgrCandidates.providers" :key="'a' + p.aid" :value="'aid:' + p.aid">{{ p.typename }}（{{ p.name }}）</n-radio>
+                    </n-space>
+                  </n-radio-group>
+                </template>
+                <template v-else-if="certMgrCandidates.defaultLe">
+                  <n-alert type="warning" :show-icon="true" class="cert-tip">当前没有可用的证书提供商，将自动使用默认 Let's Encrypt（{{ certMgrCandidates.defaultLe.email }}）签发精确子域名证书。</n-alert>
+                  <n-radio-group v-model:value="certMgrChoice" class="link-group">
+                    <n-space vertical>
+                      <n-radio value="default">{{ certMgrCandidates.defaultLe.typename }}（{{ certMgrCandidates.defaultLe.email }}）</n-radio>
+                    </n-space>
+                  </n-radio-group>
+                </template>
+              </template>
+            </template>
+          </n-spin>
+          <n-alert v-if="certMgrError" type="error" :show-icon="true" class="cert-tip">{{ certMgrError }}</n-alert>
+
+          <n-divider class="cert-divider">CDN证书部署进度</n-divider>
+          <n-alert v-if="linkLogState.summary" :type="linkLogState.type" :show-icon="true" class="cert-tip">{{ linkLogState.summary }}</n-alert>
+          <div v-if="linkLog?.order" class="link-meta">
+            证书订单 #{{ linkLog.order.id }}：{{ orderStatusText(linkLog.order.status) }}
+            <span v-if="linkLog.order.domains && linkLog.order.domains.length">（{{ linkLog.order.domains.join('、') }}）</span>
           </div>
-        </div>
-        <n-empty v-else size="small" description="暂无执行日志" />
+          <div v-if="linkLog?.deploy" class="link-meta">自动部署任务 #{{ linkLog.deploy.id }}：{{ deployStatusText(linkLog.deploy.status) }}</div>
+          <div class="link-log-list" v-if="linkLog && linkLog.logs && linkLog.logs.length">
+            <div v-for="(l, i) in linkLog.logs" :key="i" class="link-log-item">
+              <n-tag :type="logStatusType(l.status)" size="tiny" :bordered="false">{{ logStatusText(l.status) }}</n-tag>
+              <span class="link-log-node">{{ nodeText(l.node) }}</span>
+              <span class="link-log-msg">{{ l.message }}</span>
+              <span class="link-log-time">{{ (l.addtime || '').slice(5, 19) }}</span>
+            </div>
+          </div>
+          <n-empty v-else size="small" description="暂无执行日志" />
+        </template>
+
+        <!-- 项目申请证书上传绑定 -->
+        <template v-else-if="certMgrMode === 'certapply'">
+          <n-alert type="info" :show-icon="true" class="cert-tip">
+            按站点申请一张通配符证书（*.站点根域 + 站点根域），申请账户在「自动续签设置」中配置；签发后自动上传绑定，后续续签自动更新。
+          </n-alert>
+          <n-list v-if="certMgrApply.length" bordered class="cert-list">
+            <n-list-item v-for="r in certMgrApply" :key="r.id">
+              <div class="cert-head">
+                <span class="cert-name">{{ r.name || certMgrTarget?.name }}</span>
+                <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
+              </div>
+              <div v-if="r.domains && r.domains.length" class="cert-scope">证书覆盖：{{ r.domains.join('、') }}</div>
+              <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
+            </n-list-item>
+          </n-list>
+        </template>
+
+        <n-alert v-else type="warning" :show-icon="true" class="cert-tip">不使用证书：仅停用「由本项目管理」的自动部署任务，不影响已部署到 CDN 的证书。</n-alert>
       </n-spin>
+
       <template #footer>
         <n-space justify="end" class="cert-actions">
-          <n-button :loading="linkLogLoading" @click="fetchLinkLog">刷新</n-button>
-          <n-button type="primary" :loading="linkLogRetrying" @click="retryLink">立即检查并部署</n-button>
-          <n-button @click="showLinkLog = false">关闭</n-button>
+          <n-button v-if="certMgrHasPendingFree" :loading="certMgrBusy" @click="checkFreeCertMgr">检查并部署</n-button>
+          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" :loading="linkLogLoading" @click="loadCertMgrLog">刷新进度</n-button>
+          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" type="primary" secondary :loading="linkLogRetrying" @click="retryLink">立即检查并部署</n-button>
+          <n-button @click="showCertMgr = false">关闭</n-button>
+          <n-button v-if="certMgrMode === 'freecert'" type="primary" :loading="certMgrBusy" @click="applyFreeCertMgr">申请并部署</n-button>
+          <n-button v-if="certMgrMode === 'certapply'" type="primary" :loading="certMgrBusy" @click="applyCertApplyMgr">申请并部署</n-button>
+          <n-button v-if="certMgrMode === 'certlink'" type="primary" :loading="certMgrBusy" :disabled="!certMgrChoice" @click="applyLinkMgr">确认并部署</n-button>
+          <n-button v-if="certMgrMode === ''" type="primary" :loading="certMgrBusy" @click="applyNoneMgr">保存</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -268,13 +366,23 @@ const linkChoice = ref('');
 const linkError = ref('');
 const linkTarget = ref<{ id?: number; name: string } | null>(null);
 
-// 与项目联动：实时进度日志
-const showLinkLog = ref(false);
+// 证书管理：统一设置证书方式、申请/部署与进度
+const showCertMgr = ref(false);
+const certMgrTarget = ref<any>(null);
+const certMgrMode = ref('');
+const certMgrBusy = ref(false);
+const certMgrLoading = ref(false);
+const certMgrCandidates = ref<any>(null);
+const certMgrChoice = ref('');
+const certMgrError = ref('');
+const certMgrFree = ref<any[]>([]);
+const certMgrApply = ref<any[]>([]);
+
+// CDN证书部署进度：实时阶段日志
 const linkLogLoading = ref(false);
 const linkLogRetrying = ref(false);
 const linkLog = ref<any>(null);
 const linkLogDomainId = ref<number | null>(null);
-const linkLogName = ref('');
 let linkLogTimer: any = null;
 
 const linkLogState = computed(() => {
@@ -307,13 +415,130 @@ function deployStatusText(s: number) {
   return '等待部署';
 }
 
-async function openLinkLog(domainId: number, name: string) {
-  linkLogDomainId.value = Number(domainId);
-  linkLogName.value = name;
+// 证书管理：打开弹窗并按所选方式加载对应内容
+async function openCertMgr(row: any) {
+  certMgrTarget.value = row;
+  certMgrMode.value = row.cert_mode || '';
+  certMgrBusy.value = false;
+  certMgrLoading.value = false;
+  certMgrCandidates.value = null;
+  certMgrChoice.value = '';
+  certMgrError.value = '';
+  certMgrFree.value = [];
+  certMgrApply.value = [];
   linkLog.value = null;
-  showLinkLog.value = true;
+  linkLogDomainId.value = Number(row.id);
+  showCertMgr.value = true;
+  await onCertMgrModeChange(certMgrMode.value);
+}
+
+async function onCertMgrModeChange(mode: string) {
+  if (mode === 'certlink') {
+    await loadCertMgrCandidates();
+    await loadCertMgrLog();
+  } else {
+    stopLinkLogTimer();
+  }
+}
+
+async function loadCertMgrCandidates() {
+  if (!certMgrTarget.value) return;
+  certMgrLoading.value = true;
+  certMgrCandidates.value = null;
+  certMgrChoice.value = '';
+  certMgrError.value = '';
+  const res = await fetchCandidates(certMgrTarget.value.name);
+  certMgrLoading.value = false;
+  if (res.code !== 0) {
+    certMgrError.value = res.msg || '获取证书候选失败';
+    return;
+  }
+  const d = res.data || {};
+  certMgrCandidates.value = d;
+  if (d.exact && d.exact.length) certMgrChoice.value = `order:${d.exact[0].oid}`;
+  else if (d.providers && d.providers.length) certMgrChoice.value = '';
+  else if (d.defaultLe) certMgrChoice.value = 'default';
+}
+
+async function loadCertMgrLog() {
+  if (!linkLogDomainId.value) return;
   await fetchLinkLog();
-  startLinkLogTimer();
+  if (!linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
+  else stopLinkLogTimer();
+}
+
+async function applyFreeCertMgr() {
+  if (!certMgrTarget.value) return;
+  certMgrBusy.value = true;
+  const res = await api<any>('POST', '/cdn/domains/freecert', { ids: [certMgrTarget.value.id] });
+  certMgrBusy.value = false;
+  if (res.code === 0) {
+    certMgrFree.value = res.data || [];
+    certMgrTarget.value.cert_mode = 'freecert';
+    message.success(res.msg);
+    loadDomains();
+  } else message.error(res.msg);
+}
+
+async function checkFreeCertMgr() {
+  if (!certMgrTarget.value) return;
+  certMgrBusy.value = true;
+  const res = await api<any>('POST', '/cdn/domains/freecert/check', { ids: [certMgrTarget.value.id] });
+  certMgrBusy.value = false;
+  if (res.code === 0) {
+    certMgrFree.value = res.data || [];
+    message.success(res.msg);
+    loadDomains();
+  } else message.error(res.msg);
+}
+
+async function applyCertApplyMgr() {
+  if (!certMgrTarget.value) return;
+  certMgrBusy.value = true;
+  const res = await api<any>('POST', '/cdn/domains/cert', { ids: [certMgrTarget.value.id] });
+  certMgrBusy.value = false;
+  if (res.code === 0) {
+    certMgrApply.value = res.data || [];
+    certMgrTarget.value.cert_mode = 'certapply';
+    message.success(res.msg);
+    loadDomains();
+  } else message.error(res.msg);
+}
+
+async function applyLinkMgr() {
+  if (!certMgrTarget.value || !certMgrChoice.value) return;
+  certMgrBusy.value = true;
+  certMgrError.value = '';
+  const res = await api<any>('POST', `/cdn/domains/${certMgrTarget.value.id}/certlink`, choiceExtra(certMgrChoice.value));
+  certMgrBusy.value = false;
+  if (res.code === 0) {
+    certMgrTarget.value.cert_mode = 'certlink';
+    message.success(res.msg);
+    loadDomains();
+    await loadCertMgrLog();
+  } else {
+    certMgrError.value = res.msg || '操作失败，请重试或更换证书';
+  }
+}
+
+async function applyNoneMgr() {
+  if (!certMgrTarget.value) return;
+  certMgrBusy.value = true;
+  const res = await api('POST', `/cdn/domains/${certMgrTarget.value.id}/cert_mode`, { mode: '' });
+  certMgrBusy.value = false;
+  if (res.code === 0) {
+    certMgrTarget.value.cert_mode = '';
+    message.success(res.msg);
+    loadDomains();
+  } else message.error(res.msg);
+}
+
+function closeCertMgr() {
+  stopLinkLogTimer();
+  certMgrTarget.value = null;
+  certMgrCandidates.value = null;
+  linkLog.value = null;
+  linkLogDomainId.value = null;
 }
 
 async function fetchLinkLog() {
@@ -347,11 +572,7 @@ function stopLinkLogTimer() {
     linkLogTimer = null;
   }
 }
-function closeLinkLog() {
-  stopLinkLogTimer();
-  linkLogDomainId.value = null;
-  linkLog.value = null;
-}
+const certMgrHasPendingFree = computed(() => certMgrFree.value.some((r) => r.status === 'pending'));
 
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
 const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
@@ -375,9 +596,9 @@ const isZoneType = computed(() => accountTypes.value[form.aid] === 'tencent_edge
 const certModeOptions = computed(() => {
   const caps = providerCaps.value[accountTypes.value[form.aid]] || {};
   const opts: any[] = [{ label: '什么都不做', value: 'none' }];
-  if (caps.freecert) opts.push({ label: '自动配置平台免费证书', value: 'freecert' });
+  if (caps.freecert) opts.push({ label: '平台免费证书', value: 'freecert' });
   if (caps.certapply) opts.push({ label: '项目申请证书上传绑定', value: 'certapply' });
-  if (caps.certlink) opts.push({ label: '与项目联动', value: 'certlink' });
+  if (caps.certlink) opts.push({ label: '由本项目管理', value: 'certlink' });
   return opts;
 });
 const showCertMode = computed(() => certModeOptions.value.length > 1);
@@ -425,15 +646,8 @@ const columns: any[] = [
     width: 400,
     render(row: any) {
       const btns: any[] = [];
-      if (row.can_freecert) {
-        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openFreeCert([row.id]) }, { default: () => '免费证书' }));
-      }
-      if (row.can_certapply) {
-        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertLink([row.id]) }, { default: () => '申请证书' }));
-      }
-      if (row.can_certlink) {
-        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openLinkDialog({ id: row.id, name: row.name }) }, { default: () => '与项目联动' }));
-        btns.push(h(NButton, { size: 'tiny', onClick: () => openLinkLog(row.id, row.name) }, { default: () => '联动进度' }));
+      if (row.can_freecert || row.can_certapply || row.can_certlink) {
+        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertMgr(row) }, { default: () => '证书管理' }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
@@ -535,6 +749,18 @@ async function submitDomain(extra: Record<string, any>) {
   } else message.error(res.msg);
 }
 
+// 证书候选：精确匹配证书 / 可用提供商 / 默认 Let's Encrypt
+async function fetchCandidates(name: string) {
+  return await api<any>('GET', `/cdn/cert/candidates?name=${encodeURIComponent(name)}`);
+}
+
+// 把证书来源选择转换为接口参数
+function choiceExtra(choice: string): Record<string, any> {
+  if (choice === 'default') return { cert_use_default: 1 };
+  if (choice.startsWith('order:')) return { cert_order_id: Number(choice.slice(6)) };
+  return { cert_aid: Number(choice.slice(4)) };
+}
+
 // 与项目联动：加载证书候选（精确匹配证书 / 可用提供商 / 默认 LE）
 async function openLinkDialog(target: { id?: number; name: string }) {
   linkTarget.value = target;
@@ -543,7 +769,7 @@ async function openLinkDialog(target: { id?: number; name: string }) {
   linkError.value = '';
   showLink.value = true;
   linkLoading.value = true;
-  const res = await api<any>('GET', `/cdn/cert/candidates?name=${encodeURIComponent(target.name)}`);
+  const res = await fetchCandidates(target.name);
   linkLoading.value = false;
   if (res.code !== 0) {
     linkError.value = res.msg || '获取证书候选失败';
@@ -560,12 +786,7 @@ async function confirmLink() {
   if (!linkChoice.value) return message.warning('请选择证书或证书提供商');
   const t = linkTarget.value;
   if (!t) return;
-  const extra =
-    linkChoice.value === 'default'
-      ? { cert_use_default: 1 }
-      : linkChoice.value.startsWith('order:')
-        ? { cert_order_id: Number(linkChoice.value.slice(6)) }
-        : { cert_aid: Number(linkChoice.value.slice(4)) };
+  const extra = choiceExtra(linkChoice.value);
   linkSubmitting.value = true;
   linkError.value = '';
   const url = t.id ? `/cdn/domains/${t.id}/certlink` : '/cdn/domains';
@@ -576,10 +797,10 @@ async function confirmLink() {
     showLink.value = false;
     if (!t.id) showAdd.value = false;
     loadDomains();
-    // 新签发证书需要时间，打开实时进度日志让用户看到执行阶段
+    // 新签发证书需要时间，打开证书管理让用户实时看到执行阶段
     const cert = t.id ? res.data : res.data?.cert;
     const domainId = t.id ? Number(t.id) : Number(res.data?.id || 0);
-    if (domainId && cert?.status !== 'applied') openLinkLog(domainId, t.name);
+    if (domainId && cert?.status !== 'applied') openCertMgr({ id: domainId, name: t.name, can_certlink: 1, cert_mode: 'certlink' });
   } else {
     // 不关闭弹窗，便于重试或更换证书提供商
     linkError.value = res.msg || '操作失败，请重试或更换证书提供商';
@@ -600,7 +821,7 @@ async function doSync() {
 
 async function openCert(ids: number[], mode: 'free' | 'link') {
   const list = [...new Set(ids)].filter(Boolean);
-  if (!list.length) return message.warning(mode === 'link' ? '请先勾选要申请证书的加速域名' : '请先勾选要配置免费证书的加速域名');
+  if (!list.length) return message.warning(mode === 'link' ? '请先勾选要申请证书的加速域名' : '请先勾选要配置平台免费证书的加速域名');
   certMode.value = mode;
   certResults.value = [];
   certSummary.value = '';
@@ -780,6 +1001,10 @@ onUnmounted(() => {
 .link-log-time {
   color: #9ca3af;
   white-space: nowrap;
+}
+.cert-divider {
+  margin: 16px 0 8px;
+  font-size: 13px;
 }
 
 @media (max-width: 768px) {
