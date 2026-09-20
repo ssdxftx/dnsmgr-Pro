@@ -34,17 +34,9 @@
       <n-empty class="list-empty" v-if="!loading && !domains.length" description="暂无 CDN 加速域名" />
     </n-card>
 
-    <!-- 接入域名弹窗（分步向导） -->
-    <n-modal v-model:show="showAdd" preset="card" title="接入加速域名" style="max-width:640px" :mask-closable="false">
-      <n-steps :current="addStep" size="small" class="add-steps">
-        <n-step title="账户与站点" />
-        <n-step title="加速域名" />
-        <n-step title="回源配置" />
-        <n-step title="证书设置" />
-      </n-steps>
-
-      <!-- 步骤1：账户与站点 -->
-      <n-form v-show="addStep === 1" label-placement="left" label-width="110" class="add-form">
+    <!-- 接入域名：每步独立弹窗，下一步/上一步切换弹窗 -->
+    <n-modal :show="showAdd && addStep === 1" preset="card" title="接入加速域名（1/4）账户与站点" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+      <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item label="CDN 账户">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
         </n-form-item>
@@ -55,9 +47,16 @@
           <n-select v-model:value="form.service_area" :options="serviceAreaOptions" />
         </n-form-item>
       </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showAdd = false">取消</n-button>
+          <n-button type="primary" @click="nextAddStep">下一步</n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
-      <!-- 步骤2：加速域名 -->
-      <n-form v-show="addStep === 2" label-placement="left" label-width="110" class="add-form">
+    <n-modal :show="showAdd && addStep === 2" preset="card" title="接入加速域名（2/4）加速域名" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+      <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item label="加速域名">
           <n-input v-model:value="form.name" placeholder="如 www.example.com" />
         </n-form-item>
@@ -67,9 +66,16 @@
           <span v-else class="link-hint">填写加速域名后自动匹配</span>
         </n-form-item>
       </n-form>
+      <template #footer>
+        <n-space justify="space-between" class="cert-actions" style="width:100%">
+          <n-button @click="addStep--">上一步</n-button>
+          <n-button type="primary" @click="nextAddStep">下一步</n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
-      <!-- 步骤3：回源配置 -->
-      <n-form v-show="addStep === 3" label-placement="left" label-width="110" class="add-form">
+    <n-modal :show="showAdd && addStep === 3" preset="card" title="接入加速域名（3/4）回源配置" style="max-width:640px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+      <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item label="源站地址">
           <n-input v-model:value="form.origin" placeholder="IP 或域名" />
         </n-form-item>
@@ -107,9 +113,16 @@
           </n-space>
         </n-form-item>
       </n-form>
+      <template #footer>
+        <n-space justify="space-between" class="cert-actions" style="width:100%">
+          <n-button @click="addStep--">上一步</n-button>
+          <n-button type="primary" @click="nextAddStep">下一步</n-button>
+        </n-space>
+      </template>
+    </n-modal>
 
-      <!-- 步骤4：证书设置 -->
-      <div v-show="addStep === 4" class="add-form">
+    <n-modal :show="showAdd && addStep === 4" preset="card" title="接入加速域名（4/4）证书设置" style="max-width:620px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+      <div class="add-form">
         <n-form-item v-if="certModeOptions.length > 1" label="证书设置" label-placement="left" label-width="110">
           <n-radio-group v-model:value="form.cert_mode">
             <n-space vertical>
@@ -129,16 +142,10 @@
         <n-alert v-else-if="form.cert_mode === 'freecert'" type="info" :show-icon="true" class="cert-tip">平台免费证书由 CDN 厂商直接签发并部署到加速域名。</n-alert>
         <n-alert v-else-if="form.cert_mode === 'certapply'" type="info" :show-icon="true" class="cert-tip">按站点申请一张通配符证书，签发后自动上传绑定，后续续签自动更新。</n-alert>
       </div>
-
       <template #footer>
         <n-space justify="space-between" class="cert-actions" style="width:100%">
-          <n-button v-if="addStep > 1" @click="addStep--">上一步</n-button>
-          <span v-else />
-          <n-space>
-            <n-button @click="showAdd = false">取消</n-button>
-            <n-button v-if="addStep < 4" type="primary" @click="nextAddStep">下一步</n-button>
-            <n-button v-else type="primary" :loading="saving" @click="submitAdd">提交接入</n-button>
-          </n-space>
+          <n-button @click="addStep--">上一步</n-button>
+          <n-button type="primary" :loading="saving" @click="submitAdd">提交接入</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -1305,9 +1312,6 @@ onUnmounted(() => {
   font-size: 12px;
   color: #6b7280;
   word-break: break-all;
-}
-.add-steps {
-  margin-bottom: 18px;
 }
 .add-form {
   min-height: 200px;
