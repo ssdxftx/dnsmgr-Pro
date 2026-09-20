@@ -28,7 +28,7 @@
         <template v-if="currentProvider">
           <n-alert v-if="currentProvider.tasknote" type="info" style="margin-bottom:12px" :show-icon="false">{{ currentProvider.tasknote }}</n-alert>
           <n-form-item v-for="(field, key) in currentProvider.taskinputs" v-show="fieldVisible(field.show, form.config)" :key="key" :label="field.name" :required="field.required">
-            <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :placeholder="field.placeholder || field.name" />
+            <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
             <n-input v-else-if="field.type === 'textarea'" v-model:value="form.config[key]" type="textarea" :rows="3" :placeholder="field.placeholder || field.name" />
             <n-radio-group v-else-if="field.type === 'radio'" v-model:value="form.config[key]">
               <n-radio v-for="(label, val) in field.options" :key="String(val)" :value="String(val)">{{ label }}</n-radio>
@@ -52,6 +52,7 @@ import { h, onMounted, reactive, ref, computed } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import { evalShow, isSecretField } from '../lib/safe';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -134,13 +135,7 @@ function selectOptions(options: any) {
 }
 
 function fieldVisible(show: string | undefined, config: Record<string, any>): boolean {
-  if (!show) return true;
-  try {
-    const fn = new Function('config', `with(config){return !!(${show});}`);
-    return !!fn(config);
-  } catch {
-    return true;
-  }
+  return evalShow(show, config);
 }
 
 async function loadTasks() {
@@ -192,7 +187,7 @@ function openEdit(row: any) {
   form.aid = row.aid;
   form.oid = row.oid;
   form.remark = row.remark || '';
-  form.config = safeJson(row.config) || {};
+  form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
   const acct = accounts.value.find((a: any) => a.id === row.aid);
   currentProvider.value = providers.value[acct?.type || row.type] || null;
   showEdit.value = true;

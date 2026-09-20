@@ -7,6 +7,7 @@ import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook } from '../lib/m
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
+import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
 
 // 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
 function safeEqual(a: string, b: string): boolean {
@@ -25,13 +26,17 @@ const authenticate = (app: FastifyInstance) => ({
 export default async function systemRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
-  // 获取全部系统配置
+  // 获取全部系统配置（敏感项脱敏：JWT 签名密钥不外发，密钥/口令类字段一律以掩码返回）
   app.get('/api/system/settings', auth, async () => {
-    const cfg = await loadConfig();
+    const cfg = { ...(await loadConfig()) };
+    delete cfg.sys_key;
+    for (const [k, v] of Object.entries(cfg)) {
+      if (v && isSecretKey(k)) cfg[k] = SECRET_MASK;
+    }
     return { code: 0, data: cfg };
   });
 
-  // 保存系统配置
+  // 保存系统配置（忽略掩码值，避免未修改的密钥被写坏；禁止通过该接口修改签名密钥）
   app.post('/api/system/settings', auth, async (req: any) => {
     const b = req.body || {};
     if (b.mail_type !== undefined && b.mail_name2 !== undefined && Number(b.mail_type) > 0) {
@@ -39,7 +44,8 @@ export default async function systemRoutes(app: FastifyInstance) {
       delete b.mail_name2;
     }
     for (const [key, value] of Object.entries(b)) {
-      if (!key) continue;
+      if (!key || key === 'sys_key') continue;
+      if (isSecretKey(key) && String(value) === SECRET_MASK) continue;
       await configSet(key, String(value));
     }
     return { code: 0, msg: 'succ' };
@@ -148,7 +154,7 @@ export default async function systemRoutes(app: FastifyInstance) {
   app.get('/api/system/cronkey', auth, async () => {
     let cronKey = await configGet('cron_key', '');
     if (!cronKey) {
-      cronKey = randomBytes(12).toString('base64url');
+      cronKey = randomBytes(24).toString('base64url');
       await configSet('cron_key', cronKey);
     }
     const cronType = await configGet('cron_type', '0');

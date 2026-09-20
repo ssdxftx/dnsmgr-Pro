@@ -11,13 +11,10 @@ function getDnsType(value: string): string {
   return 'CNAME';
 }
 
+import { decryptConfig } from '../secret.js';
+
 function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 async function insertLog(taskid: number, action: number, errmsg: string | null) {

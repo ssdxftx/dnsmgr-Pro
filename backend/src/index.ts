@@ -7,6 +7,8 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getSysKey } from './config.js';
 import { isInstalled } from './installer.js';
+import { findUserById } from './auth.js';
+import { setSecretKey } from './lib/secret.js';
 import { migrate } from './migrate.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/account.js';
@@ -79,19 +81,21 @@ const allowedOrigins = (process.env.DNSMGR_ALLOWED_ORIGINS || '')
   .filter(Boolean);
 if (allowedOrigins.length) {
   await app.register(cors, { origin: allowedOrigins });
-} else if (process.env.DNSMGR_CORS_REFLECT === '1') {
-  await app.register(cors, { origin: true });
 }
 
 // 登录/注册/安装等敏感接口限流，可经 DNSMGR_RATE_LIMIT=0 关闭
 if (process.env.DNSMGR_RATE_LIMIT !== '0') {
-  const authLimiter = createRateLimit({ windowMs: 60_000, max: 30 });
   const setupLimiter = createRateLimit({ windowMs: 60_000, max: 15 });
-  const limitedAuthPaths = new Set(['/api/auth/login', '/api/auth/totp', '/api/register', '/api/register/send-code']);
+  const limiters: Array<{ paths: Set<string>; fn: any }> = [
+    { paths: new Set(['/api/auth/login', '/api/auth/totp']), fn: createRateLimit({ windowMs: 60_000, max: 20 }) },
+    { paths: new Set(['/api/register']), fn: createRateLimit({ windowMs: 60_000, max: 10 }) },
+    { paths: new Set(['/api/register/send-code']), fn: createRateLimit({ windowMs: 60_000, max: 5 }) },
+  ];
   app.addHook('onRequest', async (req: any, reply: any) => {
     const url = String(req.raw.url || '').split('?')[0];
     if (url.startsWith('/api/setup/')) return setupLimiter(req, reply);
-    if (limitedAuthPaths.has(url)) return authLimiter(req, reply);
+    const hit = limiters.find((l) => l.paths.has(url));
+    if (hit) return hit.fn(req, reply);
     return undefined;
   });
 }
@@ -103,8 +107,14 @@ try {
 } catch {
   // 未安装，忽略
 }
+// 供账号凭据加解密使用（AES-256-GCM，密钥由 sys_key 派生）
+setSecretKey(sysKey);
 // 业务令牌默认 7 天过期；TOTP 预令牌单独指定 5 分钟
 await app.register(jwt, { secret: sysKey, sign: { expiresIn: '7d' } });
+
+// 每次请求校验账号状态与权限；用 10 秒短缓存避免高频查库
+const authUserCache = new Map<number, { user: any; at: number }>();
+const AUTH_USER_CACHE_MS = 10_000;
 
 (app as any).decorate('authenticate', async function (req: any, reply: any) {
   try {
@@ -112,6 +122,28 @@ await app.register(jwt, { secret: sysKey, sign: { expiresIn: '7d' } });
   } catch (e) {
     return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
   }
+  // 仅接受正式会话令牌，拒绝 TOTP 预令牌等一次性令牌冒充登录态
+  if (req.user?.type && req.user.type !== 'session') {
+    return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
+  }
+  const uid = Number(req.user?.uid || 0);
+  if (!uid) return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
+  // 校验账号仍然有效：封禁/删除即时生效，权限以数据库为准（短缓存降低查询压力）
+  let entry = authUserCache.get(uid);
+  if (!entry || Date.now() - entry.at > AUTH_USER_CACHE_MS) {
+    const dbUser = await findUserById(uid);
+    entry = { user: dbUser, at: Date.now() };
+    authUserCache.set(uid, entry);
+  }
+  const dbUser = entry.user;
+  if (!dbUser || Number(dbUser.status) === 0) {
+    authUserCache.delete(uid);
+    return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
+  }
+  req.user.level = Number(dbUser.level);
+  req.user.username = dbUser.username;
+  req.user.totp_open = Number(dbUser.totp_open);
+  return undefined;
 });
 
 app.get('/api/health', async () => ({ code: 0, data: 'ok' }));

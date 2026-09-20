@@ -110,13 +110,14 @@ export default async function userRoutes(app: FastifyInstance) {
     const permission = Array.isArray(b.permission) ? b.permission : [];
 
     if (!username || !password) return { code: -1, msg: '用户名或密码不能为空' };
+    if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ?`, [username]);
     if (exists) return { code: -1, msg: '用户名已存在' };
 
     const uid = await insertAndGetId(
       `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, check_whole, regtime, status) VALUES (?, ?, ?, ?, ?, ?, NOW(), 1)`,
-      [username, bcrypt.hashSync(password, 10), isApi, apikey, level, checkWhole]
+      [username, await bcrypt.hash(password, 10), isApi, apikey, level, checkWhole]
     );
     if (level === 1) {
       await savePermissions(uid, permission);
@@ -155,7 +156,10 @@ export default async function userRoutes(app: FastifyInstance) {
       await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
     }
     if (repwd) {
-      await query(`UPDATE ${table('user')} SET password = ? WHERE id = ?`, [bcrypt.hashSync(repwd, 10), id]);
+      if (repwd.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
+      // 超级管理员（id 1000）的密码仅允许该账号本人修改
+      if (id === 1000 && req.user.uid !== 1000) return { code: -1, msg: '超级管理员密码仅能由该账号本人修改' };
+      await query(`UPDATE ${table('user')} SET password = ? WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
     }
     return { code: 0, msg: '修改用户成功！' };
   });

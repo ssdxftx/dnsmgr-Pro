@@ -46,7 +46,8 @@ export const certConfig: Record<string, any> = {
     wildcard: true,
     max_domains: 100,
     cname: true,
-    note: '<a href="https://app.zerossl.com/developer" target="_blank" rel="noreferrer">ZeroSSL密钥手动获取</a>',
+    note: 'ZeroSSL密钥手动获取',
+    noteUrl: 'https://app.zerossl.com/developer',
     inputs: {
       email: { name: '邮箱地址', type: 'input', placeholder: 'EAB申请邮箱', required: true },
       eabMode: { name: 'EAB获取方式', type: 'radio', options: { auto: '自动获取', manual: '手动输入' }, value: 'manual' },
@@ -62,7 +63,8 @@ export const certConfig: Record<string, any> = {
     wildcard: true,
     max_domains: 100,
     cname: true,
-    note: '<a href="https://cloud.google.com/certificate-manager/docs/public-ca-tutorial" target="_blank" rel="noreferrer">查看Google SSL账户手动配置说明</a>',
+    note: '查看Google SSL账户手动配置说明',
+    noteUrl: 'https://cloud.google.com/certificate-manager/docs/public-ca-tutorial',
     inputs: {
       email: { name: '邮箱地址', type: 'input', placeholder: 'EAB申请邮箱', required: true },
       eabMode: { name: 'EAB获取方式', type: 'radio', options: { auto: '自动获取', manual: '手动输入' }, value: 'manual' },
@@ -80,7 +82,8 @@ export const certConfig: Record<string, any> = {
     wildcard: true,
     max_domains: 100,
     cname: true,
-    note: '<a href="https://freessl.cn/automation/eab-manager" target="_blank" rel="noreferrer">LiteSSL密钥获取</a>',
+    note: 'LiteSSL密钥获取',
+    noteUrl: 'https://freessl.cn/automation/eab-manager',
     inputs: {
       email: { name: '邮箱地址', type: 'input', placeholder: 'EAB申请邮箱', required: true },
       kid: { name: 'EAB KID', type: 'input', required: true },

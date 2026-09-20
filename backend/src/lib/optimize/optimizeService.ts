@@ -26,13 +26,10 @@ const LINE_NAME: Record<string, Record<string, string>> = {
   goedge: { DEF: 'default' },
 };
 
+import { decryptConfig } from '../secret.js';
+
 function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 export async function getLicense(api: number, key: string): Promise<string> {
@@ -108,10 +105,13 @@ async function getIpAddress(cdnType: number, ipType: string): Promise<Record<str
     else if (cdnType === 3) url += 'get_gcore_ip';
     else if (cdnType === 4) url += 'get_edgeone_ip';
   }
-  const params = {
-    key: await configGet('optimize_ip_key', 'o1zrmHAF'),
-    type: ipType,
-  };
+  const params: Record<string, any> = { type: ipType };
+  // 仅 wetest.vip 接口需要密钥；不再使用内置默认密钥，未配置时给出明确提示
+  if (api !== 1) {
+    const key = String((await configGet('optimize_ip_key', '')) || '').trim();
+    if (!key) throw new Error('未配置优选IP接口密钥（optimize_ip_key），请在系统设置中填写');
+    params.key = key;
+  }
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },

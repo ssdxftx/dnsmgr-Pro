@@ -60,6 +60,12 @@ export default async function registerRoutes(app: FastifyInstance) {
       const last = new Date(latest.addtime).getTime();
       if (Date.now() - last < RESEND_INTERVAL_MS) return { code: -1, msg: '发送过于频繁，请稍后再试' };
     }
+    // 同一邮箱 24 小时内发信上限，防止被用作发信放大
+    const daily = await queryOne<any>(
+      `SELECT COUNT(*) AS c FROM ${table('reg_verify')} WHERE email = ? AND addtime > DATE_SUB(NOW(), INTERVAL 1 DAY)`,
+      [email]
+    );
+    if ((daily?.c || 0) >= 10) return { code: -1, msg: '该邮箱今日验证码发送次数已达上限，请稍后再试' };
 
     const code = genDigitCode(6);
     await query(
@@ -84,7 +90,7 @@ export default async function registerRoutes(app: FastifyInstance) {
     const email = (b.email || '').trim().toLowerCase();
 
     if (username.length < 3 || username.length > 32) return { code: -1, msg: '用户名长度需为 3-32 个字符' };
-    if (password.length < 6) return { code: -1, msg: '密码长度至少为 6 位' };
+    if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
     if (!/^[A-Za-z0-9_.-]+$/.test(username)) return { code: -1, msg: '用户名仅支持字母、数字、下划线、点和横线' };
 
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? LIMIT 1`, [username]);
@@ -115,7 +121,7 @@ export default async function registerRoutes(app: FastifyInstance) {
       await query(`UPDATE ${table('reg_code')} SET used = used + 1 WHERE id = ?`, [codeRow.id]);
     }
 
-    const hash = bcrypt.hashSync(password, 10);
+    const hash = await bcrypt.hash(password, 10);
     await query(
       `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, regtime, status, email) VALUES (?, ?, 0, '', 1, NOW(), 1, ?)`,
       [username, hash, email || null]

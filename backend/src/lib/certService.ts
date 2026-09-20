@@ -19,20 +19,18 @@ export const STATUS_LABEL: Record<number, string> = {
 
 const RETRY_INTERVAL = [60, 180, 300, 600, 600];
 
+import { decryptConfig } from './secret.js';
+
 function safeJson(s: string | null): any {
   if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  return decryptConfig(s);
 }
 
 export function genSid(): string {
   return Date.now().toString(36) + randomBytes(6).toString('hex');
 }
 
-export async function buildPfx(fullchain: string, privatekey: string, pwd = '123456'): Promise<Buffer> {
+export async function buildPfx(fullchain: string, privatekey: string, pwd: string): Promise<Buffer> {
   const dir = mkdtempSync(join(tmpdir(), 'pfx_'));
   const certFile = join(dir, 'fullchain.pem');
   const keyFile = join(dir, 'key.pem');

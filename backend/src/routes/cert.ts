@@ -20,14 +20,7 @@ import { configGet, configSet } from '../config.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
-function safeJson(s: string | null): any {
-  if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
-}
+import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
 
 function parseCertKey(fullchain: string, privatekey: string) {
   let cert: X509Certificate;
@@ -143,7 +136,7 @@ export default async function certRoutes(app: FastifyInstance) {
       id: r.id,
       type: r.type,
       name: r.name,
-      config: r.config,
+      config: maskConfig(decryptConfig(r.config)),
       remark: r.remark,
       addtime: r.addtime,
       typename: isDeploy ? (deployConfig[r.type]?.name || '') : (certConfig[r.type]?.name || ''),
@@ -155,9 +148,10 @@ export default async function certRoutes(app: FastifyInstance) {
   app.post('/api/cert/accounts', auth, async (req: any) => {
     const { type, name, config, remark, deploy = 0 } = req.body || {};
     if (!name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const cfgStr = JSON.stringify(config);
     const isDeploy = Number(deploy) === 1;
-    const dup = await queryOne(`SELECT id FROM ${table('cert_account')} WHERE type = ? AND config = ? AND deploy = ?`, [type, cfgStr, deploy]);
+    // 加密使用随机 IV，密文不可直接比较，改为解密后按明文判重
+    const same = await query(`SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = ?`, [type, deploy]);
+    const dup = (same as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === JSON.stringify(config));
     if (dup) return { code: -1, msg: isDeploy ? '自动部署账户已存在' : 'SSL证书账户已存在' };
 
     if (isDeploy) {
@@ -168,7 +162,7 @@ export default async function certRoutes(app: FastifyInstance) {
       } catch (e: any) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
       }
-      await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`, [type, name, cfgStr, remark || '']);
+      await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`, [type, name, encryptConfig(config), remark || '']);
       return { code: 0, msg: '添加自动部署账户成功！' };
     }
 
@@ -176,9 +170,9 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: '证书类型不存在' };
     try {
       const ext = await provider.register();
-      const id = await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 0, NOW())`, [type, name, cfgStr, remark || '']).then((r: any) => r.insertId || 0);
+      const id = await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 0, NOW())`, [type, name, encryptConfig(config), remark || '']).then((r: any) => r.insertId || 0);
       if (ext && typeof ext === 'object') {
-        await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [JSON.stringify(ext), id]);
+        await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), id]);
       }
       return { code: 0, msg: '添加SSL证书账户成功！' };
     } catch (e: any) {
@@ -190,30 +184,31 @@ export default async function certRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { type, name, config, remark, deploy = 0 } = req.body || {};
     if (!name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const cfgStr = JSON.stringify(config);
     const isDeploy = Number(deploy) === 1;
-    const dup = await queryOne(`SELECT id FROM ${table('cert_account')} WHERE type = ? AND config = ? AND deploy = ? AND id <> ?`, [type, cfgStr, deploy, id]);
-    if (dup) return { code: -1, msg: isDeploy ? '自动部署账户已存在' : 'SSL证书账户已存在' };
+    const row = await queryOne(`SELECT config FROM ${table('cert_account')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '账户不存在' };
+    // 前端回显的是掩码，敏感字段保持不变
+    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
 
     if (isDeploy) {
-      const provider = getDeployProvider(type, config);
+      const provider = getDeployProvider(type, merged);
       if (!provider) return { code: -1, msg: '该部署类型暂未支持' };
       try {
         await provider.check();
       } catch (e: any) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
       }
-      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, cfgStr, remark || '', id]);
+      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptConfig(merged), remark || '', id]);
       return { code: 0, msg: '修改自动部署账户成功！' };
     }
 
-    const provider = getCertProvider(type, config, null);
+    const provider = getCertProvider(type, merged, null);
     if (!provider) return { code: -1, msg: '证书类型不存在' };
     try {
       const ext = await provider.register();
-      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, cfgStr, remark || '', id]);
+      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptConfig(merged), remark || '', id]);
       if (ext && typeof ext === 'object') {
-        await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [JSON.stringify(ext), id]);
+        await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), id]);
       }
       return { code: 0, msg: '修改SSL证书账户成功！' };
     } catch (e: any) {
@@ -461,7 +456,9 @@ export default async function certRoutes(app: FastifyInstance) {
     let pfx = null;
     if (row.fullchain && row.privatekey) {
       try {
-        pfx = (await buildPfx(row.fullchain, row.privatekey)).toString('base64');
+        // PFX 密码由调用方指定，默认不设置密码（不再使用内置弱口令）
+        const pfxPass = String(req.query?.pfx_pass || '');
+        pfx = (await buildPfx(row.fullchain, row.privatekey, pfxPass)).toString('base64');
       } catch {
         pfx = null;
       }
@@ -544,6 +541,8 @@ export default async function certRoutes(app: FastifyInstance) {
         type: r.type,
         typename: r.type ? deployConfig[r.type]?.name || '' : '',
         aname: r.aname,
+        // 回显掩码，编辑保存时后端按掩码保留原密钥
+        config: maskConfig(decryptConfig(r.config)),
         remark: r.remark,
         status: r.status,
         active: r.active,
@@ -561,7 +560,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!aid || !oid || !config) return { code: -1, msg: '必填参数不能为空' };
     await query(
       `INSERT INTO ${table('cert_deploy')} (aid, oid, config, remark, addtime, status, active) VALUES (?, ?, ?, ?, NOW(), 0, 1)`,
-      [aid, oid, JSON.stringify(config), remark || ''],
+      [aid, oid, encryptConfig(config), remark || ''],
     );
     return { code: 0, msg: '添加自动部署任务成功！' };
   });
@@ -570,7 +569,11 @@ export default async function certRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { aid, oid, config, remark } = req.body || {};
     if (!aid || !oid || !config) return { code: -1, msg: '必填参数不能为空' };
-    await query(`UPDATE ${table('cert_deploy')} SET aid = ?, oid = ?, config = ?, remark = ? WHERE id = ?`, [aid, oid, JSON.stringify(config), remark || '', id]);
+    const row = await queryOne(`SELECT config FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '任务不存在' };
+    // 前端回显的是掩码，敏感字段保持不变
+    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    await query(`UPDATE ${table('cert_deploy')} SET aid = ?, oid = ?, config = ?, remark = ? WHERE id = ?`, [aid, oid, encryptConfig(merged), remark || '', id]);
     return { code: 0, msg: '修改自动部署任务成功！' };
   });
 

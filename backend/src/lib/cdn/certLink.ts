@@ -7,13 +7,10 @@ import type { CertDeployPlan } from './types.js';
 // 允许注入连接，便于测试
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
+import { decryptConfig, encryptConfig } from '../secret.js';
+
 function safeJson(s: any): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 // 证书联动阶段：order=证书订单、issue=签发、account=部署账户、task=部署任务、deploy=部署到 CDN
@@ -169,14 +166,13 @@ export async function ensureExactOrder(aid: number, domain: string, link: string
 // 复用 CDN 账户密钥：按（类型 + 配置）查找或创建自动部署账户
 export async function ensureDeployAccount(plan: CertDeployPlan, q: QueryFn = query): Promise<number> {
   const cfg = JSON.stringify(plan.accountConfig || {});
-  const rows: any = await q(`SELECT id FROM ${table('cert_account')} WHERE type = ? AND config = ? AND deploy = 1 LIMIT 1`, [
-    plan.accountType,
-    cfg,
-  ]);
-  if (rows[0]?.id) return Number(rows[0].id);
+  // 加密存储使用随机 IV，无法按密文比较，改为按类型取出后解密比对
+  const rows: any = await q(`SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = 1`, [plan.accountType]);
+  const hit = (rows as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === cfg);
+  if (hit?.id) return Number(hit.id);
   const res: any = await q(
     `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`,
-    [plan.accountType, plan.accountName || 'CDN 证书联动（' + plan.accountType + '）', cfg, '由 CDN 证书联动自动创建'],
+    [plan.accountType, plan.accountName || 'CDN 证书联动（' + plan.accountType + '）', encryptConfig(plan.accountConfig || {}), '由 CDN 证书联动自动创建'],
   );
   return Number(res?.insertId || 0);
 }
@@ -189,18 +185,16 @@ export async function ensureDeployTask(
   q: QueryFn = query,
 ): Promise<{ taskId: number; created: boolean }> {
   const cfg = JSON.stringify(config);
-  const rows: any = await q(`SELECT id, active FROM ${table('cert_deploy')} WHERE aid = ? AND oid = ? AND config = ? LIMIT 1`, [
-    aid,
-    oid,
-    cfg,
-  ]);
-  if (rows[0]?.id) {
-    if (!rows[0].active) await q(`UPDATE ${table('cert_deploy')} SET active = 1 WHERE id = ?`, [rows[0].id]);
-    return { taskId: Number(rows[0].id), created: false };
+  const rows: any = await q(`SELECT id, active, config FROM ${table('cert_deploy')} WHERE aid = ? AND oid = ?`, [aid, oid]);
+  // 加密存储使用随机 IV，需解密后比较配置
+  const hit = (rows as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === cfg);
+  if (hit?.id) {
+    if (!hit.active) await q(`UPDATE ${table('cert_deploy')} SET active = 1 WHERE id = ?`, [hit.id]);
+    return { taskId: Number(hit.id), created: false };
   }
   const res: any = await q(
     `INSERT INTO ${table('cert_deploy')} (aid, oid, config, remark, addtime, status, active) VALUES (?, ?, ?, ?, NOW(), 0, 1)`,
-    [aid, oid, cfg, 'CDN 证书联动自动部署'],
+    [aid, oid, encryptConfig(config), 'CDN 证书联动自动部署'],
   );
   return { taskId: Number(res?.insertId || 0), created: true };
 }

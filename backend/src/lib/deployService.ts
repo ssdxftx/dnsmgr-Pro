@@ -9,13 +9,11 @@ import { genSid } from './certService.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
+import { decryptConfig, encryptConfig } from './secret.js';
+
 function safeJson(s: string | null): any {
   if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
-  }
+  return decryptConfig(s);
 }
 
 export class CertDeployService {
@@ -107,7 +105,7 @@ export class CertDeployService {
       if (this.info && typeof this.info === 'object') {
         if (this.info.config && typeof this.info.config === 'object') {
           const merged = { ...(safeJson(this.task.config) || {}), ...this.info.config };
-          await query(`UPDATE ${table('cert_deploy')} SET config = ? WHERE id = ?`, [JSON.stringify(merged), this.tid]);
+          await query(`UPDATE ${table('cert_deploy')} SET config = ? WHERE id = ?`, [encryptConfig(merged), this.tid]);
           delete this.info.config;
         }
         if (Object.keys(this.info).length) {

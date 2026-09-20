@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router';
-import { getToken } from './api';
+import { getToken, getUser } from './api';
+import { isAdminUser, requiresAdmin } from './lib/admin';
 
 const routes = [
   { path: '/setup', component: () => import('./views/Setup.vue'), meta: { public: true } },
@@ -74,6 +75,8 @@ router.beforeEach(async (to, from, next) => {
   if (!setupInstalled) return next('/setup');
   if (to.meta.public) return next();
   if (!getToken()) return next('/login');
+  // 管理员页面仅管理员可进入（服务端仍会二次校验）
+  if (requiresAdmin(to.path) && !isAdminUser(getUser())) return next('/domains');
   next();
 });
 
