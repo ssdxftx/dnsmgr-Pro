@@ -41,7 +41,7 @@
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
         </n-form-item>
         <n-form-item v-if="addFlow.zone.needed" :label="addFlow.zone.label">
-          <n-select v-model:value="form.zone_id" :options="zoneOptions" :placeholder="'选择' + addFlow.zone.label" />
+          <n-select v-model:value="form.zone_id" :options="zoneOptions" :placeholder="'选择' + addFlow.zone.label" @update:value="onZoneChange" />
         </n-form-item>
         <n-form-item v-if="addFlow.serviceArea.needed" label="服务区域">
           <n-select v-model:value="form.service_area" :options="serviceAreaOptions" />
@@ -58,12 +58,16 @@
     <n-modal :show="showAdd && addStep === 2" preset="card" title="接入加速域名（2/4）加速域名" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item label="加速域名">
-          <n-input v-model:value="form.name" placeholder="如 www.example.com" />
+          <n-input-group v-if="form.zone_name">
+            <n-input v-model:value="form.sub" placeholder="子域名，如 www" />
+            <n-input-group-label>.{{ form.zone_name }}</n-input-group-label>
+          </n-input-group>
+          <n-input v-else v-model:value="form.name" placeholder="如 www.example.com" />
         </n-form-item>
         <n-form-item label="联动域名">
           <n-tag v-if="matchedDomain" type="success" :bordered="false">{{ matchedDomain }}</n-tag>
           <span v-else-if="form.name" class="link-warn">未匹配到已添加的域名，请先在「域名管理」中添加该域名</span>
-          <span v-else class="link-hint">填写加速域名后自动匹配</span>
+          <span v-else class="link-hint">{{ form.zone_name ? '输入子域名后自动匹配' : '填写加速域名后自动匹配' }}</span>
         </n-form-item>
       </n-form>
       <template #footer>
@@ -460,6 +464,8 @@ const form = reactive<any>({
   aid: null,
   did: null,
   zone_id: null,
+  zone_name: '',
+  sub: '',
   service_area: 'mainland_china',
   name: '',
   origin: '',
@@ -882,6 +888,21 @@ watch(
   (v) => matchDnsDomain(v),
 );
 
+// 已选站点时，加速域名由「子域名 + 站点域名」自动拼接（用户只需输入子域名）
+watch(
+  () => [form.sub, form.zone_name],
+  () => {
+    if (!form.zone_name) return;
+    const sub = String(form.sub || '').trim().toLowerCase().replace(/^\.+/, '').replace(/\.+$/, '');
+    const zone = String(form.zone_name || '').trim().toLowerCase();
+    if (!sub) {
+      form.name = '';
+      return;
+    }
+    form.name = sub === zone || sub.endsWith('.' + zone) ? sub : `${sub}.${zone}`;
+  },
+);
+
 async function loadProviders() {
   const res = await api<any>('GET', '/cdn/providers');
   if (res.code === 0) providerCaps.value = res.data || {};
@@ -889,12 +910,19 @@ async function loadProviders() {
 
 async function onAccountChange(aid: number) {
   form.zone_id = null;
+  form.zone_name = '';
   zoneOptions.value = [];
   const type = accountTypes.value[aid];
   if (type === 'tencent_edgeone' || type === 'aliyun_esa') {
     const res = await api<any>('GET', `/cdn/accounts/${aid}/zones`);
-    if (res.code === 0) zoneOptions.value = res.data.map((z: any) => ({ label: z.zoneName, value: z.zoneId }));
+    if (res.code === 0) zoneOptions.value = res.data.map((z: any) => ({ label: z.zoneName, value: z.zoneId, name: z.zoneName }));
   }
+}
+
+// 记住所选站点的域名，供第 2 步自动拼接加速域名
+function onZoneChange(zoneId: string) {
+  const zone = zoneOptions.value.find((z: any) => z.value === zoneId);
+  form.zone_name = zone?.name || '';
 }
 
 function goZones() {
@@ -906,6 +934,8 @@ function openAdd() {
     aid: null,
     did: null,
     zone_id: null,
+    zone_name: '',
+    sub: '',
     service_area: 'mainland_china',
     name: '',
     origin: '',
@@ -931,7 +961,13 @@ function nextAddStep() {
     if (addFlow.value.zone.needed && !form.zone_id) return message.warning('请选择' + addFlow.value.zone.label);
     if (addFlow.value.serviceArea.needed && !form.service_area) return message.warning('请选择服务区域');
   } else if (addStep.value === 2) {
-    if (!form.name) return message.warning('请输入加速域名');
+    if (form.zone_name) {
+      const sub = String(form.sub || '').trim().toLowerCase();
+      if (!sub) return message.warning('请输入子域名');
+      if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(sub.replace(/^\.+/, '').replace(/\.+$/, '')))
+        return message.warning('子域名格式不正确，只能包含字母、数字、中划线和点');
+      if (!form.name) return message.warning('请输入子域名');
+    } else if (!form.name) return message.warning('请输入加速域名');
     if (!form.did) return message.warning('未匹配到联动域名，请确认加速域名属于已在「域名管理」中添加的域名');
   } else if (addStep.value === 3) {
     if (!form.origin) return message.warning('请输入源站地址');
