@@ -117,6 +117,8 @@ export class AliyunCDN implements CdnProvider {
   }
 
   async deleteDomain(domain: string) {
+    // 阿里云 CDN 要求域名处于停用状态才能删除：先尝试停用（已停用时报错可忽略）
+    await this.call({ Action: 'StopCdnDomain', DomainName: domain });
     return (await this.call({ Action: 'DeleteCdnDomain', DomainName: domain })) !== false;
   }
 

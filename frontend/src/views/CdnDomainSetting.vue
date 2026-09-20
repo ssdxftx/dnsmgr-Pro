@@ -6,7 +6,7 @@
         <span class="domain-name">{{ info?.name }}</span>
         <n-space>
           <n-tag size="small">{{ info?.routename || info?.route }}</n-tag>
-          <n-tag size="small" :type="info?.status === 'offline' ? 'default' : 'success'">状态：{{ info?.status }}</n-tag>
+          <n-tag size="small" :type="info?.status === 'offline' ? 'default' : 'success'">状态：{{ info?.status === 'offline' ? '已停用' : '已启用' }}</n-tag>
         </n-space>
       </div>
       <div class="info-row" style="margin-top:6px">
@@ -17,8 +17,9 @@
     <n-space vertical :size="12" style="margin-top:12px">
       <n-card title="域名状态" size="small" :bordered="false">
         <n-space>
-          <n-button type="success" size="small" @click="setStatus('online')">启用</n-button>
-          <n-button type="warning" size="small" @click="setStatus('offline')">停用</n-button>
+          <n-button :type="info?.status === 'offline' ? 'success' : 'warning'" size="small" :loading="statusBusy" @click="toggleStatus">
+            {{ info?.status === 'offline' ? '启用加速' : '停用加速' }}
+          </n-button>
         </n-space>
       </n-card>
 
@@ -135,6 +136,7 @@ const cacheRules = ref<any[]>([]);
 const savingCache = ref(false);
 const savingHttps = ref(false);
 const savingAccess = ref(false);
+const statusBusy = ref(false);
 
 const protoOptions = [
   { label: '跟随', value: 'follow' },
@@ -234,11 +236,20 @@ async function saveAccess() {
 }
 
 async function setStatus(status: string) {
-  const res = await api('POST', `/cdn/domains/${domainId}/status`, { status });
-  if (res.code === 0) {
-    message.success(res.msg);
-    load();
-  } else message.error(res.msg);
+  statusBusy.value = true;
+  try {
+    const res = await api('POST', `/cdn/domains/${domainId}/status`, { status });
+    if (res.code === 0) {
+      message.success(res.msg);
+      load();
+    } else message.error(res.msg);
+  } finally {
+    statusBusy.value = false;
+  }
+}
+
+function toggleStatus() {
+  return setStatus(info.value?.status === 'offline' ? 'online' : 'offline');
 }
 
 async function saveOrigin() {
