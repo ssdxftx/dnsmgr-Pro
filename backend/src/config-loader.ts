@@ -24,12 +24,13 @@ export function confPath(): string {
 
 // 读取数据库配置：持久化配置文件优先，其次环境变量，最后默认值。
 // 安装向导写入的配置会持久化到 CONF_PATH，重启后仍生效，从而实现“绑定彩虹 DNS 现库”无需重复配置。
+// 注意：不再为数据库密码提供内置默认值，未配置时连接会失败并给出明确报错，避免出厂默认弱口令。
 export function loadDbConfig(): DbConfig {
   const cfg: DbConfig = {
     db_host: process.env.DB_HOST || '127.0.0.1',
     db_port: Number(process.env.DB_PORT || 3306),
     db_user: process.env.DB_USER || 'dnsmgr',
-    db_password: process.env.DB_PASSWORD || 'dnsmgr123456',
+    db_password: process.env.DB_PASSWORD || '',
     db_name: process.env.DB_NAME || 'dnsmgr',
     db_prefix: process.env.DB_PREFIX || 'dnsmgr_',
   };
@@ -53,7 +54,13 @@ export function loadDbConfig(): DbConfig {
 
 export function saveDbConfig(cfg: DbConfig): void {
   fs.mkdirSync(path.dirname(CONF_PATH), { recursive: true });
-  fs.writeFileSync(CONF_PATH, JSON.stringify(cfg, null, 2));
+  // 含数据库密码，显式以 0600 权限写入，避免同机其他用户读取
+  fs.writeFileSync(CONF_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  try {
+    fs.chmodSync(CONF_PATH, 0o600);
+  } catch {
+    // 忽略：部分文件系统不支持 chmod
+  }
 }
 
 export function hasDbConfigFile(): boolean {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { buildPfx } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
 
@@ -75,6 +75,8 @@ export class BtwinDeploy implements DeployProvider {
 
     const isIIS = config.type === '0' && config.is_iis === '1';
     let pfxPath = '';
+    // 临时 PFX 每次部署随机密码，避免使用可预测的固定口令
+    const pfxPassword = randomBytes(12).toString('hex');
     if (isIIS) {
       const response = await this.request('/panel/get_config', []);
       const result = await this.parseResponse(response);
@@ -85,7 +87,6 @@ export class BtwinDeploy implements DeployProvider {
         const panelPath = result.paths.soft;
         const pfxDir = panelPath + '/temp/ssl/' + Date.now();
         pfxPath = pfxDir + '/cert.pfx';
-        const pfxPassword = '123456';
         const pfx = buildPfx(fullchain, privatekey, pfxPassword);
         const response2 = await this.request(
           '/files/upload',
@@ -116,7 +117,7 @@ export class BtwinDeploy implements DeployProvider {
       if (!siteName) continue;
       if (isIIS) {
         try {
-          await this.deployIISSite(siteName, pfxPath, '123456');
+          await this.deployIISSite(siteName, pfxPath, pfxPassword);
           this.log('域名 ' + siteName + ' 证书部署成功');
           success++;
         } catch (e: any) {
@@ -188,7 +189,7 @@ export class BtwinDeploy implements DeployProvider {
     }
   }
 
-  private async deployIISSite(domain: string, pfxPath: string, password = '123456'): Promise<void> {
+  private async deployIISSite(domain: string, pfxPath: string, password: string): Promise<void> {
     const response = await this.request('/site/set_site_domain_ssl', {
       domain,
       path: pfxPath,

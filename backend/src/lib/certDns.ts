@@ -11,13 +11,10 @@ const lineDef: Record<string, string> = {
   spaceship: 'default', aliyunesa: '0', tencenteo: 'Default', dnsmgr: 'default', goedge: 'default',
 };
 
+import { decryptConfig } from './secret.js';
+
 function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 type DnsList = Record<string, DnsRecord[]>;

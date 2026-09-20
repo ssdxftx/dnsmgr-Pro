@@ -1,4 +1,5 @@
 import { createHash, createHmac, createPrivateKey, createSign, KeyObject } from 'node:crypto';
+import { assertUrlAllowed } from '../netGuard.js';
 
 export class ACMEException extends Error {
   type: string;
@@ -253,6 +254,8 @@ export class ACMEv2 {
     const start = Date.now();
     let res: Response;
     try {
+      // 禁止 ACME 地址指向内网（自建内网 CA 可设置 DNSMGR_ALLOW_PRIVATE_FETCH=1 放行）
+      await assertUrlAllowed(url);
       res = await fetch(url, init);
     } catch (e: any) {
       throw new Error('HTTP Request Error: ' + e.message);

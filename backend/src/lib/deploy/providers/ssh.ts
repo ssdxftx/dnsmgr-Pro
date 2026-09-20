@@ -1,5 +1,6 @@
 import { Client, ConnectConfig } from 'ssh2';
 import { buildPfx } from '../../cert/utils.js';
+import { assertCommandAllowed } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class SshDeploy implements DeployProvider {
@@ -83,6 +84,7 @@ export class SshDeploy implements DeployProvider {
     const conn = await this.connect();
     try {
       if (config.cmd_pre) {
+        assertCommandAllowed();
         for (const raw of String(config.cmd_pre).split('\n')) {
           const cmd = raw.trim();
           if (cmd) await this.exec(conn, cmd);
@@ -94,11 +96,12 @@ export class SshDeploy implements DeployProvider {
         await this.writeFile(conn, config.pem_key_file, Buffer.from(privatekey));
         this.log('私钥已保存到：' + config.pem_key_file);
       } else if (config.format === 'pfx') {
-        const pfx = buildPfx(fullchain, privatekey, config.pfx_pass || '123456');
+        const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
         await this.writeFile(conn, config.pfx_file, pfx);
         this.log('PFX证书已保存到：' + config.pfx_file);
       }
       if (config.cmd) {
+        assertCommandAllowed();
         for (const raw of String(config.cmd).split('\n')) {
           const cmd = raw.trim();
           if (cmd) await this.exec(conn, cmd);

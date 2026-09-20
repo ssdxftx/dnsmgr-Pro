@@ -3,6 +3,7 @@ import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
+import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -21,7 +22,7 @@ export default async function accountRoutes(app: FastifyInstance) {
   app.get('/api/dns/accounts', auth, async (req: any) => {
     if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const rows = await query(`SELECT id, type, name, config, remark, addtime FROM ${table('account')} ORDER BY id DESC`);
-    return { code: 0, data: rows };
+    return { code: 0, data: rows.map((r: any) => ({ ...r, config: maskConfig(decryptConfig(r.config)) })) };
   });
 
   app.post('/api/dns/accounts', auth, async (req: any) => {
@@ -35,7 +36,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证账户失败，' + provider.getError() };
     const id = await insertAndGetId(`INSERT INTO ${table('account')} (type, name, config, remark, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      type, name, JSON.stringify(config), remark || '',
+      type, name, encryptConfig(config), remark || '',
     ]);
     return { code: 0, msg: '添加账户成功', data: id };
   });
@@ -45,12 +46,16 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const provider = getDnsProvider(type, config, '', null);
+    const row = await queryOne(`SELECT config FROM ${table('account')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '账户不存在' };
+    // 前端回显的是掩码，敏感字段保持不变
+    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    const provider = getDnsProvider(type, merged, '', null);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证账户失败，' + provider.getError() };
     await query(`UPDATE ${table('account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [
-      type, name, JSON.stringify(config), remark || '', id,
+      type, name, encryptConfig(merged), remark || '', id,
     ]);
     return { code: 0, msg: '修改账户成功' };
   });
@@ -73,7 +78,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const rows = await query(`SELECT id, type, name, config, remark, addtime FROM ${table('cdn_account')} ORDER BY id DESC`);
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
-    const data = rows.map((r: any) => ({ ...r, typename: typeNames[r.type] || r.type }));
+    const data = rows.map((r: any) => ({ ...r, config: maskConfig(decryptConfig(r.config)), typename: typeNames[r.type] || r.type }));
     return { code: 0, data };
   });
 
@@ -88,7 +93,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证CDN账户失败，' + provider.getError() };
     const id = await insertAndGetId(`INSERT INTO ${table('cdn_account')} (type, name, config, remark, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      type, name, JSON.stringify(config), remark || '',
+      type, name, encryptConfig(config), remark || '',
     ]);
     return { code: 0, msg: '添加CDN账户成功', data: id };
   });
@@ -98,12 +103,15 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const provider = getCdnProvider(type, config);
+    const row = await queryOne(`SELECT config FROM ${table('cdn_account')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: 'CDN账户不存在' };
+    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    const provider = getCdnProvider(type, merged);
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证CDN账户失败，' + provider.getError() };
     await query(`UPDATE ${table('cdn_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [
-      type, name, JSON.stringify(config), remark || '', id,
+      type, name, encryptConfig(merged), remark || '', id,
     ]);
     return { code: 0, msg: '修改CDN账户成功' };
   });
@@ -130,12 +138,7 @@ export default async function accountRoutes(app: FastifyInstance) {
 }
 
 function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 async function insertAndGetId(sql: string, params: any[]): Promise<number> {

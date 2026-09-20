@@ -28,12 +28,12 @@
         </n-form-item>
         <n-form-item v-if="!editingId" label="密码" required>
           <n-input-group>
-            <n-input v-model:value="form.password" />
+            <n-input v-model:value="form.password" type="password" show-password-on="click" />
             <n-button @click="genPassword">随机生成</n-button>
           </n-input-group>
         </n-form-item>
         <n-form-item v-if="editingId" label="重置密码">
-          <n-input v-model:value="form.repwd" placeholder="不重置密码请留空" />
+          <n-input v-model:value="form.repwd" type="password" show-password-on="click" placeholder="不重置密码请留空" />
         </n-form-item>
         <n-form-item label="API接口">
           <n-select v-model:value="form.is_api" :options="apiOptions" style="width: 160px" />
@@ -231,8 +231,10 @@ function genApikey() {
 }
 function randomStr(len: number): string {
   const str = 'abcdefhjmnpqrstuvwxyz23456789ABCDEFGHJKLMNPQRSTUVWYXZ';
+  const buf = new Uint32Array(len);
+  crypto.getRandomValues(buf);
   let s = '';
-  for (let i = 0; i < len; i++) s += str.charAt(Math.floor(Math.random() * str.length));
+  for (let i = 0; i < len; i++) s += str.charAt(buf[i] % str.length);
   return s;
 }
 

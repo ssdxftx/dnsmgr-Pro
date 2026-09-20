@@ -47,7 +47,7 @@ export class FtpDeploy implements DeployProvider {
         await client.uploadFrom(Buffer.from(privatekey), config.pem_key_file);
         this.log('私钥已上传到：' + config.pem_key_file);
       } else if (config.format === 'pfx') {
-        const pfx = buildPfx(fullchain, privatekey, config.pfx_pass || '123456');
+        const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
         await client.uploadFrom(pfx, config.pfx_file);
         this.log('PFX证书已上传到：' + config.pfx_file);
       }

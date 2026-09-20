@@ -27,10 +27,11 @@
         </n-form-item>
         <template v-if="currentProvider">
           <n-alert v-if="currentProvider.note" type="info" style="margin-bottom:12px" :show-icon="false">
-            <span v-html="currentProvider.note"></span>
+            {{ currentProvider.note }}
+            <a v-if="currentProvider.noteUrl" :href="currentProvider.noteUrl" target="_blank" rel="noreferrer" style="margin-left:6px">查看</a>
           </n-alert>
           <n-form-item v-for="(field, key) in currentProvider.inputs" v-show="fieldVisible(field.show, form.config)" :key="key" :label="field.name" :required="field.required">
-            <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :placeholder="field.placeholder || field.name" />
+            <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
             <n-radio-group v-else-if="field.type === 'radio'" v-model:value="form.config[key]">
               <n-radio v-for="(label, val) in field.options" :key="String(val)" :value="String(val)">{{ label }}</n-radio>
             </n-radio-group>
@@ -53,6 +54,7 @@ import { h, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NEllipsis, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import { evalShow, isSecretField } from '../lib/safe';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -116,13 +118,7 @@ function selectOptions(options: any) {
 }
 
 function fieldVisible(show: string | undefined, config: Record<string, any>): boolean {
-  if (!show) return true;
-  try {
-    const fn = new Function('config', `with(config){return !!(${show});}`);
-    return !!fn(config);
-  } catch {
-    return true;
-  }
+  return evalShow(show, config);
 }
 
 async function loadProviders() {
@@ -171,7 +167,7 @@ function openEdit(row: any) {
   form.type = row.type;
   form.name = row.name;
   form.remark = row.remark || '';
-  form.config = safeJson(row.config) || {};
+  form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
   currentProvider.value = providers.value[form.type] || null;
   showEdit.value = true;
 }
