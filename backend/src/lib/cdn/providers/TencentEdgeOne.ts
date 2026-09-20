@@ -152,6 +152,15 @@ export class TencentEdgeOne implements CdnProvider {
       this.error = '未找到该域名的 EdgeOne 站点';
       return false;
     }
+    // EdgeOne 要求域名处于停用状态才能删除：在线时先停用再删除
+    const list = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Offset: 0, Limit: 200 });
+    if (list !== false) {
+      const cur = (list.AccelerationDomains || []).find((d: any) => d.DomainName === domain);
+      if (cur && cur.DomainStatus === 'online') {
+        const stopped = await this.send('ModifyAccelerationDomainStatuses', { ZoneId: zoneId, DomainNames: [domain], Status: 'offline' });
+        if (stopped === false) return false;
+      }
+    }
     return (await this.send('DeleteAccelerationDomains', { ZoneId: zoneId, DomainNames: [domain] })) !== false;
   }
 
@@ -162,9 +171,9 @@ export class TencentEdgeOne implements CdnProvider {
       return false;
     }
     return (
-      (await this.send('ModifyAccelerationDomainStatus', {
+      (await this.send('ModifyAccelerationDomainStatuses', {
         ZoneId: zoneId,
-        DomainName: domain,
+        DomainNames: [domain],
         Status: status === 'offline' ? 'offline' : 'online',
       })) !== false
     );

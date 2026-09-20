@@ -102,6 +102,8 @@ export class TencentCDN implements CdnProvider {
   }
 
   async deleteDomain(domain: string) {
+    // 腾讯云 CDN 要求域名处于停用状态才能删除：先尝试停用（已停用时报错可忽略）
+    await this.send('StopCdnDomain', { Domain: domain });
     return (await this.send('DeleteCdnDomain', { Domain: domain })) !== false;
   }
 

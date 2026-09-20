@@ -818,7 +818,7 @@ const columns: any[] = [
     key: 'status',
     width: 90,
     render(row: any) {
-      return h(NTag, { type: row.status === 'offline' ? 'default' : 'success', size: 'small' }, { default: () => row.status });
+      return h(NTag, { type: row.status === 'offline' ? 'default' : 'success', size: 'small' }, { default: () => (row.status === 'offline' ? '已停用' : '已启用') });
     },
   },
   {
