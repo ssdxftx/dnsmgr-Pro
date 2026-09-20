@@ -24,7 +24,7 @@
         </n-form-item>
         <n-alert v-if="currentProvider?.note" type="info" style="margin-bottom:12px">{{ currentProvider.note }}</n-alert>
         <n-form-item v-for="(field, key) in currentProvider?.config || {}" :key="key" :label="field.name">
-          <n-input v-model:value="form.config[key]" :placeholder="field.placeholder || field.name" />
+          <n-input v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
         </n-form-item>
       </n-form>
       <template #footer>
@@ -42,6 +42,7 @@ import { h, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import { isSecretField } from '../lib/safe';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -134,7 +135,7 @@ function openEdit(row: any) {
   editingId.value = row.id;
   form.type = row.type;
   form.name = row.name;
-  form.config = safeJson(row.config) || {};
+  form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
   currentProvider.value = providers.value[form.type] || null;
   showEdit.value = true;
 }

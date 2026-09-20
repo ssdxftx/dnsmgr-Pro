@@ -2,6 +2,7 @@ import { exec } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
+import { assertCommandAllowed } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class LocalDeploy implements DeployProvider {
@@ -28,11 +29,12 @@ export class LocalDeploy implements DeployProvider {
     } else if (config.format === 'pfx') {
       const dir = dirname(config.pfx_file);
       if (!existsSync(dir)) throw new Error(dir + ' 目录不存在');
-      const pfx = buildPfx(fullchain, privatekey, config.pfx_pass || '123456');
+      const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
       writeFileSync(config.pfx_file, pfx);
       this.log('PFX证书已保存到：' + config.pfx_file);
     }
     if (config.cmd) {
+      assertCommandAllowed();
       const cmds = String(config.cmd).split('\n');
       for (const raw of cmds) {
         const cmd = raw.trim();

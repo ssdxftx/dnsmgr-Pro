@@ -27,7 +27,7 @@
             该服务商正在接入中，暂不可用
           </n-alert>
           <n-form-item v-for="(field, key) in currentProvider.config" :key="key" :label="field.name">
-            <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :placeholder="field.placeholder || field.name" />
+            <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
             <n-radio-group v-else-if="field.type === 'radio'" v-model:value="form.config[key]">
               <n-radio v-for="(label, val) in field.options" :key="String(val)" :value="String(val)">{{ label }}</n-radio>
             </n-radio-group>
@@ -51,6 +51,7 @@ import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import { isSecretField } from '../lib/safe';
 
 const router = useRouter();
 
@@ -152,7 +153,7 @@ function openEdit(row: any) {
   editingId.value = row.id;
   form.type = row.type;
   form.name = row.name;
-  form.config = safeJson(row.config) || {};
+  form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
   currentProvider.value = providers.value[form.type] || null;
   showEdit.value = true;
 }

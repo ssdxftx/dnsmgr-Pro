@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { isInstalled, performInstall, testConnection } from '../installer.js';
+import { beginInstall, endInstall, isInstalled, performInstall, testConnection } from '../installer.js';
 import { getDbConfig } from '../db.js';
 
 export default async function setupRoutes(app: FastifyInstance) {
@@ -51,7 +51,14 @@ export default async function setupRoutes(app: FastifyInstance) {
     if (!cfg.db_host || !cfg.db_user || !cfg.db_name) {
       return { code: -1, msg: '请完整填写数据库连接信息' };
     }
-    const result = await performInstall(cfg, adminUsername, adminPassword);
+    // 并发保护：避免多个安装请求同时初始化
+    if (!beginInstall()) return { code: -1, msg: '安装正在进行，请稍候' };
+    let result;
+    try {
+      result = await performInstall(cfg, adminUsername, adminPassword);
+    } finally {
+      endInstall();
+    }
     if (!result.ok) return { code: -1, msg: result.message };
 
     // 安装完成：保存配置后优雅退出，由容器编排/守护进程重启加载完整业务路由与调度器

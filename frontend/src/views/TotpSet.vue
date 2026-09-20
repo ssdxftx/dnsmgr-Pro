@@ -28,6 +28,7 @@
             <n-button @click="copySecret">复制</n-button>
           </n-input-group>
           <n-input v-model:value="code" placeholder="输入 APP 显示的 6 位动态口令" maxlength="6" style="max-width: 380px" @keyup.enter="bind" />
+          <n-input v-model:value="password" type="password" show-password-on="click" placeholder="请输入登录密码以确认（安全校验）" style="max-width: 380px" />
           <n-space>
             <n-button @click="step = ''">取消</n-button>
             <n-button type="primary" :loading="loading" @click="bind">确认绑定</n-button>
@@ -37,7 +38,10 @@
 
       <n-result v-if="enabled && step !== 'bind'" status="success" title="已开启两步验证" description="登录时将要求输入动态口令">
         <template #footer>
-          <n-button type="error" :loading="loading" @click="close">关闭两步验证</n-button>
+          <n-space vertical align="center">
+            <n-input v-model:value="password" type="password" show-password-on="click" placeholder="请输入登录密码以关闭" style="max-width: 320px" />
+            <n-button type="error" :loading="loading" @click="close">关闭两步验证</n-button>
+          </n-space>
         </template>
       </n-result>
     </n-card>
@@ -59,6 +63,7 @@ const enabled = ref(false);
 const secret = ref('');
 const qrcode = ref('');
 const code = ref('');
+const password = ref('');
 
 const qrDataUrl = ref('');
 
@@ -81,17 +86,21 @@ async function generate() {
 
 async function bind() {
   if (!code.value) return message.warning('请输入动态口令');
+  if (!password.value) return message.warning('请输入登录密码以确认');
   loading.value = true;
-  const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, code: code.value });
+  const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, code: code.value, password: password.value });
   loading.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     enabled.value = true;
     step.value = '';
+    password.value = '';
   } else message.error(res.msg);
 }
 
 function close() {
+  if (!password.value) return message.warning('请输入登录密码以确认');
+  const pwd = password.value;
   dialog.warning({
     title: '关闭两步验证',
     content: '确定要关闭 TOTP 两步验证吗？',
@@ -99,11 +108,12 @@ function close() {
     negativeText: '取消',
     onPositiveClick: async () => {
       loading.value = true;
-      const res = await api('POST', '/auth/totp-config', { action: 'close' });
+      const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd });
       loading.value = false;
       if (res.code === 0) {
         message.success(res.msg);
         enabled.value = false;
+        password.value = '';
       } else message.error(res.msg);
     },
   });

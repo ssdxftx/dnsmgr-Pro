@@ -20,7 +20,7 @@
         :value="activeKey"
         :collapsed="collapsed"
         :collapsed-width="64"
-        :options="menuOptions"
+        :options="visibleMenu"
         :expanded-keys="expandedKeys"
         accordion
         @update:value="onMenu"
@@ -37,7 +37,7 @@
         </div>
         <n-menu
           :value="activeKey"
-          :options="menuOptions"
+          :options="visibleMenu"
           :expanded-keys="expandedKeys"
           accordion
           @update:value="onMenu"
@@ -77,6 +77,7 @@ import { NIcon, type MenuOption } from 'naive-ui';
 import { GlobeOutline, MenuOutline, PersonOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { clearToken } from '../api';
+import { isAdminUser, requiresAdmin } from '../lib/admin';
 
 const route = useRoute();
 const router = useRouter();
@@ -160,6 +161,25 @@ const menuOptions: MenuOption[] = [
     ],
   },
 ];
+
+// 非管理员隐藏管理类菜单（服务端已强制鉴权，这里只收敛入口）
+const visibleMenu = computed<MenuOption[]>(() => {
+  const admin = isAdminUser(user.value);
+  const walk = (opts: MenuOption[]): MenuOption[] => {
+    const out: MenuOption[] = [];
+    for (const o of opts) {
+      const children = (o as any).children as MenuOption[] | undefined;
+      if (children && children.length) {
+        const kept = walk(children);
+        if (kept.length) out.push({ ...o, children: kept } as MenuOption);
+      } else if (admin || !requiresAdmin('/' + String(o.key))) {
+        out.push(o);
+      }
+    }
+    return out;
+  };
+  return walk(menuOptions);
+});
 
 const activeKey = computed(() => {
   if (route.path.startsWith('/dashboard')) return 'dashboard';

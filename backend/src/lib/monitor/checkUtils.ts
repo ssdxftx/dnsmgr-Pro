@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import net from 'node:net';
+import { assertUrlAllowed } from '../netGuard.js';
 
 export interface CheckResult {
   status: boolean;
@@ -32,6 +33,8 @@ export async function checkCurl(url: string, timeout: number, ip: string | null 
   try {
     const u = new URL(url);
     if (!u.hostname) throw new Error('Invalid URL');
+    // 禁止监控目标指向内网/回环地址，避免被用作内网探测或 SSRF
+    await assertUrlAllowed(url);
     const res = await fetch(url, {
       signal: AbortSignal.timeout(timeout * 1000),
       redirect: 'follow',

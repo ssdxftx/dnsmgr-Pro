@@ -39,7 +39,7 @@ export function unzip(zipPath: string, destDir: string): void {
   execFileSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
 }
 
-export function buildPfx(fullchain: string, privatekey: string, pwd = '123456'): Buffer {
+export function buildPfx(fullchain: string, privatekey: string, pwd: string): Buffer {
   const dir = mkdtempSync(join(tmpdir(), 'pfx_'));
   const certFile = join(dir, 'fullchain.pem');
   const keyFile = join(dir, 'key.pem');

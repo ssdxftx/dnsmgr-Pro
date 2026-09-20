@@ -13,13 +13,10 @@ import { fmtDateTime } from '../lib/util.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
+import { decryptConfig, encryptConfig } from '../lib/secret.js';
+
 function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 interface DomainCtx {
@@ -70,8 +67,8 @@ async function getCloudflareAccountContext(
     resolvedAccountId = await service.getDefaultAccountId();
     if (resolvedAccountId) {
       config.account_id = resolvedAccountId;
-      await query(`UPDATE ${table('account')} SET config = ? WHERE id = ?`, [JSON.stringify(config), account.id]);
-      account.config = JSON.stringify(config);
+      await query(`UPDATE ${table('account')} SET config = ? WHERE id = ?`, [encryptConfig(config), account.id]);
+      account.config = encryptConfig(config);
       service = new CloudflareEnhanceService(config);
     }
   }

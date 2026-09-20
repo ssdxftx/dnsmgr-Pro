@@ -2,13 +2,10 @@ import { query, queryOne, table } from '../../db.js';
 import { getCdnProvider } from './factory.js';
 import { fmtDateTime } from '../util.js';
 
+import { decryptConfig } from '../secret.js';
+
 function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+  return decryptConfig(s) || {};
 }
 
 function domainFromUrl(url: string): string {
