@@ -152,7 +152,7 @@ export class TencentEdgeOne implements CdnProvider {
       this.error = '未找到该域名的 EdgeOne 站点';
       return false;
     }
-    return (await this.send('DeleteAccelerationDomain', { ZoneId: zoneId, DomainNames: [domain] })) !== false;
+    return (await this.send('DeleteAccelerationDomains', { ZoneId: zoneId, DomainNames: [domain] })) !== false;
   }
 
   async setDomainStatus(domain: string, status: string) {
