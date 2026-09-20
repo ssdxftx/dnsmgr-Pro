@@ -360,7 +360,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const target = status === 'offline' ? 'offline' : 'online';
     if (!(await provider.setDomainStatus(row.name, target))) return { code: -1, msg: '状态更新失败，' + provider.getError() };
     await query(`UPDATE ${table('cdn_domain')} SET status = ? WHERE id = ?`, [target, id]);
-    return { code: 0, msg: '状态更新成功' };
+    return { code: 0, msg: target === 'offline' ? '加速域名已停用' : '加速域名已启用' };
   });
 
   // 回源
