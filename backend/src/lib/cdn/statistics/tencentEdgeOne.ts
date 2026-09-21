@@ -57,7 +57,13 @@ export async function queryTencentEdgeOneStatistics(
   const len = labels.length;
   const result: CdnStatisticsResult = { labels };
 
+  // 记录请求失败情况：全部失败时上抛真实错误，避免页面静默展示全 0
+  let reqTotal = 0;
+  let reqOk = 0;
+  let lastError: unknown = null;
+
   async function access(zoneId: string, domain: string, area: string, metricNames: string[]): Promise<any[]> {
+    reqTotal++;
     try {
       const resp = await client.request('DescribeTimingL7AnalysisData', {
         ZoneIds: [zoneId],
@@ -68,13 +74,16 @@ export async function queryTencentEdgeOneStatistics(
         Area: area,
         Filters: [{ Key: 'domain', Operator: 'equals', Value: [domain] }],
       });
+      reqOk++;
       return resp?.TimingDataRecords || [];
-    } catch {
+    } catch (e) {
+      lastError = e;
       return [];
     }
   }
 
   async function origin(zoneId: string, domain: string, metricNames: string[]): Promise<any[]> {
+    reqTotal++;
     try {
       const resp = await client.request('DescribeTimingL7OriginPullData', {
         ZoneIds: [zoneId],
@@ -84,8 +93,10 @@ export async function queryTencentEdgeOneStatistics(
         Interval: interval,
         Filters: [{ Key: 'domain', Operator: 'equals', Value: [domain] }],
       });
+      reqOk++;
       return resp?.TimingDataRecords || [];
-    } catch {
+    } catch (e) {
+      lastError = e;
       return [];
     }
   }
@@ -122,6 +133,11 @@ export async function queryTencentEdgeOneStatistics(
       const originRecords = await origin(zoneId, d.name, [ORIGIN_REQUEST]);
       add(bsNum, extractSeries(originRecords, ORIGIN_REQUEST));
     }
+  }
+
+  // 所有请求都失败时上抛真实错误（经 _errors 展示到页面），部分失败仍返回已获取数据
+  if (reqTotal > 0 && reqOk === 0 && lastError) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   if (type === 'Resource' || type === 'All') {

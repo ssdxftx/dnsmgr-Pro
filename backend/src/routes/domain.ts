@@ -3,16 +3,14 @@ import { query, queryOne, table } from '../db.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
+import { decryptConfig } from '../lib/secret.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
-function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+// 兼容历史明文与新版加密存储的账户配置
+function safeJson(s: any): Record<string, any> {
+  if (s && typeof s === 'object') return s as Record<string, any>;
+  return decryptConfig(s) || {};
 }
 
 const allRecordsCache = new Map<string, { at: number; list: any[] }>();
