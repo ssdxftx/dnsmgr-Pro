@@ -38,6 +38,11 @@ export async function queryAliyunEsaStatistics(
   const reqNum = new Array(len).fill(0);
   const hitFlux = new Array(len).fill(0);
 
+  // 记录请求失败情况：全部失败时上抛真实错误，避免页面静默展示全 0
+  let reqTotal = 0;
+  let reqOk = 0;
+  let lastError: unknown = null;
+
   for (const d of domains) {
     if (!d.zoneId) continue;
     const fields: any[] = [
@@ -49,6 +54,7 @@ export async function queryAliyunEsaStatistics(
       fields.push({ FieldName: 'HitRate', Dimension: ['ALL'] });
     }
     let data: any[] = [];
+    reqTotal++;
     try {
       const resp = await client.request({
         Action: 'DescribeSiteTimeSeriesData',
@@ -59,7 +65,9 @@ export async function queryAliyunEsaStatistics(
         Fields: JSON.stringify(fields),
       });
       data = resp?.Data || [];
-    } catch {
+      reqOk++;
+    } catch (e) {
+      lastError = e;
       data = [];
     }
 
@@ -84,6 +92,11 @@ export async function queryAliyunEsaStatistics(
       const reqSeries = alignSeries(pickSeries(data, 'Requests'), len);
       for (let i = 0; i < len; i++) reqNum[i] += reqSeries[i] || 0;
     }
+  }
+
+  // 所有请求都失败时上抛真实错误（经 _errors 展示到页面），部分失败仍返回已获取数据
+  if (reqTotal > 0 && reqOk === 0 && lastError) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   if (type === 'Resource' || type === 'All') {

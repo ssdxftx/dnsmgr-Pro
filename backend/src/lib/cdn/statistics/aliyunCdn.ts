@@ -20,7 +20,13 @@ export async function queryAliyunCdnStatistics(
 
   const intervalSec = interval === 'day' ? '86400' : '3600';
 
+  // 记录请求失败情况：全部失败时上抛真实错误，避免页面静默展示全 0
+  let reqTotal = 0;
+  let reqOk = 0;
+  let lastError: unknown = null;
+
   async function usage(domain: string, field: string): Promise<number[]> {
+    reqTotal++;
     try {
       const resp = await client.request({
         Action: 'DescribeDomainUsageData',
@@ -33,17 +39,20 @@ export async function queryAliyunCdnStatistics(
         StartTime: formatIso(start),
         EndTime: formatIso(end),
       });
+      reqOk++;
       const items = resp?.UsageDataPerInterval?.DataModule || [];
       return items.map((it: any) => {
         const num = Number(it?.Value);
         return Number.isFinite(num) ? Math.ceil(num) : 0;
       });
-    } catch {
+    } catch (e) {
+      lastError = e;
       return [];
     }
   }
 
   async function hitRate(domain: string): Promise<number[]> {
+    reqTotal++;
     try {
       const resp = await client.request({
         Action: 'DescribeDomainHitRateData',
@@ -52,12 +61,14 @@ export async function queryAliyunCdnStatistics(
         StartTime: formatIso(start),
         EndTime: formatIso(end),
       });
+      reqOk++;
       const items = resp?.HitRatePerInterval || [];
       return items.map((it: any) => {
         const num = Number(it?.HitRate);
         return Number.isFinite(num) ? num : 0;
       });
-    } catch {
+    } catch (e) {
+      lastError = e;
       return [];
     }
   }
@@ -82,6 +93,11 @@ export async function queryAliyunCdnStatistics(
         for (let i = 0; i < len; i++) hitFlux[i] += Math.round(((alignedFlux[i] || 0) * (rates[i] || 0)) / 100);
       }
     }
+  }
+
+  // 所有请求都失败时上抛真实错误（经 _errors 展示到页面），部分失败仍返回已获取数据
+  if (reqTotal > 0 && reqOk === 0 && lastError) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   if (type === 'Resource' || type === 'All') {
