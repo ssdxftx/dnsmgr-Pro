@@ -27,7 +27,13 @@ export async function queryTencentCdnStatistics(
   const len = labels.length;
   const result: CdnStatisticsResult = { labels };
 
+  // 记录请求失败情况：全部失败时上抛真实错误，避免页面静默展示全 0
+  let reqTotal = 0;
+  let reqOk = 0;
+  let lastError: unknown = null;
+
   async function cdnData(domain: string, metric: string, area: string): Promise<number[]> {
+    reqTotal++;
     try {
       const resp = await client.request('DescribeCdnData', {
         StartTime: formatTime(start),
@@ -37,14 +43,17 @@ export async function queryTencentCdnStatistics(
         Domains: [domain],
         Area: area,
       });
+      reqOk++;
       const detail = resp?.Data?.[0]?.CdnData?.[0]?.DetailData;
       return parseValueSeries(detail);
-    } catch {
+    } catch (e) {
+      lastError = e;
       return [];
     }
   }
 
   async function originData(domain: string, metric: string, area: string): Promise<number[]> {
+    reqTotal++;
     try {
       const resp = await client.request('DescribeOriginData', {
         StartTime: formatTime(start),
@@ -54,9 +63,11 @@ export async function queryTencentCdnStatistics(
         Domains: [domain],
         Area: area,
       });
+      reqOk++;
       const detail = resp?.Data?.[0]?.OriginData?.[0]?.DetailData;
       return parseValueSeries(detail);
-    } catch {
+    } catch (e) {
+      lastError = e;
       return [];
     }
   }
@@ -98,6 +109,11 @@ export async function queryTencentCdnStatistics(
         }
       }
     }
+  }
+
+  // 所有请求都失败时上抛真实错误（经 _errors 展示到页面），部分失败仍返回已获取数据
+  if (reqTotal > 0 && reqOk === 0 && lastError) {
+    throw lastError instanceof Error ? lastError : new Error(String(lastError));
   }
 
   if (type === 'Resource' || type === 'All') {

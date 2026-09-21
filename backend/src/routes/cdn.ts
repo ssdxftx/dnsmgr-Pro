@@ -23,6 +23,7 @@ import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
 import { checkLevel } from '../auth.js';
+import { decryptConfig } from '../lib/secret.js';
 
 // 所有 CDN 管理接口仅管理员可用
 const authenticate = (app: FastifyInstance) => ({
@@ -58,13 +59,10 @@ function dedupe(list: string[]): string[] {
   return [...new Set(list.map((s) => String(s).trim()).filter(Boolean))];
 }
 
-function safeJson(s: string): Record<string, any> {
-  try {
-    const v = JSON.parse(s);
-    return typeof v === 'object' && v ? v : {};
-  } catch {
-    return {};
-  }
+// 兼容历史明文与新版加密存储的账户配置
+function safeJson(s: any): Record<string, any> {
+  if (s && typeof s === 'object') return s as Record<string, any>;
+  return decryptConfig(s) || {};
 }
 
 function calcRecordName(accelDomain: string, dnsDomain: string): string {
@@ -838,61 +836,66 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // CDN 数据统计（加速流量 / 带宽 / 请求数 / 缓存命中 / 状态码）
   app.get('/api/cdn/statistics', auth, async (req: any) => {
-    const q = req.query || {};
-    const type = ['Resource', 'Visits', 'HttpCodeStatus', 'All'].includes(String(q.type)) ? String(q.type) : 'All';
-    const start = parseStatTime(q.startTime);
-    const end = parseStatTime(q.endTime);
-    if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
-    if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
+    try {
+      const q = req.query || {};
+      const type = ['Resource', 'Visits', 'HttpCodeStatus', 'All'].includes(String(q.type)) ? String(q.type) : 'All';
+      const start = parseStatTime(q.startTime);
+      const end = parseStatTime(q.endTime);
+      if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
+      if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
 
-    const domainNames = String(q.domains || '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const aid = Number(q.aid || 0);
+      const domainNames = String(q.domains || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const aid = Number(q.aid || 0);
 
-    const where: string[] = [];
-    const params: any[] = [];
-    if (domainNames.length) {
-      where.push(`name IN (${domainNames.map(() => '?').join(',')})`);
-      params.push(...domainNames);
-    }
-    if (aid) {
-      where.push('aid = ?');
-      params.push(aid);
-    }
-    const sql = `SELECT * FROM ${table('cdn_domain')}` + (where.length ? ` WHERE ${where.join(' AND ')}` : '');
-    const rows = await query(sql, params);
-    if (!rows.length) return { code: 0, data: { labels: [] } };
-
-    const accounts: Record<number, any> = {};
-    const groups: Record<string, { route: string; config: Record<string, any>; domains: StatisticsDomain[] }> = {};
-    for (const row of rows as any[]) {
-      if (!hasCdnStatistics(row.route)) continue;
-      if (!accounts[row.aid]) accounts[row.aid] = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [row.aid]);
-      const acct = accounts[row.aid];
-      if (!acct) continue;
-      const groupKey = `${row.route}#${row.aid}`;
-      if (!groups[groupKey]) groups[groupKey] = { route: row.route, config: safeJson(acct.config), domains: [] };
-      groups[groupKey].domains.push({ name: row.name, route: row.route, zoneId: row.zone_id, serviceArea: row.service_area });
-    }
-
-    let merged: any = null;
-    const errors: string[] = [];
-    for (const key of Object.keys(groups)) {
-      const group = groups[key];
-      try {
-        const part = await queryByRoute(group.route, group.config, group.domains, start, end, type);
-        if (!part.labels.length) continue;
-        merged = merged ? mergeResult(merged, part) : part;
-      } catch (e: any) {
-        errors.push(`${group.route}: ${e?.message || e}`);
+      const where: string[] = [];
+      const params: any[] = [];
+      if (domainNames.length) {
+        where.push(`name IN (${domainNames.map(() => '?').join(',')})`);
+        params.push(...domainNames);
       }
+      if (aid) {
+        where.push('aid = ?');
+        params.push(aid);
+      }
+      const sql = `SELECT * FROM ${table('cdn_domain')}` + (where.length ? ` WHERE ${where.join(' AND ')}` : '');
+      const rows = await query(sql, params);
+      if (!rows.length) return { code: 0, data: { labels: [] } };
+
+      const accounts: Record<number, any> = {};
+      const groups: Record<string, { route: string; config: Record<string, any>; domains: StatisticsDomain[] }> = {};
+      for (const row of rows as any[]) {
+        if (!hasCdnStatistics(row.route)) continue;
+        if (!accounts[row.aid]) accounts[row.aid] = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [row.aid]);
+        const acct = accounts[row.aid];
+        if (!acct) continue;
+        const groupKey = `${row.route}#${row.aid}`;
+        if (!groups[groupKey]) groups[groupKey] = { route: row.route, config: safeJson(acct.config), domains: [] };
+        groups[groupKey].domains.push({ name: row.name, route: row.route, zoneId: row.zone_id, serviceArea: row.service_area });
+      }
+
+      let merged: any = null;
+      const errors: string[] = [];
+      for (const key of Object.keys(groups)) {
+        const group = groups[key];
+        try {
+          const part = await queryByRoute(group.route, group.config, group.domains, start, end, type);
+          if (!part.labels.length) continue;
+          merged = merged ? mergeResult(merged, part) : part;
+        } catch (e: any) {
+          errors.push(`${group.route}: ${e?.message || e}`);
+        }
+      }
+      if (!merged) return { code: 0, data: { labels: [], _errors: errors } };
+      ensureSections(merged, type, merged.labels.length);
+      if (errors.length) (merged as any)._errors = errors;
+      return { code: 0, data: merged };
+    } catch (e: any) {
+      // 兜底返回具体错误，避免框架默认 500 让前端只能显示笼统的「查询失败」
+      return { code: -1, msg: '统计查询异常：' + (e?.message || e) };
     }
-    if (!merged) return { code: 0, data: { labels: [], _errors: errors } };
-    ensureSections(merged, type, merged.labels.length);
-    if (errors.length) (merged as any)._errors = errors;
-    return { code: 0, data: merged };
   });
 
   // 按域名分组分发刷新/预热操作
