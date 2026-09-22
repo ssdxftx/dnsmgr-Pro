@@ -4,7 +4,7 @@
       <template #header>
         <div class="toolbar">
           <n-space align="center">
-            <n-button quaternary circle @click="$router.back()">
+            <n-button quaternary circle @click="goBack">
               <template #icon><n-icon :component="ArrowBackOutline" /></template>
             </n-button>
             <span class="title">解析记录 · {{ displayTitle }}</span>
@@ -107,7 +107,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { computed, h, onMounted, reactive, ref } from 'vue';
+
+const goBack = useBack('/domains');
 import { useRoute, useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { ArrowBackOutline, AddOutline } from '@vicons/ionicons5';

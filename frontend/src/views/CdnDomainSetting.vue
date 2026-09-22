@@ -2,7 +2,7 @@
   <div>
     <n-card :bordered="false" size="small">
       <div class="info-row">
-        <n-button quaternary circle size="small" @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
+        <n-button quaternary circle size="small" @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
         <span class="domain-name">{{ info?.name }}</span>
         <n-space>
           <n-tag size="small">{{ info?.routename || info?.route }}</n-tag>
@@ -121,7 +121,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { onMounted, reactive, ref } from 'vue';
+
+const goBack = useBack('/cdn-domains');
 import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';

@@ -2,7 +2,7 @@
   <div>
     <n-card :bordered="false" size="small">
       <div class="info-row">
-        <n-button quaternary circle size="small" @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
+        <n-button quaternary circle size="small" @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
         <span class="title">站点设置</span>
         <n-select
           v-model:value="selectedKey"
@@ -117,7 +117,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { computed, onMounted, reactive, ref } from 'vue';
+
+const goBack = useBack('/cdn-domains');
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
