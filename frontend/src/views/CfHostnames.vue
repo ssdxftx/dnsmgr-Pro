@@ -3,7 +3,7 @@
     <n-card :bordered="false" size="small">
       <div class="head">
         <n-space align="center">
-          <n-button quaternary circle @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
+          <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
           <span class="title">Cloudflare 自定义主机名 · {{ domainName || domainId }}</span>
           <n-tag v-if="fallbackOrigin" size="small" type="info">Fallback: {{ fallbackOrigin }}</n-tag>
         </n-space>
@@ -222,7 +222,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { computed, h, onMounted, reactive, ref } from 'vue';
+
+const goBack = useBack('/cdn-domains');
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { ArrowBackOutline, RefreshOutline } from '@vicons/ionicons5';

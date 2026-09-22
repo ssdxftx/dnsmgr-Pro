@@ -3,7 +3,7 @@
     <n-card :bordered="false" size="small">
       <div class="head">
         <n-space align="center">
-          <n-button quaternary circle @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
+          <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
           <span class="title">Cloudflare Tunnel · {{ accountName || '账户 #' + accountId }}</span>
         </n-space>
         <n-button type="primary" size="small" @click="openAdd"><template #icon><n-icon :component="AddOutline" /></template>创建 Tunnel</n-button>
@@ -89,7 +89,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { h, onMounted, reactive, ref } from 'vue';
+
+const goBack = useBack('/cdn-accounts');
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { ArrowBackOutline, AddOutline } from '@vicons/ionicons5';
