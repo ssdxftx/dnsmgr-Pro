@@ -109,7 +109,7 @@ export class CertDeployService {
           delete this.info.config;
         }
         if (Object.keys(this.info).length) {
-          await query(`UPDATE ${table('cert_deploy')} SET info = ? WHERE id = ?`, [JSON.stringify(this.info), this.tid]);
+          await query(`UPDATE ${table('cert_deploy')} SET info = ? WHERE id = ?`, [encryptConfig(this.info), this.tid]);
         }
       }
     }

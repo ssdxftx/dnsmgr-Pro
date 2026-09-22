@@ -50,8 +50,9 @@ async function savePermissions(uid: number, input: any[]) {
 export default async function userRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
-  // 域名列表（供权限选择）
-  app.get('/api/user/domains', auth, async () => {
+  // 域名列表（供权限选择，仅管理员）
+  app.get('/api/user/domains', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC`);
     return { code: 0, data: rows.map((r: any) => r.name) };
   });

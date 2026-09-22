@@ -19,6 +19,7 @@ import { DnsmgrDns } from './providers/dnsmgr.js';
 import { GoEdgeDns } from './providers/goedge.js';
 import { Dynv6Dns } from './providers/dynv6.js';
 import { TechnitiumDns } from './providers/technitium.js';
+import { AwsDns } from './providers/aws.js';
 import type { DnsProvider } from './types.js';
 
 export interface FieldConfig {
@@ -310,6 +311,18 @@ export const dnsProviders: Record<string, DnsProviderMeta> = {
     remark: 0, status: false, redirect: false, log: false, weight: false, page: false, add: false, sort: false,
     implemented: true,
   },
+  aws: {
+    name: 'AWS Route 53',
+    icon: 'aws.png',
+    note: '基于 Amazon Route 53 管理域名解析，AccessKey 需具备 Route 53 权限',
+    config: {
+      AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
+      SecretAccessKey: { name: 'SecretAccessKey', type: 'input', required: true },
+      proxy: proxyField,
+    },
+    remark: 0, status: false, redirect: false, log: false, weight: false, page: true, add: true, sort: false,
+    implemented: true,
+  },
   technitium: {
     name: 'Technitium',
     icon: 'technitium.png',
@@ -345,6 +358,7 @@ const providerMap: Record<string, new (config: Record<string, any>) => DnsProvid
   goedge: GoEdgeDns,
   dynv6: Dynv6Dns,
   technitium: TechnitiumDns,
+  aws: AwsDns,
 };
 
 export function getDnsProvider(

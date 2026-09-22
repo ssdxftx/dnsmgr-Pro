@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { checkLevel } from '../auth.js';
+import { checkLevel, getUserPermissions } from '../auth.js';
 import { configGet, configSet } from '../config.js';
 import { updateDomainDate } from '../lib/expire/expireNoticeService.js';
 
@@ -31,11 +31,17 @@ export default async function expireRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT id, name FROM ${table('domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '域名不存在' };
+    // 普通用户仅能更新其有权限访问的域名到期时间
+    if (!checkLevel(req.user, 2)) {
+      const perms = await getUserPermissions(req.user.uid);
+      if (!perms.some((p) => p.domain === row.name)) return { code: -1, msg: '无权限' };
+    }
     const res = await updateDomainDate(id, row.name);
     return res;
   });
 
   app.post('/api/domains/batch-notice', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const b = req.body || {};
     const ids: number[] = Array.isArray(b.ids) ? b.ids.map(Number).filter((n: number) => n > 0) : [];
     const isNotice = b.is_notice == 1 ? 1 : 0;

@@ -19,7 +19,7 @@ export const STATUS_LABEL: Record<number, string> = {
 
 const RETRY_INTERVAL = [60, 180, 300, 600, 600];
 
-import { decryptConfig } from './secret.js';
+import { decryptConfig, encryptConfig } from './secret.js';
 
 function safeJson(s: string | null): any {
   if (!s) return null;
@@ -256,7 +256,7 @@ export class CertOrderService {
       throw e;
     }
     if (this.info) {
-      await query(`UPDATE ${table('cert_order')} SET info = ? WHERE id = ?`, [JSON.stringify(this.info), this.oid]);
+      await query(`UPDATE ${table('cert_order')} SET info = ? WHERE id = ?`, [encryptConfig(this.info), this.oid]);
     }
     this.order.status = 0;
     await this.resetRetry();
@@ -272,7 +272,7 @@ export class CertOrderService {
         if (String(e.message).includes('KeyID header contained an invalid account URL')) {
           const ext = await this.client.register();
           if (ext) {
-            await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [JSON.stringify(ext), this.aid]);
+            await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), this.aid]);
           }
           const { dnsList, order } = await this.client.createOrder(this.domainList, this.order.keytype, this.order.keysize, this.info);
           this.dnsList = dnsList;
@@ -296,7 +296,7 @@ export class CertOrderService {
 
     await query(
       `UPDATE ${table('cert_order')} SET info = ?, dns = ? WHERE id = ?`,
-      [JSON.stringify(this.info), JSON.stringify(this.dnsList), this.oid],
+      [encryptConfig(this.info), encryptConfig(this.dnsList), this.oid],
     );
 
     if (this.dnsList && Object.keys(this.dnsList).length) {

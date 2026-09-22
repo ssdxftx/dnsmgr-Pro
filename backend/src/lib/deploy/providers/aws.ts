@@ -45,6 +45,9 @@ export class AwsDeploy implements DeployProvider {
     } catch (e: any) {
       throw new Error('获取分配信息失败：' + e.message);
     }
+    // 响应包在 <DistributionConfig> 根节点内，需先解开再访问字段
+    if (data && data.DistributionConfig) data = data.DistributionConfig;
+    if (!data || !data.ViewerCertificate) throw new Error('获取分配信息失败：响应格式异常');
 
     data.ViewerCertificate.ACMCertificateArn = certId;
     data.ViewerCertificate.CloudFrontDefaultCertificate = 'false';

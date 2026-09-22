@@ -257,6 +257,11 @@ export class AWS {
       if (arr && arr.Error && arr.Error.Message) {
         throw new Error(arr.Error.Message);
       }
+      // Route53 等返回 <ErrorResponse><Error><Message>…，需解开根节点取真实错误
+      const root = arr && typeof arr === 'object' ? Object.keys(arr).filter((k) => k !== '?xml') : [];
+      if (root.length === 1 && arr[root[0]]?.Error?.Message) {
+        throw new Error(arr[root[0]].Error.Message);
+      }
       throw new Error('HTTP Code: ' + res.status);
     } else {
       let arr: any = null;

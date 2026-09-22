@@ -35,7 +35,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
       code: 0,
       data: {
         optimize_ip_api: (await configGet('optimize_ip_api', '0')) || '0',
-        optimize_ip_key: (await configGet('optimize_ip_key', 'o1zrmHAF')) || 'o1zrmHAF',
+        optimize_ip_key: (await configGet('optimize_ip_key', '')) || '',
         optimize_ip_proxy: (await configGet('optimize_ip_proxy', '')) || '',
         optimize_ip_min: (await configGet('optimize_ip_min', '30')) || '30',
       },
