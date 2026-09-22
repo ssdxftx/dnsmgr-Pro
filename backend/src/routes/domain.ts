@@ -169,7 +169,13 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.delete('/api/domains/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
+    // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名
     await query(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
+    await query(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
+    await query(`DELETE FROM ${table('dmtask')} WHERE did = ?`, [id]);
+    await query(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
+    await query(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
+    await query(`DELETE FROM ${table('dns_check_task')} WHERE did = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });
 

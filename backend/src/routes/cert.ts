@@ -166,8 +166,8 @@ export default async function certRoutes(app: FastifyInstance) {
       return { code: 0, msg: '添加自动部署账户成功！' };
     }
 
+    if (!certConfig[type]) return { code: -1, msg: '证书类型不存在' };
     const provider = getCertProvider(type, config, null);
-    if (!provider) return { code: -1, msg: '证书类型不存在' };
     try {
       const ext = await provider.register();
       const id = await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 0, NOW())`, [type, name, encryptConfig(config), remark || '']).then((r: any) => r.insertId || 0);
@@ -202,8 +202,8 @@ export default async function certRoutes(app: FastifyInstance) {
       return { code: 0, msg: '修改自动部署账户成功！' };
     }
 
+    if (!certConfig[type]) return { code: -1, msg: '证书类型不存在' };
     const provider = getCertProvider(type, merged, null);
-    if (!provider) return { code: -1, msg: '证书类型不存在' };
     try {
       const ext = await provider.register();
       await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptConfig(merged), remark || '', id]);
@@ -253,7 +253,7 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     if (status !== undefined && status !== '') {
       if (status === '5') where += ' AND A.status < 0';
-      else if (status === '6') where += ' AND A.expiretime < ? AND A.expiretime >= NOW()';
+      else if (status === '6') where += ' AND A.expiretime < DATE_ADD(NOW(), INTERVAL 7 DAY) AND A.expiretime >= NOW()';
       else if (status === '7') where += ' AND A.expiretime < NOW()';
       else {
         where += ' AND A.status = ?';

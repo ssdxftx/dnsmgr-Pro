@@ -1,5 +1,51 @@
 // 由 DeployHelper.php 自动导出的部署商元数据
 export const deployConfig: Record<string, any> = {
+  "qzyun": {
+    "name": "全栈云",
+    "class": 2,
+    "icon": "qzyun.svg",
+    "desc": "更新全栈云证书管理中的证书",
+    "note": "填写 panel.qzyun.cn 的登录邮箱和密码",
+    "inputs": {
+      "email": {
+        "name": "登录邮箱",
+        "type": "input",
+        "placeholder": "全栈云账号邮箱",
+        "validator": "email",
+        "required": true
+      },
+      "password": {
+        "name": "密码",
+        "type": "input",
+        "placeholder": "全栈云登录密码",
+        "required": true
+      },
+      "proxy": {
+        "name": "使用代理服务器",
+        "type": "radio",
+        "options": [
+          "否",
+          "是"
+        ],
+        "value": "0"
+      }
+    },
+    "taskinputs": {
+      "certificate": {
+        "name": "证书名称或文档ID",
+        "type": "input",
+        "placeholder": "例如 qzyun.cn",
+        "note": "填写全栈云“证书管理”中显示的证书名称；首次部署后会自动保存内部文档ID",
+        "required": true
+      },
+      "domain": {
+        "name": "绑定域名",
+        "type": "input",
+        "placeholder": "例如 qzyun.cn，可留空",
+        "note": "填写后会将证书自动绑定到全栈云对应域名"
+      }
+    }
+  },
   "btpanel": {
     "name": "宝塔面板",
     "class": 1,

@@ -10,7 +10,7 @@
           <ul class="tips">
             <li>不支持对CloudFlare里的域名添加优选，必须使用其他DNS服务商。需开通Cloudflare for SaaS，且域名使用CNAME方式解析到CloudFlare。</li>
             <li>数据接口：wetest.vip 支持CloudFlare、CloudFront、EdgeOne；HostMonit 只支持CloudFlare；xingpingcn.top 只支持CloudFlare（免费、无需密钥）。</li>
-            <li>接口密钥：默认 o1zrmHAF 为免费KEY。</li>
+            <li>接口密钥：请在系统设置中填写，不再内置默认密钥。</li>
             <li>代理地址：如 https://ghfast.top/https://raw.githubusercontent.com/，留空则直接访问 GitHub。</li>
           </ul>
         </n-card>
@@ -84,7 +84,7 @@ const apiOptions = [
 
 const form = reactive({
   optimize_ip_api: '0',
-  optimize_ip_key: 'o1zrmHAF',
+  optimize_ip_key: '',
   optimize_ip_proxy: '',
   optimize_ip_min: '30',
 });

@@ -44,6 +44,7 @@ import { HuoshanDeploy } from './providers/huoshan.js';
 import { KangleDeploy } from './providers/kangle.js';
 import { KangleadminDeploy } from './providers/kangleadmin.js';
 import { QiniuDeploy } from './providers/qiniu.js';
+import { QzyunDeploy } from './providers/qzyun.js';
 import { S3storageDeploy } from './providers/s3storage.js';
 import { UpyunDeploy } from './providers/upyun.js';
 import { WestDeploy } from './providers/west.js';
@@ -97,6 +98,7 @@ const providerMap: Record<string, new (config: Record<string, any>) => DeployPro
   kangle: KangleDeploy,
   kangleadmin: KangleadminDeploy,
   qiniu: QiniuDeploy,
+  qzyun: QzyunDeploy,
   s3storage: S3storageDeploy,
   upyun: UpyunDeploy,
   west: WestDeploy,
