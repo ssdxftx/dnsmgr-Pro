@@ -292,7 +292,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (dnsAcct) {
       const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), dnsDomain.name, dnsDomain.thirdid);
       if (dns) {
-        const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, 'default', 600);
+        const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
         if (recordId) dnsRecord = String(recordId);
         else dnsError = dns.getError();
       } else dnsError = 'DNS模块不存在';
@@ -422,7 +422,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!dns) return 'DNS模块不存在，请手动添加验证记录';
     const rel = calcRecordName(row.name, dnsDomain.name);
     const name = rel === '@' ? rec.name : `${rec.name}.${rel}`;
-    const recordId = await dns.addDomainRecord(name, rec.type, rec.value, 'default', 600);
+    const recordId = await dns.addDomainRecord(name, rec.type, rec.value, undefined, 600);
     if (recordId) return `已自动添加验证解析 ${name} ${rec.type} ${rec.value}`;
     return `自动添加验证解析失败（${dns.getError()}），请手动添加 ${name} ${rec.type} ${rec.value}`;
   }
@@ -1082,7 +1082,7 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
       if (dnsAcct) {
         const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), belongDomain.name, belongDomain.thirdid);
         if (dns) {
-          const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, 'default', 600);
+          const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
           if (recordId) {
             dnsRecord = String(recordId);
             dnsOk++;
