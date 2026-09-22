@@ -4,7 +4,7 @@
       <template #header>
         <div class="toolbar">
           <n-space align="center">
-            <n-button quaternary circle @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
+            <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
             <span class="title">安全设置 · TOTP 两步验证</span>
           </n-space>
         </div>
@@ -49,7 +49,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { computed, onMounted, ref } from 'vue';
+
+const goBack = useBack('/dashboard');
 import { useMessage, useDialog } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';

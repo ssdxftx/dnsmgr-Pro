@@ -4,7 +4,7 @@
       <template #header>
         <div class="toolbar">
           <n-space align="center">
-            <n-button quaternary circle @click="$router.back()"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
+            <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
             <span class="title">自动续签设置</span>
           </n-space>
         </div>
@@ -67,7 +67,7 @@
 
       <template #footer>
         <n-space justify="end" class="footer-actions">
-          <n-button @click="$router.back()">返回</n-button>
+          <n-button @click="goBack">返回</n-button>
           <n-button type="primary" :loading="saving" @click="save">保存</n-button>
         </n-space>
       </template>
@@ -76,7 +76,10 @@
 </template>
 
 <script setup lang="ts">
+import { useBack } from '../lib/back';
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+
+const goBack = useBack('/cert-orders');
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
