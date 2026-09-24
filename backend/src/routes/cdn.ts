@@ -183,7 +183,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // 站点列表（按账户 + 站点聚合）
   app.get('/api/cdn/zones', auth, async () => {
     const rows = await query(
-      `SELECT aid, zone_id, route,
+      `SELECT aid, zone_id, MIN(route) AS route,
               MIN(name) AS primary_name,
               COUNT(*) AS domain_count,
               GROUP_CONCAT(name ORDER BY id ASC SEPARATOR ',') AS domains
