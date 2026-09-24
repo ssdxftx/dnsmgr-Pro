@@ -1,5 +1,6 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="容灾监控" subtitle="查看容灾调度运行状态与切换日志" />
     <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
         <n-card :bordered="false">
@@ -47,6 +48,7 @@
 import { onMounted, ref } from 'vue';
 import { useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const dialog = useDialog();

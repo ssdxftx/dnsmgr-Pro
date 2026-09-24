@@ -1,21 +1,19 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">容灾切换策略</span>
-          <div class="actions">
-            <n-button type="primary" @click="$router.push('/dm-tasks/add')">
-              <template #icon><n-icon :component="AddOutline" /></template>
-              添加策略
-            </n-button>
-            <n-dropdown trigger="click" :options="batchOptions" @select="onBatch">
-              <n-button>批量操作<template #icon><n-icon :component="ChevronDownOutline" /></template></n-button>
-            </n-dropdown>
-          </div>
+  <div class="app-stack">
+    <PageHeader title="容灾切换策略" subtitle="监控解析健康状态并自动切换备用记录">
+      <template #actions>
+        <div class="actions">
+          <n-button type="primary" @click="$router.push('/dm-tasks/add')">
+            <template #icon><n-icon :component="AddOutline" /></template>
+            添加策略
+          </n-button>
+          <n-dropdown trigger="click" :options="batchOptions" @select="onBatch">
+            <n-button>批量操作<template #icon><n-icon :component="ChevronDownOutline" /></template></n-button>
+          </n-dropdown>
         </div>
       </template>
-
+    </PageHeader>
+    <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 140px" />
         <n-input v-model:value="kw" placeholder="关键词" style="width: 200px" @keyup.enter="search" />
@@ -24,17 +22,15 @@
         <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table
+      <ResponsiveDataTable
+        v-model:checked-row-keys="checkedRowKeys"
         :columns="columns"
         :data="tasks"
         :loading="loading"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
-        :checked-row-keys="checkedRowKeys"
-        :bordered="false"
-        @update:checked-row-keys="onCheckedRowKeys"
+        empty-text="暂无容灾切换策略"
       />
-      <n-empty class="list-empty" v-if="!loading && !tasks.length" description="暂无容灾切换策略" />
     </n-card>
   </div>
 </template>
@@ -45,6 +41,8 @@ import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const router = useRouter();
 const message = useMessage();
@@ -246,17 +244,8 @@ onMounted(loadTasks);
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 .actions {
   display: flex;
   gap: 8px;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
 }
 </style>

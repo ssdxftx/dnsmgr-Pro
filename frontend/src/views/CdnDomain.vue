@@ -1,37 +1,35 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">CDN 域名</span>
-          <n-space>
-            <n-button v-if="canFreeCert" type="primary" secondary :disabled="!checkedIds.length" @click="openFreeCert(checkedIds)">
-              平台免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
-            </n-button>
-            <n-button v-if="canCertApply" type="primary" secondary :disabled="!checkedIds.length" @click="openCertLink(checkedIds)">
-              项目申请证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
-            </n-button>
-            <n-button @click="goZones">站点设置</n-button>
-            <n-button type="primary" @click="openAdd">
-              <template #icon><n-icon :component="AddOutline" /></template>
-              接入域名
-            </n-button>
-            <n-button @click="showSync = true">
-              <template #icon><n-icon :component="CloudDownloadOutline" /></template>
-              同步云端
-            </n-button>
-          </n-space>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="CDN 域名" subtitle="管理各厂商 CDN 加速域名、证书与缓存策略">
+      <template #actions>
+        <n-space>
+          <n-button v-if="canFreeCert" type="primary" secondary :disabled="!checkedIds.length" @click="openFreeCert(checkedIds)">
+            平台免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+          </n-button>
+          <n-button v-if="canCertApply" type="primary" secondary :disabled="!checkedIds.length" @click="openCertLink(checkedIds)">
+            项目申请证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+          </n-button>
+          <n-button @click="goZones">站点设置</n-button>
+          <n-button type="primary" @click="openAdd">
+            <template #icon><n-icon :component="AddOutline" /></template>
+            接入域名
+          </n-button>
+          <n-button @click="showSync = true">
+            <template #icon><n-icon :component="CloudDownloadOutline" /></template>
+            同步云端
+          </n-button>
+        </n-space>
       </template>
-      <n-data-table
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable
         :columns="columns"
         :data="domains"
         :loading="loading"
-        :bordered="false"
         :row-key="(row: any) => row.id"
         v-model:checked-row-keys="checkedIds"
+        empty-text="暂无 CDN 加速域名"
       />
-      <n-empty class="list-empty" v-if="!loading && !domains.length" description="暂无 CDN 加速域名" />
     </n-card>
 
     <!-- 接入域名：每步独立弹窗，下一步/上一步切换弹窗 -->
@@ -435,6 +433,8 @@ import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, CloudDownloadOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -1143,7 +1143,7 @@ function del(row: any) {
           },
           { default: () => '同时删除云端加速域名（云端删除后不可恢复）' },
         ),
-        h('div', { style: 'margin-top:6px;color:#9ca3af;font-size:12px' }, '不勾选时仅删除本系统记录，云端加速域名保留。'),
+        h('div', { style: 'margin-top:6px;color:var(--app-text-3);font-size:12px' }, '不勾选时仅删除本系统记录，云端加速域名保留。'),
       ]),
     positiveText: '删除',
     negativeText: '取消',
@@ -1186,20 +1186,11 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .cert-tip + .cert-tip {
   margin-top: 10px;
 }
 .cert-hint {
-  color: #6b7280;
+  color: var(--app-text-3);
   font-size: 12px;
   line-height: 1.6;
 }
@@ -1209,7 +1200,7 @@ onUnmounted(() => {
   word-break: break-all;
 }
 .link-hint {
-  color: #9ca3af;
+  color: var(--app-text-3);
   font-size: 13px;
 }
 .link-warn {
@@ -1231,7 +1222,7 @@ onUnmounted(() => {
 .link-meta {
   margin-top: 2px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--app-text-3);
   word-break: break-all;
 }
 .cert-list {
@@ -1251,7 +1242,7 @@ onUnmounted(() => {
   margin-top: 6px;
   font-size: 12px;
   line-height: 1.7;
-  color: #6b7280;
+  color: var(--app-text-3);
   word-break: break-word;
 }
 .cert-scope {
@@ -1301,7 +1292,7 @@ onUnmounted(() => {
   word-break: break-word;
 }
 .link-log-time {
-  color: #9ca3af;
+  color: var(--app-text-3);
   white-space: nowrap;
 }
 .cert-divider {
@@ -1346,7 +1337,7 @@ onUnmounted(() => {
 .cloud-cert-meta {
   margin-top: 2px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--app-text-3);
   word-break: break-all;
 }
 .add-form {
@@ -1354,7 +1345,7 @@ onUnmounted(() => {
 }
 .port-label {
   font-size: 13px;
-  color: #6b7280;
+  color: var(--app-text-3);
 }
 
 @media (max-width: 768px) {

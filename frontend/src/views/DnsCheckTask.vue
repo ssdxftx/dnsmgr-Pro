@@ -1,24 +1,22 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">DNS 劫持检测</span>
-          <n-button type="primary" @click="openAdd">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加任务
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="DNS 劫持检测" subtitle="配置域名解析劫持的自动检测任务">
+      <template #actions>
+        <n-button type="primary" @click="openAdd">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          添加任务
+        </n-button>
       </template>
-      <n-data-table
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
         :loading="loading"
         :pagination="{ pageSize: 20 }"
-        :bordered="false"
         :row-key="(row: any) => row.id"
+        empty-text="暂无检测任务，点击「添加任务」配置自动劫持检测"
       />
-      <n-empty class="list-empty" v-if="!loading && !tasks.length" description="暂无检测任务，点击「添加任务」配置自动劫持检测" />
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" title="检测任务" style="max-width: 640px" :mask-closable="false">
@@ -72,11 +70,10 @@
         :show-icon="false"
         :title="runningResult.error || (runningResult.issues.length ? `发现 ${runningResult.issues.length} 条异常记录，可能存在劫持！` : `检测完成，共 ${runningResult.total} 条记录，未发现异常`)"
       />
-      <n-data-table
+      <ResponsiveDataTable
         v-if="runningResult.issues && runningResult.issues.length"
         :columns="issueColumns"
         :data="runningResult.issues"
-        :bordered="false"
         size="small"
         style="margin-top: 12px"
       />
@@ -94,6 +91,8 @@ import { h, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -313,15 +312,3 @@ onMounted(() => {
   loadDomains();
 });
 </script>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

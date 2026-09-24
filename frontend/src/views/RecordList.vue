@@ -1,25 +1,18 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <n-space align="center">
-            <n-button quaternary circle @click="goBack">
-              <template #icon><n-icon :component="ArrowBackOutline" /></template>
-            </n-button>
-            <span class="title">解析记录 · {{ displayTitle }}</span>
-          </n-space>
-          <n-space>
-            <n-button v-if="accountType === 'cloudflare' && isAdmin" size="small" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">自定义主机名</n-button>
-            <n-button v-if="access.writable" type="primary" @click="openAdd">
-              <template #icon><n-icon :component="AddOutline" /></template>
-              添加记录
-            </n-button>
-          </n-space>
-        </div>
+  <div class="app-stack">
+    <PageHeader :title="'解析记录 · ' + displayTitle" subtitle="查看并维护当前域名的 DNS 解析记录" back="/domains">
+      <template #actions>
+        <n-space>
+          <n-button v-if="accountType === 'cloudflare' && isAdmin" size="small" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">自定义主机名</n-button>
+          <n-button v-if="access.writable" type="primary" @click="openAdd">
+            <template #icon><n-icon :component="AddOutline" /></template>
+            添加记录
+          </n-button>
+        </n-space>
       </template>
-      <n-data-table :columns="columns" :data="records" :loading="loading" :pagination="pagination" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !records.length" description="暂无解析记录" />
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable :columns="columns" :data="records" :loading="loading" :pagination="pagination" empty-text="暂无解析记录" />
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '修改记录' : '添加记录'" style="max-width:640px" :mask-closable="false">
@@ -107,14 +100,13 @@
 </template>
 
 <script setup lang="ts">
-import { useBack } from '../lib/back';
 import { computed, h, onMounted, reactive, ref } from 'vue';
-
-const goBack = useBack('/domains');
 import { useRoute, useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
-import { ArrowBackOutline, AddOutline } from '@vicons/ionicons5';
+import { AddOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -409,15 +401,3 @@ onMounted(() => {
   loadDomainInfo();
 });
 </script>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

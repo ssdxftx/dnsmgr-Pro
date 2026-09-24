@@ -1,17 +1,15 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">DNS 账户</span>
-          <n-button type="primary" @click="openAdd">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加账户
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="DNS 账户" subtitle="管理 DNS 服务商账户与接入配置">
+      <template #actions>
+        <n-button type="primary" @click="openAdd">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          添加账户
+        </n-button>
       </template>
-      <n-data-table :columns="columns" :data="accounts" :loading="loading" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !accounts.length" description="暂无 DNS 账户" />
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" empty-text="暂无 DNS 账户" />
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑账户' : '添加账户'" style="max-width:560px" :mask-closable="false">
@@ -52,6 +50,8 @@ import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-u
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { isSecretField } from '../lib/safe';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const router = useRouter();
 
@@ -204,14 +204,3 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

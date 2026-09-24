@@ -1,16 +1,14 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">定时切换策略</span>
-          <n-button type="primary" @click="$router.push('/schedule-tasks/add')">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加策略
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="定时切换策略" subtitle="按计划自动切换域名解析记录">
+      <template #actions>
+        <n-button type="primary" @click="$router.push('/schedule-tasks/add')">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          添加策略
+        </n-button>
       </template>
-
+    </PageHeader>
+    <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 130px" />
         <n-input v-model:value="kw" placeholder="关键词" style="width: 200px" @keyup.enter="search" />
@@ -19,17 +17,15 @@
         <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table
+      <ResponsiveDataTable
+        v-model:checked-row-keys="checkedRowKeys"
         :columns="columns"
         :data="tasks"
         :loading="loading"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
-        :checked-row-keys="checkedRowKeys"
-        :bordered="false"
-        @update:checked-row-keys="onCheckedRowKeys"
+        empty-text="暂无定时切换策略"
       />
-      <n-empty class="list-empty" v-if="!loading && !tasks.length" description="暂无定时切换策略" />
 
       <n-space v-if="checkedRowKeys.length" style="margin-top: 12px">
         <n-button size="small" @click="batch('open')">开启运行</n-button>
@@ -46,6 +42,8 @@ import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const router = useRouter();
 const message = useMessage();
@@ -212,15 +210,3 @@ function del(row: any) {
 
 onMounted(loadTasks);
 </script>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>
