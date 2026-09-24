@@ -47,7 +47,13 @@ export async function api<T = any>(method: string, url: string, body?: any): Pro
   const text = await res.text();
   if (!text) return {} as T;
   try {
-    return JSON.parse(text) as T;
+    const json: any = JSON.parse(text);
+    // 后端框架级错误（如 500）返回 { statusCode, error, message }，统一转成 { code, msg } 便于页面提示
+    if (json && typeof json === 'object' && typeof json.code !== 'number') {
+      const m = json.msg || json.message || json.error;
+      return { code: -1, msg: m || `服务器响应异常（HTTP ${res.status}）` } as T;
+    }
+    return json as T;
   } catch {
     return { code: -1, msg: `服务器响应异常（HTTP ${res.status}）` } as T;
   }
