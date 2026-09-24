@@ -247,6 +247,7 @@ function baseOption(): any {
     tooltip: { trigger: 'axis' },
     legend: { top: 0 },
     xAxis: { type: 'category', data: labels.value, boundaryGap: false },
+    yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', opacity: 0.4 } } },
   };
 }
 
@@ -323,9 +324,14 @@ async function load() {
     resource.value = data.resource || null;
     visits.value = data.visits || null;
     status.value = data.status || null;
-    errors.value = (data._errors || []).map((e: string) => e.split(':').pop());
+    errors.value = (data._errors || []).map((e: string) => String(e));
     await nextTick();
-    renderCharts();
+    try {
+      renderCharts();
+    } catch (chartErr: any) {
+      // 图表渲染失败不应清空已获取的统计数据
+      console.error('[statistics] 图表渲染失败:', chartErr?.message || chartErr);
+    }
   } catch (e: any) {
     errors.value = [e?.message || String(e)];
   } finally {

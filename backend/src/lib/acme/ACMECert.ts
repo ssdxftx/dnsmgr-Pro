@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { createHash, createHmac, generateKeyPairSync, X509Certificate } from 'node:crypto';
+import { createHash, createHmac, createPrivateKey, createPublicKey, generateKeyPairSync, sign, X509Certificate } from 'node:crypto';
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,41 @@ function pem2der(pem: string): Buffer {
 function extractCN(subject: string): string {
   const m = subject.match(/(?:^|,\s*)CN\s*=\s*([^,]+)/i);
   return m ? m[1].trim() : '';
+}
+
+// 极简 ASN.1 DER 编码，用于在进程内构造 PKCS#10 CSR（不依赖外部 openssl 命令）
+function derLength(n: number): Buffer {
+  if (n < 0x80) return Buffer.from([n]);
+  const bytes: number[] = [];
+  let x = n;
+  while (x > 0) {
+    bytes.unshift(x & 0xff);
+    x = Math.floor(x / 256);
+  }
+  return Buffer.from([0x80 | bytes.length, ...bytes]);
+}
+function der(tag: number, content: Buffer): Buffer {
+  return Buffer.concat([Buffer.from([tag]), derLength(content.length), content]);
+}
+function derSeq(...items: Buffer[]): Buffer {
+  return der(0x30, Buffer.concat(items));
+}
+function derSet(...items: Buffer[]): Buffer {
+  return der(0x31, Buffer.concat(items));
+}
+function derOid(dotted: string): Buffer {
+  const parts = dotted.split('.').map((p) => Number(p));
+  const out: number[] = [40 * parts[0] + parts[1]];
+  for (const p of parts.slice(2)) {
+    const chunk: number[] = [p & 0x7f];
+    let x = Math.floor(p / 128);
+    while (x > 0) {
+      chunk.unshift((x & 0x7f) | 0x80);
+      x = Math.floor(x / 128);
+    }
+    out.push(...chunk);
+  }
+  return der(0x06, Buffer.from(out));
 }
 
 export class ACMECert extends ACMEv2 {
@@ -266,6 +301,57 @@ export class ACMECert extends ACMEv2 {
   }
 
   generateCSR(domainKeyPem: string, domains: string[]): string {
+    // 优先在进程内生成（容器环境常常没有 openssl 二进制）
+    try {
+      return this.buildCSR(domainKeyPem, domains);
+    } catch {
+      return this.generateCSROpenSSL(domainKeyPem, domains);
+    }
+  }
+
+  private buildCSR(domainKeyPem: string, domains: string[]): string {
+    const key = createPrivateKey(domainKeyPem);
+    const keyType = key.asymmetricKeyType;
+    let sigAlg: Buffer;
+    let hash: string;
+    if (keyType === 'rsa') {
+      hash = 'sha512';
+      sigAlg = derSeq(derOid('1.2.840.113549.1.1.13'), der(0x05, Buffer.alloc(0)));
+    } else if (keyType === 'ec') {
+      const curve = String((key.asymmetricKeyDetails as any)?.namedCurve || '');
+      if (curve === 'secp384r1') {
+        hash = 'sha384';
+        sigAlg = derSeq(derOid('1.2.840.10045.4.3.3'));
+      } else if (curve === 'secp521r1') {
+        hash = 'sha512';
+        sigAlg = derSeq(derOid('1.2.840.10045.4.3.4'));
+      } else {
+        hash = 'sha256';
+        sigAlg = derSeq(derOid('1.2.840.10045.4.3.2'));
+      }
+    } else {
+      throw new Error('unsupported key type: ' + keyType);
+    }
+
+    const cn = domains[0] && domains[0].length <= 64 ? domains[0] : '';
+    const subject = cn ? derSeq(derSet(derSeq(derOid('2.5.4.3'), der(0x0c, Buffer.from(cn, 'utf8'))))) : derSeq();
+    const spki = createPublicKey(key).export({ type: 'spki', format: 'der' }) as Buffer;
+
+    // subjectAltName（DNS）
+    const generalNames = derSeq(...domains.map((d) => der(0x82, Buffer.from(d, 'ascii'))));
+    const sanExtension = derSeq(derOid('2.5.29.17'), der(0x04, generalNames));
+    const extensions = derSeq(sanExtension);
+    const extensionRequest = derSeq(derOid('1.2.840.113549.1.9.14'), derSet(extensions));
+    const attributes = der(0xa0, extensionRequest);
+
+    const cri = derSeq(der(0x02, Buffer.from([0])), subject, spki, attributes);
+    const signature = sign(hash, cri, key);
+    const csr = derSeq(cri, sigAlg, der(0x03, Buffer.concat([Buffer.from([0]), signature])));
+    const body = csr.toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n+$/, '');
+    return `-----BEGIN CERTIFICATE REQUEST-----\n${body}\n-----END CERTIFICATE REQUEST-----\n`;
+  }
+
+  private generateCSROpenSSL(domainKeyPem: string, domains: string[]): string {
     const cn = domains[0] || '';
     const subj = cn && cn.length <= 64 ? '/CN=' + cn : '/';
     const san = domains.map((d) => 'DNS:' + d).join(',');
