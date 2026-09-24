@@ -1,20 +1,18 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">证书订单</span>
-          <n-space>
-            <n-button @click="router.push('/cert-settings')">计划任务设置</n-button>
-            <n-button type="primary" @click="openAdd">
-              <template #icon><n-icon :component="AddOutline" /></template>
-              申请证书
-            </n-button>
-          </n-space>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="证书订单" subtitle="管理证书申请、签发与续期">
+      <template #actions>
+        <n-space>
+          <n-button @click="router.push('/cert-settings')">计划任务设置</n-button>
+          <n-button type="primary" @click="openAdd">
+            <template #icon><n-icon :component="AddOutline" /></template>
+            申请证书
+          </n-button>
+        </n-space>
       </template>
-      <n-data-table :columns="columns" :data="orders" :loading="loading" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !orders.length" description="暂无证书订单" />
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable :columns="columns" :data="orders" :loading="loading" empty-text="暂无证书订单" />
     </n-card>
 
     <!-- 添加/编辑弹窗 -->
@@ -93,6 +91,8 @@ import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const router = useRouter();
 
@@ -349,14 +349,3 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

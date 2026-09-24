@@ -1,22 +1,20 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">优选IP任务</span>
-          <div class="actions">
-            <n-button @click="$router.push('/optimize-settings')">
-              <template #icon><n-icon :component="SettingsOutline" /></template>
-              优选IP设置
-            </n-button>
-            <n-button type="primary" @click="$router.push('/optimize-tasks/add')">
-              <template #icon><n-icon :component="AddOutline" /></template>
-              添加任务
-            </n-button>
-          </div>
+  <div class="app-stack">
+    <PageHeader title="优选IP任务" subtitle="管理域名优选 IP 任务与执行状态">
+      <template #actions>
+        <div class="actions">
+          <n-button @click="$router.push('/optimize-settings')">
+            <template #icon><n-icon :component="SettingsOutline" /></template>
+            优选IP设置
+          </n-button>
+          <n-button type="primary" @click="$router.push('/optimize-tasks/add')">
+            <template #icon><n-icon :component="AddOutline" /></template>
+            添加任务
+          </n-button>
         </div>
       </template>
-
+    </PageHeader>
+    <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 120px" />
         <n-input v-model:value="kw" placeholder="关键词" style="width: 200px" @keyup.enter="search" />
@@ -25,8 +23,14 @@
         <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table :columns="columns" :data="tasks" :loading="loading" :pagination="pagination" :row-key="(row: any) => row.id" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !tasks.length" description="暂无优选IP任务" />
+      <ResponsiveDataTable
+        :columns="columns"
+        :data="tasks"
+        :loading="loading"
+        :pagination="pagination"
+        :row-key="(row: any) => row.id"
+        empty-text="暂无优选IP任务"
+      />
     </n-card>
   </div>
 </template>
@@ -37,6 +41,8 @@ import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, SettingsOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const router = useRouter();
 const message = useMessage();
@@ -202,17 +208,8 @@ onMounted(loadTasks);
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
 .actions {
   display: flex;
   gap: 8px;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
 }
 </style>

@@ -1,10 +1,9 @@
 <template>
-  <div class="setup-wrap">
-    <n-card class="setup-card" :bordered="false">
-      <div class="setup-head">
-        <n-icon size="40" :component="ServerOutline" color="#3b6df0" />
+  <AuthShell max-width="560px">
+    <n-card class="auth-card" :bordered="false">
+      <div class="auth-head">
         <h2>系统安装</h2>
-        <p>聚合 DNS 管理系统 · 初始化配置</p>
+        <p>初始化数据库连接与管理员账号</p>
       </div>
 
       <n-alert v-if="detected" type="info" style="margin-bottom: 16px">
@@ -49,15 +48,15 @@
         </n-space>
       </n-form>
     </n-card>
-  </div>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
-import { ServerOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import AuthShell from '../components/AuthShell.vue';
 
 const router = useRouter();
 const message = useMessage();
@@ -158,33 +157,3 @@ onMounted(async () => {
   }
 });
 </script>
-
-<style scoped>
-.setup-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #eef2ff 0%, #dbeafe 50%, #e0f2fe 100%);
-  padding: 16px;
-}
-.setup-card {
-  width: 100%;
-  max-width: 520px;
-  border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(59, 109, 240, 0.15);
-}
-.setup-head {
-  text-align: center;
-  margin-bottom: 20px;
-}
-.setup-head h2 {
-  margin: 12px 0 4px;
-  font-size: 20px;
-}
-.setup-head p {
-  margin: 0;
-  color: #888;
-  font-size: 13px;
-}
-</style>

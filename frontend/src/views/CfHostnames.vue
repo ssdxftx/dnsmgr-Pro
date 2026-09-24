@@ -1,19 +1,17 @@
 <template>
-  <div>
-    <n-card :bordered="false" size="small">
-      <div class="head">
-        <n-space align="center">
-          <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-          <span class="title">Cloudflare 自定义主机名 · {{ domainName || domainId }}</span>
-          <n-tag v-if="fallbackOrigin" size="small" type="info">Fallback: {{ fallbackOrigin }}</n-tag>
-        </n-space>
+  <div class="app-stack">
+    <PageHeader :title="'Cloudflare 自定义主机名 · ' + (domainName || domainId)" subtitle="管理 Cloudflare 自定义主机名与证书验证" back="/cdn-domains">
+      <template #title-suffix>
+        <n-tag v-if="fallbackOrigin" size="small" type="info">Fallback: {{ fallbackOrigin }}</n-tag>
+      </template>
+      <template #actions>
         <n-space size="small">
           <n-tag size="small" v-if="dcvUuid">DCV UUID: {{ dcvUuid }}</n-tag>
           <n-button size="small" @click="loadDcvUuid">获取 DCV UUID</n-button>
           <n-button size="small" @click="openFallback">Fallback 源站</n-button>
         </n-space>
-      </div>
-    </n-card>
+      </template>
+    </PageHeader>
 
     <n-card :bordered="false" size="small" style="margin-top: 12px">
       <n-space style="margin-bottom: 12px">
@@ -30,16 +28,15 @@
         <n-button size="small" @click="load"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table
+      <ResponsiveDataTable
         :columns="columns"
         :data="rows"
         :loading="loading"
         :row-key="(row: any) => row.id"
-        :bordered="false"
         size="small"
-        @update:checked-row-keys="(k: any[]) => (selection = k)"
+        v-model:checked-row-keys="selection"
+        empty-text="暂无自定义主机名"
       />
-      <n-empty class="list-empty" v-if="!loading && !rows.length" description="暂无自定义主机名" />
     </n-card>
 
     <!-- 单个添加/编辑 -->
@@ -222,14 +219,13 @@
 </template>
 
 <script setup lang="ts">
-import { useBack } from '../lib/back';
 import { computed, h, onMounted, reactive, ref } from 'vue';
-
-const goBack = useBack('/cdn-domains');
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { ArrowBackOutline, RefreshOutline } from '@vicons/ionicons5';
+import { RefreshOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const route = useRoute();
 const message = useMessage();
@@ -659,12 +655,10 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.head { display: flex; align-items: center; justify-content: space-between; }
-.title { font-size: 16px; font-weight: 600; }
 .bg { border: 1px solid #e5e5e5; border-radius: 4px; padding: 12px; margin-bottom: 12px; }
 .bg-title { font-weight: 600; margin-bottom: 8px; }
 .bg-items { margin-bottom: 10px; }
 .bg-item { background: #fafafa; border-radius: 4px; padding: 8px; margin-bottom: 6px; }
 .mono { font-family: monospace; word-break: break-all; font-size: 12px; }
-.dim { color: #888; font-size: 12px; }
+.dim { color: var(--app-text-3); font-size: 12px; }
 </style>

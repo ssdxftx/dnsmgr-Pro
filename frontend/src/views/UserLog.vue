@@ -1,10 +1,7 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="操作日志" subtitle="查询平台用户的操作记录" />
     <n-card :bordered="false">
-      <template #header>
-        <span class="title">操作日志</span>
-      </template>
-
       <n-space style="margin-bottom: 16px">
         <n-input v-if="isAdmin" v-model:value="uid" placeholder="UID" style="width: 120px" />
         <n-input v-model:value="domain" placeholder="域名" style="width: 180px" />
@@ -13,8 +10,14 @@
         <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table :columns="columns" :data="logs" :loading="loading" :pagination="pagination" :row-key="(row: any) => row.id" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !logs.length" description="暂无日志" />
+      <ResponsiveDataTable
+        :columns="columns"
+        :data="logs"
+        :loading="loading"
+        :pagination="pagination"
+        :row-key="(row: any) => row.id"
+        empty-text="暂无日志"
+      />
     </n-card>
   </div>
 </template>
@@ -24,6 +27,8 @@ import { computed, h, onMounted, reactive, ref } from 'vue';
 import { NTag, NEllipsis, useMessage } from 'naive-ui';
 import { SearchOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const loading = ref(false);
@@ -101,10 +106,3 @@ function clearSearch() {
 
 onMounted(loadLogs);
 </script>
-
-<style scoped>
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

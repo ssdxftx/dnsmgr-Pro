@@ -1,16 +1,7 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader :title="(isEdit ? '编辑' : '添加') + '优选IP任务'" subtitle="配置域名优选 IP 任务的解析参数" back="/optimize-tasks" />
     <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">{{ isEdit ? '编辑' : '添加' }}优选IP任务</span>
-          <n-button @click="$router.push('/optimize-tasks')">
-            <template #icon><n-icon :component="ArrowBackOutline" /></template>
-            返回
-          </n-button>
-        </div>
-      </template>
-
       <n-form label-placement="left" label-width="140" style="max-width: 720px">
         <n-form-item label="域名选择" required>
           <n-space :size="4" style="width: 100%">
@@ -78,8 +69,8 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useMessage } from 'naive-ui';
-import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -170,17 +161,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .tip-text {
-  color: #999;
+  color: var(--app-text-3);
   font-size: 12px;
 }
 </style>

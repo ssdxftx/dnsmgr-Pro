@@ -1,5 +1,11 @@
 <template>
-  <n-config-provider :theme-overrides="themeOverrides" :locale="zhCN" :date-locale="dateZhCN">
+  <n-config-provider
+    :theme="isDark ? darkTheme : null"
+    :theme-overrides="isDark ? darkThemeOverrides : lightThemeOverrides"
+    :locale="zhCN"
+    :date-locale="dateZhCN"
+  >
+    <n-global-style />
     <n-message-provider>
       <n-dialog-provider>
         <router-view />
@@ -9,15 +15,9 @@
 </template>
 
 <script setup lang="ts">
-import { zhCN, dateZhCN } from 'naive-ui';
-import type { GlobalThemeOverrides } from 'naive-ui';
+import { darkTheme, dateZhCN, zhCN } from 'naive-ui';
+import { useThemeMode } from './composables/useThemeMode';
+import { darkThemeOverrides, lightThemeOverrides } from './styles/theme';
 
-const themeOverrides: GlobalThemeOverrides = {
-  common: {
-    primaryColor: '#3b6df0',
-    primaryColorHover: '#5b87f5',
-    primaryColorPressed: '#2c59d0',
-    borderRadius: '6px',
-  },
-};
+const { isDark } = useThemeMode();
 </script>

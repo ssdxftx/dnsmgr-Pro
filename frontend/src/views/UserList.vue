@@ -1,24 +1,28 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">用户管理</span>
-          <n-button type="primary" @click="openAdd">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加用户
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="用户管理" subtitle="管理平台用户、权限与 API 接口">
+      <template #actions>
+        <n-button type="primary" @click="openAdd">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          添加用户
+        </n-button>
       </template>
-
+    </PageHeader>
+    <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-input v-model:value="kw" placeholder="UID或用户名" style="width: 220px" @keyup.enter="search" />
         <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>搜索</n-button>
         <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table :columns="columns" :data="users" :loading="loading" :pagination="pagination" :row-key="(row: any) => row.id" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !users.length" description="暂无用户" />
+      <ResponsiveDataTable
+        :columns="columns"
+        :data="users"
+        :loading="loading"
+        :pagination="pagination"
+        :row-key="(row: any) => row.id"
+        empty-text="暂无用户"
+      />
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '修改用户' : '添加用户'" :style="modalStyle" :mask-closable="false">
@@ -83,6 +87,8 @@ import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -321,15 +327,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .perm-list {
   width: 100%;
   display: flex;

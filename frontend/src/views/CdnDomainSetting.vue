@@ -1,18 +1,14 @@
 <template>
-  <div>
-    <n-card :bordered="false" size="small">
-      <div class="info-row">
-        <n-button quaternary circle size="small" @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-        <span class="domain-name">{{ info?.name }}</span>
-        <n-space>
+  <div class="app-stack">
+    <PageHeader :title="info?.name || '加速域名设置'" subtitle="配置加速域名的回源、缓存、HTTPS 与访问控制" back="/cdn-domains">
+      <template #actions>
+        <n-space align="center">
           <n-tag size="small">{{ info?.routename || info?.route }}</n-tag>
           <n-tag size="small" :type="info?.status === 'offline' ? 'default' : 'success'">状态：{{ info?.status === 'offline' ? '已停用' : '已启用' }}</n-tag>
+          <span class="cname">CNAME：{{ info?.cname || '暂无' }}</span>
         </n-space>
-      </div>
-      <div class="info-row" style="margin-top:6px">
-        <span class="cname">CNAME：{{ info?.cname || '暂无' }}</span>
-      </div>
-    </n-card>
+      </template>
+    </PageHeader>
 
     <n-space vertical :size="12" style="margin-top:12px">
       <n-card title="域名状态" size="small" :bordered="false">
@@ -121,14 +117,11 @@
 </template>
 
 <script setup lang="ts">
-import { useBack } from '../lib/back';
 import { onMounted, reactive, ref } from 'vue';
-
-const goBack = useBack('/cdn-domains');
 import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
-import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const route = useRoute();
 const message = useMessage();
@@ -278,7 +271,7 @@ onMounted(load);
   font-size: 16px;
 }
 .cname {
-  color: #999;
+  color: var(--app-text-3);
   font-size: 13px;
 }
 .rule-row {

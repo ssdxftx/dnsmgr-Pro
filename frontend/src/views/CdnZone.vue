@@ -1,9 +1,7 @@
 <template>
-  <div>
-    <n-card :bordered="false" size="small">
-      <div class="info-row">
-        <n-button quaternary circle size="small" @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-        <span class="title">站点设置</span>
+  <div class="app-stack">
+    <PageHeader title="站点设置" subtitle="配置 CDN 站点的 HTTPS、缓存与性能策略" back="/cdn-domains">
+      <template #actions>
         <n-select
           v-model:value="selectedKey"
           :options="zoneOptions"
@@ -11,8 +9,8 @@
           style="width:320px;margin-left:8px"
           @update:value="onZoneSelect"
         />
-      </div>
-    </n-card>
+      </template>
+    </PageHeader>
 
     <n-empty v-if="!zoneOptions.length" description="暂无站点（仅接入到站点类型的加速域名后可用）" style="margin-top:24px" />
 
@@ -32,7 +30,7 @@
 
       <n-card title="站点全局配置" size="small" :bordered="false" style="margin-top:12px">
         <template #header-extra>
-          <span style="color:#f60;font-size:12px">作用于站点下所有加速域名</span>
+          <span style="color:var(--app-warning);font-size:12px">作用于站点下所有加速域名</span>
         </template>
         <n-form label-placement="left" label-width="130">
           <n-divider title-placement="left">HTTPS / TLS</n-divider>
@@ -117,13 +115,10 @@
 </template>
 
 <script setup lang="ts">
-import { useBack } from '../lib/back';
 import { computed, onMounted, reactive, ref } from 'vue';
-
-const goBack = useBack('/cdn-domains');
 import { useMessage } from 'naive-ui';
-import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const zoneOptions = ref<any[]>([]);

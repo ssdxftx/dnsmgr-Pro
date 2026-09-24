@@ -1,14 +1,7 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="域名到期提醒设置" subtitle="配置域名到期的邮件与机器人提醒" back="/domains" />
     <n-card :bordered="false" style="max-width: 640px">
-      <template #header>
-        <div class="toolbar">
-          <n-space align="center">
-            <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-            <span class="title">域名到期提醒设置</span>
-          </n-space>
-        </div>
-      </template>
       <n-form :label-placement="labelPlacement" :label-width="labelWidth">
         <n-form-item label="到期提醒天数">
           <n-input v-model:value="form.expire_noticedays" placeholder="留空则不开启到期提醒" />
@@ -50,6 +43,7 @@ const goBack = useBack('/domains');
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const saving = ref(false);
@@ -98,12 +92,9 @@ onMounted(load);
 </script>
 
 <style scoped>
-.toolbar { display: flex; align-items: center; justify-content: space-between; }
-.title { font-size: 16px; font-weight: 600; }
 .hint { color: #18a058; font-size: 12px; margin-top: 4px; line-height: 1.6; }
 
 @media (max-width: 768px) {
-  .toolbar { gap: 8px; }
   :deep(.n-card__footer .n-space) {
     width: 100%;
     justify-content: space-between;

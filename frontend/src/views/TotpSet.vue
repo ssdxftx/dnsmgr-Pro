@@ -1,15 +1,7 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="安全设置 · TOTP 两步验证" subtitle="使用动态口令为账户增加二次验证" back="/dashboard" />
     <n-card :bordered="false" style="max-width: 560px">
-      <template #header>
-        <div class="toolbar">
-          <n-space align="center">
-            <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-            <span class="title">安全设置 · TOTP 两步验证</span>
-          </n-space>
-        </div>
-      </template>
-
       <n-result v-if="!enabled" status="info" title="未开启两步验证" description="开启后将使用动态口令进行二次验证，提升账户安全性">
         <template #footer>
           <n-button type="primary" :loading="loading" @click="generate">开启两步验证</n-button>
@@ -49,13 +41,10 @@
 </template>
 
 <script setup lang="ts">
-import { useBack } from '../lib/back';
 import { computed, onMounted, ref } from 'vue';
-
-const goBack = useBack('/dashboard');
 import { useMessage, useDialog } from 'naive-ui';
-import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 import QRCode from 'qrcode';
 
 const message = useMessage();
@@ -133,8 +122,6 @@ onMounted(async () => {
 </script>
 
 <style scoped>
-.toolbar { display: flex; align-items: center; justify-content: space-between; }
-.title { font-size: 16px; font-weight: 600; }
 .qr-box {
   width: 220px;
   height: 220px;

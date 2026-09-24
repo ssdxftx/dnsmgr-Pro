@@ -1,17 +1,15 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">自动部署任务</span>
-          <n-button type="primary" @click="openAdd">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加任务
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="自动部署任务" subtitle="管理证书自动部署任务">
+      <template #actions>
+        <n-button type="primary" @click="openAdd">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          添加任务
+        </n-button>
       </template>
-      <n-data-table :columns="columns" :data="tasks" :loading="loading" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !tasks.length" description="暂无部署任务" />
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loading" empty-text="暂无部署任务" />
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑任务' : '添加部署任务'" style="max-width:640px" :mask-closable="false">
@@ -53,6 +51,8 @@ import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-u
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { evalShow, isSecretField } from '../lib/safe';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -267,14 +267,3 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

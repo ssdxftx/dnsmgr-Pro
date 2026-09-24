@@ -1,15 +1,7 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="自动续签设置" subtitle="配置证书自动续签、运行时段与通知" back="/cert-orders" />
     <n-card :bordered="false" style="max-width: 640px">
-      <template #header>
-        <div class="toolbar">
-          <n-space align="center">
-            <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-            <span class="title">自动续签设置</span>
-          </n-space>
-        </div>
-      </template>
-
       <n-form :label-placement="labelPlacement" :label-width="labelWidth">
         <n-divider title-placement="left" class="section">自动续签</n-divider>
         <n-form-item label="到期前续签天数">
@@ -83,6 +75,7 @@ const goBack = useBack('/cert-orders');
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const saving = ref(false);
@@ -161,15 +154,6 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
 .section {
   margin: 24px 0 12px;
 }
@@ -184,18 +168,15 @@ onMounted(() => {
 }
 .range-sep {
   flex: none;
-  color: #6b7280;
+  color: var(--app-text-3);
 }
 .hint {
-  color: #6b7280;
+  color: var(--app-text-3);
   font-size: 12px;
   line-height: 1.6;
 }
 
 @media (max-width: 768px) {
-  .toolbar {
-    gap: 8px;
-  }
   :deep(.n-card__footer .n-space) {
     width: 100%;
     justify-content: space-between;

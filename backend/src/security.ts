@@ -14,10 +14,17 @@ const HTML_CSP = [
   "worker-src 'self' blob:",
 ].join('; ');
 
-const IMMUTABLE = 'public, max-age=31536000, immutable';
-const SHORT_PUBLIC = 'public, max-age=86400';
-const REVALIDATE = 'no-cache';
+const IMMUTABLE = 'public, max-age=31536000, immutable, stale-while-revalidate=86400, stale-if-error=604800';
+const SHORT_PUBLIC = 'public, max-age=604800, stale-while-revalidate=86400, stale-if-error=604800';
+const REVALIDATE = 'no-cache, must-revalidate, stale-while-revalidate=120, stale-if-error=86400';
 const NO_STORE = 'no-store, no-cache, must-revalidate';
+
+// 无需登录即可访问、且对所有访客一致的只读接口，可交由 CDN/浏览器短时缓存
+const PUBLIC_API_CACHE: Record<string, string> = {
+  '/api/health': 'public, max-age=10, stale-while-revalidate=30',
+  '/api/setup/status': 'public, max-age=5, stale-while-revalidate=20',
+  '/api/register/config': 'public, max-age=60, stale-while-revalidate=300',
+};
 
 function isHashedAsset(url: string): boolean {
   return /^\/assets\/.+\.[a-z0-9]+$/i.test(url);
@@ -25,6 +32,11 @@ function isHashedAsset(url: string): boolean {
 
 function isDocument(url: string): boolean {
   return url === '/' || url.endsWith('.html') || !/\.[a-z0-9]{2,5}$/i.test(url);
+}
+
+function setCache(reply: FastifyReply, value: string) {
+  reply.header('Cache-Control', value);
+  reply.header('CDN-Cache-Control', value);
 }
 
 export function applySecurityHeaders(app: FastifyInstance): void {
@@ -38,26 +50,31 @@ export function applySecurityHeaders(app: FastifyInstance): void {
     reply.header('Cross-Origin-Resource-Policy', 'same-origin');
     reply.header('Cross-Origin-Opener-Policy', 'same-origin');
     reply.header('X-Robots-Tag', 'noindex, nofollow');
+    reply.header('Vary', 'Accept-Encoding');
     if (hsts) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 
     const url = String(req.raw.url || '').split('?')[0];
+    const contentType = String(reply.getHeader('content-type') || '');
+    const isHtml = contentType.includes('text/html');
+
     if (url.startsWith('/api/')) {
-      reply.header('Cache-Control', NO_STORE);
-      reply.header('Pragma', 'no-cache');
-      reply.header('CDN-Cache-Control', 'no-store');
+      const publicCache = req.method === 'GET' ? PUBLIC_API_CACHE[url] : undefined;
+      if (publicCache) {
+        setCache(reply, publicCache);
+      } else {
+        reply.header('Cache-Control', NO_STORE);
+        reply.header('Pragma', 'no-cache');
+        reply.header('CDN-Cache-Control', 'no-store');
+      }
     } else if (isHashedAsset(url)) {
-      reply.header('Cache-Control', IMMUTABLE);
-      reply.header('CDN-Cache-Control', IMMUTABLE);
-    } else if (isDocument(url)) {
-      reply.header('Cache-Control', REVALIDATE);
-      reply.header('CDN-Cache-Control', REVALIDATE);
+      setCache(reply, IMMUTABLE);
+    } else if (isHtml || isDocument(url)) {
+      setCache(reply, REVALIDATE);
     } else {
-      reply.header('Cache-Control', SHORT_PUBLIC);
-      reply.header('CDN-Cache-Control', SHORT_PUBLIC);
+      setCache(reply, SHORT_PUBLIC);
     }
 
-    const contentType = String(reply.getHeader('content-type') || '');
-    if (contentType.includes('text/html')) {
+    if (isHtml) {
       reply.header('Content-Security-Policy', HTML_CSP);
     }
     return payload;
