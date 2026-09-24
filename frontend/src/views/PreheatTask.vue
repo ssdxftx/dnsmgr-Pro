@@ -1,24 +1,22 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">自动预热</span>
-          <n-button type="primary" @click="openAdd">
-            <template #icon><n-icon :component="AddOutline" /></template>
-            添加任务
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="自动预热" subtitle="自动预热或清除 CDN 缓存资源">
+      <template #actions>
+        <n-button type="primary" @click="openAdd">
+          <template #icon><n-icon :component="AddOutline" /></template>
+          添加任务
+        </n-button>
       </template>
-      <n-data-table
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
         :loading="loading"
         :pagination="{ pageSize: 20 }"
-        :bordered="false"
         :row-key="(row: any) => row.id"
+        empty-text="暂无预热任务，点击「添加任务」配置自动预热"
       />
-      <n-empty class="list-empty" v-if="!loading && !tasks.length" description="暂无预热任务，点击「添加任务」配置自动预热" />
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" title="预热任务" style="max-width: 640px" :mask-closable="false">
@@ -66,6 +64,8 @@ import { h, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -230,15 +230,3 @@ function del(row: any) {
 
 onMounted(load);
 </script>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

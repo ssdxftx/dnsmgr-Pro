@@ -1,16 +1,14 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">切换记录</span>
-          <n-button @click="$router.push('/dm-tasks')">
-            <template #icon><n-icon :component="ArrowBackOutline" /></template>
-            返回
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="切换记录" subtitle="查看容灾任务的切换明细记录">
+      <template #actions>
+        <n-button @click="$router.push('/dm-tasks')">
+          <template #icon><n-icon :component="ArrowBackOutline" /></template>
+          返回
+        </n-button>
       </template>
-
+    </PageHeader>
+    <n-card :bordered="false">
       <n-descriptions v-if="task" bordered :column="2" size="small" style="margin-bottom: 16px">
         <n-descriptions-item label="域名">{{ task.rr }}.{{ task.domain || '' }}</n-descriptions-item>
         <n-descriptions-item label="解析记录">{{ task.main_value }}</n-descriptions-item>
@@ -31,8 +29,7 @@
         <n-button @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
       </n-space>
 
-      <n-data-table :columns="logColumns" :data="logs" :loading="loading" :pagination="pagination" :bordered="false" />
-      <n-empty class="list-empty" v-if="!loading && !logs.length" description="暂无切换记录" />
+      <ResponsiveDataTable :columns="logColumns" :data="logs" :loading="loading" :pagination="pagination" empty-text="暂无切换记录" />
     </n-card>
   </div>
 </template>
@@ -44,6 +41,8 @@ import { useMessage } from 'naive-ui';
 import { NTag } from 'naive-ui';
 import { ArrowBackOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -151,15 +150,3 @@ onMounted(() => {
   loadLogs();
 });
 </script>
-
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>

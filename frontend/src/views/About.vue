@@ -1,5 +1,6 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="关于" subtitle="查看项目版本信息与更新状态" />
     <n-grid cols="1 l:2" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
         <n-card :bordered="false">
@@ -119,13 +120,6 @@
           </li>
         </ul>
       </div>
-      <div class="stack-block">
-        <div class="stack-title">版本说明</div>
-        <p class="stack-desc">
-          版本号遵循 <code>主版本.次版本.修订号</code>，每次发布都会在仓库打上 <code>v{{ update?.current || info?.version || '1.0.0' }}</code> 形式的标签；
-          「检查更新」通过对比仓库标签判断是否有新版本。
-        </p>
-      </div>
     </n-card>
   </div>
 </template>
@@ -135,6 +129,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { NIcon, useMessage } from 'naive-ui';
 import { RefreshOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 interface AboutInfo {
   name: string;
@@ -289,7 +284,7 @@ onMounted(async () => {
   margin-top: 4px;
   font-size: 13px;
   line-height: 1.6;
-  color: #6b7280;
+  color: var(--app-text-3);
 }
 .app-divider {
   margin: 16px 0;
@@ -309,7 +304,7 @@ onMounted(async () => {
 }
 .ver-label {
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--app-text-3);
 }
 .ver-value {
   margin-top: 2px;

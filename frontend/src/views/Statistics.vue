@@ -1,38 +1,69 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">数据统计</span>
-          <n-button size="small" @click="load" :loading="loading">
-            <template #icon><n-icon :component="RefreshOutline" /></template>
-            刷新
-          </n-button>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="数据统计" subtitle="查看 CDN 加速流量、带宽与请求统计">
+      <template #actions>
+        <n-button size="small" @click="load" :loading="loading">
+          <template #icon><n-icon :component="RefreshOutline" /></template>
+          刷新
+        </n-button>
       </template>
-
-      <n-space style="margin-bottom: 16px" align="center">
-        <n-radio-group v-model:value="range" @update:value="onRangeChange">
+    </PageHeader>
+    <n-card :bordered="false">
+      <div class="filters">
+        <n-radio-group v-if="!isMobile" v-model:value="range" class="filter-range" @update:value="onRangeChange">
           <n-radio-button value="24h">近24小时</n-radio-button>
           <n-radio-button value="today">今天</n-radio-button>
           <n-radio-button value="7d">近7天</n-radio-button>
           <n-radio-button value="30d">近30天</n-radio-button>
           <n-radio-button value="custom">自定义</n-radio-button>
         </n-radio-group>
+        <div v-else class="range-pills">
+          <n-button
+            v-for="opt in rangeOptions"
+            :key="opt.value"
+            size="small"
+            :type="range === opt.value ? 'primary' : 'default'"
+            :secondary="range !== opt.value"
+            @click="setRange(opt.value)"
+          >
+            {{ opt.label }}
+          </n-button>
+        </div>
         <n-date-picker
-          v-if="range === 'custom'"
+          v-if="range === 'custom' && !isMobile"
           v-model:value="customRange"
           type="datetimerange"
           format="yyyy-MM-dd HH:mm:ss"
-          style="width: 340px"
+          class="filter-datetime"
           clearable
+          @update:value="onRangeChange"
         />
+        <template v-else-if="range === 'custom' && isMobile">
+          <n-date-picker
+            v-model:value="customStart"
+            type="datetime"
+            format="yyyy-MM-dd HH:mm:ss"
+            class="filter-datetime"
+            placeholder="开始时间"
+            clearable
+            @update:value="onCustomPart"
+          />
+          <n-date-picker
+            v-model:value="customEnd"
+            type="datetime"
+            format="yyyy-MM-dd HH:mm:ss"
+            class="filter-datetime"
+            placeholder="结束时间"
+            clearable
+            @update:value="onCustomPart"
+          />
+        </template>
         <n-select
           v-model:value="selectedAid"
           :options="accountOptions"
           placeholder="全部 CDN 账户"
           clearable
-          style="width: 200px"
+          class="filter-aid"
         />
         <n-select
           v-model:value="selectedDomains"
@@ -41,9 +72,9 @@
           multiple
           clearable
           filterable
-          style="width: 260px"
+          class="filter-domains"
         />
-      </n-space>
+      </div>
 
       <n-alert v-if="errors.length" type="warning" :show-icon="false" style="margin-bottom: 16px">
         部分服务商统计获取失败：{{ errors.join('；') }}
@@ -113,13 +144,23 @@ import { LineChart, BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 const isMobile = ref(window.innerWidth < 768);
 const loading = ref(false);
 const range = ref('24h');
+const rangeOptions = [
+  { label: '近24小时', value: '24h' },
+  { label: '今天', value: 'today' },
+  { label: '近7天', value: '7d' },
+  { label: '近30天', value: '30d' },
+  { label: '自定义', value: 'custom' },
+];
 const customRange = ref<[number, number] | null>(null);
+const customStart = ref<number | null>(null);
+const customEnd = ref<number | null>(null);
 const accountOptions = ref<{ label: string; value: number }[]>([]);
 const domainOptions = ref<{ label: string; value: string }[]>([]);
 const selectedAid = ref<number | null>(null);
@@ -296,6 +337,20 @@ function onRangeChange() {
   load();
 }
 
+function setRange(value: string) {
+  range.value = value;
+  load();
+}
+
+function onCustomPart() {
+  if (customStart.value != null && customEnd.value != null) {
+    customRange.value = [customStart.value, customEnd.value];
+  } else {
+    customRange.value = null;
+  }
+  load();
+}
+
 async function loadOptions() {
   const [a, d] = await Promise.all([
     api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] })),
@@ -328,5 +383,41 @@ onBeforeUnmount(() => {
 .chart {
   width: 100%;
   height: 280px;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.filter-datetime {
+  width: 340px;
+}
+.filter-aid {
+  width: 200px;
+}
+.filter-domains {
+  width: 260px;
+}
+.filter-range {
+  max-width: 100%;
+}
+.range-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 100%;
+}
+.range-pills :deep(.n-button) {
+  flex: 1 1 auto;
+  min-width: 76px;
+}
+@media (max-width: 767px) {
+  .filter-datetime,
+  .filter-aid,
+  .filter-domains {
+    width: 100%;
+  }
 }
 </style>

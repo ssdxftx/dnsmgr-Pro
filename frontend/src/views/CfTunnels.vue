@@ -1,18 +1,13 @@
 <template>
-  <div>
-    <n-card :bordered="false" size="small">
-      <div class="head">
-        <n-space align="center">
-          <n-button quaternary circle @click="goBack"><template #icon><n-icon :component="ArrowBackOutline" /></template></n-button>
-          <span class="title">Cloudflare Tunnel · {{ accountName || '账户 #' + accountId }}</span>
-        </n-space>
+  <div class="app-stack">
+    <PageHeader :title="'Cloudflare Tunnel · ' + (accountName || '账户 #' + accountId)" subtitle="管理 Cloudflare Tunnel 及其路由规则" back="/cdn-accounts">
+      <template #actions>
         <n-button type="primary" size="small" @click="openAdd"><template #icon><n-icon :component="AddOutline" /></template>创建 Tunnel</n-button>
-      </div>
-    </n-card>
+      </template>
+    </PageHeader>
 
     <n-card :bordered="false" size="small" style="margin-top: 12px">
-      <n-data-table :columns="columns" :data="rows" :loading="loading" :row-key="(row: any) => row.id" :bordered="false" size="small" />
-      <n-empty class="list-empty" v-if="!loading && !rows.length" description="暂无 Tunnel" />
+      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :row-key="(row: any) => row.id" size="small" empty-text="暂无 Tunnel" />
     </n-card>
 
     <!-- 创建 -->
@@ -52,7 +47,7 @@
         <n-button type="primary" size="small" :loading="publicLoading" @click="savePublic">保存</n-button>
       </n-form>
       <n-divider />
-      <n-data-table :columns="publicColumns" :data="publicRows" :loading="publicLoading" :row-key="(row: any) => row.hostname + row.path" :bordered="false" size="small" />
+      <ResponsiveDataTable :columns="publicColumns" :data="publicRows" :loading="publicLoading" :row-key="(row: any) => row.hostname + row.path" size="small" />
       <template #footer>
         <n-button @click="showPublic = false">关闭</n-button>
       </template>
@@ -66,7 +61,7 @@
         <n-button type="primary" size="small" :loading="cidrLoading" @click="saveCidr">添加</n-button>
       </n-form>
       <n-divider />
-      <n-data-table :columns="cidrColumns" :data="cidrRows" :loading="cidrLoading" :row-key="(row: any) => row.id" :bordered="false" size="small" />
+      <ResponsiveDataTable :columns="cidrColumns" :data="cidrRows" :loading="cidrLoading" :row-key="(row: any) => row.id" size="small" />
       <template #footer>
         <n-button @click="showCidr = false">关闭</n-button>
       </template>
@@ -80,7 +75,7 @@
         <n-button type="primary" size="small" :loading="routeLoading" @click="saveRoute">添加</n-button>
       </n-form>
       <n-divider />
-      <n-data-table :columns="routeColumns" :data="routeRows" :loading="routeLoading" :row-key="(row: any) => row.id" :bordered="false" size="small" />
+      <ResponsiveDataTable :columns="routeColumns" :data="routeRows" :loading="routeLoading" :row-key="(row: any) => row.id" size="small" />
       <template #footer>
         <n-button @click="showRoute = false">关闭</n-button>
       </template>
@@ -89,14 +84,13 @@
 </template>
 
 <script setup lang="ts">
-import { useBack } from '../lib/back';
 import { h, onMounted, reactive, ref } from 'vue';
-
-const goBack = useBack('/cdn-accounts');
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { ArrowBackOutline, AddOutline } from '@vicons/ionicons5';
+import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const route = useRoute();
 const message = useMessage();
@@ -352,8 +346,3 @@ function delRoute(row: any) {
 
 onMounted(load);
 </script>
-
-<style scoped>
-.head { display: flex; align-items: center; justify-content: space-between; }
-.title { font-size: 16px; font-weight: 600; }
-</style>

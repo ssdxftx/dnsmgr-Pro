@@ -1,6 +1,35 @@
-/* 移动端工具栏响应式布局
- * 桌面端（>768px）保持原有横向 space-between 排列不变，
- * 手机端标题独占一行，按钮组保持一行排列（不换行），并适当收紧按钮间距与内边距。 */
+/* ===========================================================================
+   响应式适配层（在 tokens.css 之后加载）
+   =========================================================================== */
+
+/* 移动端页面留白收紧 */
+@media (max-width: 767px) {
+  .app-page {
+    gap: 12px;
+  }
+  .n-card {
+    border-radius: var(--app-radius);
+  }
+  /* 卡片弹窗不撑出屏幕 */
+  .n-modal.n-card {
+    max-width: calc(100vw - 24px) !important;
+  }
+  .n-drawer .n-drawer-content {
+    max-width: 86vw;
+  }
+  /* 表格允许横向滚动，避免列被压扁 */
+  .n-data-table .n-data-table-wrapper,
+  .n-data-table .n-data-table-base-table-body {
+    overflow-x: auto;
+  }
+  /* 日期选择面板不超出手机视口 */
+  .n-date-panel {
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+  }
+}
+
+/* 旧版工具栏布局兼容：标题换行、按钮横向滚动不换行 */
 @media (max-width: 768px) {
   .toolbar {
     flex-direction: column;
@@ -13,16 +42,25 @@
     flex-wrap: nowrap;
     overflow-x: auto;
     gap: 8px;
+    padding-bottom: 2px;
   }
   .toolbar .n-space .n-button {
     flex-shrink: 0;
     padding: 0 9px;
     font-size: 13px;
   }
-  /* 列表页空状态提示沉到卡片底部，避免悬浮在屏幕中部 */
   .list-empty {
-    min-height: 45vh;
+    min-height: 40vh;
     justify-content: flex-end;
     padding-bottom: 32px;
+  }
+}
+
+/* 触屏：可点击元素去除 300ms 延迟并保证最小点击尺寸 */
+@media (hover: none) and (pointer: coarse) {
+  .n-button,
+  .n-menu-item-content,
+  a {
+    touch-action: manipulation;
   }
 }

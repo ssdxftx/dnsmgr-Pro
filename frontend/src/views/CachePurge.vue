@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="app-stack">
     <n-card :bordered="false" title="缓存刷新与预热">
       <n-space vertical :size="16">
         <n-radio-group v-model:value="opType">
@@ -27,12 +27,11 @@
     </n-card>
 
     <n-card :bordered="false" title="任务历史" style="margin-top:12px">
-      <n-data-table
+      <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
         :loading="loadingTasks"
         :pagination="{ pageSize: 20 }"
-        :bordered="false"
       />
     </n-card>
   </div>
@@ -42,6 +41,7 @@
 import { computed, h, onMounted, ref } from 'vue';
 import { NTag } from 'naive-ui';
 import { api } from '../api';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const opType = ref<'url' | 'dir' | 'preheat'>('url');
 const urlText = ref('');

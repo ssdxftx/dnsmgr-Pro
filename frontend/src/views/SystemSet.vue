@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div class="app-stack">
     <n-card :bordered="false">
       <n-tabs type="line" animated>
         <!-- 通知设置 -->
@@ -136,11 +136,10 @@
             <template #header-extra>
               <n-button type="primary" size="small" @click="showGen = true">生成注册码</n-button>
             </template>
-            <n-data-table
+            <ResponsiveDataTable
               :columns="regCodeColumns"
               :data="regCodes"
               :loading="regCodesLoading"
-              :bordered="false"
               :row-key="(row: any) => row.id"
             />
           </n-card>
@@ -231,6 +230,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useMessage, NButton, NSpace, NTag } from 'naive-ui';
 import { api } from '../api';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const saving = ref(false);

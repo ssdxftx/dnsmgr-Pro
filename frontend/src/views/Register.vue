@@ -1,10 +1,9 @@
 <template>
-  <div class="login-wrap">
-    <n-card class="register-card" :bordered="false">
-      <div class="login-head">
-        <n-icon size="40" :component="GlobeOutline" color="#3b6df0" />
+  <AuthShell>
+    <n-card class="auth-card" :bordered="false">
+      <div class="auth-head">
         <h2>注册账号</h2>
-        <p>聚合 DNS 管理系统</p>
+        <p>创建你的聚合 DNS 管理账号</p>
       </div>
 
       <n-alert v-if="!loading && !config.enable" type="warning" style="margin-bottom: 16px">
@@ -51,15 +50,15 @@
         <n-button text style="margin-top: 12px; width: 100%" @click="router.push('/login')">已有账号？返回登录</n-button>
       </template>
     </n-card>
-  </div>
+  </AuthShell>
 </template>
 
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
-import { GlobeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
+import AuthShell from '../components/AuthShell.vue';
 
 const router = useRouter();
 const message = useMessage();
@@ -146,33 +145,3 @@ async function onRegister() {
   }
 }
 </script>
-
-<style scoped>
-.login-wrap {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: linear-gradient(135deg, #eef2ff 0%, #dbeafe 50%, #e0f2fe 100%);
-  padding: 16px;
-}
-.register-card {
-  width: 100%;
-  max-width: 420px;
-  border-radius: 14px;
-  box-shadow: 0 12px 40px rgba(59, 109, 240, 0.15);
-}
-.login-head {
-  text-align: center;
-  margin-bottom: 20px;
-}
-.login-head h2 {
-  margin: 12px 0 4px;
-  font-size: 20px;
-}
-.login-head p {
-  margin: 0;
-  color: #888;
-  font-size: 13px;
-}
-</style>

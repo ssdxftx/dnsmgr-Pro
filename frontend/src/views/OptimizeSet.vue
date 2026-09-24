@@ -1,5 +1,6 @@
 <template>
-  <div>
+  <div class="app-stack">
+    <PageHeader title="优选IP设置" subtitle="配置优选 IP 数据接口与自动更新间隔" />
     <n-grid cols="1 s:2" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
         <n-card :bordered="false" title="功能简介">
@@ -60,6 +61,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const saving = ref(false);

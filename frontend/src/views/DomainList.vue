@@ -1,31 +1,28 @@
 <template>
-  <div>
-    <n-card :bordered="false">
-      <template #header>
-        <div class="toolbar">
-          <span class="title">域名管理</span>
-          <n-space v-if="isAdmin">
-            <n-button v-if="checked.length" size="small" type="success" @click="batchNotice(1)">开启提醒</n-button>
-            <n-button v-if="checked.length" size="small" @click="batchNotice(0)">关闭提醒</n-button>
-            <n-button @click="router.push('/expire-notice')">到期提醒设置</n-button>
-            <n-button type="primary" @click="showImport = true">
-              <template #icon><n-icon :component="CloudDownloadOutline" /></template>
-              导入域名
-            </n-button>
-            <n-button @click="showCategory = true">添加分类</n-button>
-          </n-space>
-        </div>
+  <div class="app-stack">
+    <PageHeader title="域名管理" subtitle="管理已接入的域名、分类与到期提醒">
+      <template #actions>
+        <n-space v-if="isAdmin">
+          <n-button v-if="checked.length" size="small" type="success" @click="batchNotice(1)">开启提醒</n-button>
+          <n-button v-if="checked.length" size="small" @click="batchNotice(0)">关闭提醒</n-button>
+          <n-button @click="router.push('/expire-notice')">到期提醒设置</n-button>
+          <n-button type="primary" @click="showImport = true">
+            <template #icon><n-icon :component="CloudDownloadOutline" /></template>
+            导入域名
+          </n-button>
+          <n-button @click="showCategory = true">添加分类</n-button>
+        </n-space>
       </template>
-      <n-data-table
+    </PageHeader>
+    <n-card :bordered="false">
+      <ResponsiveDataTable
+        v-model:checked-row-keys="checked"
         :columns="columns"
         :data="domains"
         :loading="loading"
-        :pagination="false"
-        :bordered="false"
         :row-key="(row: any) => row._key || row.id"
-        @update:checked-row-keys="(k: any[]) => (checked = k)"
+        empty-text="暂无域名，点击「导入域名」从 DNS 账户接入"
       />
-      <n-empty class="list-empty" v-if="!loading && !domains.length" description="暂无域名，点击「导入域名」从 DNS 账户接入" />
     </n-card>
 
     <!-- 导入域名弹窗 -->
@@ -70,6 +67,8 @@ import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { CloudDownloadOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const router = useRouter();
 const message = useMessage();
@@ -251,14 +250,3 @@ onMounted(() => {
 });
 </script>
 
-<style scoped>
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.title {
-  font-size: 16px;
-  font-weight: 600;
-}
-</style>
