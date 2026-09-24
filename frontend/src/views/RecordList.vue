@@ -3,7 +3,7 @@
     <PageHeader :title="'解析记录 · ' + displayTitle" subtitle="查看并维护当前域名的 DNS 解析记录" back="/domains">
       <template #actions>
         <n-space>
-          <n-button v-if="accountType === 'cloudflare' && isAdmin" size="small" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">自定义主机名</n-button>
+          <n-button v-if="accountType === 'cloudflare' && isAdmin" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">自定义主机名</n-button>
           <n-button v-if="access.writable" type="primary" @click="openAdd">
             <template #icon><n-icon :component="AddOutline" /></template>
             添加记录
