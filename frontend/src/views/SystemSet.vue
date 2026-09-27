@@ -62,6 +62,36 @@
             </n-form>
           </n-card>
 
+          <n-card title="QQ机器人通知设置" :bordered="false" size="small" style="margin-bottom:16px">
+            <n-form label-placement="left" label-width="110">
+              <n-form-item label="AppID">
+                <n-input v-model:value="cfg.qqbot_appid" placeholder="QQ机器人开放平台的AppID" />
+              </n-form-item>
+              <n-form-item label="AppSecret">
+                <n-input v-model:value="cfg.qqbot_appsecret" type="password" show-password-on="click" placeholder="QQ机器人开放平台的AppSecret" />
+              </n-form-item>
+              <n-form-item label="Webhook回调地址">
+                <n-input :value="qqbotWebhook" readonly>
+                  <template #suffix>
+                    <n-button text size="small" @click="copyQqbotWebhook">复制</n-button>
+                  </template>
+                </n-input>
+              </n-form-item>
+              <n-form-item label="绑定状态">
+                <n-tag :type="cfg.qqbot_openid ? 'success' : 'error'" :bordered="false">
+                  {{ cfg.qqbot_openid ? '已绑定' : '未绑定' }}
+                </n-tag>
+              </n-form-item>
+              <n-form-item>
+                <n-space>
+                  <n-button type="primary" :loading="saving" @click="saveFields(['qqbot_appid', 'qqbot_appsecret'])">保存</n-button>
+                  <n-button @click="testQqbot">发送测试消息</n-button>
+                  <n-button @click="showQqbotHelp = true">使用说明</n-button>
+                </n-space>
+              </n-form-item>
+            </n-form>
+          </n-card>
+
           <n-card title="群机器人 Webhook（企微/钉钉/飞书）" :bordered="false" size="small" style="margin-bottom:16px">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="Webhook地址"><n-input v-model:value="cfg.webhook_url" /></n-form-item>
@@ -223,6 +253,21 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- QQ机器人使用说明 -->
+    <n-modal v-model:show="showQqbotHelp" preset="card" title="QQ机器人使用说明" style="max-width:560px">
+      <div class="help-body">
+        <p><b>一、创建并配置机器人</b></p>
+        <p>1. 打开 QQ 开放平台（q.qq.com）→「我的机器人」，创建机器人。</p>
+        <p>2. 机器人无需认证、无需上线。在「开发设置」中获取 AppID 与 AppSecret，填入本页并保存。</p>
+        <p>3. 在「开发设置」→「事件订阅与回调」中选择 Webhook 接入方式，复制本页的 Webhook 回调地址填写。</p>
+        <p>4. 接收事件配置中选择「C2C消息事件」并保存。</p>
+        <p><b>二、完成绑定</b></p>
+        <p>1. 在 QQ 中找到并添加你的机器人。</p>
+        <p>2. 向机器人发送任意一条私聊消息。</p>
+        <p>3. 收到绑定成功回复，且本页绑定状态变为「已绑定」后即可。</p>
+      </div>
+    </n-modal>
   </div>
 </template>
 
@@ -320,6 +365,21 @@ async function testTgbot() {
   const res = await api('POST', '/system/tgbottest', {});
   if (res.code === 0) message.success(res.msg);
   else message.error(res.msg);
+}
+const showQqbotHelp = ref(false);
+const qqbotWebhook = computed(() => `${location.origin}/api/qqbot/webhook`);
+async function testQqbot() {
+  const res = await api('POST', '/system/qqbottest', {});
+  if (res.code === 0) message.success(res.msg);
+  else message.error(res.msg);
+}
+async function copyQqbotWebhook() {
+  try {
+    await navigator.clipboard.writeText(qqbotWebhook.value);
+    message.success('已复制');
+  } catch {
+    message.error('复制失败，请手动复制');
+  }
 }
 async function testWebhook() {
   const res = await api('POST', '/system/webhooktest', {});
@@ -441,3 +501,12 @@ onMounted(() => {
   loadRegCodes();
 });
 </script>
+
+<style scoped>
+.help-body p {
+  margin: 0 0 8px;
+  line-height: 1.7;
+  font-size: 13px;
+  color: var(--app-text-2);
+}
+</style>

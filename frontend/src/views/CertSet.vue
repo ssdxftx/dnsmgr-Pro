@@ -46,6 +46,9 @@
         <n-form-item label="Telegram 通知">
           <n-select v-model:value="form.cert_notice_tgbot" :options="noticeOptions" />
         </n-form-item>
+        <n-form-item label="QQ 机器人通知">
+          <n-select v-model:value="form.cert_notice_qqbot" :options="noticeOptions" />
+        </n-form-item>
         <n-form-item label="群机器人 Webhook">
           <n-select v-model:value="form.cert_notice_webhook" :options="onOffOptions" />
         </n-form-item>
@@ -102,6 +105,7 @@ const DEFAULTS: Record<string, string | number> = {
   cert_notice_mail: '0',
   cert_notice_wxtpl: '0',
   cert_notice_tgbot: '0',
+  cert_notice_qqbot: '0',
   cert_notice_webhook: '0',
   cert_notice_custom_webhook: '0',
 };

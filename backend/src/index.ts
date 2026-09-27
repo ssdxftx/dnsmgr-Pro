@@ -27,6 +27,7 @@ import setupRoutes from './routes/setup.js';
 import aboutRoutes from './routes/about.js';
 import preheatRoutes from './routes/preheat.js';
 import dnsCheckRoutes from './routes/dnscheck.js';
+import qqbotRoutes from './routes/qqbot.js';
 import { startMonitorScheduler } from './lib/monitor/scheduler.js';
 import { executeAll as runOptimizeAll } from './lib/optimize/optimizeService.js';
 import { executeAll as runScheduleAll } from './lib/schedule/scheduleService.js';
@@ -73,6 +74,17 @@ const app = Fastify({
 });
 
 applySecurityHeaders(app);
+
+// 保留原始请求体，供 QQ 机器人 Webhook 的 Ed25519 签名校验使用
+app.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, body: string, done: any) => {
+  req.rawBody = body;
+  if (!body) return done(null, {});
+  try {
+    done(null, JSON.parse(body));
+  } catch (err) {
+    done(err as Error, undefined);
+  }
+});
 
 // 同源部署下前端与后端同域，无需 CORS；如需跨域调用 API，用 DNSMGR_ALLOWED_ORIGINS 显式放行
 const allowedOrigins = (process.env.DNSMGR_ALLOWED_ORIGINS || '')
@@ -176,6 +188,7 @@ if (installed) {
   await app.register(preheatRoutes);
   await app.register(dnsCheckRoutes);
   await app.register(aboutRoutes);
+  await app.register(qqbotRoutes);
 }
 
 // 静态资源与 SPA 回退（容器内 serve 前端构建产物；本地未构建则不注册）

@@ -18,6 +18,9 @@
         <n-form-item label="Telegram 机器人通知">
           <n-select v-model:value="form.expire_notice_tgbot" :options="onOffOptions" />
         </n-form-item>
+        <n-form-item label="QQ 机器人通知">
+          <n-select v-model:value="form.expire_notice_qqbot" :options="onOffOptions" />
+        </n-form-item>
         <n-form-item label="群机器人 Webhook">
           <n-select v-model:value="form.expire_notice_webhook" :options="onOffOptions" />
         </n-form-item>
@@ -65,6 +68,7 @@ const form = reactive<any>({
   expire_notice_mail: '0',
   expire_notice_wxtpl: '0',
   expire_notice_tgbot: '0',
+  expire_notice_qqbot: '0',
   expire_notice_webhook: '0',
   expire_notice_custom_webhook: '0',
 });
