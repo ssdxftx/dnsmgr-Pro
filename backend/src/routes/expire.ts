@@ -6,7 +6,7 @@ import { updateDomainDate } from '../lib/expire/expireNoticeService.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
-const KEYS = ['expire_noticedays', 'expire_notice_mail', 'expire_notice_wxtpl', 'expire_notice_tgbot', 'expire_notice_webhook', 'expire_notice_custom_webhook'];
+const KEYS = ['expire_noticedays', 'expire_notice_mail', 'expire_notice_wxtpl', 'expire_notice_tgbot', 'expire_notice_qqbot', 'expire_notice_webhook', 'expire_notice_custom_webhook'];
 
 export default async function expireRoutes(app: FastifyInstance) {
   const auth = authenticate(app);

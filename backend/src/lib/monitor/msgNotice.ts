@@ -6,6 +6,7 @@ import { fmtDateTime } from '../util.js';
 import { certConfig } from '../cert/factory.js';
 import { deployConfig } from '../deploy/meta.js';
 import { STATUS_LABEL } from '../certService.js';
+import { QqBot } from './qqbot.js';
 
 const SITENAME = '聚合DNS管理系统';
 
@@ -124,6 +125,19 @@ export async function sendTelegram(content: string): Promise<boolean | string> {
   const arr: any = await res.json().catch(() => null);
   if (arr && arr.ok === true) return true;
   return (arr && arr.description) || '请求失败';
+}
+
+export async function sendQqbot(title: string, content: string): Promise<boolean | string> {
+  const appId = await configGet('qqbot_appid');
+  const appSecret = await configGet('qqbot_appsecret');
+  const openid = await configGet('qqbot_openid');
+  if (!appId || !appSecret || !openid) return false;
+  try {
+    const bot = new QqBot(appId, appSecret);
+    return await bot.sendMarkdown(openid, QqBot.toMarkdown(title, content));
+  } catch (e: any) {
+    return e?.message || String(e);
+  }
 }
 
 export async function sendWebhook(sub: string, content: string): Promise<boolean | string> {
@@ -294,6 +308,9 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
     const content = stripTags(mailContent.replace(/<br\/>/g, '\n'));
     await sendTelegram(`<strong>${mailTitle}</strong>\n${content}`);
   }
+  if ((await configGet('notice_qqbot')) === '1') {
+    await sendQqbot(mailTitle, mailContent);
+  }
   if ((await configGet('notice_webhook')) === '1') {
     const content = mailContent.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
     await sendWebhook(mailTitle, content);
@@ -321,6 +338,9 @@ export async function sendExpireNotice(day: number, list: { name: string; expire
     const c = stripTags(content.replace(/<br\/>/g, '\n'));
     await sendTelegram(`<strong>${title}</strong>\n${c}`);
   }
+  if ((await configGet('expire_notice_qqbot')) === '1') {
+    await sendQqbot(title, content);
+  }
   if ((await configGet('expire_notice_webhook')) === '1') {
     const c = content.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
     await sendWebhook(title, c);
@@ -346,6 +366,9 @@ async function certSend(title: string, content: string, result: boolean): Promis
   if (await on('cert_notice_tgbot')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n'));
     await sendTelegram(`<strong>${title}</strong>\n${c}`);
+  }
+  if (await on('cert_notice_qqbot')) {
+    await sendQqbot(title, content);
   }
   if ((await configGet('cert_notice_webhook')) === '1') {
     const c = content.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
