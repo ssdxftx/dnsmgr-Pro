@@ -215,6 +215,35 @@
             </n-form>
           </n-card>
         </n-tab-pane>
+
+        <!-- 统计缓存 -->
+        <n-tab-pane name="statcache" tab="统计缓存">
+          <n-card title="CDN 数据统计缓存" :bordered="false" size="small" style="max-width:560px">
+            <n-alert type="info" :show-icon="false" style="margin-bottom:16px">
+              开启后系统会按服务商数据粒度定时拉取统计并保存到服务器（近 30 天按天、近 48 小时按小时），打开数据统计页即可快速加载。该功能会在后台持续消耗服务器资源，请按需开启；并可在「用户管理」中为其他用户单独开启查看权限。
+            </n-alert>
+            <n-form label-placement="left" label-width="120">
+              <n-form-item label="开启统计缓存">
+                <n-switch :value="(cfg.cdn_stats_cache || '0') === '1'" @update:value="setStatCache" />
+              </n-form-item>
+              <n-form-item label="刷新间隔(分钟)">
+                <n-input-number v-model:value="statCacheInterval" :min="5" :max="1440" style="width: 180px" />
+              </n-form-item>
+              <n-form-item label="最近刷新时间">
+                <n-input :value="cfg.cdn_stats_cache_last || '-'" readonly />
+              </n-form-item>
+              <n-form-item v-if="cfg.cdn_stats_cache_error" label="最近错误">
+                <n-input type="textarea" :rows="2" :value="cfg.cdn_stats_cache_error" readonly />
+              </n-form-item>
+              <n-form-item>
+                <n-space>
+                  <n-button type="primary" :loading="saving" @click="saveStatCache">保存</n-button>
+                  <n-button :loading="refreshingCache" @click="refreshStatCache">立即刷新</n-button>
+                </n-space>
+              </n-form-item>
+            </n-form>
+          </n-card>
+        </n-tab-pane>
       </n-tabs>
     </n-card>
 
@@ -410,6 +439,30 @@ async function setVcode(v: boolean) {
 async function setCronType(v: boolean) {
   cfg.cron_type = v ? '1' : '0';
   await saveFields(['cron_type']);
+}
+
+const statCacheInterval = computed<number>({
+  get: () => Number(cfg.cdn_stats_cache_interval || 30),
+  set: (v: number) => {
+    cfg.cdn_stats_cache_interval = String(v ?? 30);
+  },
+});
+async function setStatCache(v: boolean) {
+  cfg.cdn_stats_cache = v ? '1' : '0';
+  await saveFields(['cdn_stats_cache']);
+}
+async function saveStatCache() {
+  await saveFields(['cdn_stats_cache', 'cdn_stats_cache_interval']);
+}
+const refreshingCache = ref(false);
+async function refreshStatCache() {
+  refreshingCache.value = true;
+  const res = await api('POST', '/system/stat-cache-refresh', {});
+  refreshingCache.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    await loadSettings();
+  } else message.error(res.msg);
 }
 
 async function loadCronKey() {

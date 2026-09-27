@@ -4,6 +4,7 @@ import { query, table } from './db.js';
 export async function migrate(): Promise<void> {
   await ensureColumn('user', 'email', 'varchar(128) DEFAULT NULL');
   await ensureColumn('user', 'check_whole', "tinyint(1) NOT NULL DEFAULT '0'");
+  await ensureColumn('user', 'stat_cache', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'readonly', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'expiretime', 'datetime DEFAULT NULL');
 
@@ -111,6 +112,20 @@ export async function migrate(): Promise<void> {
       addtime datetime NOT NULL,
       PRIMARY KEY (id),
       KEY did (did)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('cdn_stat_data')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      route varchar(20) NOT NULL,
+      aid int(11) unsigned NOT NULL,
+      granularity varchar(6) NOT NULL,
+      ts datetime NOT NULL,
+      data text NOT NULL,
+      addtime datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY bucket (route, aid, granularity, ts)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
 }
