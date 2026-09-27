@@ -1144,6 +1144,7 @@ function del(row: any) {
           { default: () => '同时删除云端加速域名（云端删除后不可恢复）' },
         ),
         h('div', { style: 'margin-top:6px;color:var(--app-text-3);font-size:12px' }, '不勾选时仅删除本系统记录，云端加速域名保留。'),
+        h('div', { style: 'margin-top:6px;color:var(--app-warning);font-size:12px' }, '若该域名由本项目管理并已联动证书，删除时将先吊销联动证书，吊销成功后再删除该域名与自动部署任务；吊销失败会中止删除。'),
       ]),
     positiveText: '删除',
     negativeText: '取消',

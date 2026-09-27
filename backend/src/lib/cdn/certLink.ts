@@ -8,6 +8,7 @@ import type { CertDeployPlan } from './types.js';
 type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 import { decryptConfig, encryptConfig } from '../secret.js';
+import { CertOrderService } from '../certService.js';
 
 function safeJson(s: any): Record<string, any> {
   return decryptConfig(s) || {};
@@ -320,4 +321,49 @@ export async function logDeployResult(taskId: number, status: number, error?: st
   } else if (status < 0) {
     await linkLog(did, oid, 'deploy', 'fail', '部署失败：' + (error || '未知错误，可在自动部署任务中重试'));
   }
+}
+
+// 删除与指定 CDN 加速域名联动的证书订单：先吊销全部已签发证书，全部成功后才删除
+// （部署任务、订单、域名、联动日志）。任一吊销失败则抛出异常，不删除任何记录。
+export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number): Promise<{ orders: number; deployTasks: number }> {
+  const did = Number(cdnDomainId || 0);
+  if (!did) return { orders: 0, deployTasks: 0 };
+  const rows: any[] = await query(`SELECT id, status, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%cdnDomainId%']);
+  const targets = (rows as any[]).filter((r) => {
+    try {
+      return Number(JSON.parse(r.link)?.cdnDomainId) === did;
+    } catch {
+      return false;
+    }
+  });
+
+  // 阶段一：先吊销所有已签发（status=3）的联动证书，任一失败则整体中止
+  for (const o of targets) {
+    if (Number(o.status) !== 3) continue;
+    try {
+      await new CertOrderService(Number(o.id)).revoke();
+    } catch (e: any) {
+      throw new Error(`联动证书 #${o.id} 吊销失败：${e?.message || e}，已中止删除`);
+    }
+  }
+
+  // 阶段二：吊销全部成功后，取消处理中的订单并删除部署任务与订单记录
+  let deployTasks = 0;
+  for (const o of targets) {
+    const oid = Number(o.id);
+    if (Number(o.status) !== 3) {
+      try {
+        await new CertOrderService(oid).cancel();
+      } catch {
+        // ignore
+      }
+    }
+    const taskRows: any[] = await query(`SELECT id FROM ${table('cert_deploy')} WHERE oid = ?`, [oid]);
+    deployTasks += taskRows.length;
+    await query(`DELETE FROM ${table('cert_deploy')} WHERE oid = ?`, [oid]);
+    await query(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [oid]);
+    await query(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [oid]);
+    await query(`DELETE FROM ${table('cert_link_log')} WHERE oid = ?`, [oid]);
+  }
+  return { orders: targets.length, deployTasks };
 }
