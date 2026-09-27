@@ -188,7 +188,7 @@ export async function expireNoticeTask(): Promise<void> {
   if (count > 0) return;
 
   const nowHour = new Date().getHours();
-  const anyOn = ['expire_notice_mail', 'expire_notice_wxtpl', 'expire_notice_tgbot', 'expire_notice_webhook', 'expire_notice_custom_webhook'];
+  const anyOn = ['expire_notice_mail', 'expire_notice_wxtpl', 'expire_notice_tgbot', 'expire_notice_qqbot', 'expire_notice_webhook', 'expire_notice_custom_webhook'];
   let enabled = false;
   for (const k of anyOn) {
     if ((await configGet(k)) === '1') { enabled = true; break; }

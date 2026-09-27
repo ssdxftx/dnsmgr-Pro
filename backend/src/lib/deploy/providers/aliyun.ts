@@ -166,10 +166,17 @@ export class AliyunDeploy implements DeployProvider {
   }
 
   private async deployEsaSaas(casId: string, config: Record<string, any>): Promise<void> {
-    const sitename = config.esa_sitename;
-    const saasSitename = config.esa_saas_sitename;
+    const sitename = String(config.esa_sitename || '').trim();
     if (!sitename) throw new Error('ESA站点名称不能为空');
-    if (!saasSitename) throw new Error('ESA SAAS域名不能为空');
+    const saasInput = config.esa_saas_sitename;
+    if (typeof saasInput !== 'string') throw new Error('ESA SAAS域名格式错误，请每行填写一个域名');
+    const saasSitenames: string[] = [];
+    for (const line of saasInput.split(/\r\n|\r|\n/)) {
+      const domain = line.trim().toLowerCase();
+      if (domain) saasSitenames.push(domain);
+    }
+    const uniqueSitenames = Array.from(new Set(saasSitenames));
+    if (!uniqueSitenames.length) throw new Error('ESA SAAS域名不能为空');
 
     const client = this.makeClient(this.esaEndpoint(config), '2024-09-10');
 
@@ -179,35 +186,65 @@ export class AliyunDeploy implements DeployProvider {
     } catch (e: any) {
       throw new Error('查询ESA站点列表失败：' + e.message);
     }
-    if (data.TotalCount === 0) throw new Error('ESA站点 ' + sitename + ' 不存在');
+    if (!data?.TotalCount || !Array.isArray(data?.Sites) || !data.Sites.length) throw new Error('ESA站点 ' + sitename + ' 不存在');
+    const siteId = Number(data.Sites[0]?.SiteId);
+    if (!Number.isInteger(siteId) || siteId < 1) throw new Error('ESA站点 ' + sitename + ' 返回的站点ID无效');
     this.log('成功查询到' + data.TotalCount + '个ESA站点');
-    const siteId = data.Sites[0].SiteId;
 
-    let saasData: any;
-    try {
-      saasData = await client.request({ Action: 'ListCustomHostnames', SiteName: saasSitename, SiteId: siteId, SiteSearchType: 'exact' }, 'GET');
-    } catch (e: any) {
-      throw new Error('查询ESA saas域名失败：' + e.message);
-    }
-    if (saasData.TotalCount === 0) throw new Error('ESA saas站点 ' + saasSitename + ' 不存在');
-    const saasHostnameId = saasData.Hostnames[0].HostnameId;
+    let success = 0;
+    let failed = 0;
+    let firstError: string | null = null;
+    for (const saasSitename of uniqueSitenames) {
+      let stage = '查询';
+      try {
+        const saasData = await client.request(
+          { Action: 'ListCustomHostnames', Hostname: saasSitename, SiteId: siteId, NameMatchType: 'exact' },
+          'GET',
+        );
+        if (!saasData || typeof saasData.TotalCount === 'undefined' || !Array.isArray(saasData.Hostnames)) {
+          throw new Error('返回的域名列表无效');
+        }
+        if (Number(saasData.TotalCount) === 0 || !saasData.Hostnames.length) throw new Error('域名不存在');
+        const matches = saasData.Hostnames.filter(
+          (h: any) => String(h?.Hostname || '').toLowerCase() === saasSitename && String(h?.SiteId ?? '') === String(siteId),
+        );
+        if (!matches.length) throw new Error('返回的域名或站点不匹配');
+        if (matches.length > 1) throw new Error('返回多个匹配域名，无法确定部署目标');
+        const saasHostnameId = Number(matches[0]?.HostnameId);
+        if (!Number.isInteger(saasHostnameId) || saasHostnameId < 1) throw new Error('返回的HostnameId无效');
 
-    const param = {
-      Action: 'UpdateCustomHostname',
-      HostnameId: saasHostnameId,
-      SslFlag: 'on',
-      CertType: 'cas',
-      CasId: casId,
-      CasRegion: config.region,
-    };
-    this.log('ESA SAAS站点部署参数 ' + JSON.stringify(param));
-    try {
-      const result = await client.request(param);
-      this.log('ESA SAAS站点部署结果 ' + JSON.stringify(result));
-    } catch (e: any) {
-      throw new Error('部署失败：' + e.message);
+        stage = '部署';
+        const param = {
+          Action: 'UpdateCustomHostname',
+          HostnameId: saasHostnameId,
+          SslFlag: 'on',
+          CertType: 'cas',
+          CasId: casId,
+          CasRegion: config.region,
+        };
+        this.log('ESA SAAS站点 ' + saasSitename + ' 部署参数 ' + JSON.stringify(param));
+        const result = await client.request(param);
+        this.log('ESA SAAS站点 ' + saasSitename + ' 部署结果 ' + JSON.stringify(result));
+        this.log('ESA SAAS站点 ' + saasSitename + ' 证书添加成功！');
+        success++;
+      } catch (e: any) {
+        const error = 'ESA SAAS站点 ' + saasSitename + ' ' + stage + '失败：' + e.message;
+        this.log('[Error] ' + error);
+        if (firstError === null) firstError = error;
+        failed++;
+      }
     }
-    this.log('ESA SAAS站点 ' + saasSitename + ' 证书添加成功！');
+    let summary = 'ESA SAAS证书部署完成：成功 ' + success + ' 个，失败 ' + failed + ' 个';
+    this.log(summary);
+    if (failed > 0) {
+      summary += '；详见部署日志；首个错误：';
+      const room = Math.max(0, 300 - Buffer.byteLength(summary, 'utf8'));
+      let tail = firstError || '';
+      if (Buffer.byteLength(tail, 'utf8') > room) {
+        tail = Buffer.from(tail, 'utf8').subarray(0, room).toString('utf8');
+      }
+      throw new Error(summary + tail);
+    }
   }
 
   private async deployEsa(casId: string, certName: string, config: Record<string, any>): Promise<void> {

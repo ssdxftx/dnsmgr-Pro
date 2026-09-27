@@ -38,6 +38,7 @@ import { AmhDeploy } from './providers/amh.js';
 import { BaiduDeploy } from './providers/baidu.js';
 import { CtyunDeploy } from './providers/ctyun.js';
 import { DirectadminDeploy } from './providers/directadmin.js';
+import { CloudpanelDeploy } from './providers/cloudpanel.js';
 import { DogeDeploy } from './providers/doge.js';
 import { HuaweiDeploy } from './providers/huawei.js';
 import { HuoshanDeploy } from './providers/huoshan.js';
@@ -92,6 +93,7 @@ const providerMap: Record<string, new (config: Record<string, any>) => DeployPro
   baidu: BaiduDeploy,
   ctyun: CtyunDeploy,
   directadmin: DirectadminDeploy,
+  cloudpanel: CloudpanelDeploy,
   doge: DogeDeploy,
   huawei: HuaweiDeploy,
   huoshan: HuoshanDeploy,

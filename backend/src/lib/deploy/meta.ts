@@ -388,6 +388,53 @@ export const deployConfig: Record<string, any> = {
       }
     }
   },
+  "cloudpanel": {
+    "name": "CloudPanel",
+    "class": 1,
+    "icon": "cloudpanel.svg",
+    "desc": "",
+    "note": "使用管理员账号密码登录面板。暂不支持已开启双因素认证的账户。",
+    "tasknote": "",
+    "inputs": {
+      "url": {
+        "name": "面板地址",
+        "type": "input",
+        "placeholder": "CloudPanel 面板地址",
+        "note": "填写规则如：https://192.168.1.100:8443 ，不要带其他后缀",
+        "required": true
+      },
+      "username": {
+        "name": "登录用户名",
+        "type": "input",
+        "placeholder": "管理员用户名",
+        "required": true
+      },
+      "password": {
+        "name": "登录密码",
+        "type": "input",
+        "placeholder": "管理员密码",
+        "required": true
+      },
+      "proxy": {
+        "name": "使用代理服务器",
+        "type": "radio",
+        "options": [
+          "否",
+          "是"
+        ],
+        "value": "0"
+      }
+    },
+    "taskinputs": {
+      "sites": {
+        "name": "网站域名列表",
+        "type": "textarea",
+        "placeholder": "填写要部署证书的网站主域名，每行一个",
+        "note": "必须与 CloudPanel 站点列表中的主域名一致",
+        "required": true
+      }
+    }
+  },
   "directadmin": {
     "name": "DirectAdmin",
     "class": 1,
@@ -1416,8 +1463,8 @@ export const deployConfig: Record<string, any> = {
       },
       "esa_saas_sitename": {
         "name": "ESA SAAS站点域名",
-        "type": "input",
-        "placeholder": "ESA SAAS站点域名",
+        "type": "textarea",
+        "placeholder": "每行一个域名",
         "show": "product == 'esa_saas'",
         "required": true
       },

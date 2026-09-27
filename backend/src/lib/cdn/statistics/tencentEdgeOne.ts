@@ -75,7 +75,8 @@ export async function queryTencentEdgeOneStatistics(
         Filters: [{ Key: 'domain', Operator: 'equals', Value: [domain] }],
       });
       reqOk++;
-      return resp?.TimingDataRecords || [];
+      // DescribeTimingL7AnalysisData 的时序数据在 Data 字段（回源接口才是 TimingDataRecords）
+      return resp?.Data || [];
     } catch (e) {
       lastError = e;
       return [];

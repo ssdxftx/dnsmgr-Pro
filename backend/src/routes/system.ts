@@ -3,7 +3,7 @@ import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { query, table } from '../db.js';
 import { configGet, configSet, loadConfig } from '../config.js';
 import { ProxyAgent } from 'undici';
-import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook } from '../lib/monitor/msgNotice.js';
+import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook, sendQqbot } from '../lib/monitor/msgNotice.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
@@ -43,6 +43,15 @@ export default async function systemRoutes(app: FastifyInstance) {
       b.mail_name = b.mail_name2;
       delete b.mail_name2;
     }
+    // QQ 机器人 AppID/AppSecret 变更后需重新绑定，清空已记录的 openid
+    if ('qqbot_appid' in b || 'qqbot_appsecret' in b) {
+      const oldId = (await configGet('qqbot_appid', '')) || '';
+      const oldSecret = (await configGet('qqbot_appsecret', '')) || '';
+      const newId = 'qqbot_appid' in b ? String(b.qqbot_appid) : oldId;
+      let newSecret = 'qqbot_appsecret' in b ? String(b.qqbot_appsecret) : oldSecret;
+      if (newSecret === SECRET_MASK) newSecret = oldSecret;
+      if (newId !== oldId || newSecret !== oldSecret) b.qqbot_openid = '';
+    }
     for (const [key, value] of Object.entries(b)) {
       if (!key || key === 'sys_key') continue;
       if (isSecretKey(key) && String(value) === SECRET_MASK) continue;
@@ -67,6 +76,17 @@ export default async function systemRoutes(app: FastifyInstance) {
     if (!token || !chatid) return { code: -1, msg: '请先保存设置' };
     const content = '<strong>消息发送测试</strong>\n\n这是一封测试消息！\n\n来自：聚合DNS管理系统';
     const result = await sendTelegram(content);
+    if (result === true) return { code: 0, msg: '消息发送成功！' };
+    return { code: -1, msg: '消息发送失败！' + (result as string) };
+  });
+
+  // 发送测试 QQ 机器人消息
+  app.post('/api/system/qqbottest', auth, async () => {
+    const appId = await configGet('qqbot_appid');
+    const appSecret = await configGet('qqbot_appsecret');
+    const openid = await configGet('qqbot_openid');
+    if (!appId || !appSecret || !openid) return { code: -1, msg: '请先配置QQ机器人并完成绑定' };
+    const result = await sendQqbot('消息发送测试', '这是一封测试消息！<br/>来自：聚合DNS管理系统');
     if (result === true) return { code: 0, msg: '消息发送成功！' };
     return { code: -1, msg: '消息发送失败！' + (result as string) };
   });

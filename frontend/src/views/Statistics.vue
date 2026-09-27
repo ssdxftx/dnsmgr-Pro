@@ -80,38 +80,26 @@
         部分服务商统计获取失败：{{ errors.join('；') }}
       </n-alert>
 
-      <n-grid :cols="isMobile ? 2 : 5" :x-gap="12" :y-gap="12">
+      <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
         <n-grid-item>
-          <n-card size="small" class="stat-card">
-            <n-statistic label="加速流量" :value="summary.fluxText">
-              <template #prefix><n-icon :component="CloudOutline" color="#3b6df0" /></template>
-            </n-statistic>
-          </n-card>
+          <StatCard label="加速流量" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" class="stat-card">
-            <n-statistic label="峰值带宽" :value="summary.bwText" />
-          </n-card>
+          <StatCard label="峰值带宽" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" class="stat-card">
-            <n-statistic label="回源流量" :value="summary.bsFluxText" />
-          </n-card>
+          <StatCard label="回源流量" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" class="stat-card">
-            <n-statistic label="请求总数" :value="summary.reqText" />
-          </n-card>
+          <StatCard label="请求总数" :value="summary.reqText" tone="warning" :icon="BarChartOutline" />
         </n-grid-item>
         <n-grid-item>
-          <n-card size="small" class="stat-card">
-            <n-statistic label="缓存命中率" :value="summary.hitRateText" />
-          </n-card>
+          <StatCard label="缓存命中率" :value="summary.hitRateText" tone="primary" :icon="FlashOutline" />
         </n-grid-item>
       </n-grid>
     </n-card>
 
-    <n-grid :cols="1" :x-gap="12" :y-gap="12" style="margin-top: 12px">
+    <n-grid cols="1 m:2" responsive="screen" :x-gap="14" :y-gap="14">
       <n-grid-item>
         <n-card title="流量趋势" size="small">
           <div ref="fluxRef" class="chart"></div>
@@ -138,13 +126,14 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
-import { CloudOutline, RefreshOutline } from '@vicons/ionicons5';
+import { CloudOutline, RefreshOutline, SpeedometerOutline, CloudDownloadOutline, BarChartOutline, FlashOutline } from '@vicons/ionicons5';
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import StatCard from '../components/StatCard.vue';
 
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
@@ -383,9 +372,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.stat-card {
-  text-align: center;
-}
 .chart {
   width: 100%;
   height: 280px;
