@@ -16,12 +16,14 @@ import {
   ensureDefaultLetsEncrypt,
   linkLog,
   DEFAULT_LE_EMAIL,
+  removeCertOrdersLinkedToCdnDomain,
 } from '../lib/cdn/certLink.js';
 import { CertDeployService } from '../lib/deployService.js';
 import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
+import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS } from '../lib/cdn/statistics/cacheService.js';
 import { checkLevel } from '../auth.js';
 import { decryptConfig } from '../lib/secret.js';
 
@@ -115,6 +117,17 @@ function summarizeResults(list: any[], pendingLabel: string): string {
 
 export default async function cdnRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
+
+  // 数据统计：管理员，或被管理员单独授权使用统计缓存的用户
+  const statAuth = {
+    preHandler: async (req: any, reply: any) => {
+      await (app as any).authenticate(req, reply);
+      if (!req.user) return;
+      if (!checkLevel(req.user, 2) && Number(req.user.stat_cache) !== 1) {
+        return reply.code(403).send({ code: -1, msg: '无权限' });
+      }
+    },
+  };
 
   async function loadCdnDomain(id: number): Promise<any> {
     const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
@@ -331,11 +344,21 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 删除：可选同时删除云端加速域名（delete_cloud=1）；云端删除失败时不删除本地记录，便于重试
+  // 联动证书需先吊销成功才会删除；吊销失败则整体中止，云端与本地记录均不删除
   app.delete('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;
     const deleteCloud = ['1', 'true'].includes(String(req.query?.delete_cloud || '').toLowerCase());
     const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '加速域名不存在' };
+
+    // 先吊销并删除联动证书；吊销失败则中止，不删除云端/本地记录
+    let linked = { orders: 0, deployTasks: 0 };
+    try {
+      linked = await removeCertOrdersLinkedToCdnDomain(Number(id));
+    } catch (e: any) {
+      return { code: -1, msg: (e?.message || '联动证书吊销失败') + '（未删除加速域名，可稍后重试）' };
+    }
+
     if (deleteCloud) {
       const provider = await cdnForRow(row);
       if (!provider) return { code: -1, msg: 'CDN账户不存在，无法删除云端加速域名' };
@@ -344,7 +367,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
       }
     }
     await query(`DELETE FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
-    return { code: 0, msg: deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）' };
+    let msg = deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）';
+    if (linked.orders) msg += `；已吊销并删除联动证书 ${linked.orders} 个、自动部署任务 ${linked.deployTasks} 个`;
+    return { code: 0, msg };
   });
 
   // 状态
@@ -835,7 +860,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // CDN 数据统计（加速流量 / 带宽 / 请求数 / 缓存命中 / 状态码）
-  app.get('/api/cdn/statistics', auth, async (req: any) => {
+  app.get('/api/cdn/statistics', statAuth, async (req: any) => {
     try {
       const q = req.query || {};
       const type = ['Resource', 'Visits', 'HttpCodeStatus', 'All'].includes(String(q.type)) ? String(q.type) : 'All';
@@ -849,6 +874,24 @@ export default async function cdnRoutes(app: FastifyInstance) {
         .map((s) => s.trim())
         .filter(Boolean);
       const aid = Number(q.aid || 0);
+
+      const isAdmin = checkLevel(req.user, 2);
+      const cacheEnabled = await isStatCacheEnabled();
+      // 普通用户仅能查看已缓存的汇总统计（不支持按域名筛选，避免暴露账号/域名信息）
+      if (!isAdmin) {
+        if (!cacheEnabled) return { code: -1, msg: '数据统计缓存未开启，暂无法查看统计' };
+        if (domainNames.length) return { code: -1, msg: '普通用户不支持按域名筛选' };
+      }
+      // 缓存命中：开启缓存且未按域名筛选、时间范围在保留期内
+      if (cacheEnabled && !domainNames.length && start.getTime() >= Date.now() - STAT_COVER_MS) {
+        try {
+          const cached = await loadCachedStatistics(start, end, type, aid ? [aid] : undefined);
+          if (cached && cached.labels?.length) return { code: 0, data: cached };
+        } catch {
+          // 读取缓存失败则继续走实时查询（仅管理员）
+        }
+        if (!isAdmin) return { code: 0, data: { labels: [], _errors: ['该时间范围暂未缓存，请稍后再试'] } };
+      }
 
       const where: string[] = [];
       const params: any[] = [];

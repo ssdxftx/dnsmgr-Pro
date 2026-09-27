@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_user` (
   `totp_secret` varchar(100) DEFAULT NULL,
   `status` tinyint(1) NOT NULL DEFAULT '1',
   `check_whole` tinyint(1) NOT NULL DEFAULT '0',
+  `stat_cache` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 AUTO_INCREMENT=1000;
@@ -334,4 +335,16 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_dns_check_task` (
   `addtime` datetime NOT NULL,
   PRIMARY KEY (`id`),
   KEY `did` (`did`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `dnsmgr_cdn_stat_data` (
+  `id` int(11) unsigned NOT NULL auto_increment,
+  `route` varchar(20) NOT NULL,
+  `aid` int(11) unsigned NOT NULL,
+  `granularity` varchar(6) NOT NULL,
+  `ts` datetime NOT NULL,
+  `data` text NOT NULL,
+  `addtime` datetime DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `bucket` (`route`,`aid`,`granularity`,`ts`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

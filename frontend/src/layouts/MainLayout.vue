@@ -215,7 +215,7 @@ const visibleMenu = computed<MenuOption[]>(() => {
       if (children && children.length) {
         const kept = walk(children);
         if (kept.length) out.push({ ...o, children: kept } as MenuOption);
-      } else if (admin || !requiresAdmin('/' + String(o.key))) {
+      } else if (admin || !requiresAdmin('/' + String(o.key)) || (String(o.key) === 'statistics' && Number(user.value?.stat_cache) === 1)) {
         out.push(o);
       }
     }

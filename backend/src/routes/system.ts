@@ -4,6 +4,7 @@ import { query, table } from '../db.js';
 import { configGet, configSet, loadConfig } from '../config.js';
 import { ProxyAgent } from 'undici';
 import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook, sendQqbot } from '../lib/monitor/msgNotice.js';
+import { refreshAllStatCache } from '../lib/cdn/statistics/cacheService.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
@@ -78,6 +79,13 @@ export default async function systemRoutes(app: FastifyInstance) {
     const result = await sendTelegram(content);
     if (result === true) return { code: 0, msg: '消息发送成功！' };
     return { code: -1, msg: '消息发送失败！' + (result as string) };
+  });
+
+  // 立即刷新 CDN 数据统计缓存
+  app.post('/api/system/stat-cache-refresh', auth, async () => {
+    if ((await configGet('cdn_stats_cache', '0')) !== '1') return { code: -1, msg: '请先开启统计缓存' };
+    const r = await refreshAllStatCache();
+    return { code: 0, msg: `已刷新 ${r.accounts} 个账户` + (r.errors.length ? `，部分失败：${r.errors.join('；')}` : '') };
   });
 
   // 发送测试 QQ 机器人消息

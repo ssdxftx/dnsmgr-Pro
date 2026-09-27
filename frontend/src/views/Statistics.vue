@@ -9,17 +9,20 @@
       </template>
     </PageHeader>
     <n-card :bordered="false">
+      <n-alert v-if="!isAdmin" type="info" :show-icon="false" style="margin-bottom: 16px">
+        数据来自系统缓存（由管理员定时刷新），仅展示汇总统计，不支持按账户/域名筛选。
+      </n-alert>
       <div class="filters">
         <n-radio-group v-if="!isMobile" v-model:value="range" class="filter-range" @update:value="onRangeChange">
           <n-radio-button value="24h">近24小时</n-radio-button>
           <n-radio-button value="today">今天</n-radio-button>
           <n-radio-button value="7d">近7天</n-radio-button>
           <n-radio-button value="30d">近30天</n-radio-button>
-          <n-radio-button value="custom">自定义</n-radio-button>
+          <n-radio-button v-if="isAdmin" value="custom">自定义</n-radio-button>
         </n-radio-group>
         <div v-else class="range-pills">
           <n-button
-            v-for="opt in rangeOptions"
+            v-for="opt in visibleRangeOptions"
             :key="opt.value"
             size="small"
             :type="range === opt.value ? 'primary' : 'default'"
@@ -59,6 +62,7 @@
           />
         </template>
         <n-select
+          v-if="isAdmin"
           v-model:value="selectedAid"
           :options="accountOptions"
           placeholder="全部 CDN 账户"
@@ -66,6 +70,7 @@
           class="filter-aid"
         />
         <n-select
+          v-if="isAdmin"
           v-model:value="selectedDomains"
           :options="domainOptions"
           placeholder="全部加速域名"
@@ -131,13 +136,14 @@ import * as echarts from 'echarts/core';
 import { LineChart, BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { api } from '../api';
+import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 const isMobile = ref(window.innerWidth < 768);
+const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const loading = ref(false);
 const range = ref('24h');
 const rangeOptions = [
@@ -148,6 +154,7 @@ const rangeOptions = [
   { label: '自定义', value: 'custom' },
 ];
 const customRange = ref<[number, number] | null>(null);
+const visibleRangeOptions = computed(() => (isAdmin.value ? rangeOptions : rangeOptions.filter((o) => o.value !== 'custom')));
 const customStart = ref<number | null>(null);
 const customEnd = ref<number | null>(null);
 const accountOptions = ref<{ label: string; value: number }[]>([]);

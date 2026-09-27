@@ -35,6 +35,7 @@ import { expireNoticeTask } from './lib/expire/expireNoticeService.js';
 import { executePreheatTasks } from './lib/cdn/preheatService.js';
 import { executeCheckTasks } from './lib/dns/checkService.js';
 import { certTaskRun } from './lib/cert/certTaskService.js';
+import { refreshAllStatCache, getStatCacheIntervalMs, isStatCacheEnabled } from './lib/cdn/statistics/cacheService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
 
 process.on('unhandledRejection', (reason: any) => {
@@ -155,6 +156,7 @@ const AUTH_USER_CACHE_MS = 10_000;
   req.user.level = Number(dbUser.level);
   req.user.username = dbUser.username;
   req.user.totp_open = Number(dbUser.totp_open);
+  req.user.stat_cache = Number(dbUser.stat_cache || 0);
   return undefined;
 });
 
@@ -234,6 +236,21 @@ try {
       certTaskRun().catch((e: any) => console.error('[cert] SSL证书续签调度异常:', e.message));
     }, 5 * 60 * 1000);
     console.log('[dnsmgr-backend] SSL证书续签调度器已启动');
+
+    // CDN 数据统计缓存：按服务商数据粒度（近 30 天按天、近 48 小时按小时）定时拉取落库
+    let statCacheLast = 0;
+    setInterval(() => {
+      (async () => {
+        if (!(await isStatCacheEnabled())) return;
+        const interval = await getStatCacheIntervalMs();
+        if (Date.now() - statCacheLast < interval) return;
+        statCacheLast = Date.now();
+        const r = await refreshAllStatCache();
+        if (r.errors.length) console.error('[cdn-stats-cache] 部分账户刷新失败:', r.errors.join('；'));
+        else console.log(`[cdn-stats-cache] 已刷新 ${r.accounts} 个账户统计`);
+      })().catch((e: any) => console.error('[cdn-stats-cache] 刷新异常:', e?.message || e));
+    }, 60 * 1000);
+    console.log('[dnsmgr-backend] CDN 数据统计缓存调度器已启动');
   }
 } catch (e) {
   console.error(e);

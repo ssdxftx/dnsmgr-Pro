@@ -81,7 +81,7 @@ export default async function userRoutes(app: FastifyInstance) {
     const orderBy = allowedSort[sort] ? `${allowedSort[sort]} ${orderDir}` : 'id DESC';
 
     const list = await query(
-      `SELECT id, username, is_api, level, regtime, lasttime, status, totp_open FROM ${table('user')}${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      `SELECT id, username, is_api, level, regtime, lasttime, status, totp_open, stat_cache FROM ${table('user')}${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
     return { code: 0, data: { total, list } };
@@ -91,7 +91,7 @@ export default async function userRoutes(app: FastifyInstance) {
   app.get('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id, username, is_api, apikey, level, status, totp_open, check_whole FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT id, username, is_api, apikey, level, status, totp_open, check_whole, stat_cache FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     const perms = await query(`SELECT domain, sub, readonly, expiretime FROM ${table('permission')} WHERE uid = ?`, [id]);
     row.permission = perms.map((p: any) => ({ domain: p.domain, sub: p.sub || null, readonly: Number(p.readonly || 0), expiretime: p.expiretime || null }));
@@ -140,6 +140,7 @@ export default async function userRoutes(app: FastifyInstance) {
     let level = Number(b.level || 1);
     const repwd = (b.repwd || '').trim();
     const checkWhole = Number(b.check_whole || 0);
+    const statCache = Number(b.stat_cache) === 1 ? 1 : 0;
     const permission = Array.isArray(b.permission) ? b.permission : [];
 
     if (!username) return { code: -1, msg: '用户名不能为空' };
@@ -150,7 +151,7 @@ export default async function userRoutes(app: FastifyInstance) {
       level = 2;
     }
 
-    await query(`UPDATE ${table('user')} SET username = ?, is_api = ?, apikey = ?, level = ?, check_whole = ? WHERE id = ?`, [username, isApi, apikey, level, checkWhole, id]);
+    await query(`UPDATE ${table('user')} SET username = ?, is_api = ?, apikey = ?, level = ?, check_whole = ?, stat_cache = ? WHERE id = ?`, [username, isApi, apikey, level, checkWhole, statCache, id]);
     if (level === 1) {
       await savePermissions(id, permission);
     } else {
@@ -174,6 +175,17 @@ export default async function userRoutes(app: FastifyInstance) {
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法修改状态' };
     await query(`UPDATE ${table('user')} SET status = ? WHERE id = ?`, [status, id]);
     return { code: 0, msg: '设置成功' };
+  });
+
+  // 开关用户的 CDN 统计缓存查看权限（仅管理员）
+  app.post('/api/users/:id/stat-cache', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number(req.params.id);
+    const row = await queryOne(`SELECT id FROM ${table('user')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '用户不存在' };
+    const value = Number((req.body || {}).stat_cache) === 1 ? 1 : 0;
+    await query(`UPDATE ${table('user')} SET stat_cache = ? WHERE id = ?`, [value, id]);
+    return { code: 0, msg: value ? '已开启统计缓存查看' : '已关闭统计缓存查看' };
   });
 
   // 删除用户

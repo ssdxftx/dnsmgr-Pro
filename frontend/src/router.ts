@@ -76,7 +76,11 @@ router.beforeEach(async (to, from, next) => {
   if (to.meta.public) return next();
   if (!getToken()) return next('/login');
   // 管理员页面仅管理员可进入（服务端仍会二次校验）
-  if (requiresAdmin(to.path) && !isAdminUser(getUser())) return next('/domains');
+  if (requiresAdmin(to.path) && !isAdminUser(getUser())) {
+    const u = getUser();
+    if (to.path.startsWith('/statistics') && Number(u?.stat_cache) === 1) return next();
+    return next('/domains');
+  }
   next();
 });
 

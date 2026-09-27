@@ -29,7 +29,7 @@ export default async function authRoutes(app: FastifyInstance) {
     return {
       code: 0,
       msg: '登录成功',
-      data: { token, user: { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open } },
+      data: { token, user: { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open, stat_cache: Number(user.stat_cache || 0) } },
     };
   });
 
@@ -58,7 +58,7 @@ export default async function authRoutes(app: FastifyInstance) {
       '登录后台',
       'IP:' + (req.ip || ''),
     ]);
-    return { code: 0, msg: '登录成功', data: { token, user: { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open } } };
+    return { code: 0, msg: '登录成功', data: { token, user: { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open, stat_cache: Number(user.stat_cache || 0) } } };
   });
 
   app.post('/api/auth/totp-config', { preHandler: (app as any).authenticate }, async (req: any) => {
@@ -87,6 +87,6 @@ export default async function authRoutes(app: FastifyInstance) {
   app.get('/api/auth/me', { preHandler: (app as any).authenticate }, async (req: any) => {
     const user = await findUserById(req.user.uid);
     if (!user) return { code: -1, msg: '用户不存在' };
-    return { code: 0, data: { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open } };
+    return { code: 0, data: { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open, stat_cache: Number(user.stat_cache || 0) } };
   });
 }
