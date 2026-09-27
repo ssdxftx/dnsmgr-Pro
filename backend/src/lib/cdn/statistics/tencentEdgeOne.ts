@@ -6,15 +6,10 @@ const ACCESS_FLUX = 'l7Flow_outFlux';
 const ACCESS_BANDWIDTH = 'l7Flow_outBandwidth';
 const ACCESS_REQUEST = 'l7Flow_request';
 const HIT_FLUX = 'l7Flow_hit_outFlux';
-const ORIGIN_FLUX = 'l7Flow_inFlux_hy';
-const ORIGIN_BANDWIDTH = 'l7Flow_inBandwidth_hy';
+// 回源：EdgeOne 节点至源站方向（与面板「回源流量/带宽/请求数」一致）
+const ORIGIN_FLUX = 'l7Flow_outFlux_hy';
+const ORIGIN_BANDWIDTH = 'l7Flow_outBandwidth_hy';
 const ORIGIN_REQUEST = 'l7Flow_request_hy';
-
-function toArea(serviceArea?: string | null): string {
-  if (serviceArea === 'mainland_china') return 'mainland';
-  if (serviceArea === 'overseas' || serviceArea === 'outside_mainland_china') return 'overseas';
-  return 'global';
-}
 
 function formatTime(d: Date): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
@@ -62,7 +57,7 @@ export async function queryTencentEdgeOneStatistics(
   let reqOk = 0;
   let lastError: unknown = null;
 
-  async function access(zoneId: string, domain: string, area: string, metricNames: string[]): Promise<any[]> {
+  async function access(zoneId: string, domain: string, metricNames: string[]): Promise<any[]> {
     reqTotal++;
     try {
       const resp = await client.request('DescribeTimingL7AnalysisData', {
@@ -71,7 +66,6 @@ export async function queryTencentEdgeOneStatistics(
         StartTime: formatTime(start),
         EndTime: formatTime(end),
         Interval: interval,
-        Area: area,
         Filters: [{ Key: 'domain', Operator: 'equals', Value: [domain] }],
       });
       reqOk++;
@@ -113,14 +107,13 @@ export async function queryTencentEdgeOneStatistics(
   for (const d of domains) {
     const zoneId = d.zoneId || '';
     if (!zoneId) continue;
-    const area = toArea(d.serviceArea);
     const add = (target: number[], values: number[]) => {
       const aligned = alignSeries(values, len);
       for (let i = 0; i < len; i++) target[i] += aligned[i] || 0;
     };
 
     if (type === 'Resource' || type === 'All') {
-      const accessRecords = await access(zoneId, d.name, area, [ACCESS_FLUX, ACCESS_BANDWIDTH]);
+      const accessRecords = await access(zoneId, d.name, [ACCESS_FLUX, ACCESS_BANDWIDTH]);
       add(flux, extractSeries(accessRecords, ACCESS_FLUX));
       add(bw, extractSeries(accessRecords, ACCESS_BANDWIDTH));
       const originRecords = await origin(zoneId, d.name, [ORIGIN_FLUX, ORIGIN_BANDWIDTH]);
@@ -128,7 +121,7 @@ export async function queryTencentEdgeOneStatistics(
       add(bsBw, extractSeries(originRecords, ORIGIN_BANDWIDTH));
     }
     if (type === 'Visits' || type === 'All') {
-      const accessRecords = await access(zoneId, d.name, area, [ACCESS_REQUEST, HIT_FLUX]);
+      const accessRecords = await access(zoneId, d.name, [ACCESS_REQUEST, HIT_FLUX]);
       add(reqNum, extractSeries(accessRecords, ACCESS_REQUEST));
       add(hitFlux, extractSeries(accessRecords, HIT_FLUX));
       const originRecords = await origin(zoneId, d.name, [ORIGIN_REQUEST]);
