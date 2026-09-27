@@ -57,16 +57,16 @@ export async function queryTencentEdgeOneStatistics(
   let reqOk = 0;
   let lastError: unknown = null;
 
-  async function access(zoneId: string, domain: string, metricNames: string[]): Promise<any[]> {
+  async function access(zoneId: string, metricNames: string[]): Promise<any[]> {
     reqTotal++;
     try {
+      // 按站点（Zone）聚合查询，不按域名过滤、不传 Area，取全量数据以与面板一致
       const resp = await client.request('DescribeTimingL7AnalysisData', {
         ZoneIds: [zoneId],
         MetricNames: metricNames,
         StartTime: formatTime(start),
         EndTime: formatTime(end),
         Interval: interval,
-        Filters: [{ Key: 'domain', Operator: 'equals', Value: [domain] }],
       });
       reqOk++;
       // DescribeTimingL7AnalysisData 的时序数据在 Data 字段（回源接口才是 TimingDataRecords）
@@ -77,7 +77,7 @@ export async function queryTencentEdgeOneStatistics(
     }
   }
 
-  async function origin(zoneId: string, domain: string, metricNames: string[]): Promise<any[]> {
+  async function origin(zoneId: string, metricNames: string[]): Promise<any[]> {
     reqTotal++;
     try {
       const resp = await client.request('DescribeTimingL7OriginPullData', {
@@ -86,7 +86,6 @@ export async function queryTencentEdgeOneStatistics(
         StartTime: formatTime(start),
         EndTime: formatTime(end),
         Interval: interval,
-        Filters: [{ Key: 'domain', Operator: 'equals', Value: [domain] }],
       });
       reqOk++;
       return resp?.TimingDataRecords || [];
@@ -104,27 +103,27 @@ export async function queryTencentEdgeOneStatistics(
   const hitFlux = new Array(len).fill(0);
   const bsNum = new Array(len).fill(0);
 
-  for (const d of domains) {
-    const zoneId = d.zoneId || '';
-    if (!zoneId) continue;
-    const add = (target: number[], values: number[]) => {
-      const aligned = alignSeries(values, len);
-      for (let i = 0; i < len; i++) target[i] += aligned[i] || 0;
-    };
+  const add = (target: number[], values: number[]) => {
+    const aligned = alignSeries(values, len);
+    for (let i = 0; i < len; i++) target[i] += aligned[i] || 0;
+  };
 
+  // 同一站点下多个域名只查询一次，避免重复累加导致数据偏大
+  const zoneIds = Array.from(new Set(domains.map((d) => d.zoneId).filter((z): z is string => !!z)));
+  for (const zoneId of zoneIds) {
     if (type === 'Resource' || type === 'All') {
-      const accessRecords = await access(zoneId, d.name, [ACCESS_FLUX, ACCESS_BANDWIDTH]);
+      const accessRecords = await access(zoneId, [ACCESS_FLUX, ACCESS_BANDWIDTH]);
       add(flux, extractSeries(accessRecords, ACCESS_FLUX));
       add(bw, extractSeries(accessRecords, ACCESS_BANDWIDTH));
-      const originRecords = await origin(zoneId, d.name, [ORIGIN_FLUX, ORIGIN_BANDWIDTH]);
+      const originRecords = await origin(zoneId, [ORIGIN_FLUX, ORIGIN_BANDWIDTH]);
       add(bsFlux, extractSeries(originRecords, ORIGIN_FLUX));
       add(bsBw, extractSeries(originRecords, ORIGIN_BANDWIDTH));
     }
     if (type === 'Visits' || type === 'All') {
-      const accessRecords = await access(zoneId, d.name, [ACCESS_REQUEST, HIT_FLUX]);
+      const accessRecords = await access(zoneId, [ACCESS_REQUEST, HIT_FLUX]);
       add(reqNum, extractSeries(accessRecords, ACCESS_REQUEST));
       add(hitFlux, extractSeries(accessRecords, HIT_FLUX));
-      const originRecords = await origin(zoneId, d.name, [ORIGIN_REQUEST]);
+      const originRecords = await origin(zoneId, [ORIGIN_REQUEST]);
       add(bsNum, extractSeries(originRecords, ORIGIN_REQUEST));
     }
   }
