@@ -147,6 +147,13 @@ export async function refreshAllStatCache(): Promise<{ accounts: number; errors:
   return { accounts: count, errors };
 }
 
+// 清空全部统计缓存数据（切换指标口径或数据异常时使用）
+export async function clearStatCache(): Promise<number> {
+  const res: any = await query(`DELETE FROM ${table('cdn_stat_data')}`);
+  await configSet('cdn_stats_cache_last', '');
+  return Number(res?.affectedRows || 0);
+}
+
 // 从缓存读取并按查询区间聚合；无可用数据返回 null
 export async function loadCached(start: Date, end: Date, type: string, aids?: number[]): Promise<any | null> {
   const spanDays = (end.getTime() - start.getTime()) / 86400000;
