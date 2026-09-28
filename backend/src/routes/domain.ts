@@ -123,7 +123,8 @@ export default async function domainRoutes(app: FastifyInstance) {
       data = out;
     }
 
-    // 关键词搜索：主域名 / 备注 / 别名子域名，以及解析记录中的子域名（记录带 60s 缓存、并发拉取）
+    // 关键词搜索：优先匹配本地数据（主域名 / 备注 / 别名子域名）；
+    // 本地无任何匹配时，才逐域拉取云端解析记录按子域名匹配（记录带 60s 缓存、并发拉取）
     if (kw) {
       const k = kw.toLowerCase();
       const aliasRows: any[] = await query(`SELECT did, name FROM ${table('domain_alias')}`);
@@ -134,8 +135,8 @@ export default async function domainRoutes(app: FastifyInstance) {
         aliasMap.set(Number(a.did), arr);
       }
       const baseNameOf = (d: any) => String(d._base_name || d.name || '').toLowerCase();
-      const matched: any[] = [];
-      const pending: any[] = [];
+
+      const localHits: any[] = [];
       for (const d of data) {
         const base = baseNameOf(d);
         const hit =
@@ -143,30 +144,34 @@ export default async function domainRoutes(app: FastifyInstance) {
           String(d.name || '').toLowerCase().includes(k) ||
           String(d.remark || '').toLowerCase().includes(k) ||
           (aliasMap.get(Number(d.id)) || []).some((name) => name.includes(k));
-        if (hit) matched.push(d);
-        else pending.push(d);
+        if (hit) localHits.push(d);
       }
-      const recordHits: any[] = [];
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < pending.length) {
-          const d = pending[cursor++];
-          try {
-            const base = baseNameOf(d);
-            const list = await fetchAllRecords({ ...d, name: base });
-            const hit = (list || []).some((r: any) => {
-              const n = String(r?.Name ?? '').toLowerCase();
-              const full = n === '@' ? base : `${n}.${base}`;
-              return n.includes(k) || full.includes(k);
-            });
-            if (hit) recordHits.push(d);
-          } catch {
-            // 单个域名记录拉取失败忽略
+
+      if (localHits.length) {
+        data = localHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      } else {
+        const recordHits: any[] = [];
+        let cursor = 0;
+        const worker = async () => {
+          while (cursor < data.length) {
+            const d = data[cursor++];
+            try {
+              const base = baseNameOf(d);
+              const list = await fetchAllRecords({ ...d, name: base });
+              const hit = (list || []).some((r: any) => {
+                const n = String(r?.Name ?? '').toLowerCase();
+                const full = n === '@' ? base : `${n}.${base}`;
+                return n.includes(k) || full.includes(k);
+              });
+              if (hit) recordHits.push(d);
+            } catch {
+              // 单个域名记录拉取失败忽略
+            }
           }
-        }
-      };
-      await Promise.all(Array.from({ length: Math.min(5, pending.length) }, worker));
-      data = matched.concat(recordHits).sort((a: any, b: any) => Number(b.id) - Number(a.id));
+        };
+        await Promise.all(Array.from({ length: Math.min(5, data.length) }, worker));
+        data = recordHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
+      }
     }
     return { code: 0, data };
   });
