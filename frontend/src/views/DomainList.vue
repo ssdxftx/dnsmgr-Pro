@@ -15,6 +15,20 @@
       </template>
     </PageHeader>
     <n-card :bordered="false">
+      <n-space style="margin-bottom: 16px">
+        <n-input
+          v-model:value="kw"
+          placeholder="搜索域名 / 子域名 / 备注"
+          style="width: 260px"
+          clearable
+          @keyup.enter="search"
+        />
+        <n-button type="primary" @click="search">
+          <template #icon><n-icon :component="SearchOutline" /></template>
+          搜索
+        </n-button>
+        <n-button @click="clearSearch">刷新</n-button>
+      </n-space>
       <ResponsiveDataTable
         v-model:checked-row-keys="checked"
         :columns="columns"
@@ -65,7 +79,7 @@
 import { computed, h, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { CloudDownloadOutline, RefreshOutline } from '@vicons/ionicons5';
+import { CloudDownloadOutline, RefreshOutline, SearchOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
@@ -85,6 +99,7 @@ const showImport = ref(false);
 const showCategory = ref(false);
 const categoryName = ref('');
 const importing = ref(false);
+const kw = ref('');
 
 const columns = computed(() => {
   const cols: any[] = [];
@@ -103,6 +118,12 @@ const columns = computed(() => {
       }),
   });
   cols.push({ title: '分类', key: 'category_name', width: 120 });
+  cols.push({
+    title: '备注',
+    key: 'remark',
+    width: 160,
+    render: (row: any) => h(NEllipsis, { style: 'max-width:160px' }, { default: () => row.remark || '' }),
+  });
   cols.push({ title: '记录数', key: 'recordcount', width: 90 });
   cols.push({
     title: '到期时间',
@@ -144,9 +165,18 @@ const columns = computed(() => {
 
 async function loadDomains() {
   loading.value = true;
-  const res = await api<any>('GET', '/domains');
+  const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined);
   domains.value = res.code === 0 ? res.data : [];
   loading.value = false;
+}
+
+function search() {
+  loadDomains();
+}
+
+function clearSearch() {
+  kw.value = '';
+  loadDomains();
 }
 
 async function loadAccounts() {

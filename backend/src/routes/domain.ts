@@ -93,9 +93,18 @@ export default async function domainRoutes(app: FastifyInstance) {
   // ============ 域名管理 ============
   app.get('/api/domains', auth, async (req: any) => {
     const acc = await getUserPerms(req);
-    const rows = await query(
-      `SELECT A.*, B.type AS account_type, B.name AS account_name FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
-    );
+    const kw = String(req.query?.kw || '').trim();
+    let sql = `SELECT A.*, B.type AS account_type, B.name AS account_name FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id`;
+    const params: any[] = [];
+    if (kw) {
+      const like = `%${kw.replace(/[\\%_]/g, (m) => '\\' + m)}%`;
+      // 匹配主域名、备注，以及别名/子域名（domain_alias）
+      sql += ` WHERE (A.name LIKE ? ESCAPE '\\\\' OR A.remark LIKE ? ESCAPE '\\\\'
+                OR EXISTS (SELECT 1 FROM ${table('domain_alias')} AL WHERE AL.did = A.id AND AL.name LIKE ? ESCAPE '\\\\'))`;
+      params.push(like, like, like);
+    }
+    sql += ' ORDER BY A.id DESC';
+    const rows = await query(sql, params);
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     let data = rows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));

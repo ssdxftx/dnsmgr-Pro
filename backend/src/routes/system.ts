@@ -4,7 +4,7 @@ import { query, table } from '../db.js';
 import { configGet, configSet, loadConfig } from '../config.js';
 import { ProxyAgent } from 'undici';
 import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook, sendQqbot } from '../lib/monitor/msgNotice.js';
-import { refreshAllStatCache } from '../lib/cdn/statistics/cacheService.js';
+import { refreshAllStatCache, clearStatCache } from '../lib/cdn/statistics/cacheService.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
@@ -79,6 +79,12 @@ export default async function systemRoutes(app: FastifyInstance) {
     const result = await sendTelegram(content);
     if (result === true) return { code: 0, msg: '消息发送成功！' };
     return { code: -1, msg: '消息发送失败！' + (result as string) };
+  });
+
+  // 清空 CDN 数据统计缓存
+  app.post('/api/system/stat-cache-clear', auth, async () => {
+    const n = await clearStatCache();
+    return { code: 0, msg: `已清空统计缓存数据（${n} 条）` };
   });
 
   // 立即刷新 CDN 数据统计缓存
