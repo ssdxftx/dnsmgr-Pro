@@ -94,17 +94,9 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.get('/api/domains', auth, async (req: any) => {
     const acc = await getUserPerms(req);
     const kw = String(req.query?.kw || '').trim();
-    let sql = `SELECT A.*, B.type AS account_type, B.name AS account_name FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id`;
-    const params: any[] = [];
-    if (kw) {
-      const like = `%${kw.replace(/[\\%_]/g, (m) => '\\' + m)}%`;
-      // 匹配主域名、备注，以及别名/子域名（domain_alias）
-      sql += ` WHERE (A.name LIKE ? ESCAPE '\\\\' OR A.remark LIKE ? ESCAPE '\\\\'
-                OR EXISTS (SELECT 1 FROM ${table('domain_alias')} AL WHERE AL.did = A.id AND AL.name LIKE ? ESCAPE '\\\\'))`;
-      params.push(like, like, like);
-    }
-    sql += ' ORDER BY A.id DESC';
-    const rows = await query(sql, params);
+    const rows = await query(
+      `SELECT A.*, B.type AS account_type, B.name AS account_name FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
+    );
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     let data = rows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
@@ -129,6 +121,52 @@ export default async function domainRoutes(app: FastifyInstance) {
         });
       }
       data = out;
+    }
+
+    // 关键词搜索：主域名 / 备注 / 别名子域名，以及解析记录中的子域名（记录带 60s 缓存、并发拉取）
+    if (kw) {
+      const k = kw.toLowerCase();
+      const aliasRows: any[] = await query(`SELECT did, name FROM ${table('domain_alias')}`);
+      const aliasMap = new Map<number, string[]>();
+      for (const a of aliasRows) {
+        const arr = aliasMap.get(Number(a.did)) || [];
+        arr.push(String(a.name || '').toLowerCase());
+        aliasMap.set(Number(a.did), arr);
+      }
+      const baseNameOf = (d: any) => String(d._base_name || d.name || '').toLowerCase();
+      const matched: any[] = [];
+      const pending: any[] = [];
+      for (const d of data) {
+        const base = baseNameOf(d);
+        const hit =
+          base.includes(k) ||
+          String(d.name || '').toLowerCase().includes(k) ||
+          String(d.remark || '').toLowerCase().includes(k) ||
+          (aliasMap.get(Number(d.id)) || []).some((name) => name.includes(k));
+        if (hit) matched.push(d);
+        else pending.push(d);
+      }
+      const recordHits: any[] = [];
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < pending.length) {
+          const d = pending[cursor++];
+          try {
+            const base = baseNameOf(d);
+            const list = await fetchAllRecords({ ...d, name: base });
+            const hit = (list || []).some((r: any) => {
+              const n = String(r?.Name ?? '').toLowerCase();
+              const full = n === '@' ? base : `${n}.${base}`;
+              return n.includes(k) || full.includes(k);
+            });
+            if (hit) recordHits.push(d);
+          } catch {
+            // 单个域名记录拉取失败忽略
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(5, pending.length) }, worker));
+      data = matched.concat(recordHits).sort((a: any, b: any) => Number(b.id) - Number(a.id));
     }
     return { code: 0, data };
   });
