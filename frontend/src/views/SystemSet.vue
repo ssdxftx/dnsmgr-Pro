@@ -239,6 +239,7 @@
                 <n-space>
                   <n-button type="primary" :loading="saving" @click="saveStatCache">保存</n-button>
                   <n-button :loading="refreshingCache" @click="refreshStatCache">立即刷新</n-button>
+                  <n-button :loading="clearingCache" @click="clearStatCache">清空缓存</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -302,11 +303,12 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
-import { useMessage, NButton, NSpace, NTag } from 'naive-ui';
+import { useMessage, useDialog, NButton, NSpace, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
+const dialog = useDialog();
 const saving = ref(false);
 const cfg = reactive<Record<string, string>>({});
 const cronKey = ref('');
@@ -463,6 +465,24 @@ async function refreshStatCache() {
     message.success(res.msg);
     await loadSettings();
   } else message.error(res.msg);
+}
+const clearingCache = ref(false);
+function clearStatCache() {
+  dialog.warning({
+    title: '清空统计缓存',
+    content: '将删除当前服务器上缓存的全部 CDN 统计数据，之后可点击「立即刷新」重新拉取。确定清空吗？',
+    positiveText: '清空',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      clearingCache.value = true;
+      const res = await api('POST', '/system/stat-cache-clear', {});
+      clearingCache.value = false;
+      if (res.code === 0) {
+        message.success(res.msg);
+        await loadSettings();
+      } else message.error(res.msg);
+    },
+  });
 }
 
 async function loadCronKey() {

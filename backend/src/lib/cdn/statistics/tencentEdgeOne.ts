@@ -2,13 +2,14 @@ import { TencentCloud } from '../../clients/TencentCloud.js';
 import type { CdnStatisticsResult, StatisticsDomain } from './types.js';
 import { alignSeries, buildLabels, max, sum } from './util.js';
 
-const ACCESS_FLUX = 'l7Flow_outFlux';
-const ACCESS_BANDWIDTH = 'l7Flow_outBandwidth';
+// 访问总流量/总带宽（EdgeOne 响应 + 客户端请求），与控制台「访问流量/带宽」一致
+const ACCESS_FLUX = 'l7Flow_flux';
+const ACCESS_BANDWIDTH = 'l7Flow_bandwidth';
 const ACCESS_REQUEST = 'l7Flow_request';
 const HIT_FLUX = 'l7Flow_hit_outFlux';
-// 回源：EdgeOne 节点至源站方向（与面板「回源流量/带宽/请求数」一致）
-const ORIGIN_FLUX = 'l7Flow_outFlux_hy';
-const ORIGIN_BANDWIDTH = 'l7Flow_outBandwidth_hy';
+// 回源：源站至 EdgeOne 节点方向的响应（与控制台「回源流量/带宽」一致）
+const ORIGIN_FLUX = 'l7Flow_inFlux_hy';
+const ORIGIN_BANDWIDTH = 'l7Flow_inBandwidth_hy';
 const ORIGIN_REQUEST = 'l7Flow_request_hy';
 
 function formatTime(d: Date): string {
