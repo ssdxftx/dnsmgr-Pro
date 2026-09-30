@@ -40,6 +40,8 @@ export class CloudflareEnhanceService {
     this.auth = config.auth !== undefined ? Number(config.auth) : /^[0-9a-f]+$/i.test(this.apiKey) ? 0 : 1;
     this.proxy = String(config.proxy ?? '') === '1';
     this.accountId = String(config.account_id ?? '').trim();
+    // 允许通过环境变量覆盖 API 基址（用于本地/联调环境，默认官方地址）
+    if (process.env.DNSMGR_CF_API_BASE) this.baseUrl = process.env.DNSMGR_CF_API_BASE.replace(/\/+$/, '');
   }
 
   isApiTokenAuth(): boolean {
@@ -79,6 +81,33 @@ export class CloudflareEnhanceService {
     } catch (e: any) {
       this.throwActionError('获取域名详情', e, 'Zone:Read');
     }
+  }
+
+  /**
+   * 公共 API 调用入口：供规则引擎等模块复用鉴权、代理与统一错误映射。
+   * 返回 Cloudflare 原始响应体（含 result 字段）。
+   */
+  async apiRequest(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    query: Record<string, any> = {},
+    body: any = null,
+    allowNotFound = false,
+  ): Promise<any> {
+    return this.requestRaw(method, path, query, body, allowNotFound);
+  }
+
+  /** 公共 API 调用入口，返回 Cloudflare result 字段（allowNotFound 时可能为 null） */
+  async apiResult(
+    method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+    path: string,
+    query: Record<string, any> = {},
+    body: any = null,
+    allowNotFound = false,
+  ): Promise<any> {
+    const payload = await this.requestRaw(method, path, query, body, allowNotFound);
+    if (payload === null) return null;
+    return payload.result ?? null;
   }
 
   async listCustomHostnames(zoneId: string): Promise<any[]> {
@@ -472,6 +501,9 @@ export class CloudflareEnhanceService {
     }
 
     if (allowNotFound && status === 404) return null;
+
+    // 部分 DELETE 接口返回 204 空响应，按成功且无 body 处理
+    if (!text && status >= 200 && status < 300) return { success: true, result: null };
 
     let payload: any;
     try {

@@ -28,7 +28,7 @@ services:
   #   container_name: dnsmgr-mysql
   #   restart: always
   #   environment:
-  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+  #     MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?请在 .env 中设置强 root 密码}
   #     TZ: Asia/Shanghai
   #   volumes:
   #     - mysql-data:/var/lib/mysql

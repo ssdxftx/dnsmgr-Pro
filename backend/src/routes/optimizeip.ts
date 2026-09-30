@@ -44,8 +44,11 @@ export default async function optimizeRoutes(app: FastifyInstance) {
 
   app.post('/api/optimize/settings', auth, async (req: any) => {
     const b = req.body || {};
-    for (const [key, value] of Object.entries(b)) {
-      if (!key) continue;
+    // 白名单：仅允许写入本模块配置项，避免越权覆盖 sys_key 等内部配置
+    const allowed = ['optimize_ip_api', 'optimize_ip_key', 'optimize_ip_proxy', 'optimize_ip_min'];
+    for (const key of allowed) {
+      if (!(key in b)) continue;
+      const value = b[key];
       if (key === 'optimize_ip_min' && parseInt(String(value)) < 10) {
         return { code: -1, msg: '自动更新时间间隔不能小于10分钟' };
       }

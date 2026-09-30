@@ -1227,6 +1227,12 @@ export const deployConfig: Record<string, any> = {
         "value": "22",
         "required": true
       },
+      "host_fingerprint": {
+        "name": "主机密钥指纹",
+        "type": "input",
+        "placeholder": "可选，形如 SHA256:xxxx，填写后校验服务器主机密钥防中间人",
+        "required": false
+      },
       "username": {
         "name": "用户名",
         "type": "input",
@@ -2979,6 +2985,12 @@ export const deployConfig: Record<string, any> = {
         "placeholder": "",
         "value": "22",
         "required": true
+      },
+      "host_fingerprint": {
+        "name": "主机密钥指纹",
+        "type": "input",
+        "placeholder": "可选，形如 SHA256:xxxx，填写后校验服务器主机密钥防中间人",
+        "required": false
       },
       "auth": {
         "name": "认证方式",

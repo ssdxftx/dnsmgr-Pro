@@ -128,6 +128,19 @@ export async function migrate(): Promise<void> {
       UNIQUE KEY bucket (route, aid, granularity, ts)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+
+  // Cloudflare 规则引擎专用凭证：按 Cloudflare 账户（aid）绑定，DNS 密钥权限不足时使用
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('cf_rule_credential')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      aid int(11) unsigned NOT NULL,
+      config text NOT NULL,
+      addtime datetime NOT NULL,
+      updatetime datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY aid (aid)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 }
 
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {
