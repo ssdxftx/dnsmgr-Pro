@@ -3,7 +3,7 @@
     <PageHeader :title="(isEdit ? '编辑' : '添加') + '容灾切换策略'" subtitle="配置解析健康检测与故障自动切换策略" back="/dm-tasks" />
     <n-card :bordered="false">
       <n-form label-placement="left" label-width="140" style="max-width: 720px">
-        <n-form-item label="域名选择" :required>
+        <n-form-item label="域名选择" required>
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" placeholder="主机记录" style="width: 200px" />
             <span>.</span>
@@ -11,20 +11,20 @@
           </n-space>
         </n-form-item>
 
-        <n-form-item label="解析记录" :required>
+        <n-form-item label="解析记录" required>
           <n-space style="width: 100%">
             <n-select v-model:value="form.recordid" :options="recordOptions" placeholder="解析记录" filterable style="flex: 1" @update:value="onRecordChange" />
             <n-button @click="getRecordList" :loading="loadingRecords">获取</n-button>
           </n-space>
         </n-form-item>
 
-        <n-form-item label="切换设置" :required>
+        <n-form-item label="切换设置" required>
           <n-radio-group v-model:value="form.type">
             <n-radio-button v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.type === 2" label="备用解析记录" :required>
+        <n-form-item v-show="form.type === 2" label="备用解析记录" required>
           <n-input v-model:value="form.backup_value" placeholder="支持填写IP或CNAME地址" />
         </n-form-item>
 
@@ -32,7 +32,7 @@
           <n-checkbox v-model:checked="form.cdn">切换时同时开启Cloudflare代理模式</n-checkbox>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2" label="检测协议" :required>
+        <n-form-item v-show="form.type <= 2" label="检测协议" required>
           <n-radio-group v-model:value="form.checktype">
             <n-radio-button v-for="o in checktypeOptions" :key="o.value" :value="o.value" :disabled="o.disabled">{{ o.label }}</n-radio-button>
           </n-radio-group>
@@ -42,11 +42,11 @@
           <n-input v-model:value="form.checkurl" placeholder="留空默认为解析记录值IP" />
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype === 1" label="TCP检测端口" :required>
+        <n-form-item v-show="form.type <= 2 && form.checktype === 1" label="TCP检测端口" required>
           <n-input-number v-model:value="form.tcpport" :min="1" :max="65535" style="width: 220px" />
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype === 2" label="检测URL地址" :required>
+        <n-form-item v-show="form.type <= 2 && form.checktype === 2" label="检测URL地址" required>
           <n-input v-model:value="form.checkurl" placeholder="以http(s)://开头的完整地址，状态码须为2xx/3xx" />
         </n-form-item>
 
@@ -57,13 +57,13 @@
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype > 0" label="最大超时时间" :required>
+        <n-form-item v-show="form.type <= 2 && form.checktype > 0" label="最大超时时间" required>
           <n-input-number v-model:value="form.timeout" :min="1" style="width: 220px">
             <template #suffix>秒</template>
           </n-input-number>
         </n-form-item>
 
-        <n-form-item v-show="form.type === 3" label="同域名正常数量" :required>
+        <n-form-item v-show="form.type === 3" label="同域名正常数量" required>
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-input-number v-model:value="form.cycle" :min="0" style="width: 220px" />
@@ -72,13 +72,13 @@
           </n-tooltip>
         </n-form-item>
 
-        <n-form-item label="检测间隔" :required>
+        <n-form-item label="检测间隔" required>
           <n-input-number v-model:value="form.frequency" :min="1" style="width: 220px">
             <template #suffix>秒</template>
           </n-input-number>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2" label="确认次数" :required>
+        <n-form-item v-show="form.type <= 2" label="确认次数" required>
           <n-input-number v-model:value="form.cycle" :min="1" style="width: 220px" />
         </n-form-item>
 

@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
-import pkg from './package.json';
+import pkg from './package.json' with { type: 'json' };
 
 export default defineConfig({
   plugins: [vue()],
@@ -11,10 +11,26 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-vue': ['vue', 'vue-router', 'pinia'],
-          'vendor-ui': ['naive-ui'],
-          'vendor-charts': ['echarts'],
+        manualChunks(id: string) {
+          if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'vendor-charts';
+          if (
+            id.includes('/node_modules/naive-ui/') ||
+            id.includes('/node_modules/vueuc/') ||
+            id.includes('/node_modules/seemly/') ||
+            id.includes('/node_modules/css-render/') ||
+            id.includes('/node_modules/@css-render/')
+          ) {
+            return 'vendor-ui';
+          }
+          if (
+            id.includes('/node_modules/vue/') ||
+            id.includes('/node_modules/@vue/') ||
+            id.includes('/node_modules/vue-router/') ||
+            id.includes('/node_modules/pinia/')
+          ) {
+            return 'vendor-vue';
+          }
+          return undefined;
         },
       },
     },

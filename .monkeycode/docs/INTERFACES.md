@@ -296,6 +296,26 @@ CDN 厂商 type：`tencent_cdn`、`tencent_edgeone`、`aliyun_cdn`、`aliyun_esa
 
 覆盖自定义主机名（含批量增删改、TXT 目标、fallback origin、DCV UUID）以及 Tunnel（token、public hostnames、CIDR 路由、hostname 路由）。路径前缀 `/api/cloudflare/domains/:domainId/...` 与 `/api/cloudflare/accounts/:accountId/tunnels/...`。
 
+## Cloudflare 规则引擎
+
+实现：`backend/src/routes/cfrules.ts`、`lib/cloudflare/ruleset.ts`、`lib/cloudflare/rulesCredential.ts`。全部接口仅管理员（`level >= 2`）可用，返回 `needCredential` 时前端引导填写专用凭证。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/cf-rules/phases` | 规则类型元数据（8 类，含作用域与所需权限） |
+| GET | `/api/cf-rules/domains` | 可管理的 Cloudflare 域名（id/name/zone_id/aid/account_name） |
+| GET | `/api/cf-rules/credential?aid=` | 查询账户凭证状态（专用凭证掩码回显） |
+| POST | `/api/cf-rules/credential` | 校验并保存专用凭证（按 `aid` 绑定） |
+| DELETE | `/api/cf-rules/credential?aid=` | 移除专用凭证，回退 DNS 账户密钥 |
+| GET | `/api/cf-rules/rules?domainId=&phase=` | 规则列表 |
+| POST | `/api/cf-rules/rules` | 新增规则 |
+| PUT | `/api/cf-rules/rules/:ruleId` | 更新规则 |
+| DELETE | `/api/cf-rules/rules/:ruleId?domainId=&phase=` | 删除规则 |
+
+规则写入体：`{ domain_id, phase, expression, action, action_parameters, description?, enabled? }`。phase 共 8 类：`http_request_origin`、`http_request_dynamic_redirect`、`http_request_transform`、`http_request_late_transform`、`http_response_headers_transform`、`http_request_cache_settings`、`http_request_firewall_custom`、`http_ratelimit`（均为站点级）。
+
+凭证策略：默认复用域名所属 Cloudflare DNS 账户凭证；Cloudflare 返回 403 时接口返回 `data.needCredential=true`，前端展示专用凭证表单，校验通过后 AES-256-GCM 加密写入 `cf_rule_credential`（唯一键 `aid`），后续优先使用。
+
 ## 用户、注册、系统、关于
 
 ### 用户 `routes/user.ts`
@@ -333,6 +353,7 @@ CDN 厂商 type：`tencent_cdn`、`tencent_edgeone`、`aliyun_cdn`、`aliyun_esa
 | `/domains/:id/records` | RecordList.vue | `/api/domains/:id/records` |
 | `/dns-accounts` | DnsAccount.vue | `/api/dns` |
 | `/cdn-*` | Cdn*.vue | `/api/cdn` |
+| `/cf-rules` | CfRules.vue | `/api/cf-rules` |
 | `/cert-*` `/deploy-*` | Cert*/Deploy* | `/api/cert` `/api/deploy` |
 | `/dm-*` | Dm*.vue | `/api/dmonitor` |
 | `/optimize-*` | Optimize*.vue | `/api/optimize` |

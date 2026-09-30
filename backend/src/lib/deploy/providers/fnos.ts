@@ -1,5 +1,6 @@
 import { Client, ConnectConfig } from 'ssh2';
 import { X509Certificate } from 'node:crypto';
+import { applyHostKeyVerification } from '../sshHostKey.js';
 import type { DeployProvider } from '../types.js';
 
 export class FnosDeploy implements DeployProvider {
@@ -33,6 +34,8 @@ export class FnosDeploy implements DeployProvider {
       username: cfg.username,
       password: cfg.password,
     };
+    // 如配置了主机密钥指纹/公钥则严格校验，防止中间人攻击
+    applyHostKeyVerification(connectConfig, cfg);
 
     return new Promise((resolve, reject) => {
       const conn = new Client();

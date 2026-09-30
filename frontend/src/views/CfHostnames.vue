@@ -543,7 +543,7 @@ async function runBatchRecord() {
   dialog.info({ title: '处理完成', content: `成功 ${ok} 个，失败 ${fail} 个` + (errors.length ? '\n\n失败详情：\n' + errors.join('\n') : ''), positiveText: '确定' });
 }
 
-async function getDefaultLine(targetDomainId: number): Promise<string> {
+async function getDefaultLine(targetDomainId: number | string): Promise<string> {
   const res = await api<any>('GET', `/domains/${targetDomainId}/lines`);
   if (res.code === 0 && res.data) {
     const keys = Object.keys(res.data);

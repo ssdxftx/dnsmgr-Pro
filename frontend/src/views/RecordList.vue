@@ -4,6 +4,7 @@
       <template #actions>
         <n-space>
           <n-button v-if="accountType === 'cloudflare' && isAdmin" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">自定义主机名</n-button>
+          <n-button v-if="accountType === 'cloudflare' && isAdmin" type="primary" secondary @click="router.push(`/cf-rules?domain=${domainId}`)">规则引擎</n-button>
           <n-button v-if="access.writable" type="primary" @click="openAdd">
             <template #icon><n-icon :component="AddOutline" /></template>
             添加记录

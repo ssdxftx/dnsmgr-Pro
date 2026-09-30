@@ -14,7 +14,9 @@ ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
     PORT=8082 \
     DNSMGR_WEB_DIR=/app/web \
-    DNSMGR_DATA_DIR=/app/data
+    DNSMGR_DATA_DIR=/app/data \
+    HOME=/home/node \
+    NPM_CONFIG_CACHE=/tmp/.npm
 
 # 后端依赖（含 tsx，用于运行 TypeScript 源码）
 COPY backend/package.json backend/package-lock.json ./
@@ -24,8 +26,11 @@ COPY backend/ ./
 # 前端构建产物
 COPY --from=web /build/dist /app/web
 
-RUN mkdir -p /app/data
+# 以非 root 用户运行；命名卷首次创建会继承此处属主，确保运行用户可写入数据目录
+RUN mkdir -p /app/data && chown -R node:node /app
 
 EXPOSE 8082
+
+USER node
 
 CMD ["npx", "tsx", "src/index.ts"]

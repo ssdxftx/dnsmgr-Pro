@@ -112,7 +112,7 @@
 import { computed, h, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
-import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
+import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, OptionsOutline, InformationCircleOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { clearToken } from '../api';
 import { isAdminUser, requiresAdmin } from '../lib/admin';
@@ -157,6 +157,7 @@ const menuOptions: MenuOption[] = [
       { label: 'CDN 账户', key: 'cdn-accounts', icon: renderIcon(CloudOutline) },
       { label: 'CDN 域名', key: 'cdn-domains', icon: renderIcon(GlobeOutline) },
       { label: 'CDN 站点设置', key: 'cdn-zones', icon: renderIcon(FolderOutline) },
+      { label: 'CF 规则引擎', key: 'cf-rules', icon: renderIcon(OptionsOutline) },
       { label: '缓存刷新', key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
       { label: '自动预热', key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
       { label: '数据统计', key: 'statistics', icon: renderIcon(BarChartOutline) },
@@ -227,7 +228,7 @@ const visibleMenu = computed<MenuOption[]>(() => {
 const activeKey = computed(() => {
   const matched = [
     'dashboard', 'domains', 'dns-accounts', 'expire-notice', 'dns-check',
-    'cdn-accounts', 'cdn-domains', 'cdn-zones', 'cache-refresh', 'preheat-tasks', 'statistics',
+    'cdn-accounts', 'cdn-domains', 'cdn-zones', 'cf-rules', 'cache-refresh', 'preheat-tasks', 'statistics',
     'dm-overview', 'dm-tasks', 'schedule-tasks',
     'optimize-settings', 'optimize-tasks',
     'cert-accounts', 'cert-orders', 'deploy-accounts', 'deploy-tasks', 'cert-settings',

@@ -19,6 +19,7 @@ backend/src/routes/
 ├── preheat.ts      # 定时预热任务
 ├── dnscheck.ts     # 劫持检测
 ├── cloudflare.ts   # 自定义主机名与 Tunnel
+├── cfrules.ts      # Cloudflare 规则引擎（Rulesets）
 ├── register.ts     # 自助注册与注册码
 ├── user.ts         # 用户与日志
 ├── system.ts       # 系统设置与通知测试

@@ -21,6 +21,7 @@ import scheduleRoutes from './routes/schedule.js';
 import systemRoutes from './routes/system.js';
 import userRoutes from './routes/user.js';
 import cloudflareRoutes from './routes/cloudflare.js';
+import cfRulesRoutes from './routes/cfrules.js';
 import expireRoutes from './routes/expire.js';
 import registerRoutes from './routes/register.js';
 import setupRoutes from './routes/setup.js';
@@ -70,7 +71,8 @@ function resolveTrustProxy(): boolean | string | number {
 
 const app = Fastify({
   logger: false,
-  trustProxy: resolveTrustProxy(),
+  // Fastify 5 类型不再声明数值形式，但运行时仍支持按跳数信任代理，故此处保留原语义
+  trustProxy: resolveTrustProxy() as any,
   bodyLimit: Number(process.env.DNSMGR_BODY_LIMIT || 2 * 1024 * 1024),
 });
 
@@ -185,6 +187,7 @@ if (installed) {
   await app.register(systemRoutes);
   await app.register(userRoutes);
   await app.register(cloudflareRoutes);
+  await app.register(cfRulesRoutes);
   await app.register(expireRoutes);
   await app.register(registerRoutes);
   await app.register(preheatRoutes);
