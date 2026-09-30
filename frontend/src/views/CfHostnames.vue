@@ -5,16 +5,16 @@
         <n-tag v-if="fallbackOrigin" size="small" type="info">Fallback: {{ fallbackOrigin }}</n-tag>
       </template>
       <template #actions>
-        <n-space size="small">
+        <n-space>
           <n-tag size="small" v-if="dcvUuid">DCV UUID: {{ dcvUuid }}</n-tag>
-          <n-button size="small" @click="loadDcvUuid">获取 DCV UUID</n-button>
-          <n-button size="small" @click="openFallback">Fallback 源站</n-button>
+          <n-button @click="loadDcvUuid">获取 DCV UUID</n-button>
+          <n-button @click="openFallback">Fallback 源站</n-button>
         </n-space>
       </template>
     </PageHeader>
 
-    <n-card :bordered="false" size="small" style="margin-top: 12px">
-      <n-space style="margin-bottom: 12px">
+    <n-card :bordered="false">
+      <n-space class="mb-12">
         <n-button type="primary" size="small" @click="openAdd">添加</n-button>
         <n-button size="small" @click="openBatchAdd">批量添加</n-button>
         <n-button size="small" :disabled="!selection.length" @click="openBatchEdit">批量编辑</n-button>
@@ -41,7 +41,7 @@
 
     <!-- 单个添加/编辑 -->
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑自定义主机名' : '添加自定义主机名'" style="max-width:560px" :mask-closable="false">
-      <n-form label-placement="left" label-width="130">
+      <n-form label-placement="left" label-width="110">
         <n-form-item v-if="!editingId" label="主机名" required>
           <n-input v-model:value="form.hostname" placeholder="如 www.example.com" />
         </n-form-item>
@@ -68,7 +68,7 @@
 
     <!-- 批量添加 -->
     <n-modal v-model:show="showBatchAdd" preset="card" title="批量添加自定义主机名" style="max-width:560px" :mask-closable="false">
-      <n-form label-placement="left" label-width="130">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="主机名列表" required>
           <n-input v-model:value="batchAddForm.hostnames" type="textarea" :rows="6" placeholder="每行一个主机名" />
         </n-form-item>
@@ -92,7 +92,7 @@
 
     <!-- 批量编辑 -->
     <n-modal v-model:show="showBatchEdit" preset="card" title="批量编辑自定义主机名" style="max-width:560px" :mask-closable="false">
-      <n-form label-placement="left" label-width="130">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="自定义源站">
           <n-input v-model:value="batchEditForm.custom_origin_server" placeholder="留空则清空源站" />
         </n-form-item>
@@ -655,10 +655,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.bg { border: 1px solid #e5e5e5; border-radius: 4px; padding: 12px; margin-bottom: 12px; }
+.mb-12 { margin-bottom: 12px; }
+.bg { border: 1px solid var(--app-border); border-radius: 4px; padding: 12px; margin-bottom: 12px; }
 .bg-title { font-weight: 600; margin-bottom: 8px; }
 .bg-items { margin-bottom: 10px; }
-.bg-item { background: #fafafa; border-radius: 4px; padding: 8px; margin-bottom: 6px; }
+.bg-item { background: var(--app-surface-2); border-radius: 4px; padding: 8px; margin-bottom: 6px; }
 .mono { font-family: monospace; word-break: break-all; font-size: 12px; }
 .dim { color: var(--app-text-3); font-size: 12px; }
 </style>

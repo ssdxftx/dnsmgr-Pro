@@ -367,7 +367,7 @@ onMounted(() => {
   flex-direction: column;
   gap: 6px;
   padding: 8px;
-  border: 1px solid #e8e8e8;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
 }
 .perm-row {

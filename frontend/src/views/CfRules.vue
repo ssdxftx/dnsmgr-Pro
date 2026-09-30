@@ -1,9 +1,17 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="Cloudflare 规则引擎" subtitle="管理 Cloudflare 域名的边缘规则（Rulesets）" back="/cdn-domains" />
+    <PageHeader title="Cloudflare 规则引擎" subtitle="管理 Cloudflare 域名的边缘规则（Rulesets）" back="/cdn-domains">
+      <template #actions>
+        <n-space>
+          <n-button :loading="loading" @click="loadRules">刷新</n-button>
+          <n-button :disabled="!selectedDomain" @click="openCredential">凭证设置</n-button>
+          <n-button type="primary" :disabled="!selectedDomain" @click="openAdd">添加规则</n-button>
+        </n-space>
+      </template>
+    </PageHeader>
 
     <n-card :bordered="false">
-      <n-space align="center" :wrap="true" style="margin-bottom: 12px">
+      <n-space align="center" :wrap="true" class="mb-12">
         <n-select
           v-model:value="selectedDomain"
           :options="domainOptions"
@@ -18,12 +26,9 @@
           style="width: 220px"
           @update:value="onPhaseChange"
         />
-        <n-button :loading="loading" @click="loadRules">刷新</n-button>
-        <n-button type="primary" :disabled="!selectedDomain" @click="openAdd">添加规则</n-button>
         <n-tag v-if="selectedDomain && credentialSource" size="small" :type="credentialSource === 'dedicated' ? 'success' : 'default'">
           {{ credentialSource === 'dedicated' ? '专用凭证' : 'DNS 账户密钥' }}
         </n-tag>
-        <n-button v-if="selectedDomain" size="small" @click="openCredential">凭证设置</n-button>
       </n-space>
 
       <n-alert v-if="needCredential" type="warning" style="margin-bottom: 12px" :show-icon="true">
@@ -44,7 +49,7 @@
 
     <!-- 规则编辑 -->
     <n-modal v-model:show="showRule" preset="card" :title="editingId ? '编辑规则' : '添加规则'" style="max-width: 640px" :mask-closable="false">
-      <n-form label-placement="left" label-width="120">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="规则类型">
           <n-tag size="small" type="info">{{ currentPhaseLabel }}</n-tag>
           <n-text depth="3" style="margin-left: 8px">{{ selectedPhase }}</n-text>
@@ -159,7 +164,7 @@
       <n-alert type="info" style="margin-bottom: 12px">
         当前 DNS 账户密钥不具备规则引擎权限时，请填写具备 Zone WAF / 规则集权限的专用凭证。凭证按 Cloudflare 账户加密保存并优先复用。
       </n-alert>
-      <n-form label-placement="left" label-width="120">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="认证方式">
           <n-radio-group v-model:value="credForm.auth">
             <n-radio :value="1">API 令牌</n-radio>
@@ -716,3 +721,7 @@ onMounted(async () => {
   await loadRules();
 });
 </script>
+
+<style scoped>
+.mb-12 { margin-bottom: 12px; }
+</style>

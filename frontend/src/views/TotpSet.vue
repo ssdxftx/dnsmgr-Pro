@@ -128,7 +128,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #eee;
+  border: 1px solid var(--app-divider);
   border-radius: 8px;
 }
 .qr-box img { width: 100%; height: 100%; }

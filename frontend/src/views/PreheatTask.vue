@@ -20,7 +20,7 @@
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" title="预热任务" style="max-width: 640px" :mask-closable="false">
-      <n-form label-placement="left" label-width="90">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="任务名称">
           <n-input v-model:value="form.name" placeholder="可选，便于识别" />
         </n-form-item>

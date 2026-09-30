@@ -2,7 +2,7 @@
   <div class="app-stack">
     <PageHeader title="数据统计" subtitle="查看 CDN 加速流量、带宽与请求统计">
       <template #actions>
-        <n-button size="small" @click="load" :loading="loading">
+        <n-button @click="load" :loading="loading">
           <template #icon><n-icon :component="RefreshOutline" /></template>
           刷新
         </n-button>
