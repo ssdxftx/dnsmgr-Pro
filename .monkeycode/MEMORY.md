@@ -46,3 +46,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - 后端业务路由仅在“已安装”状态注册；本环境验证需先安装并启动 MariaDB（`apt-get install -y mariadb-server`，`service mariadb start`），再走安装向导 `POST /api/setup/install` 初始化（会执行 `migrate.ts` 建表）
   - 可用环境变量 `DNSMGR_CF_API_BASE` 覆盖 Cloudflare API 基址，指向本地 Mock 即可离线验证规则引擎与凭证降级
   - 后端类型检查 `cd backend && npx tsc --noEmit`；前端 `cd frontend && npx vue-tsc --noEmit && npx vite build`
+
+[Project Knowledge Summary]
+- Date: 2026-09-30
+- Context: Discovered by Agent while 排查 1Panel 拉取镜像升级失败
+- Category: Operations & Deployment / Troubleshooting & Debugging
+- Instructions:
+  - Dockerfile 运行阶段必须保持 root。曾改为 `USER node`，并把 `NPM_CONFIG_CACHE=/tmp/.npm` 放在 `RUN npm ci` 之前：构建期以 root 生成 `/tmp/.npm`（root 属主）并固化进镜像，运行时非 root（uid 1000）无法写入，容器启动即 `npm error EACCES`、升级回滚
+  - 既有部署的数据卷 `/app/data/config.json` 为 root 属主（0600），非 root 运行会读取失败，故升级兼容性要求 root 运行
+  - 版本镜像仅由推送 `vX.Y.Z` 标签触发（产出 `X.Y.Z`、`X.Y`、`X`、`latest`）；仅推送 `main` 只产出 `edge`
+  - 发布流程：`node scripts/release.mjs <版本>`（要求暂存区非空，会一并提交已暂存改动 + 版本号，打标签并推送 main 与标签）
+  - 本环境 `hub.docker.com` 被网络策略拦截、`gh` 未登录、GitHub 匿名 API 有限流，无法直接核验镜像产物
