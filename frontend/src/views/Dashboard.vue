@@ -107,8 +107,8 @@ onMounted(async () => {
   color: var(--app-success);
 }
 .quick-tile__icon--info {
-  background: color-mix(in srgb, #38a3f5 16%, transparent);
-  color: #1d6fd0;
+  background: color-mix(in srgb, var(--app-primary) 16%, transparent);
+  color: var(--app-primary-strong);
 }
 .quick-tile__icon--warning {
   background: var(--app-warning-weak);

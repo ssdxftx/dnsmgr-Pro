@@ -13,7 +13,7 @@
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑账户' : '添加账户'" style="max-width:600px" :mask-closable="false">
-      <n-form label-placement="left" label-width="120">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="证书服务商">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
         </n-form-item>

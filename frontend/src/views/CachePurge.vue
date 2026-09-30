@@ -1,6 +1,7 @@
 <template>
   <div class="app-stack">
-    <n-card :bordered="false" title="缓存刷新与预热">
+    <PageHeader title="缓存刷新" subtitle="刷新或预热 CDN 缓存，并查看任务历史" />
+    <n-card :bordered="false">
       <n-space vertical :size="16">
         <n-radio-group v-model:value="opType">
           <n-radio-button value="url">URL 刷新</n-radio-button>
@@ -42,6 +43,7 @@ import { computed, h, onMounted, ref } from 'vue';
 import { NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import PageHeader from '../components/PageHeader.vue';
 
 const opType = ref<'url' | 'dir' | 'preheat'>('url');
 const urlText = ref('');

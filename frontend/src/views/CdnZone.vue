@@ -32,7 +32,7 @@
         <template #header-extra>
           <span style="color:var(--app-warning);font-size:12px">作用于站点下所有加速域名</span>
         </template>
-        <n-form label-placement="left" label-width="130">
+        <n-form label-placement="left" label-width="110">
           <n-divider title-placement="left">HTTPS / TLS</n-divider>
           <n-form-item label="强制 HTTPS 跳转">
             <n-switch v-model:value="zone.forceSwitch" />

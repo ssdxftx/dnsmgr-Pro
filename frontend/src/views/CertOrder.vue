@@ -19,7 +19,7 @@
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑订单' : '申请证书'" style="max-width:640px" :mask-closable="false">
       <n-tabs v-model:value="tab" type="line">
         <n-tab-pane name="apply" tab="自动申请">
-          <n-form label-placement="left" label-width="100">
+          <n-form label-placement="left" label-width="110">
             <n-form-item label="证书账户">
               <n-select v-model:value="form.aid" :options="accountOptions" placeholder="选择证书账户" />
             </n-form-item>
@@ -38,7 +38,7 @@
           </n-form>
         </n-tab-pane>
         <n-tab-pane name="import" tab="手动导入">
-          <n-form label-placement="left" label-width="100">
+          <n-form label-placement="left" label-width="110">
             <n-form-item label="证书内容">
               <n-input v-model:value="form.fullchain" type="textarea" :rows="6" placeholder="-----BEGIN CERTIFICATE----- ..." />
             </n-form-item>
