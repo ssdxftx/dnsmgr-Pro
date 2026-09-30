@@ -19,7 +19,7 @@
 
       <n-grid-item>
         <n-card :bordered="false" title="数据接口设置">
-          <n-form :label-placement="labelPlacement" label-width="90">
+          <n-form :label-placement="labelPlacement" label-width="110">
             <n-form-item label="数据接口">
               <n-select v-model:value="form.optimize_ip_api" :options="apiOptions" @update:value="onApiChange" />
             </n-form-item>
@@ -127,7 +127,7 @@ onMounted(load);
 .desc {
   margin: 0 0 8px;
   line-height: 1.7;
-  color: #4b5563;
+  color: var(--app-text-2);
 }
 .desc:last-child {
   margin-bottom: 0;
@@ -136,7 +136,7 @@ onMounted(load);
   margin: 0;
   padding-left: 20px;
   line-height: 1.7;
-  color: #4b5563;
+  color: var(--app-text-2);
 }
 .tips li {
   margin-bottom: 6px;

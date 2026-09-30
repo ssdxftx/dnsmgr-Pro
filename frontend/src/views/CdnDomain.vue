@@ -154,7 +154,7 @@
 
     <!-- 同步云端弹窗 -->
     <n-modal v-model:show="showSync" preset="card" title="同步云端已有加速域名" style="max-width:440px">
-      <n-form label-placement="left" label-width="90">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="CDN 账户">
           <n-select v-model:value="syncAid" :options="accountOptions" />
         </n-form-item>
@@ -304,7 +304,7 @@
         </div>
         <n-alert v-if="certMgrMismatch" type="warning" :show-icon="true" class="cert-tip">本地记录与云端证书不一致，请以云端为准确认证书方式。</n-alert>
 
-        <n-form-item label="证书方式" label-placement="left" label-width="90">
+        <n-form-item label="证书方式" label-placement="left" label-width="110">
           <n-radio-group v-model:value="certMgrMode" @update:value="onCertMgrModeChange">
             <n-space vertical>
               <n-radio value="">不使用证书（停用自动部署）</n-radio>
@@ -1205,7 +1205,7 @@ onUnmounted(() => {
   font-size: 13px;
 }
 .link-warn {
-  color: #f0a020;
+  color: var(--app-warning);
   font-size: 13px;
   line-height: 1.6;
 }
@@ -1250,14 +1250,14 @@ onUnmounted(() => {
   margin-top: 6px;
   font-size: 12px;
   line-height: 1.7;
-  color: #2080f0;
+  color: var(--app-primary);
   word-break: break-all;
 }
 .cert-records {
   margin-top: 6px;
   padding: 8px;
   border-radius: 6px;
-  background: #f5f7fa;
+  background: var(--app-surface-2);
   font-size: 12px;
   word-break: break-all;
 }
@@ -1268,7 +1268,7 @@ onUnmounted(() => {
   margin-top: 12px;
   max-height: 320px;
   overflow-y: auto;
-  border: 1px solid #eef0f3;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
   padding: 4px 10px;
 }
@@ -1277,19 +1277,19 @@ onUnmounted(() => {
   align-items: baseline;
   gap: 8px;
   padding: 6px 0;
-  border-bottom: 1px dashed #f0f1f3;
+  border-bottom: 1px dashed var(--app-divider);
   font-size: 12px;
 }
 .link-log-item:last-child {
   border-bottom: none;
 }
 .link-log-node {
-  color: #2080f0;
+  color: var(--app-primary);
   white-space: nowrap;
 }
 .link-log-msg {
   flex: 1;
-  color: #4b5563;
+  color: var(--app-text-2);
   word-break: break-word;
 }
 .link-log-time {
@@ -1303,9 +1303,9 @@ onUnmounted(() => {
 .cloud-cert {
   margin-bottom: 14px;
   padding: 10px 12px;
-  border: 1px solid #eef0f3;
+  border: 1px solid var(--app-border);
   border-radius: 6px;
-  background: #fafbfc;
+  background: var(--app-surface-2);
 }
 .cloud-cert-head {
   display: flex;
@@ -1329,7 +1329,7 @@ onUnmounted(() => {
 .cloud-cert-item + .cloud-cert-item {
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px dashed #f0f1f3;
+  border-top: 1px dashed var(--app-divider);
 }
 .cloud-cert-name {
   font-weight: 600;

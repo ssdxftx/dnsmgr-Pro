@@ -20,7 +20,7 @@
       </n-card>
 
       <n-card title="回源配置" size="small" :bordered="false">
-        <n-form label-placement="left" label-width="90">
+        <n-form label-placement="left" label-width="110">
           <n-form-item label="源站地址">
             <n-input v-model:value="originForm.origin" placeholder="IP 或域名，多个用分号间隔" />
           </n-form-item>

@@ -2,17 +2,17 @@
   <div class="app-stack">
     <PageHeader :title="'Cloudflare Tunnel · ' + (accountName || '账户 #' + accountId)" subtitle="管理 Cloudflare Tunnel 及其路由规则" back="/cdn-accounts">
       <template #actions>
-        <n-button type="primary" size="small" @click="openAdd"><template #icon><n-icon :component="AddOutline" /></template>创建 Tunnel</n-button>
+        <n-button type="primary" @click="openAdd"><template #icon><n-icon :component="AddOutline" /></template>创建 Tunnel</n-button>
       </template>
     </PageHeader>
 
-    <n-card :bordered="false" size="small" style="margin-top: 12px">
+    <n-card :bordered="false">
       <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :row-key="(row: any) => row.id" size="small" empty-text="暂无 Tunnel" />
     </n-card>
 
     <!-- 创建 -->
     <n-modal v-model:show="showAdd" preset="card" title="创建 Tunnel" style="max-width:440px" :mask-closable="false">
-      <n-form label-placement="left" label-width="90">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="名称" required><n-input v-model:value="addName" placeholder="Tunnel 名称" /></n-form-item>
       </n-form>
       <template #footer>
@@ -25,7 +25,7 @@
 
     <!-- Token -->
     <n-modal v-model:show="showToken" preset="card" title="Tunnel Token" style="max-width:640px">
-      <n-form label-placement="left" label-width="90">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="Tunnel"><n-input :value="tokenName" disabled /></n-form-item>
         <n-form-item label="Token"><n-input v-model:value="tokenValue" type="textarea" :rows="6" readonly /></n-form-item>
         <n-form-item label="运行命令"><n-input v-model:value="tokenCommand" type="textarea" :rows="2" readonly /></n-form-item>
@@ -40,7 +40,7 @@
 
     <!-- 公网主机名 -->
     <n-modal v-model:show="showPublic" preset="card" :title="'公网主机名 · ' + currentTunnelName" style="max-width:760px">
-      <n-form label-placement="left" label-width="90" inline>
+      <n-form label-placement="left" label-width="110" inline>
         <n-form-item label="主机名"><n-input v-model:value="publicForm.hostname" placeholder="app.example.com" style="width:200px" /></n-form-item>
         <n-form-item label="服务"><n-input v-model:value="publicForm.service" placeholder="http://localhost:8080" style="width:200px" /></n-form-item>
         <n-form-item label="路径"><n-input v-model:value="publicForm.path" placeholder="留空" style="width:120px" /></n-form-item>
@@ -55,7 +55,7 @@
 
     <!-- CIDR 路由 -->
     <n-modal v-model:show="showCidr" preset="card" :title="'CIDR 路由 · ' + currentTunnelName" style="max-width:760px">
-      <n-form label-placement="left" label-width="90" inline>
+      <n-form label-placement="left" label-width="110" inline>
         <n-form-item label="CIDR"><n-input v-model:value="cidrForm.network" placeholder="10.0.0.0/24" style="width:180px" /></n-form-item>
         <n-form-item label="备注"><n-input v-model:value="cidrForm.comment" style="width:200px" /></n-form-item>
         <n-button type="primary" size="small" :loading="cidrLoading" @click="saveCidr">添加</n-button>
@@ -69,7 +69,7 @@
 
     <!-- 主机名路由 -->
     <n-modal v-model:show="showRoute" preset="card" :title="'主机名路由 · ' + currentTunnelName" style="max-width:760px">
-      <n-form label-placement="left" label-width="90" inline>
+      <n-form label-placement="left" label-width="110" inline>
         <n-form-item label="主机名"><n-input v-model:value="routeForm.hostname" placeholder="private.example.com" style="width:220px" /></n-form-item>
         <n-form-item label="备注"><n-input v-model:value="routeForm.comment" style="width:200px" /></n-form-item>
         <n-button type="primary" size="small" :loading="routeLoading" @click="saveRoute">添加</n-button>

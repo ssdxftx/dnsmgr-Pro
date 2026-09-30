@@ -260,7 +260,7 @@ onMounted(async () => {
   width: 48px;
   height: 48px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #3b6df0, #6f9bff);
+  background: linear-gradient(135deg, var(--app-primary), var(--app-primary-strong));
   color: #fff;
   font-weight: 700;
   font-size: 15px;
@@ -337,7 +337,7 @@ onMounted(async () => {
   word-break: break-word;
   font-size: 12px;
   line-height: 1.7;
-  color: #4b5563;
+  color: var(--app-text-2);
 }
 .stack-card {
   margin-top: 16px;
@@ -356,12 +356,12 @@ onMounted(async () => {
   margin: 0;
   padding-left: 20px;
   line-height: 1.8;
-  color: #4b5563;
+  color: var(--app-text-2);
 }
 .stack-desc {
   margin: 0;
   line-height: 1.8;
-  color: #4b5563;
+  color: var(--app-text-2);
   font-size: 13px;
 }
 

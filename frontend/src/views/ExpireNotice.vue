@@ -96,7 +96,7 @@ onMounted(load);
 </script>
 
 <style scoped>
-.hint { color: #18a058; font-size: 12px; margin-top: 4px; line-height: 1.6; }
+.hint { color: var(--app-success); font-size: 12px; margin-top: 4px; line-height: 1.6; }
 
 @media (max-width: 768px) {
   :deep(.n-card__footer .n-space) {

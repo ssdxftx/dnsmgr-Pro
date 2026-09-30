@@ -17,7 +17,7 @@
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '修改记录' : '添加记录'" style="max-width:640px" :mask-closable="false">
-      <n-form label-placement="left" label-width="90">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="主机记录">
           <n-input v-model:value="form.name" placeholder="如 www、@（根域名）" />
         </n-form-item>

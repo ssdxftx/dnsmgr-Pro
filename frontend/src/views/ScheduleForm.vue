@@ -208,10 +208,10 @@ onMounted(async () => {
 .native-input {
   height: 34px;
   padding: 0 10px;
-  border: 1px solid #d9d9d9;
-  border-radius: 3px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
   font-size: 14px;
-  color: #333;
-  background: #fff;
+  color: var(--app-text);
+  background: var(--app-surface);
 }
 </style>

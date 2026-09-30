@@ -41,7 +41,7 @@
 
     <!-- 导入域名弹窗 -->
     <n-modal v-model:show="showImport" preset="card" title="导入域名" style="max-width:640px" :mask-closable="false">
-      <n-form label-placement="left" label-width="90">
+      <n-form label-placement="left" label-width="110">
         <n-form-item label="DNS 账户">
           <n-select v-model:value="importAid" :options="accountOptions" placeholder="选择账户" @update:value="loadPullDomains" />
         </n-form-item>
@@ -133,7 +133,7 @@ const columns = computed(() => {
       const val = row.expiretime || '';
       const expired = val && new Date(val) < new Date();
       const text = val ? String(val).slice(0, 19) : (row.checkstatus === 2 ? '查询失败' : '未查询');
-      const color = expired ? '#d03050' : row.checkstatus === 2 ? '#f0a020' : undefined;
+      const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
       const children: any[] = [h('span', { style: color ? { color } : undefined }, text || '-')];
       if (isAdmin.value) {
         children.push(h(NButton, { size: 'tiny', quaternary: true, title: '刷新到期时间', onClick: () => updateDate(row) }, { icon: () => h(RefreshOutline) }));

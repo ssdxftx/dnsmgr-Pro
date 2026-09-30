@@ -1,10 +1,11 @@
 <template>
   <div class="app-stack">
+    <PageHeader title="系统设置" subtitle="通知、注册、代理与调度等系统级配置" />
     <n-card :bordered="false">
       <n-tabs type="line" animated>
         <!-- 通知设置 -->
         <n-tab-pane name="notice" tab="通知设置">
-          <n-card title="发信邮箱" :bordered="false" size="small" style="margin-bottom:16px">
+          <n-card title="发信邮箱" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="发信模式">
                 <n-select v-model:value="cfg.mail_type" :options="mailTypeOptions" style="width: 260px" />
@@ -32,7 +33,7 @@
             </n-form>
           </n-card>
 
-          <n-card title="微信公众号消息接口（WxPusher）" :bordered="false" size="small" style="margin-bottom:16px">
+          <n-card title="微信公众号消息接口（WxPusher）" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="appToken"><n-input v-model:value="cfg.wechat_apptoken" /></n-form-item>
               <n-form-item label="用户UID"><n-input v-model:value="cfg.wechat_appuid" /></n-form-item>
@@ -42,7 +43,7 @@
             </n-form>
           </n-card>
 
-          <n-card title="Telegram机器人接口" :bordered="false" size="small" style="margin-bottom:16px">
+          <n-card title="Telegram机器人接口" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="Token"><n-input v-model:value="cfg.tgbot_token" /></n-form-item>
               <n-form-item label="Chat Id"><n-input v-model:value="cfg.tgbot_chatid" /></n-form-item>
@@ -62,7 +63,7 @@
             </n-form>
           </n-card>
 
-          <n-card title="QQ机器人通知设置" :bordered="false" size="small" style="margin-bottom:16px">
+          <n-card title="QQ机器人通知设置" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="AppID">
                 <n-input v-model:value="cfg.qqbot_appid" placeholder="QQ机器人开放平台的AppID" />
@@ -92,7 +93,7 @@
             </n-form>
           </n-card>
 
-          <n-card title="群机器人 Webhook（企微/钉钉/飞书）" :bordered="false" size="small" style="margin-bottom:16px">
+          <n-card title="群机器人 Webhook（企微/钉钉/飞书）" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="Webhook地址"><n-input v-model:value="cfg.webhook_url" /></n-form-item>
               <n-form-item label="@用户手机号"><n-input v-model:value="cfg.webhook_user" placeholder="非必填，@全体填all" /></n-form-item>
@@ -137,7 +138,7 @@
 
         <!-- 登录设置 -->
         <n-tab-pane name="login" tab="登录设置">
-          <n-card title="登录验证码设置" :bordered="false" size="small" style="max-width:520px">
+          <n-card title="登录验证码设置" :bordered="false" size="small" class="narrow">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="开启图形验证码">
                 <n-switch :value="cfg.vcode !== '2'" @update:value="setVcode" />
@@ -148,7 +149,7 @@
 
         <!-- 注册设置 -->
         <n-tab-pane name="register" tab="注册设置">
-          <n-card title="注册配置" :bordered="false" size="small" style="max-width:520px;margin-bottom:16px">
+          <n-card title="注册配置" :bordered="false" size="small" class="narrow mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="开启注册">
                 <n-switch :value="(cfg.register_enable || '0') === '1'" @update:value="setRegisterEnable" />
@@ -177,7 +178,7 @@
 
         <!-- 代理设置 -->
         <n-tab-pane name="proxy" tab="代理设置">
-          <n-card title="代理服务器设置" :bordered="false" size="small" style="max-width:520px">
+          <n-card title="代理服务器设置" :bordered="false" size="small" class="narrow">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="代理IP"><n-input v-model:value="cfg.proxy_server" /></n-form-item>
               <n-form-item label="代理端口"><n-input v-model:value="cfg.proxy_port" /></n-form-item>
@@ -198,8 +199,8 @@
 
         <!-- 计划任务 -->
         <n-tab-pane name="cron" tab="计划任务">
-          <n-card title="计划任务设置" :bordered="false" size="small" style="max-width:520px">
-            <n-alert type="info" style="margin-bottom:16px">
+          <n-card title="计划任务设置" :bordered="false" size="small" class="narrow">
+            <n-alert type="info" class="mb-16">
               本系统已内置定时调度器（容灾监控 / 优选IP / 定时切换解析），随服务启动自动运行，无需额外配置计划任务。以下为兼容旧版的外部触发方式。
             </n-alert>
             <n-form label-placement="left" label-width="110">
@@ -218,11 +219,11 @@
 
         <!-- 统计缓存 -->
         <n-tab-pane name="statcache" tab="统计缓存">
-          <n-card title="CDN 数据统计缓存" :bordered="false" size="small" style="max-width:560px">
-            <n-alert type="info" :show-icon="false" style="margin-bottom:16px">
+          <n-card title="CDN 数据统计缓存" :bordered="false" size="small" class="narrow-wide">
+            <n-alert type="info" :show-icon="false" class="mb-16">
               开启后系统会按服务商数据粒度定时拉取统计并保存到服务器（近 30 天按天、近 48 小时按小时），打开数据统计页即可快速加载。该功能会在后台持续消耗服务器资源，请按需开启；并可在「用户管理」中为其他用户单独开启查看权限。
             </n-alert>
-            <n-form label-placement="left" label-width="120">
+            <n-form label-placement="left" label-width="110">
               <n-form-item label="开启统计缓存">
                 <n-switch :value="(cfg.cdn_stats_cache || '0') === '1'" @update:value="setStatCache" />
               </n-form-item>
@@ -249,7 +250,7 @@
     </n-card>
 
     <!-- 生成注册码弹窗 -->
-    <n-modal v-model:show="showGen" preset="card" title="生成注册码" style="max-width:420px" :mask-closable="false">
+    <n-modal v-model:show="showGen" preset="card" title="生成注册码" class="narrow-sm" :mask-closable="false">
       <n-form label-placement="top">
         <n-form-item label="生成数量">
           <n-input-number v-model:value="genForm.count" :min="1" :max="100" style="width: 100%" />
@@ -273,8 +274,8 @@
     </n-modal>
 
     <!-- 生成结果弹窗 -->
-    <n-modal v-model:show="showResult" preset="card" title="注册码已生成" style="max-width:520px">
-      <n-alert type="success" style="margin-bottom:12px">请保存下方注册码，关闭后可在列表中查看（已使用次数与状态）。</n-alert>
+    <n-modal v-model:show="showResult" preset="card" title="注册码已生成" class="narrow">
+      <n-alert type="success" class="mb-12">请保存下方注册码，关闭后可在列表中查看（已使用次数与状态）。</n-alert>
       <n-input v-model:value="resultText" type="textarea" :rows="8" readonly />
       <template #footer>
         <n-space justify="end">
@@ -285,7 +286,7 @@
     </n-modal>
 
     <!-- QQ机器人使用说明 -->
-    <n-modal v-model:show="showQqbotHelp" preset="card" title="QQ机器人使用说明" style="max-width:560px">
+    <n-modal v-model:show="showQqbotHelp" preset="card" title="QQ机器人使用说明" class="narrow-wide">
       <div class="help-body">
         <p><b>一、创建并配置机器人</b></p>
         <p>1. 打开 QQ 开放平台（q.qq.com）→「我的机器人」，创建机器人。</p>
@@ -306,6 +307,7 @@ import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useMessage, useDialog, NButton, NSpace, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -576,6 +578,11 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.mb-12 { margin-bottom: 12px; }
+.mb-16 { margin-bottom: 16px; }
+.narrow { max-width: 520px; }
+.narrow-wide { max-width: 560px; }
+.narrow-sm { max-width: 420px; }
 .help-body p {
   margin: 0 0 8px;
   line-height: 1.7;
