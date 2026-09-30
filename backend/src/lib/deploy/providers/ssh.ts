@@ -1,6 +1,7 @@
 import { Client, ConnectConfig } from 'ssh2';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
+import { applyHostKeyVerification } from '../sshHostKey.js';
 import type { DeployProvider } from '../types.js';
 
 export class SshDeploy implements DeployProvider {
@@ -32,6 +33,8 @@ export class SshDeploy implements DeployProvider {
     } else {
       connectConfig.password = cfg.password;
     }
+    // 如配置了主机密钥指纹/公钥则严格校验，防止中间人攻击
+    applyHostKeyVerification(connectConfig, cfg);
 
     return new Promise((resolve, reject) => {
       const conn = new Client();

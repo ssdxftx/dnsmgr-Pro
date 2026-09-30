@@ -6,3 +6,16 @@ declare module '*.vue' {
   const component: DefineComponent<{}, {}, any>;
   export default component;
 }
+declare module 'qrcode' {
+  interface QRCodeToDataURLOptions {
+    width?: number;
+    margin?: number;
+    [key: string]: any;
+  }
+  interface QRCodeApi {
+    toDataURL(text: string, options?: QRCodeToDataURLOptions): Promise<string>;
+    toCanvas(canvas: unknown, text: string, options?: QRCodeToDataURLOptions): Promise<unknown>;
+  }
+  const QRCode: QRCodeApi;
+  export default QRCode;
+}

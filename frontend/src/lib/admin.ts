@@ -7,6 +7,7 @@ export const ADMIN_PREFIXES = [
   '/cdn-accounts',
   '/cdn-domains',
   '/cdn-zones',
+  '/cf-rules',
   '/cache-refresh',
   '/preheat-tasks',
   '/statistics',

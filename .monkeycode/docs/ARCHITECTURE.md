@@ -48,7 +48,7 @@ dnsmgr-Pro/
 │       ├── installer.ts     # 安装 / 绑定现库
 │       ├── migrate.ts       # 启动幂等迁移
 │       ├── security.ts      # 安全头与限流
-│       ├── routes/          # HTTP 路由插件（17 个）
+│       ├── routes/          # HTTP 路由插件（18 个）
 │       ├── sql/schema-init.sql
 │       └── lib/             # 业务实现与厂商 SDK
 ├── frontend/                # Vue 3 SPA
@@ -58,7 +58,7 @@ dnsmgr-Pro/
 │       ├── layouts/MainLayout.vue
 │       ├── stores/auth.ts
 │       ├── lib/             # admin.ts / back.ts / safe.ts
-│       └── views/           # 36 个页面
+│       └── views/           # 37 个页面
 ├── scripts/release.mjs      # 版本同步 + 打标签 + 推送
 ├── deploy/kubernetes.yaml
 ├── Dockerfile

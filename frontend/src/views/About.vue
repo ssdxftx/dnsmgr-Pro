@@ -221,7 +221,7 @@ function formatTime(v?: string | null): string {
 }
 
 async function loadInfo() {
-  const res = await api<{ code: number; data: AboutInfo }>('GET', '/about');
+  const res = await api<{ code: number; data: AboutInfo; msg?: string }>('GET', '/about');
   if (res.code === 0) info.value = res.data;
   else message.error(res.msg || '获取项目信息失败');
 }

@@ -16,7 +16,7 @@ frontend/src/
 ├── lib/back.ts            # useBack(fallback)
 ├── lib/safe.ts            # 密钥掩码与表单 show 表达式
 ├── styles/responsive.css
-└── views/                 # 36 个页面
+└── views/                 # 37 个页面
 ```
 
 `vite.config.ts`：`allowedHosts: ['.monkeycode-ai.online']`；manualChunks 拆 `vendor-vue` / `vendor-ui` / `vendor-charts`；注入 `__APP_VERSION__`、`__BUILD_TIME__`。

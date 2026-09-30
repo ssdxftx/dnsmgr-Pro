@@ -22,6 +22,7 @@ const routes = [
       { path: 'preheat-tasks', component: () => import('./views/PreheatTask.vue'), meta: { title: '自动预热' } },
       { path: 'dns-check', component: () => import('./views/DnsCheckTask.vue'), meta: { title: '劫持检测' } },
       { path: 'cdn-zones', component: () => import('./views/CdnZone.vue'), meta: { title: 'CDN 站点设置' } },
+      { path: 'cf-rules', component: () => import('./views/CfRules.vue'), meta: { title: 'CF 规则引擎' } },
       { path: 'cdn-domains/:id/setting', component: () => import('./views/CdnDomainSetting.vue'), meta: { title: 'CDN 配置' } },
       { path: 'cloudflare/domains/:id/hostnames', component: () => import('./views/CfHostnames.vue'), meta: { title: 'Cloudflare 自定义主机名' } },
       { path: 'cloudflare/accounts/:id/tunnels', component: () => import('./views/CfTunnels.vue'), meta: { title: 'Cloudflare Tunnel' } },
