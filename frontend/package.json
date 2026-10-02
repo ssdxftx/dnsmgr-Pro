@@ -1,6 +1,6 @@
 {
   "name": "dnsmgr-frontend",
-  "version": "1.6.2",
+  "version": "1.7.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -15,6 +15,7 @@
     "pinia": "^2.1.7",
     "qrcode": "^1.5.4",
     "vue": "^3.4.0",
+    "vue-i18n": "^11.4.12",
     "vue-router": "^4.3.0"
   },
   "devDependencies": {

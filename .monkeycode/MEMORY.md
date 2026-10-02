@@ -57,3 +57,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - 版本镜像仅由推送 `vX.Y.Z` 标签触发（产出 `X.Y.Z`、`X.Y`、`X`、`latest`）；仅推送 `main` 只产出 `edge`
   - 发布流程：`node scripts/release.mjs <版本>`（要求暂存区非空，会一并提交已暂存改动 + 版本号，打标签并推送 main 与标签）
   - 本环境 `hub.docker.com` 被网络策略拦截、`gh` 未登录、GitHub 匿名 API 有限流，无法直接核验镜像产物
+
+[Project Knowledge Summary]
+- Date: 2026-10-01
+- Context: Discovered by Agent while 为前端新增 i18n 多语言（zh-CN/en-US）
+- Category: Build Methods / Workflow & Collaboration
+- Instructions:
+  - 前端 i18n 采用 vue-i18n v11（`legacy:false`，已全局安装）；语言偏好存后端 `user.lang`（varchar，迁移由 `migrate.ts` 的 `ensureColumn('user','lang',...)` 保证），登录返回 `publicUser` 携带 lang，更新走 `POST /api/auth/lang`
+  - 新增文案的约定：在 `frontend/src/i18n/locales/zh-CN/*.ts` 与 `en-US/*.ts` 各放一个模块文件（`export default { '<唯一顶层命名空间>': {...} }`），由 `import.meta.glob` 自动合并；顶层命名空间必须唯一（已有 common/nav/route/layout/auth/preferences 及 login/domain/cdn/cert/dm/cf/user* 等可按阶段追加），新增模块后无需改 index.ts/core.ts
+  - 视图内用 `useI18n()` 取 `t()`；含 `t()` 的 label/column/option 数组必须用 `computed` 包裹保证语言切换时响应式；带参文案用 `t('ns.key', { param })` + 语言文件中 `{param}` 占位符
+  - 前端根 `n-config-provider` 的 Naive UI locale 随当前语言在 `zhCN/enUS`、`dateZhCN/dateEnUS` 间切换

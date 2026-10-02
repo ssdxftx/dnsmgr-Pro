@@ -1,135 +1,135 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="系统设置" subtitle="通知、注册、代理与调度等系统级配置" />
+    <PageHeader :title="t('systemSet.title')" :subtitle="t('systemSet.subtitle')" />
     <n-card :bordered="false">
       <n-tabs type="line" animated>
         <!-- 通知设置 -->
-        <n-tab-pane name="notice" tab="通知设置">
-          <n-card title="发信邮箱" :bordered="false" size="small" class="mb-16">
+        <n-tab-pane name="notice" :tab="t('systemSet.tabNotice')">
+          <n-card :title="t('systemSet.mailCardTitle')" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="发信模式">
+              <n-form-item :label="t('systemSet.mailMode')">
                 <n-select v-model:value="cfg.mail_type" :options="mailTypeOptions" style="width: 260px" />
               </n-form-item>
               <template v-if="(cfg.mail_type || '0') === '0'">
-                <n-form-item label="SMTP服务器"><n-input v-model:value="cfg.mail_smtp" /></n-form-item>
-                <n-form-item label="SMTP端口"><n-input v-model:value="cfg.mail_port" /></n-form-item>
-                <n-form-item label="邮箱账号"><n-input v-model:value="cfg.mail_name" /></n-form-item>
-                <n-form-item label="邮箱密码"><n-input v-model:value="cfg.mail_pwd" type="password" show-password-on="click" /></n-form-item>
+                <n-form-item :label="t('systemSet.mailSmtpServer')"><n-input v-model:value="cfg.mail_smtp" /></n-form-item>
+                <n-form-item :label="t('systemSet.mailSmtpPort')"><n-input v-model:value="cfg.mail_port" /></n-form-item>
+                <n-form-item :label="t('systemSet.mailAccount')"><n-input v-model:value="cfg.mail_name" /></n-form-item>
+                <n-form-item :label="t('systemSet.mailPassword')"><n-input v-model:value="cfg.mail_pwd" type="password" show-password-on="click" /></n-form-item>
               </template>
               <template v-else>
                 <n-form-item label="API_USER"><n-input v-model:value="cfg.mail_apiuser" /></n-form-item>
                 <n-form-item label="API_KEY"><n-input v-model:value="cfg.mail_apikey" /></n-form-item>
-                <n-form-item label="发信邮箱"><n-input v-model:value="cfg.mail_name" /></n-form-item>
+                <n-form-item :label="t('systemSet.mailSender')"><n-input v-model:value="cfg.mail_name" /></n-form-item>
               </template>
-              <n-form-item label="收信邮箱">
-                <n-input v-model:value="cfg.mail_recv" placeholder="不填默认为发信邮箱" />
+              <n-form-item :label="t('systemSet.mailRecv')">
+                <n-input v-model:value="cfg.mail_recv" :placeholder="t('systemSet.mailRecvPlaceholder')" />
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveMail">保存</n-button>
-                  <n-button @click="testMail">发送测试邮件</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveMail">{{ t('common.save') }}</n-button>
+                  <n-button @click="testMail">{{ t('systemSet.testMail') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
           </n-card>
 
-          <n-card title="微信公众号消息接口（WxPusher）" :bordered="false" size="small" class="mb-16">
+          <n-card :title="t('systemSet.wxCardTitle')" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="appToken"><n-input v-model:value="cfg.wechat_apptoken" /></n-form-item>
-              <n-form-item label="用户UID"><n-input v-model:value="cfg.wechat_appuid" /></n-form-item>
+              <n-form-item :label="t('systemSet.wxUserUid')"><n-input v-model:value="cfg.wechat_appuid" /></n-form-item>
               <n-form-item>
-                <n-button type="primary" :loading="saving" @click="saveFields(['wechat_apptoken', 'wechat_appuid'])">保存</n-button>
+                <n-button type="primary" :loading="saving" @click="saveFields(['wechat_apptoken', 'wechat_appuid'])">{{ t('common.save') }}</n-button>
               </n-form-item>
             </n-form>
           </n-card>
 
-          <n-card title="Telegram机器人接口" :bordered="false" size="small" class="mb-16">
+          <n-card :title="t('systemSet.tgCardTitle')" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="Token"><n-input v-model:value="cfg.tgbot_token" /></n-form-item>
               <n-form-item label="Chat Id"><n-input v-model:value="cfg.tgbot_chatid" /></n-form-item>
-              <n-form-item label="Topic Id"><n-input v-model:value="cfg.tgbot_topicid" placeholder="非必填" /></n-form-item>
-              <n-form-item label="使用代理">
+              <n-form-item label="Topic Id"><n-input v-model:value="cfg.tgbot_topicid" :placeholder="t('systemSet.tgTopicOptional')" /></n-form-item>
+              <n-form-item :label="t('systemSet.tgUseProxy')">
                 <n-select v-model:value="cfg.tgbot_proxy" :options="tgbotProxyOptions" style="width: 200px" />
               </n-form-item>
-              <n-form-item v-if="(cfg.tgbot_proxy || '0') === '2'" label="反代URL">
-                <n-input v-model:value="cfg.tgbot_url" placeholder="默认为：https://api.telegram.org" />
+              <n-form-item v-if="(cfg.tgbot_proxy || '0') === '2'" :label="t('systemSet.tgProxyUrl')">
+                <n-input v-model:value="cfg.tgbot_url" :placeholder="t('systemSet.tgProxyUrlPlaceholder')" />
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['tgbot_token', 'tgbot_chatid', 'tgbot_topicid', 'tgbot_proxy', 'tgbot_url'])">保存</n-button>
-                  <n-button @click="testTgbot">发送测试消息</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveFields(['tgbot_token', 'tgbot_chatid', 'tgbot_topicid', 'tgbot_proxy', 'tgbot_url'])">{{ t('common.save') }}</n-button>
+                  <n-button @click="testTgbot">{{ t('systemSet.testMessage') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
           </n-card>
 
-          <n-card title="QQ机器人通知设置" :bordered="false" size="small" class="mb-16">
+          <n-card :title="t('systemSet.qqCardTitle')" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
               <n-form-item label="AppID">
-                <n-input v-model:value="cfg.qqbot_appid" placeholder="QQ机器人开放平台的AppID" />
+                <n-input v-model:value="cfg.qqbot_appid" :placeholder="t('systemSet.qqAppIdPlaceholder')" />
               </n-form-item>
               <n-form-item label="AppSecret">
-                <n-input v-model:value="cfg.qqbot_appsecret" type="password" show-password-on="click" placeholder="QQ机器人开放平台的AppSecret" />
+                <n-input v-model:value="cfg.qqbot_appsecret" type="password" show-password-on="click" :placeholder="t('systemSet.qqAppSecretPlaceholder')" />
               </n-form-item>
-              <n-form-item label="Webhook回调地址">
+              <n-form-item :label="t('systemSet.qqWebhookUrl')">
                 <n-input :value="qqbotWebhook" readonly>
                   <template #suffix>
-                    <n-button text size="small" @click="copyQqbotWebhook">复制</n-button>
+                    <n-button text size="small" @click="copyQqbotWebhook">{{ t('common.copy') }}</n-button>
                   </template>
                 </n-input>
               </n-form-item>
-              <n-form-item label="绑定状态">
+              <n-form-item :label="t('systemSet.qqBindStatus')">
                 <n-tag :type="cfg.qqbot_openid ? 'success' : 'error'" :bordered="false">
-                  {{ cfg.qqbot_openid ? '已绑定' : '未绑定' }}
+                  {{ cfg.qqbot_openid ? t('systemSet.qqBound') : t('systemSet.qqNotBound') }}
                 </n-tag>
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['qqbot_appid', 'qqbot_appsecret'])">保存</n-button>
-                  <n-button @click="testQqbot">发送测试消息</n-button>
-                  <n-button @click="showQqbotHelp = true">使用说明</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveFields(['qqbot_appid', 'qqbot_appsecret'])">{{ t('common.save') }}</n-button>
+                  <n-button @click="testQqbot">{{ t('systemSet.testMessage') }}</n-button>
+                  <n-button @click="showQqbotHelp = true">{{ t('systemSet.qqHelp') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
           </n-card>
 
-          <n-card title="群机器人 Webhook（企微/钉钉/飞书）" :bordered="false" size="small" class="mb-16">
+          <n-card :title="t('systemSet.groupCardTitle')" :bordered="false" size="small" class="mb-16">
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="Webhook地址"><n-input v-model:value="cfg.webhook_url" /></n-form-item>
-              <n-form-item label="@用户手机号"><n-input v-model:value="cfg.webhook_user" placeholder="非必填，@全体填all" /></n-form-item>
+              <n-form-item :label="t('systemSet.webhookUrl')"><n-input v-model:value="cfg.webhook_url" /></n-form-item>
+              <n-form-item :label="t('systemSet.webhookUser')"><n-input v-model:value="cfg.webhook_user" :placeholder="t('systemSet.webhookUserPlaceholder')" /></n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['webhook_url', 'webhook_user'])">保存</n-button>
-                  <n-button @click="testWebhook">发送测试消息</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveFields(['webhook_url', 'webhook_user'])">{{ t('common.save') }}</n-button>
+                  <n-button @click="testWebhook">{{ t('systemSet.testMessage') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
           </n-card>
 
-          <n-card title="自定义 Webhook" :bordered="false" size="small">
+          <n-card :title="t('systemSet.customTitle')" :bordered="false" size="small">
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="Webhook地址">
+              <n-form-item :label="t('systemSet.webhookUrl')">
                 <n-input v-model:value="cfg.custom_webhook_url" placeholder="https://example.com/webhook" />
               </n-form-item>
-              <n-form-item label="请求方式">
+              <n-form-item :label="t('systemSet.customMethod')">
                 <n-select v-model:value="cfg.custom_webhook_method" :options="methodOptions" style="width: 200px" />
               </n-form-item>
               <n-form-item label="Content-Type">
                 <n-select v-model:value="cfg.custom_webhook_content_type" :options="contentTypeOptions" style="width: 220px" />
               </n-form-item>
-              <n-form-item label="自定义Headers">
-                <n-input v-model:value="cfg.custom_webhook_headers" type="textarea" :rows="3" placeholder="每行一个，格式：HeaderName: HeaderValue" />
+              <n-form-item :label="t('systemSet.customHeaders')">
+                <n-input v-model:value="cfg.custom_webhook_headers" type="textarea" :rows="3" :placeholder="t('systemSet.customHeadersPlaceholder')" />
               </n-form-item>
-              <n-form-item label="请求Body">
+              <n-form-item :label="t('systemSet.customBody')">
                 <n-input v-model:value="cfg.custom_webhook_body" type="textarea" :rows="4" placeholder='{"title":"{title}","content":"{content}"}' />
               </n-form-item>
-              <n-form-item label="内容格式">
+              <n-form-item :label="t('systemSet.contentFormat')">
                 <n-select v-model:value="cfg.custom_webhook_content_format" :options="contentFormatOptions" style="width: 200px" />
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(customWebhookFields)">保存</n-button>
-                  <n-button @click="testCustomWebhook">发送测试消息</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveFields(customWebhookFields)">{{ t('common.save') }}</n-button>
+                  <n-button @click="testCustomWebhook">{{ t('systemSet.testMessage') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -137,10 +137,10 @@
         </n-tab-pane>
 
         <!-- 登录设置 -->
-        <n-tab-pane name="login" tab="登录设置">
-          <n-card title="登录验证码设置" :bordered="false" size="small" class="narrow">
+        <n-tab-pane name="login" :tab="t('systemSet.tabLogin')">
+          <n-card :title="t('systemSet.loginCardTitle')" :bordered="false" size="small" class="narrow">
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="开启图形验证码">
+              <n-form-item :label="t('systemSet.loginVcode')">
                 <n-switch :value="cfg.vcode !== '2'" @update:value="setVcode" />
               </n-form-item>
             </n-form>
@@ -148,24 +148,24 @@
         </n-tab-pane>
 
         <!-- 注册设置 -->
-        <n-tab-pane name="register" tab="注册设置">
-          <n-card title="注册配置" :bordered="false" size="small" class="narrow mb-16">
+        <n-tab-pane name="register" :tab="t('systemSet.tabRegister')">
+          <n-card :title="t('systemSet.regConfigTitle')" :bordered="false" size="small" class="narrow mb-16">
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="开启注册">
+              <n-form-item :label="t('systemSet.regEnable')">
                 <n-switch :value="(cfg.register_enable || '0') === '1'" @update:value="setRegisterEnable" />
               </n-form-item>
-              <n-form-item label="注册方式">
+              <n-form-item :label="t('systemSet.regMode')">
                 <n-select v-model:value="cfg.register_mode" :options="registerModeOptions" style="width: 200px" />
               </n-form-item>
               <n-form-item>
-                <n-button type="primary" :loading="saving" @click="saveRegister">保存</n-button>
+                <n-button type="primary" :loading="saving" @click="saveRegister">{{ t('common.save') }}</n-button>
               </n-form-item>
             </n-form>
           </n-card>
 
-          <n-card title="注册码管理" :bordered="false" size="small">
+          <n-card :title="t('systemSet.regCodeManage')" :bordered="false" size="small">
             <template #header-extra>
-              <n-button type="primary" size="small" @click="showGen = true">生成注册码</n-button>
+              <n-button type="primary" size="small" @click="showGen = true">{{ t('systemSet.genCode') }}</n-button>
             </template>
             <ResponsiveDataTable
               :columns="regCodeColumns"
@@ -177,20 +177,20 @@
         </n-tab-pane>
 
         <!-- 代理设置 -->
-        <n-tab-pane name="proxy" tab="代理设置">
-          <n-card title="代理服务器设置" :bordered="false" size="small" class="narrow">
+        <n-tab-pane name="proxy" :tab="t('systemSet.tabProxy')">
+          <n-card :title="t('systemSet.proxyCardTitle')" :bordered="false" size="small" class="narrow">
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="代理IP"><n-input v-model:value="cfg.proxy_server" /></n-form-item>
-              <n-form-item label="代理端口"><n-input v-model:value="cfg.proxy_port" /></n-form-item>
-              <n-form-item label="代理账号"><n-input v-model:value="cfg.proxy_user" placeholder="没有请留空" /></n-form-item>
-              <n-form-item label="代理密码"><n-input v-model:value="cfg.proxy_pwd" type="password" show-password-on="click" placeholder="没有请留空" /></n-form-item>
-              <n-form-item label="代理协议">
+              <n-form-item :label="t('systemSet.proxyIp')"><n-input v-model:value="cfg.proxy_server" /></n-form-item>
+              <n-form-item :label="t('systemSet.proxyPort')"><n-input v-model:value="cfg.proxy_port" /></n-form-item>
+              <n-form-item :label="t('systemSet.proxyUser')"><n-input v-model:value="cfg.proxy_user" :placeholder="t('systemSet.proxyBlank')" /></n-form-item>
+              <n-form-item :label="t('systemSet.proxyPassword')"><n-input v-model:value="cfg.proxy_pwd" type="password" show-password-on="click" :placeholder="t('systemSet.proxyBlank')" /></n-form-item>
+              <n-form-item :label="t('systemSet.proxyProtocol')">
                 <n-select v-model:value="cfg.proxy_type" :options="proxyTypeOptions" style="width: 200px" />
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type'])">保存</n-button>
-                  <n-button @click="testProxy">测试连通性</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveFields(['proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type'])">{{ t('common.save') }}</n-button>
+                  <n-button @click="testProxy">{{ t('systemSet.testConnectivity') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -198,19 +198,19 @@
         </n-tab-pane>
 
         <!-- 计划任务 -->
-        <n-tab-pane name="cron" tab="计划任务">
-          <n-card title="计划任务设置" :bordered="false" size="small" class="narrow">
+        <n-tab-pane name="cron" :tab="t('systemSet.tabCron')">
+          <n-card :title="t('systemSet.cronCardTitle')" :bordered="false" size="small" class="narrow">
             <n-alert type="info" class="mb-16">
-              本系统已内置定时调度器（容灾监控 / 优选IP / 定时切换解析），随服务启动自动运行，无需额外配置计划任务。以下为兼容旧版的外部触发方式。
+              {{ t('systemSet.cronAlert') }}
             </n-alert>
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="外部触发方式">
+              <n-form-item :label="t('systemSet.cronExternal')">
                 <n-switch :value="(cfg.cron_type || '0') === '1'" @update:value="setCronType" />
               </n-form-item>
-              <n-form-item label="访问密钥">
+              <n-form-item :label="t('systemSet.cronAccessKey')">
                 <n-input :value="cronKey" readonly />
               </n-form-item>
-              <n-form-item label="触发地址">
+              <n-form-item :label="t('systemSet.cronTriggerUrl')">
                 <n-input :value="cronUrl" readonly />
               </n-form-item>
             </n-form>
@@ -218,29 +218,29 @@
         </n-tab-pane>
 
         <!-- 统计缓存 -->
-        <n-tab-pane name="statcache" tab="统计缓存">
-          <n-card title="CDN 数据统计缓存" :bordered="false" size="small" class="narrow-wide">
+        <n-tab-pane name="statcache" :tab="t('systemSet.tabStatCache')">
+          <n-card :title="t('systemSet.statCacheCardTitle')" :bordered="false" size="small" class="narrow-wide">
             <n-alert type="info" :show-icon="false" class="mb-16">
-              开启后系统会按服务商数据粒度定时拉取统计并保存到服务器（近 30 天按天、近 48 小时按小时），打开数据统计页即可快速加载。该功能会在后台持续消耗服务器资源，请按需开启；并可在「用户管理」中为其他用户单独开启查看权限。
+              {{ t('systemSet.statCacheAlert') }}
             </n-alert>
             <n-form label-placement="left" label-width="110">
-              <n-form-item label="开启统计缓存">
+              <n-form-item :label="t('systemSet.statCacheEnable')">
                 <n-switch :value="(cfg.cdn_stats_cache || '0') === '1'" @update:value="setStatCache" />
               </n-form-item>
-              <n-form-item label="刷新间隔(分钟)">
+              <n-form-item :label="t('systemSet.statCacheInterval')">
                 <n-input-number v-model:value="statCacheInterval" :min="5" :max="1440" style="width: 180px" />
               </n-form-item>
-              <n-form-item label="最近刷新时间">
+              <n-form-item :label="t('systemSet.statCacheLast')">
                 <n-input :value="cfg.cdn_stats_cache_last || '-'" readonly />
               </n-form-item>
-              <n-form-item v-if="cfg.cdn_stats_cache_error" label="最近错误">
+              <n-form-item v-if="cfg.cdn_stats_cache_error" :label="t('systemSet.statCacheError')">
                 <n-input type="textarea" :rows="2" :value="cfg.cdn_stats_cache_error" readonly />
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveStatCache">保存</n-button>
-                  <n-button :loading="refreshingCache" @click="refreshStatCache">立即刷新</n-button>
-                  <n-button :loading="clearingCache" @click="clearStatCache">清空缓存</n-button>
+                  <n-button type="primary" :loading="saving" @click="saveStatCache">{{ t('common.save') }}</n-button>
+                  <n-button :loading="refreshingCache" @click="refreshStatCache">{{ t('systemSet.refreshNow') }}</n-button>
+                  <n-button :loading="clearingCache" @click="clearStatCache">{{ t('systemSet.clearCache') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -250,53 +250,53 @@
     </n-card>
 
     <!-- 生成注册码弹窗 -->
-    <n-modal v-model:show="showGen" preset="card" title="生成注册码" class="narrow-sm" :mask-closable="false">
+    <n-modal v-model:show="showGen" preset="card" :title="t('systemSet.genTitle')" class="narrow-sm" :mask-closable="false">
       <n-form label-placement="top">
-        <n-form-item label="生成数量">
+        <n-form-item :label="t('systemSet.genCount')">
           <n-input-number v-model:value="genForm.count" :min="1" :max="100" style="width: 100%" />
         </n-form-item>
-        <n-form-item label="有效期（天）">
-          <n-input-number v-model:value="genForm.days" :min="0" style="width: 100%" placeholder="0 表示永久有效" />
+        <n-form-item :label="t('systemSet.genDays')">
+          <n-input-number v-model:value="genForm.days" :min="0" style="width: 100%" :placeholder="t('systemSet.genDaysPlaceholder')" />
         </n-form-item>
-        <n-form-item label="可用次数">
-          <n-input-number v-model:value="genForm.maxUse" :min="0" style="width: 100%" placeholder="0 表示不限次数" />
+        <n-form-item :label="t('systemSet.genMaxUse')">
+          <n-input-number v-model:value="genForm.maxUse" :min="0" style="width: 100%" :placeholder="t('systemSet.genMaxUsePlaceholder')" />
         </n-form-item>
-        <n-form-item label="备注">
-          <n-input v-model:value="genForm.remark" placeholder="选填" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="genForm.remark" :placeholder="t('systemSet.genRemarkPlaceholder')" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showGen = false">取消</n-button>
-          <n-button type="primary" :loading="genning" @click="doGen">生成</n-button>
+          <n-button @click="showGen = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="genning" @click="doGen">{{ t('systemSet.genBtn') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 生成结果弹窗 -->
-    <n-modal v-model:show="showResult" preset="card" title="注册码已生成" class="narrow">
-      <n-alert type="success" class="mb-12">请保存下方注册码，关闭后可在列表中查看（已使用次数与状态）。</n-alert>
+    <n-modal v-model:show="showResult" preset="card" :title="t('systemSet.resultTitle')" class="narrow">
+      <n-alert type="success" class="mb-12">{{ t('systemSet.resultAlert') }}</n-alert>
       <n-input v-model:value="resultText" type="textarea" :rows="8" readonly />
       <template #footer>
         <n-space justify="end">
-          <n-button @click="copyResult">复制全部</n-button>
-          <n-button type="primary" @click="showResult = false">关闭</n-button>
+          <n-button @click="copyResult">{{ t('systemSet.copyAll') }}</n-button>
+          <n-button type="primary" @click="showResult = false">{{ t('common.close') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- QQ机器人使用说明 -->
-    <n-modal v-model:show="showQqbotHelp" preset="card" title="QQ机器人使用说明" class="narrow-wide">
+    <n-modal v-model:show="showQqbotHelp" preset="card" :title="t('systemSet.qqHelpTitle')" class="narrow-wide">
       <div class="help-body">
-        <p><b>一、创建并配置机器人</b></p>
-        <p>1. 打开 QQ 开放平台（q.qq.com）→「我的机器人」，创建机器人。</p>
-        <p>2. 机器人无需认证、无需上线。在「开发设置」中获取 AppID 与 AppSecret，填入本页并保存。</p>
-        <p>3. 在「开发设置」→「事件订阅与回调」中选择 Webhook 接入方式，复制本页的 Webhook 回调地址填写。</p>
-        <p>4. 接收事件配置中选择「C2C消息事件」并保存。</p>
-        <p><b>二、完成绑定</b></p>
-        <p>1. 在 QQ 中找到并添加你的机器人。</p>
-        <p>2. 向机器人发送任意一条私聊消息。</p>
-        <p>3. 收到绑定成功回复，且本页绑定状态变为「已绑定」后即可。</p>
+        <p><b>{{ t('systemSet.helpStep1') }}</b></p>
+        <p>{{ t('systemSet.helpStep1p1') }}</p>
+        <p>{{ t('systemSet.helpStep1p2') }}</p>
+        <p>{{ t('systemSet.helpStep1p3') }}</p>
+        <p>{{ t('systemSet.helpStep1p4') }}</p>
+        <p><b>{{ t('systemSet.helpStep2') }}</b></p>
+        <p>{{ t('systemSet.helpStep2p1') }}</p>
+        <p>{{ t('systemSet.helpStep2p2') }}</p>
+        <p>{{ t('systemSet.helpStep2p3') }}</p>
       </div>
     </n-modal>
   </div>
@@ -304,6 +304,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useMessage, useDialog, NButton, NSpace, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
@@ -311,6 +312,7 @@ import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const dialog = useDialog();
+const { t } = useI18n();
 const saving = ref(false);
 const cfg = reactive<Record<string, string>>({});
 const cronKey = ref('');
@@ -323,21 +325,21 @@ const genForm = reactive({ count: 1, days: 0, maxUse: 0, remark: '' });
 const regCodes = ref<any[]>([]);
 const regCodesLoading = ref(false);
 
-const registerModeOptions = [
-  { label: '邮箱验证码', value: 'email' },
-  { label: '注册码', value: 'code' },
-];
+const registerModeOptions = computed(() => [
+  { label: t('systemSet.regModeEmail'), value: 'email' },
+  { label: t('systemSet.regModeCode'), value: 'code' },
+]);
 
-const mailTypeOptions = [
-  { label: 'SMTP发信', value: '0' },
-  { label: '搜狐Sendcloud', value: '1' },
-  { label: '阿里云邮件推送', value: '2' },
-];
-const tgbotProxyOptions = [
-  { label: '否', value: '0' },
-  { label: '是', value: '1' },
-  { label: '自定义反代URL', value: '2' },
-];
+const mailTypeOptions = computed(() => [
+  { label: t('systemSet.mailTypeSmtp'), value: '0' },
+  { label: t('systemSet.mailTypeSendcloud'), value: '1' },
+  { label: t('systemSet.mailTypeAliyun'), value: '2' },
+]);
+const tgbotProxyOptions = computed(() => [
+  { label: t('common.no'), value: '0' },
+  { label: t('common.yes'), value: '1' },
+  { label: t('systemSet.tgReverseProxy'), value: '2' },
+]);
 const methodOptions = [
   { label: 'POST', value: 'POST' },
   { label: 'GET', value: 'GET' },
@@ -347,11 +349,11 @@ const contentTypeOptions = [
   { label: 'application/json', value: 'application/json' },
   { label: 'application/x-www-form-urlencoded', value: 'application/x-www-form-urlencoded' },
 ];
-const contentFormatOptions = [
+const contentFormatOptions = computed(() => [
   { label: 'HTML', value: 'html' },
   { label: 'Markdown', value: 'markdown' },
-  { label: '纯文本', value: 'text' },
-];
+  { label: t('systemSet.formatText'), value: 'text' },
+]);
 const proxyTypeOptions = [
   { label: 'HTTP', value: 'http' },
   { label: 'HTTPS', value: 'https' },
@@ -378,7 +380,7 @@ async function saveFields(fields: string[]) {
   saving.value = true;
   const res = await api('POST', '/system/settings', body);
   saving.value = false;
-  if (res.code === 0) message.success('设置保存成功');
+  if (res.code === 0) message.success(t('systemSet.saveSuccess'));
   else message.error(res.msg);
 }
 
@@ -409,9 +411,9 @@ async function testQqbot() {
 async function copyQqbotWebhook() {
   try {
     await navigator.clipboard.writeText(qqbotWebhook.value);
-    message.success('已复制');
+    message.success(t('common.copied'));
   } catch {
-    message.error('复制失败，请手动复制');
+    message.error(t('systemSet.copyFailed'));
   }
 }
 async function testWebhook() {
@@ -433,7 +435,7 @@ async function testProxy() {
     proxy_type: cfg.proxy_type,
   });
   if (res.code === 0) message.success(res.msg);
-  else message.error('连通性测试失败：' + res.msg);
+  else message.error(t('systemSet.proxyTestFailed', { msg: res.msg }));
 }
 
 async function setVcode(v: boolean) {
@@ -471,10 +473,10 @@ async function refreshStatCache() {
 const clearingCache = ref(false);
 function clearStatCache() {
   dialog.warning({
-    title: '清空统计缓存',
-    content: '将删除当前服务器上缓存的全部 CDN 统计数据，之后可点击「立即刷新」重新拉取。确定清空吗？',
-    positiveText: '清空',
-    negativeText: '取消',
+    title: t('systemSet.clearCacheTitle'),
+    content: t('systemSet.clearCacheContent'),
+    positiveText: t('systemSet.clearNow'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       clearingCache.value = true;
       const res = await api('POST', '/system/stat-cache-clear', {});
@@ -492,14 +494,14 @@ async function loadCronKey() {
   if (res.code === 0) cronKey.value = res.data.cron_key;
 }
 
-const regCodeColumns: any[] = [
-  { title: '注册码', key: 'code', width: 180 },
-  { title: '状态', key: 'status', width: 80, render: (row: any) => (row.status === 1 ? h(NTag, { type: 'success', size: 'small' }, { default: () => '启用' }) : h(NTag, { type: 'default', size: 'small' }, { default: () => '停用' })) },
-  { title: '有效期至', key: 'expiretime', width: 160, render: (row: any) => (row.expiretime ? String(row.expiretime).slice(0, 16) : '永久') },
-  { title: '使用', key: 'used', width: 90, render: (row: any) => `${row.used}${row.max_use > 0 ? '/' + row.max_use : '/∞'}` },
-  { title: '备注', key: 'remark', ellipsis: { tooltip: true } },
+const regCodeColumns = computed<any[]>(() => [
+  { title: t('systemSet.regCodeCol'), key: 'code', width: 180 },
+  { title: t('common.status'), key: 'status', width: 80, render: (row: any) => (row.status === 1 ? h(NTag, { type: 'success', size: 'small' }, { default: () => t('systemSet.regCodeStatusActive') }) : h(NTag, { type: 'default', size: 'small' }, { default: () => t('systemSet.regCodeStatusDisabled') })) },
+  { title: t('systemSet.regCodeExpire'), key: 'expiretime', width: 160, render: (row: any) => (row.expiretime ? String(row.expiretime).slice(0, 16) : t('systemSet.permanent')) },
+  { title: t('systemSet.regCodeUsed'), key: 'used', width: 90, render: (row: any) => `${row.used}${row.max_use > 0 ? '/' + row.max_use : '/∞'}` },
+  { title: t('common.remark'), key: 'remark', ellipsis: { tooltip: true } },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 160,
     render: (row: any) =>
@@ -507,12 +509,12 @@ const regCodeColumns: any[] = [
         h(
           NButton,
           { size: 'small', quaternary: true, type: row.status === 1 ? 'warning' : 'success', onClick: () => toggleCodeStatus(row) },
-          { default: () => (row.status === 1 ? '停用' : '启用') }
+          { default: () => (row.status === 1 ? t('systemSet.regCodeStatusDisabled') : t('systemSet.regCodeStatusActive')) }
         ),
-        h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => deleteCode(row) }, { default: () => '删除' }),
+        h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => deleteCode(row) }, { default: () => t('common.delete') }),
       ]),
   },
-];
+]);
 
 async function loadRegCodes() {
   regCodesLoading.value = true;
@@ -548,9 +550,9 @@ async function doGen() {
 async function copyResult() {
   try {
     await navigator.clipboard.writeText(resultText.value);
-    message.success('已复制到剪贴板');
+    message.success(t('systemSet.copiedClipboard'));
   } catch {
-    message.warning('复制失败，请手动选择复制');
+    message.warning(t('systemSet.copyFailedManual'));
   }
 }
 

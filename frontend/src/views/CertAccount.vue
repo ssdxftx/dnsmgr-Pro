@@ -1,32 +1,32 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="SSL 证书账户" subtitle="管理 SSL 证书服务商账户与接入配置">
+    <PageHeader :title="t('certAccount.title')" :subtitle="t('certAccount.subtitle')">
       <template #actions>
         <n-button type="primary" @click="openAdd">
           <template #icon><n-icon :component="AddOutline" /></template>
-          添加账户
+          {{ t('certAccount.add') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" empty-text="暂无证书账户" />
+      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" :empty-text="t('certAccount.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑账户' : '添加账户'" style="max-width:600px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('certAccount.editTitle') : t('certAccount.addTitle')" style="max-width:600px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="证书服务商">
+        <n-form-item :label="t('certAccount.provider')">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
         </n-form-item>
-        <n-form-item label="账户名称">
-          <n-input v-model:value="form.name" placeholder="备注名称" />
+        <n-form-item :label="t('certAccount.accountName')">
+          <n-input v-model:value="form.name" :placeholder="t('certAccount.remarkPlaceholder')" />
         </n-form-item>
-        <n-form-item label="备注">
-          <n-input v-model:value="form.remark" placeholder="选填" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('certAccount.optional')" />
         </n-form-item>
         <template v-if="currentProvider">
           <n-alert v-if="currentProvider.note" type="info" style="margin-bottom:12px" :show-icon="false">
             {{ currentProvider.note }}
-            <a v-if="currentProvider.noteUrl" :href="currentProvider.noteUrl" target="_blank" rel="noreferrer" style="margin-left:6px">查看</a>
+            <a v-if="currentProvider.noteUrl" :href="currentProvider.noteUrl" target="_blank" rel="noreferrer" style="margin-left:6px">{{ t('certAccount.view') }}</a>
           </n-alert>
           <n-form-item v-for="(field, key) in currentProvider.inputs" v-show="fieldVisible(field.show, form.config)" :key="key" :label="field.name" :required="field.required">
             <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
@@ -39,8 +39,8 @@
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存并验证</n-button>
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('certAccount.saveVerify') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -48,7 +48,8 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NEllipsis, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -56,6 +57,7 @@ import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -70,10 +72,10 @@ const form = reactive<any>({ type: '', name: '', remark: '', config: {} });
 const currentProvider = ref<any>(null);
 const providerOptions = ref<any[]>([]);
 
-const columns = [
+const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   {
-    title: '服务商',
+    title: t('certAccount.providerCol'),
     key: 'typename',
     width: 150,
     render(row: any) {
@@ -81,7 +83,7 @@ const columns = [
     },
   },
   {
-    title: '账户名称',
+    title: t('certAccount.accountName'),
     key: 'name',
     minWidth: 180,
     render(row: any) {
@@ -89,28 +91,28 @@ const columns = [
     },
   },
   {
-    title: '备注',
+    title: t('common.remark'),
     key: 'remark',
     minWidth: 120,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.remark || '' });
     },
   },
-  { title: '添加时间', key: 'addtime', width: 170 },
+  { title: t('certAccount.addtimeCol'), key: 'addtime', width: 170 },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 160,
     render(row: any) {
       return h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }),
+          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
   },
-];
+]);
 
 function selectOptions(options: any) {
   if (Array.isArray(options)) return options;
@@ -181,7 +183,7 @@ function safeJson(s: string) {
 }
 
 async function save() {
-  if (!form.type || !form.name) return message.warning('请填写服务商和账户名称');
+  if (!form.type || !form.name) return message.warning(t('certAccount.fillWarning'));
   saving.value = true;
   const body = { type: form.type, name: form.name, remark: form.remark, config: form.config };
   const res = editingId.value
@@ -197,14 +199,14 @@ async function save() {
 
 function del(row: any) {
   dialog.warning({
-    title: '删除账户',
-    content: `确定删除账户 ${row.name} 吗？`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('certAccount.deleteTitle'),
+    content: t('certAccount.deleteConfirm', { name: row.name }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/cert/accounts/${row.id}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('certAccount.deleteSuccess'));
         loadAccounts();
       } else message.error(res.msg);
     },

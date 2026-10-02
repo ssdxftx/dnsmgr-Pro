@@ -12,11 +12,16 @@
         </div>
         <div class="auth-brand__text">
           <div class="auth-brand__name">聚合 DNS</div>
-          <div class="auth-brand__sub">多厂商 DNS · CDN · SSL 一体化管理</div>
+          <div class="auth-brand__sub">{{ t('auth.brandSub') }}</div>
         </div>
       </div>
       <slot />
-      <div class="auth-shell__foot">聚合 DNS 管理系统 · 安全 · 稳定 · 高效</div>
+      <div class="auth-lang">
+        <button type="button" :class="{ 'is-active': locale === 'zh-CN' }" @click="setLocale('zh-CN')">中文</button>
+        <span class="auth-lang__sep">/</span>
+        <button type="button" :class="{ 'is-active': locale === 'en-US' }" @click="setLocale('en-US')">English</button>
+      </div>
+      <div class="auth-shell__foot">{{ t('auth.foot') }}</div>
     </div>
   </div>
 </template>
@@ -24,8 +29,13 @@
 <script setup lang="ts">
 import { NIcon } from 'naive-ui';
 import { GlobeOutline } from '@vicons/ionicons5';
+import { useI18n } from 'vue-i18n';
+import { useLocale } from '../composables/useLocale';
 
 withDefaults(defineProps<{ maxWidth?: string }>(), { maxWidth: '440px' });
+
+const { t } = useI18n();
+const { locale, setLocale } = useLocale();
 </script>
 
 <style scoped>
@@ -108,6 +118,29 @@ withDefaults(defineProps<{ maxWidth?: string }>(), { maxWidth: '440px' });
   font-size: 12px;
   color: var(--app-text-3);
   margin-top: 2px;
+}
+.auth-lang {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.auth-lang button {
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--app-text-3);
+  font-size: 12px;
+}
+.auth-lang button.is-active {
+  color: var(--app-primary);
+  font-weight: 600;
+}
+.auth-lang__sep {
+  color: var(--app-text-3);
+  opacity: 0.5;
 }
 .auth-shell__foot {
   text-align: center;

@@ -1,93 +1,93 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="(isEdit ? '编辑' : '添加') + '容灾切换策略'" subtitle="配置解析健康检测与故障自动切换策略" back="/dm-tasks" />
+    <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('dm.policyTitle')" :subtitle="t('dm.formSubtitle')" back="/dm-tasks" />
     <n-card :bordered="false">
       <n-form label-placement="left" label-width="140" style="max-width: 720px">
-        <n-form-item label="域名选择" required>
+        <n-form-item :label="t('dm.domainSelect')" required>
           <n-space :size="4" style="width: 100%">
-            <n-input v-model:value="form.rr" placeholder="主机记录" style="width: 200px" />
+            <n-input v-model:value="form.rr" :placeholder="t('dm.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" placeholder="主域名" filterable style="flex: 1" @update:value="onDomainChange" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('dm.mainDomain')" filterable style="flex: 1" @update:value="onDomainChange" />
           </n-space>
         </n-form-item>
 
-        <n-form-item label="解析记录" required>
+        <n-form-item :label="t('dm.recordSelect')" required>
           <n-space style="width: 100%">
-            <n-select v-model:value="form.recordid" :options="recordOptions" placeholder="解析记录" filterable style="flex: 1" @update:value="onRecordChange" />
-            <n-button @click="getRecordList" :loading="loadingRecords">获取</n-button>
+            <n-select v-model:value="form.recordid" :options="recordOptions" :placeholder="t('dm.recordSelect')" filterable style="flex: 1" @update:value="onRecordChange" />
+            <n-button @click="getRecordList" :loading="loadingRecords">{{ t('dm.fetch') }}</n-button>
           </n-space>
         </n-form-item>
 
-        <n-form-item label="切换设置" required>
+        <n-form-item :label="t('dm.switchSet')" required>
           <n-radio-group v-model:value="form.type">
             <n-radio-button v-for="o in typeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.type === 2" label="备用解析记录" required>
-          <n-input v-model:value="form.backup_value" placeholder="支持填写IP或CNAME地址" />
+        <n-form-item v-show="form.type === 2" :label="t('dm.backupRecord')" required>
+          <n-input v-model:value="form.backup_value" :placeholder="t('dm.ipOrCname')" />
         </n-form-item>
 
-        <n-form-item v-show="form.type === 2 && dnstype === 'cloudflare'" label="Cloudflare代理">
-          <n-checkbox v-model:checked="form.cdn">切换时同时开启Cloudflare代理模式</n-checkbox>
+        <n-form-item v-show="form.type === 2 && dnstype === 'cloudflare'" :label="t('dm.cfProxy')">
+          <n-checkbox v-model:checked="form.cdn">{{ t('dm.cfProxyHint') }}</n-checkbox>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2" label="检测协议" required>
+        <n-form-item v-show="form.type <= 2" :label="t('dm.checkProto')" required>
           <n-radio-group v-model:value="form.checktype">
             <n-radio-button v-for="o in checktypeOptions" :key="o.value" :value="o.value" :disabled="o.disabled">{{ o.label }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype < 2" label="指定检测IP">
-          <n-input v-model:value="form.checkurl" placeholder="留空默认为解析记录值IP" />
+        <n-form-item v-show="form.type <= 2 && form.checktype < 2" :label="t('dm.checkIp')">
+          <n-input v-model:value="form.checkurl" :placeholder="t('dm.ipDefault')" />
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype === 1" label="TCP检测端口" required>
+        <n-form-item v-show="form.type <= 2 && form.checktype === 1" :label="t('dm.tcpPort')" required>
           <n-input-number v-model:value="form.tcpport" :min="1" :max="65535" style="width: 220px" />
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype === 2" label="检测URL地址" required>
-          <n-input v-model:value="form.checkurl" placeholder="以http(s)://开头的完整地址，状态码须为2xx/3xx" />
+        <n-form-item v-show="form.type <= 2 && form.checktype === 2" :label="t('dm.checkUrl')" required>
+          <n-input v-model:value="form.checkurl" :placeholder="t('dm.urlPlaceholder')" />
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype === 2" label="使用代理请求">
+        <n-form-item v-show="form.type <= 2 && form.checktype === 2" :label="t('dm.useProxy')">
           <n-radio-group v-model:value="form.proxy">
-            <n-radio :value="0">否</n-radio>
-            <n-radio :value="1">是</n-radio>
+            <n-radio :value="0">{{ t('common.no') }}</n-radio>
+            <n-radio :value="1">{{ t('common.yes') }}</n-radio>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2 && form.checktype > 0" label="最大超时时间" required>
+        <n-form-item v-show="form.type <= 2 && form.checktype > 0" :label="t('dm.timeout')" required>
           <n-input-number v-model:value="form.timeout" :min="1" style="width: 220px">
-            <template #suffix>秒</template>
+            <template #suffix>{{ t('dm.second') }}</template>
           </n-input-number>
         </n-form-item>
 
-        <n-form-item v-show="form.type === 3" label="同域名正常数量" required>
+        <n-form-item v-show="form.type === 3" :label="t('dm.condCount')" required>
           <n-tooltip trigger="hover">
             <template #trigger>
               <n-input-number v-model:value="form.cycle" :min="0" style="width: 220px" />
             </template>
-            与暂停解析配合使用，当同域名正常记录数量&lt;=几条时开启解析
+            {{ t('dm.condHint') }}
           </n-tooltip>
         </n-form-item>
 
-        <n-form-item label="检测间隔" required>
+        <n-form-item :label="t('dm.checkInterval')" required>
           <n-input-number v-model:value="form.frequency" :min="1" style="width: 220px">
-            <template #suffix>秒</template>
+            <template #suffix>{{ t('dm.second') }}</template>
           </n-input-number>
         </n-form-item>
 
-        <n-form-item v-show="form.type <= 2" label="确认次数" required>
+        <n-form-item v-show="form.type <= 2" :label="t('dm.confirmCount')" required>
           <n-input-number v-model:value="form.cycle" :min="1" style="width: 220px" />
         </n-form-item>
 
-        <n-form-item label="备注">
-          <n-input v-model:value="form.remark" placeholder="可留空" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('dm.optional')" />
         </n-form-item>
 
         <n-form-item>
-          <n-button type="primary" :loading="saving" @click="submit">提交</n-button>
+          <n-button type="primary" :loading="saving" @click="submit">{{ t('common.submit') }}</n-button>
         </n-form-item>
       </n-form>
     </n-card>
@@ -97,6 +97,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -104,6 +105,7 @@ import PageHeader from '../components/PageHeader.vue';
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
+const { t } = useI18n();
 
 const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'));
 const editId = computed(() => Number(route.params.id));
@@ -134,12 +136,12 @@ const form = reactive<any>({
   remark: '',
 });
 
-const typeOptions = [
-  { value: 0, label: '无操作' },
-  { value: 1, label: '暂停解析' },
-  { value: 2, label: '切换备用解析' },
-  { value: 3, label: '条件开启解析' },
-];
+const typeOptions = computed(() => [
+  { value: 0, label: t('dm.noAction') },
+  { value: 1, label: t('dm.pauseRecord') },
+  { value: 2, label: t('dm.switchBackupRecord') },
+  { value: 3, label: t('dm.condEnableFull') },
+]);
 const checktypeOptions = computed(() => [
   { value: 0, label: 'PING', disabled: pingDisabled.value },
   { value: 1, label: 'TCP', disabled: false },
@@ -159,15 +161,15 @@ function onDomainChange() {
 }
 
 async function getRecordList() {
-  if (!form.did) return message.warning('请先选择域名');
-  if (!form.rr) return message.warning('主机记录不能为空');
+  if (!form.did) return message.warning(t('dm.selectDomainFirst'));
+  if (!form.rr) return message.warning(t('dm.hostRequired'));
   loadingRecords.value = true;
   const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
   loadingRecords.value = false;
   if (res.code === 0) {
     const list = res.data.list || [];
     recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
-    message.success('获取到 ' + list.length + ' 条解析记录');
+    message.success(t('dm.gotRecords', { count: list.length }));
     if (form.recordid) {
       const found = list.find((r: any) => r.RecordId === form.recordid);
       if (found) fillRecord(found);
@@ -221,13 +223,13 @@ async function loadTask() {
 
 async function submit() {
   if (!form.did || !form.rr || !form.recordid || !form.main_value || !form.frequency || !form.cycle) {
-    return message.warning('必填项不能为空');
+    return message.warning(t('dm.requiredEmpty'));
   }
   if (form.checktype > 0 && form.timeout > form.frequency) {
-    return message.warning('为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔');
+    return message.warning(t('dm.timeoutHint'));
   }
   if (form.type === 2 && form.backup_value === form.main_value) {
-    return message.warning('主备地址不能相同');
+    return message.warning(t('dm.sameValue'));
   }
   saving.value = true;
   const body = {

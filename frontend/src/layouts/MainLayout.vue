@@ -29,14 +29,14 @@
           <template #trigger>
             <button class="foot-btn" @click="toggleTheme">
               <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
-              <span v-if="!collapsed">{{ isDark ? '浅色模式' : '深色模式' }}</span>
+              <span v-if="!collapsed">{{ isDark ? t('common.lightMode') : t('common.darkMode') }}</span>
             </button>
           </template>
-          {{ isDark ? '浅色模式' : '深色模式' }}
+          {{ isDark ? t('common.lightMode') : t('common.darkMode') }}
         </n-tooltip>
         <button class="foot-btn" @click="collapsed = !collapsed">
           <n-icon size="18" :component="collapsed ? ChevronForwardOutline : ChevronBackOutline" />
-          <span v-if="!collapsed">收起菜单</span>
+          <span v-if="!collapsed">{{ t('common.collapse') }}</span>
         </button>
         <div v-if="!collapsed" class="foot-version">v{{ version }}</div>
       </div>
@@ -63,7 +63,7 @@
         <div class="drawer-foot">
           <button class="foot-btn" @click="toggleTheme">
             <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
-            <span>{{ isDark ? '浅色模式' : '深色模式' }}</span>
+            <span>{{ isDark ? t('common.lightMode') : t('common.darkMode') }}</span>
           </button>
         </div>
       </n-drawer-content>
@@ -88,7 +88,7 @@
           <n-dropdown :options="userOptions" trigger="click" @select="onUserSelect">
             <button class="user-chip">
               <n-avatar round :size="30" class="user-chip__avatar">{{ avatarText }}</n-avatar>
-              <span v-if="!isMobile" class="user-chip__name">{{ user?.username || '用户' }}</span>
+              <span v-if="!isMobile" class="user-chip__name">{{ user?.username || t('common.user') }}</span>
               <n-icon v-if="!isMobile" size="14" :component="ChevronDownOutline" />
             </button>
           </n-dropdown>
@@ -118,6 +118,9 @@ import { clearToken } from '../api';
 import { isAdminUser, requiresAdmin } from '../lib/admin';
 import { useResponsive } from '../composables/useResponsive';
 import { useThemeMode } from '../composables/useThemeMode';
+import { useLocale } from '../composables/useLocale';
+import { useI18n } from 'vue-i18n';
+import type { AppLocale } from '../i18n';
 
 const route = useRoute();
 const router = useRouter();
@@ -125,6 +128,8 @@ const auth = useAuthStore();
 const user = computed(() => auth.user);
 const { isMobile } = useResponsive();
 const { isDark, toggle: toggleTheme } = useThemeMode();
+const { t } = useI18n();
+const { setLocale } = useLocale();
 
 const version = __APP_VERSION__;
 const collapsed = ref(false);
@@ -136,76 +141,76 @@ function renderIcon(icon: Component) {
   return () => h(NIcon, null, { default: () => h(icon) });
 }
 
-const menuOptions: MenuOption[] = [
-  { label: '仪表盘', key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
+const menuOptions = computed<MenuOption[]>(() => [
+  { label: t('nav.dashboard'), key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
   {
-    label: '域名管理',
+    label: t('nav.groupDomain'),
     key: 'group-domain',
     icon: renderIcon(ServerOutline),
     children: [
-      { label: '域名列表', key: 'domains', icon: renderIcon(ServerOutline) },
-      { label: 'DNS 账户', key: 'dns-accounts', icon: renderIcon(LinkOutline) },
-      { label: '到期提醒', key: 'expire-notice', icon: renderIcon(TimeOutline) },
-      { label: '劫持检测', key: 'dns-check', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.domains'), key: 'domains', icon: renderIcon(ServerOutline) },
+      { label: t('nav.dnsAccounts'), key: 'dns-accounts', icon: renderIcon(LinkOutline) },
+      { label: t('nav.expireNotice'), key: 'expire-notice', icon: renderIcon(TimeOutline) },
+      { label: t('nav.dnsCheck'), key: 'dns-check', icon: renderIcon(ShieldCheckmarkOutline) },
     ],
   },
   {
-    label: 'CDN 管理',
+    label: t('nav.groupCdn'),
     key: 'group-cdn',
     icon: renderIcon(CloudOutline),
     children: [
-      { label: 'CDN 账户', key: 'cdn-accounts', icon: renderIcon(CloudOutline) },
-      { label: 'CDN 域名', key: 'cdn-domains', icon: renderIcon(GlobeOutline) },
-      { label: 'CDN 站点设置', key: 'cdn-zones', icon: renderIcon(FolderOutline) },
-      { label: 'CF 规则引擎', key: 'cf-rules', icon: renderIcon(OptionsOutline) },
-      { label: '缓存刷新', key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
-      { label: '自动预热', key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
-      { label: '数据统计', key: 'statistics', icon: renderIcon(BarChartOutline) },
+      { label: t('nav.cdnAccounts'), key: 'cdn-accounts', icon: renderIcon(CloudOutline) },
+      { label: t('nav.cdnDomains'), key: 'cdn-domains', icon: renderIcon(GlobeOutline) },
+      { label: t('nav.cdnZones'), key: 'cdn-zones', icon: renderIcon(FolderOutline) },
+      { label: t('nav.cfRules'), key: 'cf-rules', icon: renderIcon(OptionsOutline) },
+      { label: t('nav.cacheRefresh'), key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
+      { label: t('nav.preheatTasks'), key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
+      { label: t('nav.statistics'), key: 'statistics', icon: renderIcon(BarChartOutline) },
     ],
   },
   {
-    label: '容灾切换',
+    label: t('nav.groupDm'),
     key: 'group-dm',
     icon: renderIcon(PulseOutline),
     children: [
-      { label: '运行概览', key: 'dm-overview', icon: renderIcon(PulseOutline) },
-      { label: '切换策略', key: 'dm-tasks', icon: renderIcon(SwapHorizontalOutline) },
-      { label: '定时切换', key: 'schedule-tasks', icon: renderIcon(TimeOutline) },
+      { label: t('nav.dmOverview'), key: 'dm-overview', icon: renderIcon(PulseOutline) },
+      { label: t('nav.dmTasks'), key: 'dm-tasks', icon: renderIcon(SwapHorizontalOutline) },
+      { label: t('nav.scheduleTasks'), key: 'schedule-tasks', icon: renderIcon(TimeOutline) },
     ],
   },
   {
-    label: 'CF 优选IP',
+    label: t('nav.groupOptimize'),
     key: 'group-optimize',
     icon: renderIcon(FlashOutline),
     children: [
-      { label: '优选设置', key: 'optimize-settings', icon: renderIcon(SettingsOutline) },
-      { label: '任务管理', key: 'optimize-tasks', icon: renderIcon(FlashOutline) },
+      { label: t('nav.optimizeSettings'), key: 'optimize-settings', icon: renderIcon(SettingsOutline) },
+      { label: t('nav.optimizeTasks'), key: 'optimize-tasks', icon: renderIcon(FlashOutline) },
     ],
   },
   {
-    label: 'SSL 证书',
+    label: t('nav.groupCert'),
     key: 'group-cert',
     icon: renderIcon(ShieldCheckmarkOutline),
     children: [
-      { label: 'SSL 证书账户', key: 'cert-accounts', icon: renderIcon(ShieldCheckmarkOutline) },
-      { label: 'SSL 证书订单', key: 'cert-orders', icon: renderIcon(ShieldCheckmarkOutline) },
-      { label: '自动部署账户', key: 'deploy-accounts', icon: renderIcon(RocketOutline) },
-      { label: '自动部署任务', key: 'deploy-tasks', icon: renderIcon(RocketOutline) },
-      { label: '自动续签设置', key: 'cert-settings', icon: renderIcon(TimeOutline) },
+      { label: t('nav.certAccounts'), key: 'cert-accounts', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.certOrders'), key: 'cert-orders', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.deployAccounts'), key: 'deploy-accounts', icon: renderIcon(RocketOutline) },
+      { label: t('nav.deployTasks'), key: 'deploy-tasks', icon: renderIcon(RocketOutline) },
+      { label: t('nav.certSettings'), key: 'cert-settings', icon: renderIcon(TimeOutline) },
     ],
   },
   {
-    label: '系统设置',
+    label: t('nav.groupSystem'),
     key: 'group-system',
     icon: renderIcon(SettingsOutline),
     children: [
-      { label: '系统设置', key: 'system-settings', icon: renderIcon(SettingsOutline) },
-      { label: '用户管理', key: 'users', icon: renderIcon(PeopleOutline) },
-      { label: '操作日志', key: 'logs', icon: renderIcon(DocumentTextOutline) },
-      { label: '关于', key: 'about', icon: renderIcon(InformationCircleOutline) },
+      { label: t('nav.systemSettings'), key: 'system-settings', icon: renderIcon(SettingsOutline) },
+      { label: t('nav.users'), key: 'users', icon: renderIcon(PeopleOutline) },
+      { label: t('nav.logs'), key: 'logs', icon: renderIcon(DocumentTextOutline) },
+      { label: t('nav.about'), key: 'about', icon: renderIcon(InformationCircleOutline) },
     ],
   },
-];
+]);
 
 const visibleMenu = computed<MenuOption[]>(() => {
   const admin = isAdminUser(user.value);
@@ -222,7 +227,7 @@ const visibleMenu = computed<MenuOption[]>(() => {
     }
     return out;
   };
-  return walk(menuOptions);
+  return walk(menuOptions.value);
 });
 
 const activeKey = computed(() => {
@@ -237,7 +242,10 @@ const activeKey = computed(() => {
   return matched || 'dashboard';
 });
 
-const pageTitle = computed(() => (route.meta.title as string) || '聚合 DNS');
+const pageTitle = computed(() => {
+  const key = route.meta.titleKey as string | undefined;
+  return key ? t(key) : t('nav.dashboard');
+});
 
 const activeGroupMap: Record<string, string> = {
   domains: 'group-domain', 'dns-accounts': 'group-domain', 'expire-notice': 'group-domain', 'dns-check': 'group-domain',
@@ -248,17 +256,17 @@ const activeGroupMap: Record<string, string> = {
   'system-settings': 'group-system', users: 'group-system', logs: 'group-system', about: 'group-system',
 };
 
-const groupLabels: Record<string, string> = {
-  dashboard: '仪表盘',
-  'group-domain': '域名管理',
-  'group-cdn': 'CDN 管理',
-  'group-dm': '容灾切换',
-  'group-optimize': 'CF 优选IP',
-  'group-cert': 'SSL 证书',
-  'group-system': '系统设置',
-};
+const groupLabels = computed<Record<string, string>>(() => ({
+  dashboard: t('nav.dashboard'),
+  'group-domain': t('nav.groupDomain'),
+  'group-cdn': t('nav.groupCdn'),
+  'group-dm': t('nav.groupDm'),
+  'group-optimize': t('nav.groupOptimize'),
+  'group-cert': t('nav.groupCert'),
+  'group-system': t('nav.groupSystem'),
+}));
 
-const groupLabel = computed(() => groupLabels[activeGroupMap[activeKey.value] || 'dashboard'] || '控制台');
+const groupLabel = computed(() => groupLabels.value[activeGroupMap[activeKey.value] || 'dashboard'] || t('layout.console'));
 
 const expandedKeys = ref<string[]>([]);
 
@@ -271,17 +279,30 @@ watch(
   { immediate: true },
 );
 
-const userOptions = [
-  { label: '安全设置（TOTP）', key: 'totp' },
-  { label: '退出登录', key: 'logout' },
-];
+const userOptions = computed(() => [
+  { label: t('common.preferences'), key: 'preferences' },
+  { label: t('common.security'), key: 'totp' },
+  {
+    label: t('common.language'),
+    key: 'language',
+    children: [
+      { label: t('common.chinese'), key: 'lang:zh-CN' },
+      { label: t('common.english'), key: 'lang:en-US' },
+    ],
+  },
+  { label: t('common.logout'), key: 'logout' },
+]);
 
 function onMenu(key: string) {
   drawerShow.value = false;
   router.push('/' + key);
 }
 function onUserSelect(key: string) {
-  if (key === 'totp') {
+  if (key.startsWith('lang:')) {
+    setLocale(key.slice(5) as AppLocale);
+  } else if (key === 'preferences') {
+    router.push('/preferences');
+  } else if (key === 'totp') {
     router.push('/totp');
   } else if (key === 'logout') {
     clearToken();

@@ -1,6 +1,6 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="关于" subtitle="查看项目版本信息与更新状态" />
+    <PageHeader :title="t('about.title')" :subtitle="t('about.subtitle')" />
     <n-grid cols="1 l:2" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
         <n-card :bordered="false">
@@ -8,27 +8,27 @@
             <div class="app-logo">DNS</div>
             <div class="app-meta">
               <div class="app-name">
-                <span>{{ info?.name || '彩虹 DNS Pro' }}</span>
+                <span>{{ info?.name || t('about.appName') }}</span>
                 <n-tag type="success" size="small" round>v{{ info?.version || frontendVersion }}</n-tag>
               </div>
-              <div class="app-desc">{{ info?.description || '项目信息加载中…' }}</div>
+              <div class="app-desc">{{ info?.description || t('about.loading') }}</div>
             </div>
           </div>
 
           <n-divider class="app-divider" />
 
           <n-descriptions :column="1" :label-placement="labelPlacement" size="small">
-            <n-descriptions-item label="后端版本">{{ info?.version || '-' }}</n-descriptions-item>
-            <n-descriptions-item label="前端版本">
+            <n-descriptions-item :label="t('about.backendVersion')">{{ info?.version || '-' }}</n-descriptions-item>
+            <n-descriptions-item :label="t('about.frontendVersion')">
               <span>{{ frontendVersion }}</span>
-              <n-tag v-if="versionMismatch" type="warning" size="tiny" :bordered="false" class="inline-tag">与后端不一致</n-tag>
+              <n-tag v-if="versionMismatch" type="warning" size="tiny" :bordered="false" class="inline-tag">{{ t('about.versionMismatch') }}</n-tag>
             </n-descriptions-item>
-            <n-descriptions-item label="前端构建时间">{{ formatTime(buildTime) }}</n-descriptions-item>
-            <n-descriptions-item label="运行环境">{{ runtimeText }}</n-descriptions-item>
-            <n-descriptions-item label="已运行">{{ uptimeText }}</n-descriptions-item>
-            <n-descriptions-item label="启动时间">{{ formatTime(info?.startedAt) }}</n-descriptions-item>
-            <n-descriptions-item label="开源协议">{{ info?.license || '-' }}</n-descriptions-item>
-            <n-descriptions-item label="项目仓库">
+            <n-descriptions-item :label="t('about.buildTime')">{{ formatTime(buildTime) }}</n-descriptions-item>
+            <n-descriptions-item :label="t('about.runtime')">{{ runtimeText }}</n-descriptions-item>
+            <n-descriptions-item :label="t('about.uptime')">{{ uptimeText }}</n-descriptions-item>
+            <n-descriptions-item :label="t('about.startedAt')">{{ formatTime(info?.startedAt) }}</n-descriptions-item>
+            <n-descriptions-item :label="t('about.license')">{{ info?.license || '-' }}</n-descriptions-item>
+            <n-descriptions-item :label="t('about.repo')">
               <n-a :href="info?.repo || repoFallback" target="_blank" rel="noreferrer">{{ repoLabel }}</n-a>
             </n-descriptions-item>
           </n-descriptions>
@@ -38,23 +38,23 @@
       <n-grid-item>
         <n-card :bordered="false">
           <template #header>
-            <span>版本更新</span>
+            <span>{{ t('about.updates') }}</span>
           </template>
           <template #header-extra>
             <n-button size="small" secondary :loading="checking" @click="check(true)">
               <template #icon><n-icon :component="RefreshOutline" /></template>
-              检查更新
+              {{ t('about.checkUpdate') }}
             </n-button>
           </template>
 
           <n-spin :show="loading">
             <div class="ver-row">
               <div class="ver-cell">
-                <div class="ver-label">当前版本</div>
+                <div class="ver-label">{{ t('about.currentVersion') }}</div>
                 <div class="ver-value">v{{ update?.current || info?.version || '-' }}</div>
               </div>
               <div class="ver-cell">
-                <div class="ver-label">最新版本</div>
+                <div class="ver-label">{{ t('about.latestVersion') }}</div>
                 <div class="ver-value">v{{ update?.latest || '—' }}</div>
               </div>
               <n-tag :type="statusType" size="small" round class="ver-tag">{{ statusText }}</n-tag>
@@ -64,34 +64,34 @@
               {{ update.error }}
             </n-alert>
             <n-alert v-else-if="update?.hasUpdate" type="success" :show-icon="true" class="ver-alert">
-              发现新版本 v{{ update.latest }}，建议尽快升级。
+              {{ t('about.newVersion', { version: update.latest }) }}
             </n-alert>
             <n-alert v-else-if="update?.ahead" type="info" :show-icon="true" class="ver-alert">
-              当前版本高于仓库最新标签，可能是开发版或尚未发布标签。
+              {{ t('about.aheadVersion') }}
             </n-alert>
             <n-alert v-else type="default" :show-icon="true" class="ver-alert">
-              已是最新版本。
+              {{ t('about.upToDate') }}
             </n-alert>
 
             <div v-if="update?.hasUpdate && (update?.compareUrl || update?.releaseUrl)" class="ver-actions">
               <n-button v-if="update?.compareUrl" size="small" tag="a" :href="update.compareUrl" target="_blank" rel="noreferrer">
-                查看更新内容
+                {{ t('about.viewChanges') }}
               </n-button>
               <n-button v-if="update?.releaseUrl" size="small" type="primary" tag="a" :href="update.releaseUrl" target="_blank" rel="noreferrer">
-                前往下载
+                {{ t('about.goDownload') }}
               </n-button>
             </div>
 
             <n-descriptions :column="1" :label-placement="labelPlacement" size="small" class="ver-detail">
-              <n-descriptions-item label="发布时间">{{ formatTime(update?.publishedAt) }}</n-descriptions-item>
-              <n-descriptions-item label="检查时间">{{ formatTime(update?.checkedAt) }}</n-descriptions-item>
-              <n-descriptions-item label="更新源仓库">
+              <n-descriptions-item :label="t('about.publishedAt')">{{ formatTime(update?.publishedAt) }}</n-descriptions-item>
+              <n-descriptions-item :label="t('about.checkedAt')">{{ formatTime(update?.checkedAt) }}</n-descriptions-item>
+              <n-descriptions-item :label="t('about.updateRepo')">
                 <n-a :href="updateRepoUrl" target="_blank" rel="noreferrer">{{ update?.repo || info?.updateRepo }}</n-a>
               </n-descriptions-item>
             </n-descriptions>
 
             <n-collapse v-if="update?.notes" class="ver-notes">
-              <n-collapse-item title="更新说明" name="notes">
+              <n-collapse-item :title="t('about.releaseNotes')" name="notes">
                 <pre class="notes-body">{{ update.notes }}</pre>
               </n-collapse-item>
             </n-collapse>
@@ -100,23 +100,23 @@
       </n-grid-item>
     </n-grid>
 
-    <n-card :bordered="false" title="技术栈与致谢" class="stack-card">
+    <n-card :bordered="false" :title="t('about.stackThanks')" class="stack-card">
       <div class="stack-block">
-        <div class="stack-title">技术栈</div>
+        <div class="stack-title">{{ t('about.stack') }}</div>
         <n-space :size="8" class="stack-tags">
           <n-tag v-for="item in stack" :key="item" size="small" :bordered="false" round>{{ item }}</n-tag>
         </n-space>
       </div>
       <div class="stack-block">
-        <div class="stack-title">参考项目</div>
+        <div class="stack-title">{{ t('about.references') }}</div>
         <ul class="stack-list">
           <li>
             <n-a href="https://github.com/netcccyun/dnsmgr" target="_blank" rel="noreferrer">彩虹聚合 DNS 管理系统（彩虹 DNS）</n-a>
-            <span class="stack-desc">：本项目的数据结构与功能原型</span>
+            <span class="stack-desc">{{ t('about.refDnsmgrDesc') }}</span>
           </li>
           <li>
             <n-a href="https://github.com/qingqian844/kuocaicdn_V1A" target="_blank" rel="noreferrer">阔彩 CDN（multi-cloud-cdn）</n-a>
-            <span class="stack-desc">：CDN 域名管理与边缘规则引擎能力</span>
+            <span class="stack-desc">{{ t('about.refCdnDesc') }}</span>
           </li>
         </ul>
       </div>
@@ -128,6 +128,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { NIcon, useMessage } from 'naive-ui';
 import { RefreshOutline } from '@vicons/ionicons5';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 
@@ -161,6 +162,7 @@ interface UpdateResult {
 }
 
 const message = useMessage();
+const { t } = useI18n();
 const frontendVersion = __APP_VERSION__;
 const buildTime = __BUILD_TIME__;
 const repoFallback = 'https://github.com/ssdxftx/dnsmgr-Pro';
@@ -190,17 +192,17 @@ const uptimeText = computed(() => {
   const days = Math.floor(total / 86400);
   const hours = Math.floor((total % 86400) / 3600);
   const minutes = Math.floor((total % 3600) / 60);
-  if (days > 0) return `${days} 天 ${hours} 小时 ${minutes} 分钟`;
-  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`;
-  return `${minutes} 分钟`;
+  if (days > 0) return t('about.uptimeFull', { days, hours, minutes });
+  if (hours > 0) return t('about.uptimeHours', { hours, minutes });
+  return t('about.uptimeMinutes', { minutes });
 });
 
 const statusText = computed(() => {
-  if (!update.value) return '未检查';
-  if (update.value.error) return '检查失败';
-  if (update.value.hasUpdate) return '有新版本';
-  if (update.value.ahead) return '开发版';
-  return '已是最新';
+  if (!update.value) return t('about.statusNotChecked');
+  if (update.value.error) return t('about.statusCheckFailed');
+  if (update.value.hasUpdate) return t('about.statusHasUpdate');
+  if (update.value.ahead) return t('about.statusDev');
+  return t('about.statusUpToDate');
 });
 const statusType = computed(() => {
   if (!update.value) return 'default';
@@ -223,7 +225,7 @@ function formatTime(v?: string | null): string {
 async function loadInfo() {
   const res = await api<{ code: number; data: AboutInfo; msg?: string }>('GET', '/about');
   if (res.code === 0) info.value = res.data;
-  else message.error(res.msg || '获取项目信息失败');
+  else message.error(res.msg || t('about.loadInfoFailed'));
 }
 
 async function check(force = false) {
@@ -232,9 +234,9 @@ async function check(force = false) {
     const res = await api<{ code: number; data: UpdateResult; msg?: string }>('POST', '/about/check-update', { force: force ? 1 : 0 });
     if (res.code === 0) {
       update.value = res.data;
-      if (!res.data.error && res.data.hasUpdate) message.success(`发现新版本 v${res.data.latest}`);
+      if (!res.data.error && res.data.hasUpdate) message.success(t('about.newVersionToast', { version: res.data.latest }));
     } else {
-      message.error(res.msg || '检查更新失败');
+      message.error(res.msg || t('about.checkFailed'));
     }
   } finally {
     checking.value = false;

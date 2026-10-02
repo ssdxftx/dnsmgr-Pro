@@ -2,49 +2,49 @@
   <AuthShell max-width="560px">
     <n-card class="auth-card" :bordered="false">
       <div class="auth-head">
-        <h2>系统安装</h2>
-        <p>初始化数据库连接与管理员账号</p>
+        <h2>{{ t('setup.title') }}</h2>
+        <p>{{ t('setup.subtitle') }}</p>
       </div>
 
       <n-alert v-if="detected" type="info" style="margin-bottom: 16px">
-        检测到数据库已存在数据（彩虹 DNS），本次安装将绑定现有数据库，不会删除或覆盖原有数据。
+        {{ t('setup.dbDetected') }}
       </n-alert>
       <n-alert v-else-if="checked" type="success" style="margin-bottom: 16px">
-        数据库连接成功，将进行全新安装。
+        {{ t('setup.dbConnected') }}
       </n-alert>
 
       <n-form :model="form" label-placement="top">
-        <n-form-item label="数据库主机">
-          <n-input v-model:value="form.db_host" placeholder="127.0.0.1 或容器服务名" />
+        <n-form-item :label="t('setup.dbHost')">
+          <n-input v-model:value="form.db_host" :placeholder="t('setup.dbHostPlaceholder')" />
         </n-form-item>
-        <n-form-item label="数据库端口">
+        <n-form-item :label="t('setup.dbPort')">
           <n-input-number v-model:value="form.db_port" :min="1" :max="65535" style="width: 100%" />
         </n-form-item>
-        <n-form-item label="数据库用户名">
-          <n-input v-model:value="form.db_user" placeholder="数据库账号" />
+        <n-form-item :label="t('setup.dbUser')">
+          <n-input v-model:value="form.db_user" :placeholder="t('setup.dbUserPlaceholder')" />
         </n-form-item>
-        <n-form-item label="数据库密码">
-          <n-input v-model:value="form.db_password" type="password" show-password-on="click" placeholder="数据库密码" />
+        <n-form-item :label="t('setup.dbPassword')">
+          <n-input v-model:value="form.db_password" type="password" show-password-on="click" :placeholder="t('setup.dbPasswordPlaceholder')" />
         </n-form-item>
-        <n-form-item label="数据库名">
-          <n-input v-model:value="form.db_name" placeholder="需提前创建好的数据库名" />
+        <n-form-item :label="t('setup.dbName')">
+          <n-input v-model:value="form.db_name" :placeholder="t('setup.dbNamePlaceholder')" />
         </n-form-item>
-        <n-form-item label="表前缀">
-          <n-input v-model:value="form.db_prefix" placeholder="默认 dnsmgr_，绑定彩虹 DNS 请填其前缀" />
+        <n-form-item :label="t('setup.dbPrefix')">
+          <n-input v-model:value="form.db_prefix" :placeholder="t('setup.dbPrefixPlaceholder')" />
         </n-form-item>
 
-        <n-divider title-placement="left">管理员账号（绑定已有数据时无需填写）</n-divider>
+        <n-divider title-placement="left">{{ t('setup.adminSection') }}</n-divider>
 
-        <n-form-item label="管理员账号">
-          <n-input v-model:value="form.admin_username" placeholder="仅全新安装时需要" />
+        <n-form-item :label="t('setup.adminUsername')">
+          <n-input v-model:value="form.admin_username" :placeholder="t('setup.freshOnly')" />
         </n-form-item>
-        <n-form-item label="管理员密码">
-          <n-input v-model:value="form.admin_password" type="password" show-password-on="click" placeholder="仅全新安装时需要" />
+        <n-form-item :label="t('setup.adminPassword')">
+          <n-input v-model:value="form.admin_password" type="password" show-password-on="click" :placeholder="t('setup.freshOnly')" />
         </n-form-item>
 
         <n-space vertical>
-          <n-button block :loading="checking" @click="onCheck">测试数据库连接</n-button>
-          <n-button type="primary" block :loading="installing" @click="onInstall">立即安装</n-button>
+          <n-button block :loading="checking" @click="onCheck">{{ t('setup.testConnection') }}</n-button>
+          <n-button type="primary" block :loading="installing" @click="onInstall">{{ t('setup.installNow') }}</n-button>
         </n-space>
       </n-form>
     </n-card>
@@ -55,9 +55,11 @@
 import { onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import AuthShell from '../components/AuthShell.vue';
 
+const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
 const checking = ref(false);
@@ -81,7 +83,7 @@ function sleep(ms: number) {
 
 async function onCheck() {
   if (!form.db_host || !form.db_user || !form.db_name) {
-    message.warning('请完整填写数据库主机、用户名和数据库名');
+    message.warning(t('setup.dbInfoRequired'));
     return;
   }
   checking.value = true;
@@ -97,7 +99,7 @@ async function onCheck() {
       message.error(res.msg);
     }
   } catch (e: any) {
-    message.error(e.message || '网络错误');
+    message.error(e.message || t('setup.networkError'));
   } finally {
     checking.value = false;
   }
@@ -105,11 +107,11 @@ async function onCheck() {
 
 async function onInstall() {
   if (!form.db_host || !form.db_user || !form.db_name) {
-    message.warning('请完整填写数据库连接信息');
+    message.warning(t('setup.dbConnRequired'));
     return;
   }
   if (!detected.value && (!form.admin_username || !form.admin_password)) {
-    message.warning('全新安装需要设置管理员账号和密码，或先点击「测试连接」检测已有数据');
+    message.warning(t('setup.adminRequired'));
     return;
   }
   installing.value = true;
@@ -122,7 +124,7 @@ async function onInstall() {
       message.error(res.msg);
     }
   } catch (e: any) {
-    message.error(e.message || '网络错误');
+    message.error(e.message || t('setup.networkError'));
   } finally {
     installing.value = false;
   }
@@ -135,7 +137,7 @@ async function waitRestart() {
       const res = await fetch('/api/setup/status');
       const json = await res.json();
       if (json?.data?.installed) {
-        message.success('安装完成，请登录');
+        message.success(t('setup.installDone'));
         router.push('/login');
         return;
       }
@@ -143,7 +145,7 @@ async function waitRestart() {
       // 进程重启中，继续等待
     }
   }
-  message.warning('应用仍在启动中，请稍后刷新页面');
+  message.warning(t('setup.stillStarting'));
 }
 
 onMounted(async () => {

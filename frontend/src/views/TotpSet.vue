@@ -1,38 +1,38 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="安全设置 · TOTP 两步验证" subtitle="使用动态口令为账户增加二次验证" back="/dashboard" />
+    <PageHeader :title="t('totp.title')" :subtitle="t('totp.subtitle')" back="/dashboard" />
     <n-card :bordered="false" style="max-width: 560px">
-      <n-result v-if="!enabled" status="info" title="未开启两步验证" description="开启后将使用动态口令进行二次验证，提升账户安全性">
+      <n-result v-if="!enabled" status="info" :title="t('totp.notEnabled')" :description="t('totp.notEnabledDesc')">
         <template #footer>
-          <n-button type="primary" :loading="loading" @click="generate">开启两步验证</n-button>
+          <n-button type="primary" :loading="loading" @click="generate">{{ t('totp.enable') }}</n-button>
         </template>
       </n-result>
 
       <div v-if="step === 'bind'">
-        <n-alert type="info" style="margin-bottom: 16px">请使用 Google Authenticator / Microsoft Authenticator 等 APP 扫描二维码，或手动输入密钥</n-alert>
+        <n-alert type="info" style="margin-bottom: 16px">{{ t('totp.scanHint') }}</n-alert>
         <n-space vertical align="center" style="width:100%">
           <div class="qr-box">
-            <img v-if="qrcode" :src="qrDataUrl" alt="TOTP 二维码" />
+            <img v-if="qrcode" :src="qrDataUrl" :alt="t('totp.qrAlt')" />
             <n-spin v-else />
           </div>
           <n-input-group style="max-width: 380px">
             <n-input :value="secret" readonly />
-            <n-button @click="copySecret">复制</n-button>
+            <n-button @click="copySecret">{{ t('common.copy') }}</n-button>
           </n-input-group>
-          <n-input v-model:value="code" placeholder="输入 APP 显示的 6 位动态口令" maxlength="6" style="max-width: 380px" @keyup.enter="bind" />
-          <n-input v-model:value="password" type="password" show-password-on="click" placeholder="请输入登录密码以确认（安全校验）" style="max-width: 380px" />
+          <n-input v-model:value="code" :placeholder="t('totp.codePlaceholder')" maxlength="6" style="max-width: 380px" @keyup.enter="bind" />
+          <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.passwordPlaceholder')" style="max-width: 380px" />
           <n-space>
-            <n-button @click="step = ''">取消</n-button>
-            <n-button type="primary" :loading="loading" @click="bind">确认绑定</n-button>
+            <n-button @click="step = ''">{{ t('common.cancel') }}</n-button>
+            <n-button type="primary" :loading="loading" @click="bind">{{ t('totp.confirmBind') }}</n-button>
           </n-space>
         </n-space>
       </div>
 
-      <n-result v-if="enabled && step !== 'bind'" status="success" title="已开启两步验证" description="登录时将要求输入动态口令">
+      <n-result v-if="enabled && step !== 'bind'" status="success" :title="t('totp.enabled')" :description="t('totp.enabledDesc')">
         <template #footer>
           <n-space vertical align="center">
-            <n-input v-model:value="password" type="password" show-password-on="click" placeholder="请输入登录密码以关闭" style="max-width: 320px" />
-            <n-button type="error" :loading="loading" @click="close">关闭两步验证</n-button>
+            <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.closePasswordPlaceholder')" style="max-width: 320px" />
+            <n-button type="error" :loading="loading" @click="close">{{ t('totp.close') }}</n-button>
           </n-space>
         </template>
       </n-result>
@@ -43,10 +43,12 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import { useMessage, useDialog } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import QRCode from 'qrcode';
 
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -77,8 +79,8 @@ async function generate() {
 }
 
 async function bind() {
-  if (!code.value) return message.warning('请输入动态口令');
-  if (!password.value) return message.warning('请输入登录密码以确认');
+  if (!code.value) return message.warning(t('totp.codeRequired'));
+  if (!password.value) return message.warning(t('totp.passwordRequired'));
   loading.value = true;
   const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, code: code.value, password: password.value });
   loading.value = false;
@@ -91,13 +93,13 @@ async function bind() {
 }
 
 function close() {
-  if (!password.value) return message.warning('请输入登录密码以确认');
+  if (!password.value) return message.warning(t('totp.passwordRequired'));
   const pwd = password.value;
   dialog.warning({
-    title: '关闭两步验证',
-    content: '确定要关闭 TOTP 两步验证吗？',
-    positiveText: '关闭',
-    negativeText: '取消',
+    title: t('totp.close'),
+    content: t('totp.closeConfirm'),
+    positiveText: t('common.close'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       loading.value = true;
       const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd });
@@ -112,7 +114,7 @@ function close() {
 }
 
 function copySecret() {
-  navigator.clipboard?.writeText(secret.value).then(() => message.success('已复制')).catch(() => message.warning('复制失败，请手动复制'));
+  navigator.clipboard?.writeText(secret.value).then(() => message.success(t('common.copied'))).catch(() => message.warning(t('totp.copyFailed')));
 }
 
 onMounted(async () => {

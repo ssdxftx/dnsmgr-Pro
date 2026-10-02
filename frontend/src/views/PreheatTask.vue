@@ -1,10 +1,10 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="自动预热" subtitle="自动预热或清除 CDN 缓存资源">
+    <PageHeader :title="t('preheat.title')" :subtitle="t('preheat.subtitle')">
       <template #actions>
         <n-button type="primary" @click="openAdd">
           <template #icon><n-icon :component="AddOutline" /></template>
-          添加任务
+          {{ t('preheat.add') }}
         </n-button>
       </template>
     </PageHeader>
@@ -15,44 +15,44 @@
         :loading="loading"
         :pagination="{ pageSize: 20 }"
         :row-key="(row: any) => row.id"
-        empty-text="暂无预热任务，点击「添加任务」配置自动预热"
+        :empty-text="t('preheat.empty')"
       />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" title="预热任务" style="max-width: 640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="t('preheat.modalTitle')" style="max-width: 640px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="任务名称">
-          <n-input v-model:value="form.name" placeholder="可选，便于识别" />
+        <n-form-item :label="t('preheat.nameLabel')">
+          <n-input v-model:value="form.name" :placeholder="t('preheat.namePlaceholder')" />
         </n-form-item>
-        <n-form-item label="链接列表">
-          <n-input v-model:value="form.urls" type="textarea" :rows="6" placeholder="每行一个 URL，例如：&#10;https://www.example.com/index.html&#10;https://www.example.com/style.css" />
+        <n-form-item :label="t('preheat.urlsLabel')">
+          <n-input v-model:value="form.urls" type="textarea" :rows="6" :placeholder="t('preheat.urlsPlaceholder')" />
         </n-form-item>
-        <n-form-item label="操作类型">
+        <n-form-item :label="t('preheat.opLabel')">
           <n-radio-group v-model:value="form.op">
-            <n-radio-button value="preheat">缓存预热</n-radio-button>
-            <n-radio-button value="purge">清除缓存</n-radio-button>
+            <n-radio-button value="preheat">{{ t('preheat.opPreheat') }}</n-radio-button>
+            <n-radio-button value="purge">{{ t('preheat.opPurge') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
-        <n-form-item label="执行周期">
+        <n-form-item :label="t('preheat.cycleLabel')">
           <n-radio-group v-model:value="form.cycle">
-            <n-radio-button value="daily">每日定时</n-radio-button>
-            <n-radio-button value="interval">间隔执行</n-radio-button>
+            <n-radio-button value="daily">{{ t('preheat.cycleDaily') }}</n-radio-button>
+            <n-radio-button value="interval">{{ t('preheat.cycleInterval') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
-        <n-form-item v-if="form.cycle === 'daily'" label="每日时间">
+        <n-form-item v-if="form.cycle === 'daily'" :label="t('preheat.dailyTimeLabel')">
           <n-time-picker v-model:value="form.runTime" format="HH:mm" :clearable="false" />
         </n-form-item>
-        <n-form-item v-if="form.cycle === 'interval'" label="间隔分钟">
+        <n-form-item v-if="form.cycle === 'interval'" :label="t('preheat.intervalMinLabel')">
           <n-input-number v-model:value="form.intervalMin" :min="1" :max="10080" style="width: 200px" />
         </n-form-item>
-        <n-form-item label="启用">
+        <n-form-item :label="t('common.enable')">
           <n-switch v-model:value="form.active" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -60,13 +60,15 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -83,57 +85,57 @@ function fmtRunTime(v: number | null): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const columns = [
+const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
-  { title: '名称', key: 'name', width: 150, render: (row: any) => row.name || '-' },
+  { title: t('common.name'), key: 'name', width: 150, render: (row: any) => row.name || '-' },
   {
-    title: '类型',
+    title: t('common.type'),
     key: 'op',
     width: 100,
-    render: (row: any) => h(NTag, { size: 'small', type: row.op === 'purge' ? 'warning' : 'success', bordered: false }, { default: () => (row.op === 'purge' ? '清除缓存' : '预热') }),
+    render: (row: any) => h(NTag, { size: 'small', type: row.op === 'purge' ? 'warning' : 'success', bordered: false }, { default: () => (row.op === 'purge' ? t('preheat.opPurge') : t('preheat.typePreheatShort')) }),
   },
   {
-    title: '链接',
+    title: t('preheat.linksCol'),
     key: 'urls',
     ellipsis: { tooltip: true },
     render: (row: any) => {
       const list = String(row.urls || '').split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-      return `${list.length} 条`;
+      return t('preheat.linkCount', { count: list.length });
     },
   },
   {
-    title: '执行周期',
+    title: t('preheat.cycleCol'),
     key: 'cycle',
     width: 140,
     render: (row: any) => {
-      if (row.cycle === 'interval') return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => `每 ${row.interval_min} 分钟` });
-      return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => `每日 ${row.run_time || '-'}` });
+      if (row.cycle === 'interval') return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('preheat.everyMin', { min: row.interval_min }) });
+      return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('preheat.dailyAt', { time: row.run_time || '-' }) });
     },
   },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'active',
     width: 80,
-    render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? '启用' : '停用') }),
+    render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('common.enable') : t('preheat.stopped')) }),
   },
-  { title: '上次执行', key: 'last_run', width: 170, render: (row: any) => row.last_run || '-' },
-  { title: '下次执行', key: 'next_run', width: 170, render: (row: any) => row.next_run || '-' },
+  { title: t('preheat.lastRun'), key: 'last_run', width: 170, render: (row: any) => row.last_run || '-' },
+  { title: t('preheat.nextRun'), key: 'next_run', width: 170, render: (row: any) => row.next_run || '-' },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 260,
     render(row: any) {
       return h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'small', type: 'primary', onClick: () => runNow(row) }, { default: () => '立即执行' }),
-          h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.active ? '停用' : '启用') }),
-          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => del(row) }, { default: () => '删除' }),
+          h(NButton, { size: 'small', type: 'primary', onClick: () => runNow(row) }, { default: () => t('preheat.runNow') }),
+          h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.active ? t('preheat.stopped') : t('common.enable')) }),
+          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'small', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
   },
-];
+]);
 
 async function load() {
   loading.value = true;
@@ -175,8 +177,8 @@ function openEdit(row: any) {
 }
 
 async function save() {
-  if (!form.urls.trim()) return message.warning('请填写预热链接');
-  if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning('请填写间隔分钟数');
+  if (!form.urls.trim()) return message.warning(t('preheat.pleaseInputUrls'));
+  if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('preheat.pleaseInputInterval'));
   saving.value = true;
   try {
     const runTime = form.cycle === 'daily' ? fmtRunTime(form.runTime) : null;
@@ -187,7 +189,7 @@ async function save() {
       ? await api('PUT', `/cdn/preheat-tasks/${editingId.value}`, body)
       : await api('POST', '/cdn/preheat-tasks', body);
     if (res.code === 0) {
-      message.success(editingId.value ? '保存成功' : '创建成功');
+      message.success(editingId.value ? t('common.saved') : t('preheat.created'));
       showEdit.value = false;
       load();
     } else message.error(res.msg);
@@ -199,7 +201,7 @@ async function save() {
 async function runNow(row: any) {
   const res = await api<any>('POST', `/cdn/preheat-tasks/${row.id}/run`);
   if (res.code === 0) {
-    message.success(`执行完成：成功 ${res.success || 0} 个，失败 ${res.failed || 0} 个`);
+    message.success(t('preheat.runDone', { success: res.success || 0, failed: res.failed || 0 }));
     load();
   } else message.error(res.msg);
 }
@@ -214,14 +216,14 @@ async function toggle(row: any) {
 
 function del(row: any) {
   dialog.warning({
-    title: '删除任务',
-    content: `确定删除预热任务「${row.name || 'ID ' + row.id}」吗？`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('preheat.deleteTitle'),
+    content: t('preheat.deleteConfirm', { name: row.name || 'ID ' + row.id }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/cdn/preheat-tasks/${row.id}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('preheat.deleteSuccess'));
         load();
       } else message.error(res.msg);
     },

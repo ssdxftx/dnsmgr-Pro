@@ -2,52 +2,52 @@
   <AuthShell>
     <n-card class="auth-card" :bordered="false">
       <div class="auth-head">
-        <h2>注册账号</h2>
-        <p>创建你的聚合 DNS 管理账号</p>
+        <h2>{{ t('register.title') }}</h2>
+        <p>{{ t('register.subtitle') }}</p>
       </div>
 
       <n-alert v-if="!loading && !config.enable" type="warning" style="margin-bottom: 16px">
-        注册功能暂未开放，请联系管理员获取账号。
+        {{ t('register.disabled') }}
       </n-alert>
 
       <template v-else-if="!loading">
         <n-form :model="form" label-placement="top">
-          <n-form-item label="用户名">
-            <n-input v-model:value="form.username" placeholder="3-32 位字母、数字、下划线、点或横线" size="large" />
+          <n-form-item :label="t('register.username')">
+            <n-input v-model:value="form.username" :placeholder="t('register.usernamePlaceholder')" size="large" />
           </n-form-item>
-          <n-form-item label="密码">
-            <n-input v-model:value="form.password" type="password" show-password-on="click" placeholder="至少 6 位" size="large" />
+          <n-form-item :label="t('register.password')">
+            <n-input v-model:value="form.password" type="password" show-password-on="click" :placeholder="t('register.passwordPlaceholder')" size="large" />
           </n-form-item>
-          <n-form-item label="确认密码">
-            <n-input v-model:value="form.password2" type="password" show-password-on="click" placeholder="再次输入密码" size="large" />
+          <n-form-item :label="t('register.confirmPassword')">
+            <n-input v-model:value="form.password2" type="password" show-password-on="click" :placeholder="t('register.confirmPasswordPlaceholder')" size="large" />
           </n-form-item>
 
           <template v-if="config.mode === 'email'">
-            <n-form-item label="邮箱">
-              <n-input v-model:value="form.email" placeholder="用于接收验证码" size="large" />
+            <n-form-item :label="t('register.email')">
+              <n-input v-model:value="form.email" :placeholder="t('register.emailPlaceholder')" size="large" />
             </n-form-item>
-            <n-form-item label="邮箱验证码">
+            <n-form-item :label="t('register.emailCode')">
               <n-input-group>
-                <n-input v-model:value="form.code" placeholder="6 位验证码" size="large" maxlength="6" />
+                <n-input v-model:value="form.code" :placeholder="t('register.emailCodePlaceholder')" size="large" maxlength="6" />
                 <n-button size="large" :disabled="countdown > 0 || sending" @click="onSendCode">
-                  {{ countdown > 0 ? countdown + 's' : sending ? '发送中' : '发送验证码' }}
+                  {{ countdown > 0 ? countdown + 's' : sending ? t('register.sending') : t('register.sendCode') }}
                 </n-button>
               </n-input-group>
             </n-form-item>
           </template>
 
           <template v-else>
-            <n-form-item label="注册码">
-              <n-input v-model:value="form.reg_code" placeholder="请输入管理员提供的注册码" size="large" />
+            <n-form-item :label="t('register.regCode')">
+              <n-input v-model:value="form.reg_code" :placeholder="t('register.regCodePlaceholder')" size="large" />
             </n-form-item>
-            <n-form-item label="邮箱（可选）">
-              <n-input v-model:value="form.email" placeholder="选填，用于接收通知" size="large" />
+            <n-form-item :label="t('register.emailOptional')">
+              <n-input v-model:value="form.email" :placeholder="t('register.emailOptionalPlaceholder')" size="large" />
             </n-form-item>
           </template>
 
-          <n-button type="primary" size="large" block :loading="registering" @click="onRegister">注 册</n-button>
+          <n-button type="primary" size="large" block :loading="registering" @click="onRegister">{{ t('register.submit') }}</n-button>
         </n-form>
-        <n-button text style="margin-top: 12px; width: 100%" @click="router.push('/login')">已有账号？返回登录</n-button>
+        <n-button text style="margin-top: 12px; width: 100%" @click="router.push('/login')">{{ t('register.toLogin') }}</n-button>
       </template>
     </n-card>
   </AuthShell>
@@ -57,9 +57,11 @@
 import { onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import AuthShell from '../components/AuthShell.vue';
 
+const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
 const loading = ref(true);
@@ -91,7 +93,7 @@ onBeforeUnmount(() => {
 
 async function onSendCode() {
   if (!form.email) {
-    message.warning('请先填写邮箱地址');
+    message.warning(t('register.emailRequired'));
     return;
   }
   sending.value = true;
@@ -108,18 +110,18 @@ async function onSendCode() {
       message.error(res.msg);
     }
   } catch (e: any) {
-    message.error(e.message || '网络错误');
+    message.error(e.message || t('register.networkError'));
   } finally {
     sending.value = false;
   }
 }
 
 async function onRegister() {
-  if (form.username.length < 3) return message.warning('用户名至少 3 个字符');
-  if (form.password.length < 6) return message.warning('密码至少 6 位');
-  if (form.password !== form.password2) return message.warning('两次输入的密码不一致');
-  if (config.mode === 'email' && !form.code) return message.warning('请输入邮箱验证码');
-  if (config.mode === 'code' && !form.reg_code) return message.warning('请输入注册码');
+  if (form.username.length < 3) return message.warning(t('register.usernameMin'));
+  if (form.password.length < 6) return message.warning(t('register.passwordMin'));
+  if (form.password !== form.password2) return message.warning(t('register.passwordMismatch'));
+  if (config.mode === 'email' && !form.code) return message.warning(t('register.emailCodeRequired'));
+  if (config.mode === 'code' && !form.reg_code) return message.warning(t('register.regCodeRequired'));
 
   registering.value = true;
   try {
@@ -139,7 +141,7 @@ async function onRegister() {
       message.error(res.msg);
     }
   } catch (e: any) {
-    message.error(e.message || '网络错误');
+    message.error(e.message || t('register.networkError'));
   } finally {
     registering.value = false;
   }

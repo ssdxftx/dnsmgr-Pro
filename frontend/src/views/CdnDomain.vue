@@ -1,22 +1,22 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="CDN 域名" subtitle="管理各厂商 CDN 加速域名、证书与缓存策略">
+    <PageHeader :title="t('cdnDomain.title')" :subtitle="t('cdnDomain.subtitle')">
       <template #actions>
         <n-space>
           <n-button v-if="canFreeCert" type="primary" secondary :disabled="!checkedIds.length" @click="openFreeCert(checkedIds)">
-            平台免费证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+            {{ t('cdnDomain.freeCert') }}<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
           </n-button>
           <n-button v-if="canCertApply" type="primary" secondary :disabled="!checkedIds.length" @click="openCertLink(checkedIds)">
-            项目申请证书<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
+            {{ t('cdnDomain.certLink') }}<template v-if="checkedIds.length">（{{ checkedIds.length }}）</template>
           </n-button>
-          <n-button @click="goZones">站点设置</n-button>
+          <n-button @click="goZones">{{ t('cdnDomain.zoneSetting') }}</n-button>
           <n-button type="primary" @click="openAdd">
             <template #icon><n-icon :component="AddOutline" /></template>
-            接入域名
+            {{ t('cdnDomain.addDomain') }}
           </n-button>
           <n-button @click="showSync = true">
             <template #icon><n-icon :component="CloudDownloadOutline" /></template>
-            同步云端
+            {{ t('cdnDomain.syncCloud') }}
           </n-button>
         </n-space>
       </template>
@@ -28,73 +28,73 @@
         :loading="loading"
         :row-key="(row: any) => row.id"
         v-model:checked-row-keys="checkedIds"
-        empty-text="暂无 CDN 加速域名"
+        :empty-text="t('cdnDomain.empty')"
       />
     </n-card>
 
     <!-- 接入域名：每步独立弹窗，下一步/上一步切换弹窗 -->
-    <n-modal :show="showAdd && addStep === 1" preset="card" title="接入加速域名（1/4）账户与站点" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 1" preset="card" :title="t('cdnDomain.addTitle1')" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
-        <n-form-item label="CDN 账户">
+        <n-form-item :label="t('cdnDomain.account')">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
         </n-form-item>
         <n-form-item v-if="addFlow.zone.needed" :label="addFlow.zone.label">
-          <n-select v-model:value="form.zone_id" :options="zoneOptions" :placeholder="'选择' + addFlow.zone.label" @update:value="onZoneChange" />
+          <n-select v-model:value="form.zone_id" :options="zoneOptions" :placeholder="t('cdnDomain.selectZone', { label: addFlow.zone.label })" @update:value="onZoneChange" />
         </n-form-item>
-        <n-form-item v-if="addFlow.serviceArea.needed" label="服务区域">
+        <n-form-item v-if="addFlow.serviceArea.needed" :label="t('cdnDomain.serviceArea')">
           <n-select v-model:value="form.service_area" :options="serviceAreaOptions" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showAdd = false">取消</n-button>
-          <n-button type="primary" @click="nextAddStep">下一步</n-button>
+          <n-button @click="showAdd = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="nextAddStep">{{ t('cdnDomain.next') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 2" preset="card" title="接入加速域名（2/4）加速域名" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 2" preset="card" :title="t('cdnDomain.addTitle2')" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
-        <n-form-item label="加速域名">
+        <n-form-item :label="t('cdnDomain.accelDomain')">
           <n-input-group v-if="form.zone_name">
-            <n-input v-model:value="form.sub" placeholder="子域名，如 www" />
+            <n-input v-model:value="form.sub" :placeholder="t('cdnDomain.subPlaceholder')" />
             <n-input-group-label>.{{ form.zone_name }}</n-input-group-label>
           </n-input-group>
-          <n-input v-else v-model:value="form.name" placeholder="如 www.example.com" />
+          <n-input v-else v-model:value="form.name" :placeholder="t('cdnDomain.namePlaceholder')" />
         </n-form-item>
-        <n-form-item label="联动域名">
+        <n-form-item :label="t('cdnDomain.linkedDomain')">
           <n-tag v-if="matchedDomain" type="success" :bordered="false">{{ matchedDomain }}</n-tag>
-          <span v-else-if="form.name" class="link-warn">未匹配到已添加的域名，请先在「域名管理」中添加该域名</span>
-          <span v-else class="link-hint">{{ form.zone_name ? '输入子域名后自动匹配' : '填写加速域名后自动匹配' }}</span>
+          <span v-else-if="form.name" class="link-warn">{{ t('cdnDomain.linkWarn') }}</span>
+          <span v-else class="link-hint">{{ form.zone_name ? t('cdnDomain.matchSub') : t('cdnDomain.matchName') }}</span>
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="space-between" class="cert-actions" style="width:100%">
-          <n-button @click="addStep--">上一步</n-button>
-          <n-button type="primary" @click="nextAddStep">下一步</n-button>
+          <n-button @click="addStep--">{{ t('cdnDomain.prev') }}</n-button>
+          <n-button type="primary" @click="nextAddStep">{{ t('cdnDomain.next') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 3" preset="card" title="接入加速域名（3/4）回源配置" style="max-width:640px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 3" preset="card" :title="t('cdnDomain.addTitle3')" style="max-width:640px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
-        <n-form-item label="源站地址">
-          <n-input v-model:value="form.origin" placeholder="IP 或域名" />
+        <n-form-item :label="t('cdnDomain.origin')">
+          <n-input v-model:value="form.origin" :placeholder="t('cdnDomain.originPlaceholder')" />
         </n-form-item>
-        <n-form-item label="源站类型">
+        <n-form-item :label="t('cdnDomain.originType')">
           <n-radio-group v-model:value="form.origin_type">
-            <n-radio value="ipaddr">IP 源站</n-radio>
-            <n-radio value="domain">域名源站</n-radio>
+            <n-radio value="ipaddr">{{ t('cdnDomain.originTypeIp') }}</n-radio>
+            <n-radio value="domain">{{ t('cdnDomain.originTypeDomain') }}</n-radio>
           </n-radio-group>
         </n-form-item>
-        <n-form-item v-if="addFlow.origin.protocol" label="回源协议">
+        <n-form-item v-if="addFlow.origin.protocol" :label="t('cdnDomain.originProtocol')">
           <n-radio-group v-model:value="form.origin_protocol">
-            <n-radio value="follow">协议跟随</n-radio>
+            <n-radio value="follow">{{ t('cdnDomain.protoFollow') }}</n-radio>
             <n-radio value="http">HTTP</n-radio>
             <n-radio value="https">HTTPS</n-radio>
           </n-radio-group>
         </n-form-item>
-        <n-form-item v-if="addFlow.origin.ports" label="回源端口">
+        <n-form-item v-if="addFlow.origin.ports" :label="t('cdnDomain.originPort')">
           <n-space align="center">
             <span class="port-label">HTTP</span>
             <n-input-number v-model:value="form.http_port" :min="1" :max="65535" style="width:110px" placeholder="80" />
@@ -102,82 +102,82 @@
             <n-input-number v-model:value="form.https_port" :min="1" :max="65535" style="width:110px" placeholder="443" />
           </n-space>
         </n-form-item>
-        <n-form-item v-if="addFlow.origin.host" label="回源 HOST">
+        <n-form-item v-if="addFlow.origin.host" :label="t('cdnDomain.originHost')">
           <n-space vertical style="width:100%">
             <n-radio-group v-model:value="form.origin_host_mode">
               <n-space :wrap="true">
-                <n-radio value="accelerate">使用加速域名</n-radio>
-                <n-radio value="origin">使用源站域名</n-radio>
-                <n-radio value="custom">自定义</n-radio>
+                <n-radio value="accelerate">{{ t('cdnDomain.hostAccelerate') }}</n-radio>
+                <n-radio value="origin">{{ t('cdnDomain.hostOrigin') }}</n-radio>
+                <n-radio value="custom">{{ t('cdnDomain.custom') }}</n-radio>
               </n-space>
             </n-radio-group>
-            <n-input v-if="form.origin_host_mode === 'custom'" v-model:value="form.origin_host_custom" placeholder="请输入回源 HOST" />
+            <n-input v-if="form.origin_host_mode === 'custom'" v-model:value="form.origin_host_custom" :placeholder="t('cdnDomain.hostCustomPlaceholder')" />
           </n-space>
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="space-between" class="cert-actions" style="width:100%">
-          <n-button @click="addStep--">上一步</n-button>
-          <n-button type="primary" @click="nextAddStep">下一步</n-button>
+          <n-button @click="addStep--">{{ t('cdnDomain.prev') }}</n-button>
+          <n-button type="primary" @click="nextAddStep">{{ t('cdnDomain.next') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 4" preset="card" title="接入加速域名（4/4）证书设置" style="max-width:620px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 4" preset="card" :title="t('cdnDomain.addTitle4')" style="max-width:620px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <div class="add-form">
-        <n-form-item v-if="certModeOptions.length > 1" label="证书设置" label-placement="left" label-width="110">
+        <n-form-item v-if="certModeOptions.length > 1" :label="t('cdnDomain.certSetting')" label-placement="left" label-width="110">
           <n-radio-group v-model:value="form.cert_mode">
             <n-space vertical>
               <n-radio v-for="o in certModeOptions" :key="o.value" :value="o.value">{{ o.label }}</n-radio>
             </n-space>
           </n-radio-group>
         </n-form-item>
-        <n-alert v-else type="info" :show-icon="true" class="cert-tip">该 CDN 账户接入时暂不需要配置证书，可接入后在「证书管理」中设置。</n-alert>
+        <n-alert v-else type="info" :show-icon="true" class="cert-tip">{{ t('cdnDomain.certNotNeeded') }}</n-alert>
 
         <template v-if="form.cert_mode === 'certlink'">
-          <n-alert type="info" :show-icon="true" class="cert-tip">已选择「由本项目管理」，请先选择证书来源（精确匹配证书 / 证书提供商 / 默认 Let's Encrypt）。</n-alert>
+          <n-alert type="info" :show-icon="true" class="cert-tip">{{ t('cdnDomain.certLinkHint') }}</n-alert>
           <n-space align="center" class="cert-tip">
-            <n-button size="small" @click="pickCertSource">选择证书来源</n-button>
-            <span class="link-meta">{{ form.cert_choice_label || '未选择' }}</span>
+            <n-button size="small" @click="pickCertSource">{{ t('cdnDomain.pickCertSource') }}</n-button>
+            <span class="link-meta">{{ form.cert_choice_label || t('cdnDomain.notSelected') }}</span>
           </n-space>
         </template>
-        <n-alert v-else-if="form.cert_mode === 'freecert'" type="info" :show-icon="true" class="cert-tip">平台免费证书由 CDN 厂商直接签发并部署到加速域名。</n-alert>
-        <n-alert v-else-if="form.cert_mode === 'certapply'" type="info" :show-icon="true" class="cert-tip">按站点申请一张通配符证书，签发后自动上传绑定，后续续签自动更新。</n-alert>
+        <n-alert v-else-if="form.cert_mode === 'freecert'" type="info" :show-icon="true" class="cert-tip">{{ t('cdnDomain.freeCertHint') }}</n-alert>
+        <n-alert v-else-if="form.cert_mode === 'certapply'" type="info" :show-icon="true" class="cert-tip">{{ t('cdnDomain.certApplyHint') }}</n-alert>
       </div>
       <template #footer>
         <n-space justify="space-between" class="cert-actions" style="width:100%">
-          <n-button @click="addStep--">上一步</n-button>
-          <n-button type="primary" :loading="saving" @click="submitAdd">提交接入</n-button>
+          <n-button @click="addStep--">{{ t('cdnDomain.prev') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="submitAdd">{{ t('cdnDomain.submitAdd') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 同步云端弹窗 -->
-    <n-modal v-model:show="showSync" preset="card" title="同步云端已有加速域名" style="max-width:440px">
+    <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" style="max-width:440px">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="CDN 账户">
+        <n-form-item :label="t('cdnDomain.account')">
           <n-select v-model:value="syncAid" :options="accountOptions" />
         </n-form-item>
-        <n-form-item label="联动域名">
-          <n-select v-model:value="syncDid" :options="[{ label: '全部', value: 0 }, ...dnsDomainOptions]" />
+        <n-form-item :label="t('cdnDomain.linkedDomain')">
+          <n-select v-model:value="syncDid" :options="[{ label: t('common.all'), value: 0 }, ...dnsDomainOptions]" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showSync = false">取消</n-button>
-          <n-button type="primary" :loading="syncing" @click="doSync">开始同步</n-button>
+          <n-button @click="showSync = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="syncing" @click="doSync">{{ t('cdnDomain.startSync') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
-    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? '项目申请证书' : '平台免费证书'" style="max-width:680px">
+    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" style="max-width:680px">
       <n-spin :show="certRunning">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
-          按站点申请一张通配符证书（*.站点根域 + 站点根域），系统会自动完成 DNS 验证与签发，并创建自动部署任务；签发后自动上传到 CDN 并启用 HTTPS，后续续签自动更新。也可点击「检查并部署」立即处理。
+          {{ t('cdnDomain.certLinkDesc') }}
         </n-alert>
         <n-alert v-else type="info" :show-icon="true" class="cert-tip">
-          腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。
+          {{ t('cdnDomain.freeCertDesc') }}
         </n-alert>
         <n-alert v-if="certSummary" :type="summaryType" :show-icon="true" class="cert-tip">{{ certSummary }}</n-alert>
 
@@ -187,7 +187,7 @@
               <span class="cert-name">{{ r.name || '#' + r.id }}</span>
               <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
             </div>
-            <div v-if="r.domains && r.domains.length" class="cert-scope">证书覆盖：{{ r.domains.join('、') }}</div>
+            <div v-if="r.domains && r.domains.length" class="cert-scope">{{ t('cdnDomain.certScope', { domains: r.domains.join('、') }) }}</div>
             <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
             <div v-if="r.records && r.records.length" class="cert-records">
               <div v-for="(rec, i) in r.records" :key="i" class="cert-record">{{ rec.name }} {{ rec.type }} → {{ rec.value }}</div>
@@ -197,29 +197,29 @@
       </n-spin>
       <template #footer>
         <n-space justify="end" class="cert-actions">
-          <n-button v-if="hasPending" :loading="certRunning" @click="checkPending">检查并部署</n-button>
-          <n-button @click="showCert = false">关闭</n-button>
+          <n-button v-if="hasPending" :loading="certRunning" @click="checkPending">{{ t('cdnDomain.checkDeploy') }}</n-button>
+          <n-button @click="showCert = false">{{ t('common.close') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 由本项目管理：证书选择弹窗（选择器） -->
-    <n-modal v-model:show="showLink" preset="card" title="由本项目管理 · 选择证书" style="max-width: 680px" @after-leave="onLinkAfterLeave">
+    <n-modal v-model:show="showLink" preset="card" :title="t('cdnDomain.linkTitle')" style="max-width: 680px" @after-leave="onLinkAfterLeave">
       <n-spin :show="linkLoading">
-        <div v-if="linkTarget" class="link-target">目标域名：<b>{{ linkTarget.name }}</b></div>
+        <div v-if="linkTarget" class="link-target">{{ t('cdnDomain.targetDomain') }}<b>{{ linkTarget.name }}</b></div>
 
         <template v-if="linkCandidates">
           <template v-if="linkCandidates.exact && linkCandidates.exact.length">
             <n-alert type="success" :show-icon="true" class="cert-tip">
-              已找到与目标子域名精确匹配的证书，将直接复用绑定，不再重新签发。
+              {{ t('cdnDomain.exactFound') }}
             </n-alert>
             <n-radio-group v-model:value="linkChoice" class="link-group">
               <n-space vertical>
                 <n-radio v-for="c in linkCandidates.exact" :key="'o' + c.oid" :value="'order:' + c.oid">
                   <div class="link-cert">
-                    <div class="link-name">{{ c.name }}（证书 #{{ c.oid }}）</div>
-                    <div class="link-meta">颁发机构：{{ c.issuer || '未知' }} · 到期时间：{{ (c.expiretime || '').slice(0, 10) }}</div>
-                    <div class="link-meta">绑定域名：{{ (c.domains || []).join('、') }}</div>
+                    <div class="link-name">{{ c.name }}{{ t('cdnDomain.certIdWrap', { oid: c.oid }) }}</div>
+                    <div class="link-meta">{{ t('cdnDomain.issuer', { issuer: c.issuer || t('common.unknown') }) }} · {{ t('cdnDomain.expireTime', { time: (c.expiretime || '').slice(0, 10) }) }}</div>
+                    <div class="link-meta">{{ t('cdnDomain.boundDomains', { domains: (c.domains || []).join('、') }) }}</div>
                   </div>
                 </n-radio>
               </n-space>
@@ -229,7 +229,7 @@
           <template v-else>
             <template v-if="linkCandidates.providers && linkCandidates.providers.length">
               <n-alert type="info" :show-icon="true" class="cert-tip">
-                未找到精确匹配证书，请选择证书提供商自动签发（仅包含目标子域名 {{ linkTarget?.name }}）。
+                {{ t('cdnDomain.noExactProvider', { name: linkTarget?.name }) }}
               </n-alert>
               <n-radio-group v-model:value="linkChoice" class="link-group">
                 <n-space vertical>
@@ -241,7 +241,7 @@
             </template>
             <template v-else-if="linkCandidates.defaultLe">
               <n-alert type="warning" :show-icon="true" class="cert-tip">
-                当前没有可用的证书提供商，将自动使用默认 Let's Encrypt（{{ linkCandidates.defaultLe.email }}）签发精确子域名证书。
+                {{ t('cdnDomain.defaultLe', { email: linkCandidates.defaultLe.email }) }}
               </n-alert>
               <n-radio-group v-model:value="linkChoice" class="link-group">
                 <n-space vertical>
@@ -258,22 +258,22 @@
 
       <template #footer>
         <n-space justify="end" class="cert-actions">
-          <n-button @click="finishLink(null)">取消</n-button>
-          <n-button type="primary" :disabled="!linkCanConfirm" @click="confirmLink">选择</n-button>
+          <n-button @click="finishLink(null)">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :disabled="!linkCanConfirm" @click="confirmLink">{{ t('cdnDomain.select') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 证书管理：统一设置证书方式、申请/部署与进度 -->
-    <n-modal v-model:show="showCertMgr" preset="card" title="证书管理" style="max-width: 760px" :mask-closable="false" @after-leave="closeCertMgr">
+    <n-modal v-model:show="showCertMgr" preset="card" :title="t('cdnDomain.certMgrTitle')" style="max-width: 760px" :mask-closable="false" @after-leave="closeCertMgr">
       <n-spin :show="certMgrBusy">
-        <div class="link-target">加速域名：<b>{{ certMgrTarget?.name }}</b></div>
+        <div class="link-target">{{ t('cdnDomain.accelDomainLabel') }}<b>{{ certMgrTarget?.name }}</b></div>
 
         <!-- 云端当前证书 -->
         <div class="cloud-cert">
           <div class="cloud-cert-head">
-            <span class="cloud-cert-title">云端当前证书</span>
-            <n-button size="tiny" quaternary :loading="certMgrCloudLoading" @click="refreshCertStatus">刷新云端状态</n-button>
+            <span class="cloud-cert-title">{{ t('cdnDomain.cloudCert') }}</span>
+            <n-button size="tiny" quaternary :loading="certMgrCloudLoading" @click="refreshCertStatus">{{ t('cdnDomain.refreshCloudStatus') }}</n-button>
           </div>
           <n-spin :show="certMgrCloudLoading">
             <template v-if="certMgrCloud">
@@ -283,34 +283,34 @@
               <template v-else>
                 <div class="cloud-cert-row">
                   <n-tag :type="cloudSourceType(certMgrCloud.source)" size="small" :bordered="false">{{ certMgrCloud.sourceLabel }}</n-tag>
-                  <span class="cloud-cert-meta">HTTPS：{{ certMgrCloud.httpsEnabled ? '已启用' : '未启用' }}</span>
-                  <span v-if="certMgrCloud.mode" class="cloud-cert-meta">模式：{{ certMgrCloud.mode }}</span>
+                  <span class="cloud-cert-meta">{{ certMgrCloud.httpsEnabled ? t('cdnDomain.httpsEnabled') : t('cdnDomain.httpsDisabled') }}</span>
+                  <span v-if="certMgrCloud.mode" class="cloud-cert-meta">{{ t('cdnDomain.modeLabel', { mode: certMgrCloud.mode }) }}</span>
                 </div>
                 <div v-if="certMgrCloud.certs && certMgrCloud.certs.length" class="cloud-cert-list">
                   <div v-for="(c, i) in certMgrCloud.certs" :key="i" class="cloud-cert-item">
                     <div class="cloud-cert-name">{{ c.name || c.commonName || c.id }}</div>
-                    <div class="cloud-cert-meta">证书 ID：{{ c.id }}</div>
-                    <div v-if="c.commonName" class="cloud-cert-meta">主域名：{{ c.commonName }}</div>
-                    <div v-if="c.san && c.san.length" class="cloud-cert-meta">覆盖域名：{{ c.san.join('、') }}</div>
-                    <div v-if="c.issuer" class="cloud-cert-meta">颁发机构：{{ c.issuer }}</div>
-                    <div v-if="c.notAfter" class="cloud-cert-meta">到期时间：{{ (c.notAfter || '').slice(0, 19).replace('T', ' ') }}</div>
+                    <div class="cloud-cert-meta">{{ t('cdnDomain.certIdLabel', { id: c.id }) }}</div>
+                    <div v-if="c.commonName" class="cloud-cert-meta">{{ t('cdnDomain.mainDomain', { name: c.commonName }) }}</div>
+                    <div v-if="c.san && c.san.length" class="cloud-cert-meta">{{ t('cdnDomain.sanDomains', { domains: c.san.join('、') }) }}</div>
+                    <div v-if="c.issuer" class="cloud-cert-meta">{{ t('cdnDomain.issuer', { issuer: c.issuer }) }}</div>
+                    <div v-if="c.notAfter" class="cloud-cert-meta">{{ t('cdnDomain.expireTime', { time: (c.notAfter || '').slice(0, 19).replace('T', ' ') }) }}</div>
                   </div>
                 </div>
-                <div v-else class="cloud-cert-meta">云端未返回证书详情</div>
+                <div v-else class="cloud-cert-meta">{{ t('cdnDomain.cloudNoDetail') }}</div>
               </template>
             </template>
-            <div v-else class="cloud-cert-meta">未获取到云端证书信息</div>
+            <div v-else class="cloud-cert-meta">{{ t('cdnDomain.cloudNoInfo') }}</div>
           </n-spin>
         </div>
-        <n-alert v-if="certMgrMismatch" type="warning" :show-icon="true" class="cert-tip">本地记录与云端证书不一致，请以云端为准确认证书方式。</n-alert>
+        <n-alert v-if="certMgrMismatch" type="warning" :show-icon="true" class="cert-tip">{{ t('cdnDomain.cloudMismatch') }}</n-alert>
 
-        <n-form-item label="证书方式" label-placement="left" label-width="110">
+        <n-form-item :label="t('cdnDomain.certModeLabel')" label-placement="left" label-width="110">
           <n-radio-group v-model:value="certMgrMode" @update:value="onCertMgrModeChange">
             <n-space vertical>
-              <n-radio value="">不使用证书（停用自动部署）</n-radio>
-              <n-radio v-if="certMgrTarget?.can_freecert" value="freecert">平台免费证书</n-radio>
-              <n-radio v-if="certMgrTarget?.can_certlink" value="certlink">由本项目管理</n-radio>
-              <n-radio v-if="certMgrTarget?.can_certapply" value="certapply">项目申请证书上传绑定</n-radio>
+              <n-radio value="">{{ t('cdnDomain.certNoneMode') }}</n-radio>
+              <n-radio v-if="certMgrTarget?.can_freecert" value="freecert">{{ t('cdnDomain.freeCert') }}</n-radio>
+              <n-radio v-if="certMgrTarget?.can_certlink" value="certlink">{{ t('cdnDomain.certLink') }}</n-radio>
+              <n-radio v-if="certMgrTarget?.can_certapply" value="certapply">{{ t('cdnDomain.certApply') }}</n-radio>
             </n-space>
           </n-radio-group>
         </n-form-item>
@@ -318,7 +318,7 @@
         <!-- 平台免费证书 -->
         <template v-if="certMgrMode === 'freecert'">
           <n-alert type="info" :show-icon="true" class="cert-tip">
-            腾讯云 EdgeOne：托管接入（NS / DNSPod）可自动申请并部署免费证书；CNAME 接入会返回 DNS 委派验证记录，系统已尝试自动添加解析，生效后点击「检查并部署」完成下发。
+            {{ t('cdnDomain.freeCertDesc') }}
           </n-alert>
           <n-list v-if="certMgrFree.length" bordered class="cert-list">
             <n-list-item v-for="r in certMgrFree" :key="r.id">
@@ -339,14 +339,14 @@
           <n-spin :show="certMgrLoading">
             <template v-if="certMgrCandidates">
               <template v-if="certMgrCandidates.exact && certMgrCandidates.exact.length">
-                <n-alert type="success" :show-icon="true" class="cert-tip">已找到与目标子域名精确匹配的证书，将直接复用绑定，不再重新签发。</n-alert>
+                <n-alert type="success" :show-icon="true" class="cert-tip">{{ t('cdnDomain.exactFound') }}</n-alert>
                 <n-radio-group v-model:value="certMgrChoice" class="link-group">
                   <n-space vertical>
                     <n-radio v-for="c in certMgrCandidates.exact" :key="'o' + c.oid" :value="'order:' + c.oid">
                       <div class="link-cert">
-                        <div class="link-name">{{ c.name }}（证书 #{{ c.oid }}）</div>
-                        <div class="link-meta">颁发机构：{{ c.issuer || '未知' }} · 到期时间：{{ (c.expiretime || '').slice(0, 10) }}</div>
-                        <div class="link-meta">绑定域名：{{ (c.domains || []).join('、') }}</div>
+                        <div class="link-name">{{ c.name }}{{ t('cdnDomain.certIdWrap', { oid: c.oid }) }}</div>
+                        <div class="link-meta">{{ t('cdnDomain.issuer', { issuer: c.issuer || t('common.unknown') }) }} · {{ t('cdnDomain.expireTime', { time: (c.expiretime || '').slice(0, 10) }) }}</div>
+                        <div class="link-meta">{{ t('cdnDomain.boundDomains', { domains: (c.domains || []).join('、') }) }}</div>
                       </div>
                     </n-radio>
                   </n-space>
@@ -354,7 +354,7 @@
               </template>
               <template v-else>
                 <template v-if="certMgrCandidates.providers && certMgrCandidates.providers.length">
-                  <n-alert type="info" :show-icon="true" class="cert-tip">未找到精确匹配证书，请选择证书提供商自动签发（仅包含目标子域名 {{ certMgrTarget?.name }}）。</n-alert>
+                  <n-alert type="info" :show-icon="true" class="cert-tip">{{ t('cdnDomain.noExactProvider', { name: certMgrTarget?.name }) }}</n-alert>
                   <n-radio-group v-model:value="certMgrChoice" class="link-group">
                     <n-space vertical>
                       <n-radio v-for="p in certMgrCandidates.providers" :key="'a' + p.aid" :value="'aid:' + p.aid">{{ p.typename }}（{{ p.name }}）</n-radio>
@@ -362,7 +362,7 @@
                   </n-radio-group>
                 </template>
                 <template v-else-if="certMgrCandidates.defaultLe">
-                  <n-alert type="warning" :show-icon="true" class="cert-tip">当前没有可用的证书提供商，将自动使用默认 Let's Encrypt（{{ certMgrCandidates.defaultLe.email }}）签发精确子域名证书。</n-alert>
+                  <n-alert type="warning" :show-icon="true" class="cert-tip">{{ t('cdnDomain.defaultLe', { email: certMgrCandidates.defaultLe.email }) }}</n-alert>
                   <n-radio-group v-model:value="certMgrChoice" class="link-group">
                     <n-space vertical>
                       <n-radio value="default">{{ certMgrCandidates.defaultLe.typename }}（{{ certMgrCandidates.defaultLe.email }}）</n-radio>
@@ -374,13 +374,13 @@
           </n-spin>
           <n-alert v-if="certMgrError" type="error" :show-icon="true" class="cert-tip">{{ certMgrError }}</n-alert>
 
-          <n-divider class="cert-divider">CDN证书部署进度</n-divider>
+          <n-divider class="cert-divider">{{ t('cdnDomain.deployProgress') }}</n-divider>
           <n-alert v-if="linkLogState.summary" :type="linkLogState.type" :show-icon="true" class="cert-tip">{{ linkLogState.summary }}</n-alert>
           <div v-if="linkLog?.order" class="link-meta">
-            证书订单 #{{ linkLog.order.id }}：{{ orderStatusText(linkLog.order.status) }}
+            {{ t('cdnDomain.certOrderText', { id: linkLog.order.id, status: orderStatusText(linkLog.order.status) }) }}
             <span v-if="linkLog.order.domains && linkLog.order.domains.length">（{{ linkLog.order.domains.join('、') }}）</span>
           </div>
-          <div v-if="linkLog?.deploy" class="link-meta">自动部署任务 #{{ linkLog.deploy.id }}：{{ deployStatusText(linkLog.deploy.status) }}</div>
+          <div v-if="linkLog?.deploy" class="link-meta">{{ t('cdnDomain.deployTaskText', { id: linkLog.deploy.id, status: deployStatusText(linkLog.deploy.status) }) }}</div>
           <div class="link-log-list" v-if="linkLog && linkLog.logs && linkLog.logs.length">
             <div v-for="(l, i) in linkLog.logs" :key="i" class="link-log-item">
               <n-tag :type="logStatusType(l.status)" size="tiny" :bordered="false">{{ logStatusText(l.status) }}</n-tag>
@@ -389,13 +389,13 @@
               <span class="link-log-time">{{ (l.addtime || '').slice(5, 19) }}</span>
             </div>
           </div>
-          <n-empty v-else size="small" description="暂无执行日志" />
+          <n-empty v-else size="small" :description="t('cdnDomain.noLog')" />
         </template>
 
         <!-- 项目申请证书上传绑定 -->
         <template v-else-if="certMgrMode === 'certapply'">
           <n-alert type="info" :show-icon="true" class="cert-tip">
-            按站点申请一张通配符证书（*.站点根域 + 站点根域），申请账户在「自动续签设置」中配置；签发后自动上传绑定，后续续签自动更新。
+            {{ t('cdnDomain.certApplyDesc') }}
           </n-alert>
           <n-list v-if="certMgrApply.length" bordered class="cert-list">
             <n-list-item v-for="r in certMgrApply" :key="r.id">
@@ -403,25 +403,25 @@
                 <span class="cert-name">{{ r.name || certMgrTarget?.name }}</span>
                 <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
               </div>
-              <div v-if="r.domains && r.domains.length" class="cert-scope">证书覆盖：{{ r.domains.join('、') }}</div>
+              <div v-if="r.domains && r.domains.length" class="cert-scope">{{ t('cdnDomain.certScope', { domains: r.domains.join('、') }) }}</div>
               <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
             </n-list-item>
           </n-list>
         </template>
 
-        <n-alert v-else type="warning" :show-icon="true" class="cert-tip">不使用证书：仅停用「由本项目管理」的自动部署任务，不影响已部署到 CDN 的证书。</n-alert>
+        <n-alert v-else type="warning" :show-icon="true" class="cert-tip">{{ t('cdnDomain.certNoneDesc') }}</n-alert>
       </n-spin>
 
       <template #footer>
         <n-space justify="end" class="cert-actions">
-          <n-button v-if="certMgrHasPendingFree" :loading="certMgrBusy" @click="checkFreeCertMgr">检查并部署</n-button>
-          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" :loading="linkLogLoading" @click="loadCertMgrLog">刷新进度</n-button>
-          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" type="primary" secondary :loading="linkLogRetrying" @click="retryLink">立即检查并部署</n-button>
-          <n-button @click="showCertMgr = false">关闭</n-button>
-          <n-button v-if="certMgrMode === 'freecert'" type="primary" :loading="certMgrBusy" @click="applyFreeCertMgr">申请并部署</n-button>
-          <n-button v-if="certMgrMode === 'certapply'" type="primary" :loading="certMgrBusy" @click="applyCertApplyMgr">申请并部署</n-button>
-          <n-button v-if="certMgrMode === 'certlink'" type="primary" :loading="certMgrBusy" :disabled="!certMgrChoice" @click="applyLinkMgr">确认并部署</n-button>
-          <n-button v-if="certMgrMode === ''" type="primary" :loading="certMgrBusy" @click="applyNoneMgr">保存</n-button>
+          <n-button v-if="certMgrHasPendingFree" :loading="certMgrBusy" @click="checkFreeCertMgr">{{ t('cdnDomain.checkDeploy') }}</n-button>
+          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" :loading="linkLogLoading" @click="loadCertMgrLog">{{ t('cdnDomain.refreshProgress') }}</n-button>
+          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" type="primary" secondary :loading="linkLogRetrying" @click="retryLink">{{ t('cdnDomain.checkDeployNow') }}</n-button>
+          <n-button @click="showCertMgr = false">{{ t('common.close') }}</n-button>
+          <n-button v-if="certMgrMode === 'freecert'" type="primary" :loading="certMgrBusy" @click="applyFreeCertMgr">{{ t('cdnDomain.applyDeploy') }}</n-button>
+          <n-button v-if="certMgrMode === 'certapply'" type="primary" :loading="certMgrBusy" @click="applyCertApplyMgr">{{ t('cdnDomain.applyDeploy') }}</n-button>
+          <n-button v-if="certMgrMode === 'certlink'" type="primary" :loading="certMgrBusy" :disabled="!certMgrChoice" @click="applyLinkMgr">{{ t('cdnDomain.confirmDeploy') }}</n-button>
+          <n-button v-if="certMgrMode === ''" type="primary" :loading="certMgrBusy" @click="applyNoneMgr">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -431,11 +431,13 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 import { AddOutline, CloudDownloadOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -447,11 +449,11 @@ const dnsDomains = ref<any[]>([]);
 const dnsDomainOptions = computed(() => dnsDomains.value.map((d: any) => ({ label: d.name, value: d.id })));
 const matchedDomain = ref('');
 const zoneOptions = ref<any[]>([]);
-const serviceAreaOptions = [
-  { label: '中国大陆', value: 'mainland_china' },
-  { label: '中国大陆以外', value: 'overseas' },
-  { label: '全球', value: 'global' },
-];
+const serviceAreaOptions = computed(() => [
+  { label: t('cdnDomain.areaMainland'), value: 'mainland_china' },
+  { label: t('cdnDomain.areaOverseas'), value: 'overseas' },
+  { label: t('cdnDomain.areaGlobal'), value: 'global' },
+]);
 
 const showAdd = ref(false);
 const showSync = ref(false);
@@ -521,31 +523,38 @@ let linkLogTimer: any = null;
 const linkLogState = computed(() => {
   const d = linkLog.value;
   if (!d) return { type: 'info' as const, summary: '' };
-  if (d.done) return { type: 'success' as const, summary: '证书已签发并部署到 CDN，HTTPS 已启用；后续续签将自动更新。' };
-  if (d.failed) return { type: 'error' as const, summary: d.deploy?.error || d.order?.error || '执行失败，可点击「立即检查并部署」重试。' };
-  if (d.order && Number(d.order.status) === 3) return { type: 'warning' as const, summary: '证书已签发，正在创建自动部署任务并部署到 CDN，请稍候…' };
-  return { type: 'info' as const, summary: '证书正在申请/签发中，系统会自动完成后续部署，请稍候…' };
+  if (d.done) return { type: 'success' as const, summary: t('cdnDomain.linkLogDone') };
+  if (d.failed) return { type: 'error' as const, summary: d.deploy?.error || d.order?.error || t('cdnDomain.linkLogFailed') };
+  if (d.order && Number(d.order.status) === 3) return { type: 'warning' as const, summary: t('cdnDomain.linkLogIssued') };
+  return { type: 'info' as const, summary: t('cdnDomain.linkLogWorking') };
 });
 
 function nodeText(node: string) {
-  return ({ order: '证书订单', issue: '证书签发', account: '部署账户', task: '部署任务', deploy: '部署到CDN' } as any)[node] || node;
+  const labels: Record<string, string> = {
+    order: t('cdnDomain.nodeOrder'),
+    issue: t('cdnDomain.nodeIssue'),
+    account: t('cdnDomain.nodeAccount'),
+    task: t('cdnDomain.nodeTask'),
+    deploy: t('cdnDomain.nodeDeploy'),
+  };
+  return labels[node] || node;
 }
 function logStatusText(s: string) {
-  return s === 'ok' ? '完成' : s === 'fail' ? '失败' : '进行中';
+  return s === 'ok' ? t('cdnDomain.logDone') : s === 'fail' ? t('cdnDomain.logFail') : t('cdnDomain.logPending');
 }
 function logStatusType(s: string): 'success' | 'error' | 'warning' {
   return s === 'ok' ? 'success' : s === 'fail' ? 'error' : 'warning';
 }
 function orderStatusText(s: number) {
-  if (Number(s) === 3) return '已签发';
-  if (Number(s) < 0) return '处理失败';
-  if (Number(s) === 0) return '排队中';
-  return '签发中';
+  if (Number(s) === 3) return t('cdnDomain.orderIssued');
+  if (Number(s) < 0) return t('cdnDomain.orderFailed');
+  if (Number(s) === 0) return t('cdnDomain.orderQueued');
+  return t('cdnDomain.orderIssuing');
 }
 function deployStatusText(s: number) {
-  if (Number(s) === 1) return '部署成功';
-  if (Number(s) < 0) return '部署失败';
-  return '等待部署';
+  if (Number(s) === 1) return t('cdnDomain.deploySuccess');
+  if (Number(s) < 0) return t('cdnDomain.deployFailed');
+  return t('cdnDomain.deployWaiting');
 }
 
 // 证书管理：打开弹窗并按所选方式加载对应内容
@@ -604,7 +613,7 @@ async function fetchCertStatus(): Promise<any | null> {
 
 async function refreshCertStatus() {
   const data = await fetchCertStatus();
-  if (data) message.success('已刷新云端证书状态');
+  if (data) message.success(t('cdnDomain.refreshed'));
 }
 
 async function onCertMgrModeChange(mode: string) {
@@ -625,7 +634,7 @@ async function loadCertMgrCandidates() {
   const res = await fetchCandidates(certMgrTarget.value.name);
   certMgrLoading.value = false;
   if (res.code !== 0) {
-    certMgrError.value = res.msg || '获取证书候选失败';
+    certMgrError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
     return;
   }
   const d = res.data || {};
@@ -692,7 +701,7 @@ async function applyLinkMgr() {
     loadDomains();
     await loadCertMgrLog();
   } else {
-    certMgrError.value = res.msg || '操作失败，请重试或更换证书';
+    certMgrError.value = res.msg || t('cdnDomain.certFailedRetry');
   }
 }
 
@@ -757,9 +766,9 @@ const hasPending = computed(() => certResults.value.some((r) => r.status === 'pe
 const summaryType = computed(() => (certResults.value.some((r) => r.status === 'failed') ? 'warning' : 'success'));
 
 function statusText(status: string) {
-  if (status === 'applied') return '已部署';
-  if (status === 'pending') return certMode.value === 'link' ? '待签发' : '待验证';
-  return '失败';
+  if (status === 'applied') return t('cdnDomain.statusApplied');
+  if (status === 'pending') return certMode.value === 'link' ? t('cdnDomain.statusPendingLink') : t('cdnDomain.statusPendingFree');
+  return t('cdnDomain.statusFailed');
 }
 function statusType(status: string): 'success' | 'warning' | 'error' {
   if (status === 'applied') return 'success';
@@ -772,7 +781,7 @@ const addFlow = computed<any>(() => {
   const caps = providerCaps.value[accountTypes.value[form.aid]] || {};
   return (
     caps.addFlow || {
-      zone: { needed: false, label: '站点' },
+      zone: { needed: false, label: t('cdnDomain.zone') },
       serviceArea: { needed: false },
       origin: { protocol: true, ports: true, host: true, hostModes: [] },
       cert: [],
@@ -783,28 +792,28 @@ const addFlow = computed<any>(() => {
 // 按所选账户类型的厂商能力，动态给出证书配置选项
 const certModeOptions = computed(() => {
   const caps = providerCaps.value[accountTypes.value[form.aid]] || {};
-  const opts: any[] = [{ label: '什么都不做', value: 'none' }];
-  if (caps.freecert) opts.push({ label: '平台免费证书', value: 'freecert' });
-  if (caps.certapply) opts.push({ label: '项目申请证书上传绑定', value: 'certapply' });
-  if (caps.certlink) opts.push({ label: '由本项目管理', value: 'certlink' });
+  const opts: any[] = [{ label: t('cdnDomain.certModeNone'), value: 'none' }];
+  if (caps.freecert) opts.push({ label: t('cdnDomain.freeCert'), value: 'freecert' });
+  if (caps.certapply) opts.push({ label: t('cdnDomain.certApply'), value: 'certapply' });
+  if (caps.certlink) opts.push({ label: t('cdnDomain.certLink'), value: 'certlink' });
   return opts;
 });
 const linkCanConfirm = computed(() => !!linkChoice.value && !!linkCandidates.value);
 
-const columns: any[] = [
+const columns = computed<any[]>(() => [
   { type: 'selection' },
   { title: 'ID', key: 'id', width: 60 },
   {
-    title: '加速域名',
+    title: t('cdnDomain.accelDomain'),
     key: 'name',
     minWidth: 170,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.name });
     },
   },
-  { title: '线路', key: 'routename', width: 140 },
+  { title: t('cdnDomain.routeNameCol'), key: 'routename', width: 140 },
   {
-    title: '源站',
+    title: t('cdnDomain.originCol'),
     key: 'origin',
     minWidth: 160,
     render(row: any) {
@@ -820,28 +829,28 @@ const columns: any[] = [
     },
   },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'status',
     width: 90,
     render(row: any) {
-      return h(NTag, { type: row.status === 'offline' ? 'default' : 'success', size: 'small' }, { default: () => (row.status === 'offline' ? '已停用' : '已启用') });
+      return h(NTag, { type: row.status === 'offline' ? 'default' : 'success', size: 'small' }, { default: () => (row.status === 'offline' ? t('cdnDomain.statusStopped') : t('cdnDomain.statusEnabled')) });
     },
   },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 400,
     render(row: any) {
       const btns: any[] = [];
       if (row.can_freecert || row.can_certapply || row.can_certlink) {
-        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertMgr(row) }, { default: () => '证书管理' }));
+        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertMgr(row) }, { default: () => t('cdnDomain.certMgrTitle') }));
       }
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => '配置' }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
+      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
-];
+]);
 
 async function loadDomains() {
   loading.value = true;
@@ -957,33 +966,33 @@ function openAdd() {
 
 function nextAddStep() {
   if (addStep.value === 1) {
-    if (!form.aid) return message.warning('请选择 CDN 账户');
-    if (addFlow.value.zone.needed && !form.zone_id) return message.warning('请选择' + addFlow.value.zone.label);
-    if (addFlow.value.serviceArea.needed && !form.service_area) return message.warning('请选择服务区域');
+    if (!form.aid) return message.warning(t('cdnDomain.pleaseSelectAccount'));
+    if (addFlow.value.zone.needed && !form.zone_id) return message.warning(t('cdnDomain.pleaseSelectZone', { label: addFlow.value.zone.label }));
+    if (addFlow.value.serviceArea.needed && !form.service_area) return message.warning(t('cdnDomain.pleaseSelectArea'));
   } else if (addStep.value === 2) {
     if (form.zone_name) {
       const sub = String(form.sub || '').trim().toLowerCase();
-      if (!sub) return message.warning('请输入子域名');
+      if (!sub) return message.warning(t('cdnDomain.pleaseInputSub'));
       if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$/.test(sub.replace(/^\.+/, '').replace(/\.+$/, '')))
-        return message.warning('子域名格式不正确，只能包含字母、数字、中划线和点');
-      if (!form.name) return message.warning('请输入子域名');
-    } else if (!form.name) return message.warning('请输入加速域名');
-    if (!form.did) return message.warning('未匹配到联动域名，请确认加速域名属于已在「域名管理」中添加的域名');
+        return message.warning(t('cdnDomain.subFormatInvalid'));
+      if (!form.name) return message.warning(t('cdnDomain.pleaseInputSub'));
+    } else if (!form.name) return message.warning(t('cdnDomain.pleaseInputDomain'));
+    if (!form.did) return message.warning(t('cdnDomain.noLinkedDomain'));
   } else if (addStep.value === 3) {
-    if (!form.origin) return message.warning('请输入源站地址');
-    if (addFlow.value.origin.host && form.origin_host_mode === 'custom' && !form.origin_host_custom) return message.warning('请输入回源 HOST');
+    if (!form.origin) return message.warning(t('cdnDomain.pleaseInputOrigin'));
+    if (addFlow.value.origin.host && form.origin_host_mode === 'custom' && !form.origin_host_custom) return message.warning(t('cdnDomain.pleaseInputHost'));
   }
   addStep.value++;
 }
 
 function certChoiceLabel(choice: string): string {
-  if (choice === 'default') return "默认 Let's Encrypt";
-  if (choice.startsWith('order:')) return `证书 #${choice.slice(6)}`;
-  return `证书提供商 #${choice.slice(4)}`;
+  if (choice === 'default') return t('cdnDomain.certChoiceDefault');
+  if (choice.startsWith('order:')) return t('cdnDomain.certChoiceOrder', { id: choice.slice(6) });
+  return t('cdnDomain.certChoiceProvider', { id: choice.slice(4) });
 }
 
 async function pickCertSource() {
-  if (!form.name) return message.warning('请先填写加速域名');
+  if (!form.name) return message.warning(t('cdnDomain.pleaseInputDomainFirst'));
   const choice = await openLinkDialog({ name: form.name });
   if (!choice) return;
   form.cert_choice = choice;
@@ -991,7 +1000,7 @@ async function pickCertSource() {
 }
 
 async function submitAdd() {
-  if (form.cert_mode === 'certlink' && !form.cert_choice) return message.warning('请选择证书来源');
+  if (form.cert_mode === 'certlink' && !form.cert_choice) return message.warning(t('cdnDomain.pleaseSelectCert'));
   const host = form.origin_host_mode === 'accelerate' ? form.name : form.origin_host_mode === 'custom' ? form.origin_host_custom : '';
   const payload: Record<string, any> = {
     aid: form.aid,
@@ -1047,7 +1056,7 @@ async function openLinkDialog(target: { id?: number; name: string }): Promise<st
   const res = await fetchCandidates(target.name);
   linkLoading.value = false;
   if (res.code !== 0) {
-    linkError.value = res.msg || '获取证书候选失败';
+    linkError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
   } else {
     const d = res.data || {};
     linkCandidates.value = d;
@@ -1076,12 +1085,12 @@ function onLinkAfterLeave() {
 }
 
 function confirmLink() {
-  if (!linkChoice.value) return message.warning('请选择证书或证书提供商');
+  if (!linkChoice.value) return message.warning(t('cdnDomain.pleaseSelectCertOrProvider'));
   finishLink(linkChoice.value);
 }
 
 async function doSync() {
-  if (!syncAid.value) return message.warning('请选择 CDN 账户');
+  if (!syncAid.value) return message.warning(t('cdnDomain.pleaseSelectAccount'));
   syncing.value = true;
   const res = await api('POST', '/cdn/sync', { aid: syncAid.value, did: syncDid.value });
   syncing.value = false;
@@ -1094,7 +1103,7 @@ async function doSync() {
 
 async function openCert(ids: number[], mode: 'free' | 'link') {
   const list = [...new Set(ids)].filter(Boolean);
-  if (!list.length) return message.warning(mode === 'link' ? '请先勾选要申请证书的加速域名' : '请先勾选要配置平台免费证书的加速域名');
+  if (!list.length) return message.warning(mode === 'link' ? t('cdnDomain.pleaseSelectDomainsLink') : t('cdnDomain.pleaseSelectDomainsFree'));
   certMode.value = mode;
   certResults.value = [];
   certSummary.value = '';
@@ -1131,31 +1140,31 @@ async function checkPending() {
 function del(row: any) {
   const state = reactive({ alsoCloud: false });
   dialog.warning({
-    title: '删除加速域名',
+    title: t('cdnDomain.deleteTitle'),
     content: () =>
       h('div', null, [
-        h('div', { style: 'margin-bottom:10px' }, `确定删除 ${row.name} 吗？`),
+        h('div', { style: 'margin-bottom:10px' }, t('cdnDomain.deleteConfirm', { name: row.name })),
         h(
           NCheckbox,
           {
             checked: state.alsoCloud,
             'onUpdate:checked': (v: boolean) => (state.alsoCloud = v),
           },
-          { default: () => '同时删除云端加速域名（云端删除后不可恢复）' },
+          { default: () => t('cdnDomain.deleteCloud') },
         ),
-        h('div', { style: 'margin-top:6px;color:var(--app-text-3);font-size:12px' }, '不勾选时仅删除本系统记录，云端加速域名保留。'),
-        h('div', { style: 'margin-top:6px;color:var(--app-warning);font-size:12px' }, '若该域名由本项目管理并已联动证书，删除时将先吊销联动证书，吊销成功后再删除该域名与自动部署任务；吊销失败会中止删除。'),
+        h('div', { style: 'margin-top:6px;color:var(--app-text-3);font-size:12px' }, t('cdnDomain.deleteCloudHint')),
+        h('div', { style: 'margin-top:6px;color:var(--app-warning);font-size:12px' }, t('cdnDomain.deleteCertHint')),
       ]),
-    positiveText: '删除',
-    negativeText: '取消',
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       if (state.alsoCloud) {
         // 删除云端域名需要二次确认
         dialog.warning({
-          title: '二次确认',
-          content: `将同时删除云端加速域名 ${row.name}，删除后云端资源不可恢复，确定继续吗？`,
-          positiveText: '确认删除',
-          negativeText: '取消',
+          title: t('cdnDomain.confirmAgain'),
+          content: t('cdnDomain.deleteCloudConfirm', { name: row.name }),
+          positiveText: t('cdnDomain.confirmDelete'),
+          negativeText: t('common.cancel'),
           onPositiveClick: () => doDelete(row, true),
         });
         return true;

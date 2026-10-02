@@ -1,30 +1,30 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="自动部署账户" subtitle="管理自动部署服务商账户与接入配置">
+    <PageHeader :title="t('deployAccount.title')" :subtitle="t('deployAccount.subtitle')">
       <template #actions>
         <n-button type="primary" @click="openAdd">
           <template #icon><n-icon :component="AddOutline" /></template>
-          添加账户
+          {{ t('deployAccount.add') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" empty-text="暂无部署账户" />
+      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" :empty-text="t('deployAccount.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑账户' : '添加账户'" style="max-width:600px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployAccount.editTitle') : t('deployAccount.addTitle')" style="max-width:600px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="部署类型">
+        <n-form-item :label="t('deployAccount.deployType')">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
         </n-form-item>
-        <n-form-item label="账户名称">
-          <n-input v-model:value="form.name" placeholder="备注名称" />
+        <n-form-item :label="t('deployAccount.accountName')">
+          <n-input v-model:value="form.name" :placeholder="t('deployAccount.remarkPlaceholder')" />
         </n-form-item>
-        <n-form-item label="备注">
-          <n-input v-model:value="form.remark" placeholder="选填" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('deployAccount.optional')" />
         </n-form-item>
         <template v-if="currentProvider">
-          <n-alert v-if="!currentProvider.implemented" type="warning" style="margin-bottom:12px">该部署类型正在接入中，暂不可用</n-alert>
+          <n-alert v-if="!currentProvider.implemented" type="warning" style="margin-bottom:12px">{{ t('deployAccount.pending') }}</n-alert>
           <n-alert v-if="currentProvider.desc || currentProvider.note" type="info" style="margin-bottom:12px" :show-icon="false">
             {{ currentProvider.desc || currentProvider.note }}
           </n-alert>
@@ -40,8 +40,8 @@
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存并验证</n-button>
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('deployAccount.saveVerify') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -49,7 +49,8 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NEllipsis, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -57,6 +58,7 @@ import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -71,10 +73,10 @@ const form = reactive<any>({ type: '', name: '', remark: '', config: {} });
 const currentProvider = ref<any>(null);
 const providerOptions = ref<any[]>([]);
 
-const columns = [
+const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   {
-    title: '部署类型',
+    title: t('deployAccount.typeCol'),
     key: 'typename',
     width: 150,
     render(row: any) {
@@ -83,7 +85,7 @@ const columns = [
     },
   },
   {
-    title: '账户名称',
+    title: t('deployAccount.accountName'),
     key: 'name',
     minWidth: 180,
     render(row: any) {
@@ -91,28 +93,28 @@ const columns = [
     },
   },
   {
-    title: '备注',
+    title: t('common.remark'),
     key: 'remark',
     minWidth: 120,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.remark || '' });
     },
   },
-  { title: '添加时间', key: 'addtime', width: 170 },
+  { title: t('deployAccount.addtimeCol'), key: 'addtime', width: 170 },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 160,
     render(row: any) {
       return h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }),
+          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
   },
-];
+]);
 
 function selectOptions(options: any) {
   if (Array.isArray(options)) return options;
@@ -129,7 +131,7 @@ async function loadProviders() {
     providers.value = res.data;
     classConfig.value = res.class_config || {};
     providerOptions.value = Object.entries(res.data).map(([k, v]: any) => ({
-      label: (v.implemented ? '' : '[待接入] ') + v.name + '（' + k + '）',
+      label: (v.implemented ? '' : t('deployAccount.pendingPrefix')) + v.name + '（' + k + '）',
       value: k,
       disabled: !v.implemented,
     }));
@@ -184,8 +186,8 @@ function safeJson(s: string) {
 }
 
 async function save() {
-  if (!form.type || !form.name) return message.warning('请填写部署类型和账户名称');
-  if (currentProvider.value && !currentProvider.value.implemented) return message.warning('该部署类型暂未支持');
+  if (!form.type || !form.name) return message.warning(t('deployAccount.fillWarning'));
+  if (currentProvider.value && !currentProvider.value.implemented) return message.warning(t('deployAccount.unsupported'));
   saving.value = true;
   const body = { type: form.type, name: form.name, remark: form.remark, config: form.config, deploy: 1 };
   const res = editingId.value
@@ -201,14 +203,14 @@ async function save() {
 
 function del(row: any) {
   dialog.warning({
-    title: '删除账户',
-    content: `确定删除账户 ${row.name} 吗？`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('deployAccount.deleteTitle'),
+    content: t('deployAccount.deleteConfirm', { name: row.name }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/cert/accounts/${row.id}?deploy=1`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('deployAccount.deleteSuccess'));
         loadAccounts();
       } else message.error(res.msg);
     },

@@ -1,35 +1,35 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="切换记录" subtitle="查看容灾任务的切换明细记录">
+    <PageHeader :title="t('route.dmTaskInfo')" :subtitle="t('dm.infoSubtitle')">
       <template #actions>
         <n-button @click="$router.push('/dm-tasks')">
           <template #icon><n-icon :component="ArrowBackOutline" /></template>
-          返回
+          {{ t('common.back') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
       <n-descriptions v-if="task" bordered :column="2" size="small" style="margin-bottom: 16px">
-        <n-descriptions-item label="域名">{{ task.rr }}.{{ task.domain || '' }}</n-descriptions-item>
-        <n-descriptions-item label="解析记录">{{ task.main_value }}</n-descriptions-item>
-        <n-descriptions-item label="切换设置">{{ typeLabel }}</n-descriptions-item>
-        <n-descriptions-item label="检测协议">{{ checktypeLabel }}</n-descriptions-item>
-        <n-descriptions-item label="当前状态">
-          <n-tag :type="task.status ? 'error' : 'success'" size="small">{{ task.status ? '异常' : '正常' }}</n-tag>
+        <n-descriptions-item :label="t('dm.infoDomain')">{{ task.rr }}.{{ task.domain || '' }}</n-descriptions-item>
+        <n-descriptions-item :label="t('dm.infoRecord')">{{ task.main_value }}</n-descriptions-item>
+        <n-descriptions-item :label="t('dm.infoSwitchSet')">{{ typeLabel }}</n-descriptions-item>
+        <n-descriptions-item :label="t('dm.infoCheckProto')">{{ checktypeLabel }}</n-descriptions-item>
+        <n-descriptions-item :label="t('dm.infoStatus')">
+          <n-tag :type="task.status ? 'error' : 'success'" size="small">{{ task.status ? t('dm.abnormal') : t('dm.normal') }}</n-tag>
         </n-descriptions-item>
-        <n-descriptions-item label="运行状态">
-          <n-tag :type="task.active ? 'success' : 'default'" size="small" bordered>{{ task.active ? '运行中' : '已停止' }}</n-tag>
+        <n-descriptions-item :label="t('dm.infoRunStatus')">
+          <n-tag :type="task.active ? 'success' : 'default'" size="small" bordered>{{ task.active ? t('dm.running') : t('dm.stopped') }}</n-tag>
         </n-descriptions-item>
-        <n-descriptions-item label="24H 告警次数">{{ task.fail_count }}</n-descriptions-item>
-        <n-descriptions-item label="24H 切换次数">{{ task.switch_count }}</n-descriptions-item>
+        <n-descriptions-item :label="t('dm.infoFailCount24')">{{ task.fail_count }}</n-descriptions-item>
+        <n-descriptions-item :label="t('dm.infoSwitchCount24')">{{ task.switch_count }}</n-descriptions-item>
       </n-descriptions>
 
       <n-space style="margin-bottom: 16px">
         <n-select v-model:value="actionFilter" :options="actionOptions" style="width: 140px" @update:value="loadLogs" />
-        <n-button @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
+        <n-button @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
       </n-space>
 
-      <ResponsiveDataTable :columns="logColumns" :data="logs" :loading="loading" :pagination="pagination" empty-text="暂无切换记录" />
+      <ResponsiveDataTable :columns="logColumns" :data="logs" :loading="loading" :pagination="pagination" :empty-text="t('dm.emptyLogs')" />
     </n-card>
   </div>
 </template>
@@ -37,6 +37,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { NTag } from 'naive-ui';
 import { ArrowBackOutline, RefreshOutline } from '@vicons/ionicons5';
@@ -47,6 +48,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
+const { t } = useI18n();
 
 const task = ref<any>(null);
 const logs = ref<any[]>([]);
@@ -56,42 +58,47 @@ const pageSize = ref(10);
 const actionFilter = ref(0);
 const total = ref(0);
 
-const typeMap: Record<number, string> = { 0: '无操作', 1: '暂停解析', 2: '切换备用 (备用:' + (task.value?.backup_value || '') + ')', 3: '条件开启解析' };
+const typeMap = computed<Record<number, string>>(() => ({
+  0: t('dm.noAction'),
+  1: t('dm.pauseRecord'),
+  2: t('dm.switchBackupRecord'),
+  3: t('dm.condEnableFull'),
+}));
 const checktypeMap: Record<number, string> = { 0: 'PING', 1: 'TCP', 2: 'HTTP(S)' };
 
 const typeLabel = computed(() => {
   if (!task.value) return '';
-  const t = task.value.type;
-  if (t === 2) return '切换备用（备用：' + task.value.backup_value + '）';
-  return typeMap[t] || t;
+  const type = task.value.type;
+  if (type === 2) return t('dm.switchBackupDetail', { value: task.value.backup_value });
+  return typeMap.value[type] || task.value.type;
 });
 const checktypeLabel = computed(() => (task.value ? checktypeMap[task.value.checktype] || task.value.checktype : ''));
 
-const actionOptions = [
-  { label: '操作类型', value: 0 },
-  { label: '发生异常', value: 1 },
-  { label: '恢复正常', value: 2 },
-];
+const actionOptions = computed(() => [
+  { label: t('dm.filterType'), value: 0 },
+  { label: t('dm.actionAbnormal'), value: 1 },
+  { label: t('dm.actionRecover'), value: 2 },
+]);
 
 function actionName(a: number): string {
-  const t = task.value?.type;
+  const type = task.value?.type;
   if (a === 1) {
-    if (t === 2) return '切换备用解析记录';
-    if (t === 3) return '开启解析';
-    return '发生异常';
+    if (type === 2) return t('dm.switchToBackup');
+    if (type === 3) return t('dm.enableRecord');
+    return t('dm.actionAbnormal');
   }
   if (a === 2) {
-    if (t === 2) return '恢复主解析记录';
-    if (t === 3) return '暂停解析';
-    return '恢复正常';
+    if (type === 2) return t('dm.restoreMain');
+    if (type === 3) return t('dm.pauseRecord');
+    return t('dm.actionRecover');
   }
-  return '未知';
+  return t('common.unknown');
 }
 
-const logColumns = [
+const logColumns = computed(() => [
   { title: 'ID', key: 'id', width: 80 },
   {
-    title: '操作类型',
+    title: t('dm.logAction'),
     key: 'action',
     width: 160,
     render(row: any) {
@@ -99,9 +106,9 @@ const logColumns = [
       return h(NTag, { size: 'small', type: isAlert ? 'error' : 'success' }, { default: () => actionName(row.action) });
     },
   },
-  { title: '时间', key: 'date', width: 180 },
-  { title: '异常原因', key: 'errmsg', render: (row: any) => row.errmsg || '-' },
-];
+  { title: t('dm.logTime'), key: 'date', width: 180 },
+  { title: t('dm.logError'), key: 'errmsg', render: (row: any) => row.errmsg || '-' },
+]);
 
 const pagination = reactive({
   page: 1,

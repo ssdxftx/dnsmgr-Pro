@@ -1,44 +1,44 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="(isEdit ? '编辑' : '添加') + '优选IP任务'" subtitle="配置域名优选 IP 任务的解析参数" back="/optimize-tasks" />
+    <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('optimize.taskTitle')" :subtitle="t('optimize.formSubtitle')" back="/optimize-tasks" />
     <n-card :bordered="false">
       <n-form label-placement="left" label-width="140" style="max-width: 720px">
-        <n-form-item label="域名选择" required>
+        <n-form-item :label="t('optimize.domainSelect')" required>
           <n-space :size="4" style="width: 100%">
-            <n-input v-model:value="form.rr" placeholder="主机记录" style="width: 200px" />
+            <n-input v-model:value="form.rr" :placeholder="t('optimize.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" placeholder="主域名" filterable style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable style="flex: 1" />
           </n-space>
         </n-form-item>
 
-        <n-form-item label="CDN服务商" required>
+        <n-form-item :label="t('optimize.cdnProvider')" required>
           <n-radio-group v-model:value="form.cdn_type">
             <n-radio-button v-for="(v, k) in cdnTypeList" :key="k" :value="Number(k)">{{ v }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item label="解析线路类型" required>
+        <n-form-item :label="t('optimize.typeSelect')" required>
           <n-radio-group v-model:value="form.type">
             <n-radio-button :value="0">
-              电信/联通/移动
-              <n-tooltip trigger="hover">用于已在CF添加，需优化三网访问速度的域名</n-tooltip>
+              {{ t('optimize.lineType0') }}
+              <n-tooltip trigger="hover">{{ t('optimize.lineType0Tip') }}</n-tooltip>
             </n-radio-button>
             <n-radio-button :value="1">
-              默认/联通/移动
-              <n-tooltip trigger="hover">将电信优选IP解析到默认线路，用于给其他域名提供CNAME服务</n-tooltip>
+              {{ t('optimize.lineType1') }}
+              <n-tooltip trigger="hover">{{ t('optimize.lineType1Tip') }}</n-tooltip>
             </n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item label="解析IP类型" required>
+        <n-form-item :label="t('optimize.ipTypeSelect')" required>
           <n-space>
             <n-checkbox v-for="o in ipTypeList" :key="o.value" :checked="ipTypeSelect.includes(o.value)" :disabled="o.value === 'v6' && isXingpingcn" @update:checked="(v: boolean) => toggleIpType(o.value, v)">
-              {{ o.label }}<span v-if="o.value === 'v6' && isXingpingcn" class="tip-text">(xingpingcn.top不支持)</span>
+              {{ o.label }}<span v-if="o.value === 'v6' && isXingpingcn" class="tip-text">{{ t('optimize.ipV6Unsupported') }}</span>
             </n-checkbox>
           </n-space>
         </n-form-item>
 
-        <n-form-item label="每线路解析数量" required>
+        <n-form-item :label="t('optimize.perLine')" required>
           <n-input-number v-model:value="form.recordnum" :min="1" :max="50" style="width: 220px" />
         </n-form-item>
 
@@ -46,19 +46,19 @@
           <n-input-number v-model:value="form.ttl" :min="1" :max="3600" style="width: 220px" />
         </n-form-item>
 
-        <n-form-item label="备注">
-          <n-input v-model:value="form.remark" placeholder="可留空" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('optimize.optional')" />
         </n-form-item>
 
         <n-alert v-show="form.type === 0" type="info" style="margin-bottom: 12px">
-          提示：所选域名需保留一个默认线路的解析记录，指向所选CDN服务商提供的CNAME地址，其他线路的解析记录需要删除，添加任务后将自动添加电信/联通/移动线路的解析记录。
+          {{ t('optimize.alertType0') }}
         </n-alert>
         <n-alert v-show="form.type === 1" type="info" style="margin-bottom: 12px">
-          提示：所选域名需删除全部解析记录，添加任务后将自动为当前域名添加解析记录。
+          {{ t('optimize.alertType1') }}
         </n-alert>
 
         <n-form-item>
-          <n-button type="primary" :loading="saving" @click="submit">提交</n-button>
+          <n-button type="primary" :loading="saving" @click="submit">{{ t('common.submit') }}</n-button>
         </n-form-item>
       </n-form>
     </n-card>
@@ -68,6 +68,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -75,6 +76,7 @@ import PageHeader from '../components/PageHeader.vue';
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
+const { t } = useI18n();
 
 const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'));
 const editId = computed(() => Number(route.params.id));
@@ -85,10 +87,10 @@ const optimizeIpApi = ref('0');
 const ipTypeSelect = ref<string[]>(['v4']);
 
 const cdnTypeList: Record<number, string> = { 1: 'CloudFlare', 2: 'CloudFront', 4: 'EdgeOne' };
-const ipTypeList = [
-  { value: 'v4', label: 'IPv4(A记录)' },
-  { value: 'v6', label: 'IPv6(AAAA记录)' },
-];
+const ipTypeList = computed(() => [
+  { value: 'v4', label: t('optimize.ipTypeV4') },
+  { value: 'v6', label: t('optimize.ipTypeV6') },
+]);
 
 const isXingpingcn = computed(() => optimizeIpApi.value === '2');
 
@@ -141,7 +143,7 @@ async function loadTask() {
 
 async function submit() {
   if (!form.did || !form.rr || !form.ip_type || !form.recordnum || !form.ttl) {
-    return message.warning('必填项不能为空');
+    return message.warning(t('optimize.requiredEmpty'));
   }
   saving.value = true;
   const body = { ...form, ip_type: ipTypeSelect.value.join(',') };

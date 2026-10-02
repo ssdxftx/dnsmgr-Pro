@@ -1,10 +1,10 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="DNS 劫持检测" subtitle="配置域名解析劫持的自动检测任务">
+    <PageHeader :title="t('dnsCheck.title')" :subtitle="t('dnsCheck.subtitle')">
       <template #actions>
         <n-button type="primary" @click="openAdd">
           <template #icon><n-icon :component="AddOutline" /></template>
-          添加任务
+          {{ t('dnsCheck.addTask') }}
         </n-button>
       </template>
     </PageHeader>
@@ -15,60 +15,60 @@
         :loading="loading"
         :pagination="{ pageSize: 20 }"
         :row-key="(row: any) => row.id"
-        empty-text="暂无检测任务，点击「添加任务」配置自动劫持检测"
+        :empty-text="t('dnsCheck.empty')"
       />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" title="检测任务" style="max-width: 640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="t('dnsCheck.taskTitle')" style="max-width: 640px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="任务名称">
-          <n-input v-model:value="form.name" placeholder="可选，便于识别" />
+        <n-form-item :label="t('dnsCheck.taskName')">
+          <n-input v-model:value="form.name" :placeholder="t('dnsCheck.namePlaceholder')" />
         </n-form-item>
-        <n-form-item label="域名">
-          <n-select v-model:value="form.did" :options="domainOptions" filterable placeholder="选择要检测的域名" @update:value="onDomainChange" />
+        <n-form-item :label="t('dnsCheck.domain')">
+          <n-select v-model:value="form.did" :options="domainOptions" filterable :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
         </n-form-item>
-        <n-form-item label="子域名">
-          <n-select v-model:value="form.sub" :options="subOptions" filterable clearable placeholder="留空=检测整个域名" :disabled="!form.did" />
-          <n-text depth="3" style="font-size: 12px; display: block; margin-top: 4px">选择后检测该子域名的下级（三级检测四级及以上，四级检测五级及以上）</n-text>
+        <n-form-item :label="t('dnsCheck.subdomain')">
+          <n-select v-model:value="form.sub" :options="subOptions" filterable clearable :placeholder="t('dnsCheck.subPlaceholder')" :disabled="!form.did" />
+          <n-text depth="3" style="font-size: 12px; display: block; margin-top: 4px">{{ t('dnsCheck.subHint') }}</n-text>
         </n-form-item>
-        <n-form-item label="检测类型">
+        <n-form-item :label="t('dnsCheck.checkType')">
           <n-checkbox-group v-model:value="form.types">
-            <n-checkbox v-for="t in typeList" :key="t" :value="t" :label="t" style="margin-right: 10px" />
+            <n-checkbox v-for="type in typeList" :key="type" :value="type" :label="type" style="margin-right: 10px" />
           </n-checkbox-group>
-          <n-text depth="3" style="font-size: 12px; display: block; margin-top: 4px">留空表示检测全部类型</n-text>
+          <n-text depth="3" style="font-size: 12px; display: block; margin-top: 4px">{{ t('dnsCheck.typeHint') }}</n-text>
         </n-form-item>
-        <n-form-item label="执行周期">
+        <n-form-item :label="t('dnsCheck.cycle')">
           <n-radio-group v-model:value="form.cycle">
-            <n-radio-button value="daily">每日定时</n-radio-button>
-            <n-radio-button value="interval">间隔执行</n-radio-button>
+            <n-radio-button value="daily">{{ t('dnsCheck.daily') }}</n-radio-button>
+            <n-radio-button value="interval">{{ t('dnsCheck.interval') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
-        <n-form-item v-if="form.cycle === 'daily'" label="每日时间">
+        <n-form-item v-if="form.cycle === 'daily'" :label="t('dnsCheck.dailyTime')">
           <n-time-picker v-model:value="form.runTime" format="HH:mm" :clearable="false" />
         </n-form-item>
-        <n-form-item v-if="form.cycle === 'interval'" label="间隔分钟">
+        <n-form-item v-if="form.cycle === 'interval'" :label="t('dnsCheck.intervalMin')">
           <n-input-number v-model:value="form.intervalMin" :min="1" :max="10080" style="width: 200px" />
         </n-form-item>
-        <n-form-item label="提醒邮箱">
-          <n-input v-model:value="form.noticeEmail" placeholder="留空使用系统默认收件邮箱" />
+        <n-form-item :label="t('dnsCheck.noticeEmail')">
+          <n-input v-model:value="form.noticeEmail" :placeholder="t('dnsCheck.emailPlaceholder')" />
         </n-form-item>
-        <n-form-item label="启用">
+        <n-form-item :label="t('common.enable')">
           <n-switch v-model:value="form.active" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showResult" preset="card" title="检测结果" style="max-width: 560px">
+    <n-modal v-model:show="showResult" preset="card" :title="t('dnsCheck.resultTitle')" style="max-width: 560px">
       <n-alert
         :type="runningResult.total === 0 || runningResult.issues.length ? 'warning' : 'success'"
         :show-icon="false"
-        :title="runningResult.error || (runningResult.issues.length ? `发现 ${runningResult.issues.length} 条异常记录，可能存在劫持！` : `检测完成，共 ${runningResult.total} 条记录，未发现异常`)"
+        :title="runningResult.error || (runningResult.issues.length ? t('dnsCheck.issuesFound', { count: runningResult.issues.length }) : t('dnsCheck.allClear', { count: runningResult.total }))"
       />
       <ResponsiveDataTable
         v-if="runningResult.issues && runningResult.issues.length"
@@ -79,7 +79,7 @@
       />
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showResult = false">关闭</n-button>
+          <n-button @click="showResult = false">{{ t('common.close') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -87,7 +87,8 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -96,6 +97,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
+const { t } = useI18n();
 const loading = ref(false);
 const saving = ref(false);
 const tasks = ref<any[]>([]);
@@ -121,75 +123,75 @@ function fmtTs(v: number | null): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-const columns = [
+const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
-  { title: '名称', key: 'name', width: 150, render: (row: any) => row.name || '-' },
+  { title: t('dnsCheck.nameCol'), key: 'name', width: 150, render: (row: any) => row.name || '-' },
   {
-    title: '域名',
+    title: t('dnsCheck.domain'),
     key: 'domain_name',
     width: 200,
     render: (row: any) => (row.sub ? `${row.sub}.${row.domain_name}` : row.domain_name || '-'),
   },
   {
-    title: '检测类型',
+    title: t('dnsCheck.checkType'),
     key: 'types',
     width: 160,
     render: (row: any) => {
-      const t = String(row.types || '').trim();
-      return t ? t : '全部';
+      const types = String(row.types || '').trim();
+      return types ? types : t('dnsCheck.all');
     },
   },
   {
-    title: '周期',
+    title: t('dnsCheck.cycle'),
     key: 'cycle',
     width: 130,
     render: (row: any) => {
-      if (row.cycle === 'interval') return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => `每 ${row.interval_min} 分钟` });
-      return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => `每日 ${row.run_time || '-'}` });
+      if (row.cycle === 'interval') return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('dnsCheck.everyInterval', { minutes: row.interval_min }) });
+      return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('dnsCheck.everyDay', { time: row.run_time || '-' }) });
     },
   },
-  { title: '提醒邮箱', key: 'notice_email', width: 160, render: (row: any) => row.notice_email || '系统默认' },
+  { title: t('dnsCheck.noticeEmail'), key: 'notice_email', width: 160, render: (row: any) => row.notice_email || t('dnsCheck.systemDefault') },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'active',
     width: 80,
-    render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? '启用' : '停用') }),
+    render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('common.enable') : t('dnsCheck.stopped')) }),
   },
-  { title: '上次执行', key: 'last_run', width: 170, render: (row: any) => row.last_run || '-' },
-  { title: '下次执行', key: 'next_run', width: 170, render: (row: any) => row.next_run || '-' },
+  { title: t('dnsCheck.lastRun'), key: 'last_run', width: 170, render: (row: any) => row.last_run || '-' },
+  { title: t('dnsCheck.nextRun'), key: 'next_run', width: 170, render: (row: any) => row.next_run || '-' },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 260,
     render(row: any) {
       return h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'small', type: 'primary', onClick: () => runNow(row) }, { default: () => '立即检测' }),
-          h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.active ? '停用' : '启用') }),
-          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => del(row) }, { default: () => '删除' }),
+          h(NButton, { size: 'small', type: 'primary', onClick: () => runNow(row) }, { default: () => t('dnsCheck.runNow') }),
+          h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.active ? t('dnsCheck.stopped') : t('common.enable')) }),
+          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'small', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
   },
-];
+]);
 
-const issueColumns = [
-  { title: '主机记录', key: 'name', width: 120 },
-  { title: '类型', key: 'type', width: 70 },
-  { title: '期望值', key: 'value', width: 150, ellipsis: { tooltip: true } },
+const issueColumns = computed(() => [
+  { title: t('dnsCheck.hostRecord'), key: 'name', width: 120 },
+  { title: t('common.type'), key: 'type', width: 70 },
+  { title: t('dnsCheck.expectedValue'), key: 'value', width: 150, ellipsis: { tooltip: true } },
   {
-    title: '本地解析值',
+    title: t('dnsCheck.actualValue'),
     key: 'actual',
-    render: (row: any) => (row.actual && row.actual.length ? row.actual.join(', ') : '未查询到'),
+    render: (row: any) => (row.actual && row.actual.length ? row.actual.join(', ') : t('dnsCheck.notFound')),
   },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'status',
     width: 90,
-    render: (row: any) => h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => (row.status === 'not_found' ? '未查询到' : '不匹配') }),
+    render: (row: any) => h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => (row.status === 'not_found' ? t('dnsCheck.notFound') : t('dnsCheck.mismatch')) }),
   },
-];
+]);
 
 async function load() {
   loading.value = true;
@@ -245,8 +247,8 @@ function openEdit(row: any) {
 }
 
 async function save() {
-  if (!form.did) return message.warning('请选择域名');
-  if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning('请填写间隔分钟数');
+  if (!form.did) return message.warning(t('dnsCheck.selectDomain'));
+  if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('dnsCheck.intervalRequired'));
   saving.value = true;
   try {
     const runTime = form.cycle === 'daily' ? fmtTs(form.runTime) : null;
@@ -265,7 +267,7 @@ async function save() {
       ? await api('PUT', `/dns-check/tasks/${editingId.value}`, body)
       : await api('POST', '/dns-check/tasks', body);
     if (res.code === 0) {
-      message.success(editingId.value ? '保存成功' : '创建成功');
+      message.success(editingId.value ? t('common.saved') : t('dnsCheck.created'));
       showEdit.value = false;
       load();
     } else message.error(res.msg);
@@ -293,14 +295,14 @@ async function toggle(row: any) {
 
 function del(row: any) {
   dialog.warning({
-    title: '删除任务',
-    content: `确定删除检测任务「${row.name || 'ID ' + row.id}」吗？`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('dnsCheck.deleteTitle'),
+    content: t('dnsCheck.deleteConfirm', { name: row.name || `ID ${row.id}` }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/dns-check/tasks/${row.id}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('dnsCheck.deleteSuccess'));
         load();
       } else message.error(res.msg);
     },

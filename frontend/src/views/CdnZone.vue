@@ -1,26 +1,26 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="站点设置" subtitle="配置 CDN 站点的 HTTPS、缓存与性能策略" back="/cdn-domains">
+    <PageHeader :title="t('cdnZone.title')" :subtitle="t('cdnZone.subtitle')" back="/cdn-domains">
       <template #actions>
         <n-select
           v-model:value="selectedKey"
           :options="zoneOptions"
-          placeholder="选择站点"
+          :placeholder="t('cdnZone.selectPlaceholder')"
           style="width:320px;margin-left:8px"
           @update:value="onZoneSelect"
         />
       </template>
     </PageHeader>
 
-    <n-empty v-if="!zoneOptions.length" description="暂无站点（仅接入到站点类型的加速域名后可用）" style="margin-top:24px" />
+    <n-empty v-if="!zoneOptions.length" :description="t('cdnZone.empty')" style="margin-top:24px" />
 
     <template v-if="selectedKey">
       <n-card :bordered="false" size="small" style="margin-top:12px">
         <template #header>
           <n-space align="center">
             <span class="title">{{ currentZone?.routename || '' }} · {{ currentZone?.name || '' }}</span>
-            <n-tag size="small">站点 ID：{{ currentZone?.zone_id }}</n-tag>
-            <n-tag size="small" type="info">{{ currentZone?.domain_count }} 个加速域名</n-tag>
+            <n-tag size="small">{{ t('cdnZone.zoneIdLabel') }}{{ currentZone?.zone_id }}</n-tag>
+            <n-tag size="small" type="info">{{ t('cdnZone.domainCount', { count: currentZone?.domain_count }) }}</n-tag>
           </n-space>
         </template>
         <div>
@@ -28,13 +28,13 @@
         </div>
       </n-card>
 
-      <n-card title="站点全局配置" size="small" :bordered="false" style="margin-top:12px">
+      <n-card :title="t('cdnZone.globalCard')" size="small" :bordered="false" style="margin-top:12px">
         <template #header-extra>
-          <span style="color:var(--app-warning);font-size:12px">作用于站点下所有加速域名</span>
+          <span style="color:var(--app-warning);font-size:12px">{{ t('cdnZone.globalHint') }}</span>
         </template>
         <n-form label-placement="left" label-width="110">
           <n-divider title-placement="left">HTTPS / TLS</n-divider>
-          <n-form-item label="强制 HTTPS 跳转">
+          <n-form-item :label="t('cdnZone.forceHttpsLabel')">
             <n-switch v-model:value="zone.forceSwitch" />
             <n-select v-model:value="zone.forceCode" :options="[{ label: '302', value: 302 }, { label: '301', value: 301 }]" style="width:90px;margin-left:8px" />
           </n-form-item>
@@ -43,46 +43,46 @@
           <n-form-item label="HSTS">
             <n-space>
               <n-switch v-model:value="zone.hstsSwitch" />
-              <span>含子域</span><n-switch v-model:value="zone.hstsSub" size="small" />
+              <span>{{ t('cdnZone.includeSub') }}</span><n-switch v-model:value="zone.hstsSub" size="small" />
               <span>Preload</span><n-switch v-model:value="zone.hstsPreload" size="small" />
               <span>MaxAge</span><n-input-number v-model:value="zone.hstsMaxage" :min="0" style="width:110px" />
             </n-space>
           </n-form-item>
-          <n-form-item label="TLS 版本">
+          <n-form-item :label="t('cdnZone.tlsVersionLabel')">
             <n-space>
               <n-checkbox v-model:checked="zone.tls12">TLS 1.2</n-checkbox>
               <n-checkbox v-model:checked="zone.tls13">TLS 1.3</n-checkbox>
             </n-space>
           </n-form-item>
 
-          <n-divider title-placement="left">网络与协议</n-divider>
+          <n-divider title-placement="left">{{ t('cdnZone.networkDivider') }}</n-divider>
           <n-form-item label="HTTP/3（QUIC）"><n-switch v-model:value="zone.quic" /></n-form-item>
-          <n-form-item label="回源 HTTP/2"><n-switch v-model:value="zone.upstreamHttp2" /></n-form-item>
+          <n-form-item :label="t('cdnZone.upstreamHttp2Label')"><n-switch v-model:value="zone.upstreamHttp2" /></n-form-item>
           <n-form-item label="gRPC"><n-switch v-model:value="zone.grpc" /></n-form-item>
           <n-form-item label="WebSocket">
             <n-space>
               <n-switch v-model:value="zone.websocketSwitch" />
-              <span>超时(s)</span><n-input-number v-model:value="zone.websocketTimeout" :min="1" style="width:80px" />
+              <span>{{ t('cdnZone.timeoutLabel') }}</span><n-input-number v-model:value="zone.websocketTimeout" :min="1" style="width:80px" />
             </n-space>
           </n-form-item>
 
-          <n-divider title-placement="left">缓存</n-divider>
-          <n-form-item label="节点缓存模式">
+          <n-divider title-placement="left">{{ t('cdnZone.cacheDivider') }}</n-divider>
+          <n-form-item :label="t('cdnZone.cacheModeLabel')">
             <n-space>
               <n-radio-group v-model:value="zone.cacheMode">
-                <n-radio value="follow">遵循源站</n-radio>
-                <n-radio value="custom">自定义时间</n-radio>
-                <n-radio value="nocache">不缓存</n-radio>
+                <n-radio value="follow">{{ t('cdnZone.followOrigin') }}</n-radio>
+                <n-radio value="custom">{{ t('cdnZone.customTime') }}</n-radio>
+                <n-radio value="nocache">{{ t('cdnZone.noCache') }}</n-radio>
               </n-radio-group>
-              <n-input-number v-model:value="zone.cacheTime" :min="0" style="width:120px" placeholder="时间(秒)" />
+              <n-input-number v-model:value="zone.cacheTime" :min="0" style="width:120px" :placeholder="t('cdnZone.cacheTimePlaceholder')" />
             </n-space>
           </n-form-item>
-          <n-form-item label="缓存预刷新"><n-switch v-model:value="zone.cachePrefresh" /></n-form-item>
-          <n-form-item label="离线缓存"><n-switch v-model:value="zone.offlineCache" /></n-form-item>
+          <n-form-item :label="t('cdnZone.cachePrefreshLabel')"><n-switch v-model:value="zone.cachePrefresh" /></n-form-item>
+          <n-form-item :label="t('cdnZone.offlineCacheLabel')"><n-switch v-model:value="zone.offlineCache" /></n-form-item>
 
-          <n-divider title-placement="left">性能优化</n-divider>
-          <n-form-item label="智能路由"><n-switch v-model:value="zone.smartRouting" /></n-form-item>
-          <n-form-item label="内容压缩">
+          <n-divider title-placement="left">{{ t('cdnZone.perfDivider') }}</n-divider>
+          <n-form-item :label="t('cdnZone.smartRoutingLabel')"><n-switch v-model:value="zone.smartRouting" /></n-form-item>
+          <n-form-item :label="t('cdnZone.compressionLabel')">
             <n-space>
               <n-switch v-model:value="zone.compression" />
               <n-checkbox v-model:checked="zone.compGzip">gzip</n-checkbox>
@@ -90,24 +90,24 @@
             </n-space>
           </n-form-item>
 
-          <n-divider title-placement="left">其他</n-divider>
-          <n-form-item label="IPv6 访问"><n-switch v-model:value="zone.ipv6" /></n-form-item>
-          <n-form-item label="客户端 IP 头">
+          <n-divider title-placement="left">{{ t('cdnZone.otherDivider') }}</n-divider>
+          <n-form-item :label="t('cdnZone.ipv6Label')"><n-switch v-model:value="zone.ipv6" /></n-form-item>
+          <n-form-item :label="t('cdnZone.clientIpHeaderLabel')">
             <n-space>
               <n-switch v-model:value="zone.clientIpHeader" />
-              <n-input v-model:value="zone.clientIpHeaderName" placeholder="Header 名，如 X-Real-IP" style="width:200px" />
+              <n-input v-model:value="zone.clientIpHeaderName" :placeholder="t('cdnZone.headerNamePlaceholder')" style="width:200px" />
             </n-space>
           </n-form-item>
-          <n-form-item label="客户端 IP 地区头"><n-switch v-model:value="zone.clientIpCountry" /></n-form-item>
-          <n-form-item label="上传大小限制">
+          <n-form-item :label="t('cdnZone.clientIpCountryLabel')"><n-switch v-model:value="zone.clientIpCountry" /></n-form-item>
+          <n-form-item :label="t('cdnZone.postmaxLabel')">
             <n-space>
               <n-switch v-model:value="zone.postmax" />
-              <n-input-number v-model:value="zone.postmaxSize" :min="0" style="width:160px" placeholder="最大(字节)" />
+              <n-input-number v-model:value="zone.postmaxSize" :min="0" style="width:160px" :placeholder="t('cdnZone.postmaxPlaceholder')" />
             </n-space>
           </n-form-item>
-          <n-form-item label="中国大陆加速"><n-switch v-model:value="zone.accelerateMainland" /></n-form-item>
+          <n-form-item :label="t('cdnZone.mainlandLabel')"><n-switch v-model:value="zone.accelerateMainland" /></n-form-item>
 
-          <n-button type="primary" size="small" :loading="savingZone" @click="saveZone">保存站点配置</n-button>
+          <n-button type="primary" size="small" :loading="savingZone" @click="saveZone">{{ t('cdnZone.saveZone') }}</n-button>
         </n-form>
       </n-card>
     </template>
@@ -117,9 +117,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 
+const { t } = useI18n();
 const message = useMessage();
 const zoneOptions = ref<any[]>([]);
 const zoneList = ref<any[]>([]);
@@ -148,7 +150,7 @@ async function loadZones() {
   }
   zoneList.value = (res.data || []).map((z: any) => ({ ...z, key: `${z.aid}:${z.zone_id}` }));
   zoneOptions.value = zoneList.value.map((z: any) => ({
-    label: `${z.routename} · ${z.name}（${z.domain_count} 域名）`,
+    label: t('cdnZone.zoneOptionLabel', { routename: z.routename, name: z.name, count: z.domain_count }),
     value: z.key,
   }));
 }

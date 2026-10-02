@@ -1,14 +1,14 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="容灾切换策略" subtitle="监控解析健康状态并自动切换备用记录">
+    <PageHeader :title="t('dm.policyTitle')" :subtitle="t('dm.policySubtitle')">
       <template #actions>
         <div class="actions">
           <n-button type="primary" @click="$router.push('/dm-tasks/add')">
             <template #icon><n-icon :component="AddOutline" /></template>
-            添加策略
+            {{ t('dm.addPolicy') }}
           </n-button>
           <n-dropdown trigger="click" :options="batchOptions" @select="onBatch">
-            <n-button>批量操作<template #icon><n-icon :component="ChevronDownOutline" /></template></n-button>
+            <n-button>{{ t('dm.batchOp') }}<template #icon><n-icon :component="ChevronDownOutline" /></template></n-button>
           </n-dropdown>
         </div>
       </template>
@@ -16,10 +16,10 @@
     <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 140px" />
-        <n-input v-model:value="kw" placeholder="关键词" style="width: 200px" @keyup.enter="search" />
-        <n-select v-model:value="status" :options="statusOptions" clearable placeholder="健康状况" style="width: 130px" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>搜索</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
+        <n-input v-model:value="kw" :placeholder="t('dm.keyword')" style="width: 200px" @keyup.enter="search" />
+        <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('dm.health')" style="width: 130px" />
+        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
       </n-space>
 
       <ResponsiveDataTable
@@ -29,15 +29,16 @@
         :loading="loading"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
-        empty-text="暂无容灾切换策略"
+        :empty-text="t('dm.empty')"
       />
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -47,6 +48,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
+const { t } = useI18n();
 const loading = ref(false);
 const tasks = ref<any[]>([]);
 const total = ref(0);
@@ -58,17 +60,17 @@ const searchType = ref(1);
 const kw = ref('');
 const status = ref<number | null>(null);
 
-const searchTypeOptions = [
-  { label: '域名', value: 1 },
-  { label: '解析记录ID', value: 2 },
-  { label: '解析记录', value: 3 },
-  { label: '备用解析记录', value: 4 },
-  { label: '备注', value: 5 },
-];
-const statusOptions = [
-  { label: '正常', value: 0 },
-  { label: '异常', value: 1 },
-];
+const searchTypeOptions = computed(() => [
+  { label: t('dm.searchDomain'), value: 1 },
+  { label: t('dm.searchRecordId'), value: 2 },
+  { label: t('dm.searchRecord'), value: 3 },
+  { label: t('dm.searchBackup'), value: 4 },
+  { label: t('dm.searchRemark'), value: 5 },
+]);
+const statusOptions = computed(() => [
+  { label: t('dm.normal'), value: 0 },
+  { label: t('dm.abnormal'), value: 1 },
+]);
 
 const pagination = reactive({
   page: 1,
@@ -87,14 +89,19 @@ const pagination = reactive({
   },
 });
 
-const typeMap: Record<number, string> = { 0: '无操作', 1: '暂停解析', 2: '切换备用', 3: '条件开启解析' };
+const typeMap = computed<Record<number, string>>(() => ({
+  0: t('dm.noAction'),
+  1: t('dm.pauseRecord'),
+  2: t('dm.switchBackup'),
+  3: t('dm.condEnableFull'),
+}));
 const checktypeMap: Record<number, string> = { 0: 'PING', 1: 'TCP', 2: 'HTTP(S)' };
 
-const columns: any[] = [
+const columns = computed<any[]>(() => [
   { type: 'selection' },
   { title: 'ID', key: 'id', width: 60 },
   {
-    title: '域名',
+    title: t('dm.domain'),
     key: 'rr',
     minWidth: 160,
     render(row: any) {
@@ -102,52 +109,52 @@ const columns: any[] = [
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => txt });
     },
   },
-  { title: '解析记录', key: 'main_value', minWidth: 130, render: (row: any) => h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.main_value }) },
+  { title: t('dm.record'), key: 'main_value', minWidth: 130, render: (row: any) => h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.main_value }) },
   {
-    title: '切换设置',
+    title: t('dm.switchSet'),
     key: 'type',
     width: 130,
     render(row: any) {
-      if (row.type === 2) return h(NTag, { size: 'small', bordered: false }, { default: () => '切换备用' });
-      if (row.type === 1) return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '暂停解析' });
-      if (row.type === 3) return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => '条件开启' });
-      return typeMap[row.type];
+      if (row.type === 2) return h(NTag, { size: 'small', bordered: false }, { default: () => t('dm.switchBackup') });
+      if (row.type === 1) return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('dm.pauseRecord') });
+      if (row.type === 3) return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('dm.condEnable') });
+      return typeMap.value[row.type];
     },
   },
-  { title: '检测', key: 'checktype', width: 80, render: (row: any) => checktypeMap[row.checktype] || row.checktype },
-  { title: '间隔', key: 'frequency', width: 70, render: (row: any) => row.frequency + '秒' },
+  { title: t('dm.checkCol'), key: 'checktype', width: 80, render: (row: any) => checktypeMap[row.checktype] || row.checktype },
+  { title: t('dm.interval'), key: 'frequency', width: 70, render: (row: any) => t('dm.intervalValue', { sec: row.frequency }) },
   {
-    title: '健康状况',
+    title: t('dm.health'),
     key: 'status',
     width: 90,
     render(row: any) {
-      return h(NTag, { size: 'small', type: row.status ? 'error' : 'success' }, { default: () => (row.status ? '异常' : '正常') });
+      return h(NTag, { size: 'small', type: row.status ? 'error' : 'success' }, { default: () => (row.status ? t('dm.abnormal') : t('dm.normal')) });
     },
   },
   {
-    title: '运行',
+    title: t('dm.run'),
     key: 'active',
     width: 70,
     render(row: any) {
-      return h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? '运行中' : '已停止') });
+      return h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('dm.running') : t('dm.stopped')) });
     },
   },
-  { title: '最后检测', key: 'checktimestr', width: 160 },
+  { title: t('dm.lastCheck'), key: 'checktimestr', width: 160 },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 240,
     render(row: any) {
       const btns: any[] = [];
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => router.push('/dm-tasks/' + row.id) }, { default: () => '详情' }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => router.push('/dm-tasks/' + row.id + '/edit') }, { default: () => '编辑' }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => retry(row) }, { default: () => '重试' }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? '停用' : '启用') }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
+      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => router.push('/dm-tasks/' + row.id) }, { default: () => t('dm.detail') }));
+      btns.push(h(NButton, { size: 'tiny', onClick: () => router.push('/dm-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
+      btns.push(h(NButton, { size: 'tiny', onClick: () => retry(row) }, { default: () => t('dm.retry') }));
+      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? t('common.disable') : t('common.enable')) }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
-];
+]);
 
 async function loadTasks() {
   loading.value = true;
@@ -185,21 +192,21 @@ function onCheckedRowKeys(keys: number[]) {
   checkedRowKeys.value = keys;
 }
 
-const batchOptions = [
-  { label: '开启运行', key: 'open' },
-  { label: '停止运行', key: 'close' },
-  { label: '立即重试', key: 'retry' },
-  { label: '删除', key: 'delete' },
-];
+const batchOptions = computed(() => [
+  { label: t('dm.batchOpen'), key: 'open' },
+  { label: t('dm.batchClose'), key: 'close' },
+  { label: t('dm.batchRetry'), key: 'retry' },
+  { label: t('common.delete'), key: 'delete' },
+]);
 
 function onBatch(key: string) {
   const ids = checkedRowKeys.value;
-  if (!ids.length) return message.warning('请先勾选要操作的策略');
+  if (!ids.length) return message.warning(t('dm.batchNoSelection'));
   dialog.warning({
-    title: '批量操作',
-    content: '确定对选中的 ' + ids.length + ' 个策略执行该操作吗？',
-    positiveText: '确定',
-    negativeText: '取消',
+    title: t('dm.batchTitle'),
+    content: t('dm.batchConfirm', { count: ids.length }),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('POST', '/dmonitor/tasks/batch', { act: key, ids });
       if (res.code === 0) message.success(res.msg);
@@ -212,28 +219,28 @@ function onBatch(key: string) {
 
 async function retry(row: any) {
   const res = await api('POST', '/dmonitor/tasks/batch', { act: 'retry', ids: [row.id] });
-  if (res.code === 0) message.success('已设置立即重试');
+  if (res.code === 0) message.success(t('dm.retrySet'));
   else message.error(res.msg);
   loadTasks();
 }
 
 async function toggleActive(row: any) {
   const res = await api('POST', `/dmonitor/tasks/${row.id}/active`, { active: row.active ? 0 : 1 });
-  if (res.code === 0) message.success('操作成功');
+  if (res.code === 0) message.success(t('common.success'));
   else message.error(res.msg);
   loadTasks();
 }
 
 function del(row: any) {
   dialog.warning({
-    title: '删除策略',
-    content: '确定删除该容灾切换策略吗？',
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('dm.deleteTitle'),
+    content: t('dm.deleteConfirm'),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/dmonitor/tasks/${row.id}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('dm.deleteSuccess'));
         loadTasks();
       } else message.error(res.msg);
     },

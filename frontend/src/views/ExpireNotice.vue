@@ -1,37 +1,37 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="域名到期提醒设置" subtitle="配置域名到期的邮件与机器人提醒" back="/domains" />
+    <PageHeader :title="t('expire.title')" :subtitle="t('expire.subtitle')" back="/domains" />
     <n-card :bordered="false" style="max-width: 640px">
       <n-form :label-placement="labelPlacement" :label-width="labelWidth">
-        <n-form-item label="到期提醒天数">
-          <n-input v-model:value="form.expire_noticedays" placeholder="留空则不开启到期提醒" />
+        <n-form-item :label="t('expire.noticeDays')">
+          <n-input v-model:value="form.expire_noticedays" :placeholder="t('expire.noticeDaysPlaceholder')" />
           <template #feedback>
-            <div class="hint">域名到期前多少天发送通知，可填写多个天数，用英文逗号隔开。例如填写 7,14 则在到期前 7 天与 14 天分别发送通知。</div>
+            <div class="hint">{{ t('expire.noticeDaysHint') }}</div>
           </template>
         </n-form-item>
-        <n-form-item label="邮件通知">
+        <n-form-item :label="t('expire.mailNotice')">
           <n-select v-model:value="form.expire_notice_mail" :options="onOffOptions" />
         </n-form-item>
-        <n-form-item label="微信公众号通知">
+        <n-form-item :label="t('expire.wxNotice')">
           <n-select v-model:value="form.expire_notice_wxtpl" :options="onOffOptions" />
         </n-form-item>
-        <n-form-item label="Telegram 机器人通知">
+        <n-form-item :label="t('expire.tgNotice')">
           <n-select v-model:value="form.expire_notice_tgbot" :options="onOffOptions" />
         </n-form-item>
-        <n-form-item label="QQ 机器人通知">
+        <n-form-item :label="t('expire.qqNotice')">
           <n-select v-model:value="form.expire_notice_qqbot" :options="onOffOptions" />
         </n-form-item>
-        <n-form-item label="群机器人 Webhook">
+        <n-form-item :label="t('expire.groupWebhook')">
           <n-select v-model:value="form.expire_notice_webhook" :options="onOffOptions" />
         </n-form-item>
-        <n-form-item label="自定义 Webhook">
+        <n-form-item :label="t('expire.customWebhook')">
           <n-select v-model:value="form.expire_notice_custom_webhook" :options="onOffOptions" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="goBack">返回</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
+          <n-button @click="goBack">{{ t('common.back') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-card>
@@ -41,8 +41,10 @@
 <script setup lang="ts">
 import { useBack } from '../lib/back';
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const goBack = useBack('/domains');
+const { t } = useI18n();
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -73,10 +75,10 @@ const form = reactive<any>({
   expire_notice_custom_webhook: '0',
 });
 
-const onOffOptions = [
-  { label: '关闭', value: '0' },
-  { label: '开启', value: '1' },
-];
+const onOffOptions = computed(() => [
+  { label: t('expire.off'), value: '0' },
+  { label: t('expire.on'), value: '1' },
+]);
 
 async function load() {
   const res = await api<any>('GET', '/expire/settings');
