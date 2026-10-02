@@ -1,71 +1,71 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="(isEdit ? '编辑' : '添加') + '定时切换策略'" subtitle="按计划配置解析记录的定时切换策略" back="/schedule-tasks" />
+    <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('schedule.policyTitle')" :subtitle="t('schedule.formSubtitle')" back="/schedule-tasks" />
     <n-card :bordered="false">
       <n-form label-placement="left" label-width="140" style="max-width: 760px">
-        <n-form-item label="域名选择" required>
+        <n-form-item :label="t('schedule.domainSelect')" required>
           <n-space :size="4" style="width: 100%">
-            <n-input v-model:value="form.rr" placeholder="主机记录" style="width: 200px" />
+            <n-input v-model:value="form.rr" :placeholder="t('schedule.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" placeholder="主域名" filterable style="flex: 1" @update:value="onDomainChange" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable style="flex: 1" @update:value="onDomainChange" />
           </n-space>
         </n-form-item>
 
-        <n-form-item label="解析记录" required>
+        <n-form-item :label="t('schedule.recordSelect')" required>
           <n-space style="width: 100%">
-            <n-select v-model:value="form.recordid" :options="recordOptions" placeholder="解析记录" filterable style="flex: 1" @update:value="onRecordChange" />
-            <n-button @click="getRecordList" :loading="loadingRecords">获取</n-button>
+            <n-select v-model:value="form.recordid" :options="recordOptions" :placeholder="t('schedule.recordSelect')" filterable style="flex: 1" @update:value="onRecordChange" />
+            <n-button @click="getRecordList" :loading="loadingRecords">{{ t('schedule.fetch') }}</n-button>
           </n-space>
         </n-form-item>
 
-        <n-form-item label="执行方式" required>
+        <n-form-item :label="t('schedule.execType')" required>
           <n-radio-group v-model:value="form.type">
-            <n-radio-button :value="0">单次执行</n-radio-button>
-            <n-radio-button :value="1">周期执行</n-radio-button>
+            <n-radio-button :value="0">{{ t('schedule.once') }}</n-radio-button>
+            <n-radio-button :value="1">{{ t('schedule.cycle') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.type === 0" label="时间设置" required>
+        <n-form-item v-show="form.type === 0" :label="t('schedule.timeSet')" required>
           <input v-model="form.switchtime" type="datetime-local" class="native-input" />
         </n-form-item>
 
-        <n-form-item v-show="form.type === 1" label="时间设置" required>
+        <n-form-item v-show="form.type === 1" :label="t('schedule.timeSet')" required>
           <n-space>
             <n-select v-model:value="form.cycle" :options="cycleOptions" style="width: 120px" />
             <n-select v-if="form.cycle === 1" v-model:value="form.switchdate" :options="weekdayOptions" style="width: 120px" />
-            <n-input-number v-else-if="form.cycle === 2" v-model:value="switchdateNum" :min="1" :max="31" style="width: 120px" placeholder="日期1~31" />
+            <n-input-number v-else-if="form.cycle === 2" v-model:value="switchdateNum" :min="1" :max="31" style="width: 120px" :placeholder="t('schedule.dayRange')" />
             <input v-if="form.cycle !== 2" v-model="form.switchtime" type="time" class="native-input" />
             <input v-else v-model="form.switchtime" type="time" class="native-input" />
           </n-space>
         </n-form-item>
 
-        <n-form-item label="切换设置" required>
+        <n-form-item :label="t('schedule.switchSet')" required>
           <n-radio-group v-model:value="form.switchtype">
-            <n-radio-button :value="0">修改解析</n-radio-button>
-            <n-radio-button :value="1">启用解析</n-radio-button>
-            <n-radio-button :value="2">暂停解析</n-radio-button>
-            <n-radio-button v-if="form.type === 0" :value="3">删除解析</n-radio-button>
+            <n-radio-button :value="0">{{ t('schedule.modify') }}</n-radio-button>
+            <n-radio-button :value="1">{{ t('schedule.enable') }}</n-radio-button>
+            <n-radio-button :value="2">{{ t('schedule.pause') }}</n-radio-button>
+            <n-radio-button v-if="form.type === 0" :value="3">{{ t('schedule.delete') }}</n-radio-button>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item v-show="form.switchtype === 0" label="记录值" required>
-          <n-input v-model:value="form.value" placeholder="支持填写IP或CNAME地址" />
+        <n-form-item v-show="form.switchtype === 0" :label="t('schedule.recordValue')" required>
+          <n-input v-model:value="form.value" :placeholder="t('schedule.ipOrCname')" />
         </n-form-item>
 
-        <n-form-item v-show="form.switchtype === 0 && dnstype === 'cloudflare'" label="线路">
+        <n-form-item v-show="form.switchtype === 0 && dnstype === 'cloudflare'" :label="t('schedule.lineLabel')">
           <n-radio-group v-model:value="form.line">
-            <n-radio value="">不修改</n-radio>
-            <n-radio value="0">改为仅DNS模式</n-radio>
-            <n-radio value="1">改为代理模式</n-radio>
+            <n-radio value="">{{ t('schedule.lineNone') }}</n-radio>
+            <n-radio value="0">{{ t('schedule.lineDnsOnly') }}</n-radio>
+            <n-radio value="1">{{ t('schedule.lineProxyOnly') }}</n-radio>
           </n-radio-group>
         </n-form-item>
 
-        <n-form-item label="备注">
-          <n-input v-model:value="form.remark" placeholder="可留空" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('schedule.optional')" />
         </n-form-item>
 
         <n-form-item>
-          <n-button type="primary" :loading="saving" @click="submit">提交</n-button>
+          <n-button type="primary" :loading="saving" @click="submit">{{ t('common.submit') }}</n-button>
         </n-form-item>
       </n-form>
     </n-card>
@@ -75,6 +75,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -82,6 +83,7 @@ import PageHeader from '../components/PageHeader.vue';
 const route = useRoute();
 const router = useRouter();
 const message = useMessage();
+const { t } = useI18n();
 
 const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'));
 const editId = computed(() => Number(route.params.id));
@@ -108,20 +110,20 @@ const form = reactive<any>({
   remark: '',
 });
 
-const cycleOptions = [
-  { label: '每天', value: 0 },
-  { label: '每周', value: 1 },
-  { label: '每月', value: 2 },
-];
-const weekdayOptions = [
-  { label: '周日', value: '0' },
-  { label: '周一', value: '1' },
-  { label: '周二', value: '2' },
-  { label: '周三', value: '3' },
-  { label: '周四', value: '4' },
-  { label: '周五', value: '5' },
-  { label: '周六', value: '6' },
-];
+const cycleOptions = computed(() => [
+  { label: t('schedule.daily'), value: 0 },
+  { label: t('schedule.weekly'), value: 1 },
+  { label: t('schedule.monthly'), value: 2 },
+]);
+const weekdayOptions = computed(() => [
+  { label: t('schedule.weekdaySun'), value: '0' },
+  { label: t('schedule.weekdayMon'), value: '1' },
+  { label: t('schedule.weekdayTue'), value: '2' },
+  { label: t('schedule.weekdayWed'), value: '3' },
+  { label: t('schedule.weekdayThu'), value: '4' },
+  { label: t('schedule.weekdayFri'), value: '5' },
+  { label: t('schedule.weekdaySat'), value: '6' },
+]);
 
 async function loadDomains() {
   const res = await api<any>('GET', '/schedule/domains');
@@ -134,15 +136,15 @@ function onDomainChange() {
 }
 
 async function getRecordList() {
-  if (!form.did) return message.warning('请先选择域名');
-  if (!form.rr) return message.warning('主机记录不能为空');
+  if (!form.did) return message.warning(t('schedule.selectDomainFirst'));
+  if (!form.rr) return message.warning(t('schedule.hostRequired'));
   loadingRecords.value = true;
   const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
   loadingRecords.value = false;
   if (res.code === 0) {
     const list = res.data.list || [];
     recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
-    message.success('获取到 ' + list.length + ' 条解析记录');
+    message.success(t('schedule.gotRecords', { count: list.length }));
     if (form.recordid) {
       const found = list.find((r: any) => r.RecordId === form.recordid);
       if (found) fillRecord(found);
@@ -186,7 +188,7 @@ async function loadTask() {
 }
 
 async function submit() {
-  if (!form.did || !form.rr || !form.recordid) return message.warning('必填项不能为空');
+  if (!form.did || !form.rr || !form.recordid) return message.warning(t('schedule.requiredEmpty'));
   const body: any = { ...form };
   if (form.type === 1 && form.cycle === 2) body.switchdate = String(switchdateNum.value ?? 1);
   saving.value = true;

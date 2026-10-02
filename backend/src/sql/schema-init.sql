@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_user` (
   `id` int(11) unsigned NOT NULL auto_increment,
   `username` varchar(64) NOT NULL,
   `password` varchar(80) NOT NULL,
+  `lang` varchar(10) NOT NULL DEFAULT '',
   `is_api` tinyint(1) NOT NULL DEFAULT '0',
   `apikey` varchar(32) DEFAULT NULL,
   `level` int(11) NOT NULL DEFAULT '0',

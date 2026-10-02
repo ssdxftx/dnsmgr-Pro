@@ -1,11 +1,11 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="Cloudflare 规则引擎" subtitle="管理 Cloudflare 域名的边缘规则（Rulesets）" back="/cdn-domains">
+    <PageHeader :title="t('cfRules.title')" :subtitle="t('cfRules.subtitle')" back="/cdn-domains">
       <template #actions>
         <n-space>
-          <n-button :loading="loading" @click="loadRules">刷新</n-button>
-          <n-button :disabled="!selectedDomain" @click="openCredential">凭证设置</n-button>
-          <n-button type="primary" :disabled="!selectedDomain" @click="openAdd">添加规则</n-button>
+          <n-button :loading="loading" @click="loadRules">{{ t('common.refresh') }}</n-button>
+          <n-button :disabled="!selectedDomain" @click="openCredential">{{ t('cfRules.credentialSettings') }}</n-button>
+          <n-button type="primary" :disabled="!selectedDomain" @click="openAdd">{{ t('cfRules.addRule') }}</n-button>
         </n-space>
       </template>
     </PageHeader>
@@ -15,7 +15,7 @@
         <n-select
           v-model:value="selectedDomain"
           :options="domainOptions"
-          placeholder="选择 Cloudflare 域名"
+          :placeholder="t('cfRules.selectDomain')"
           style="width: 260px"
           filterable
           @update:value="onDomainChange"
@@ -27,14 +27,14 @@
           @update:value="onPhaseChange"
         />
         <n-tag v-if="selectedDomain && credentialSource" size="small" :type="credentialSource === 'dedicated' ? 'success' : 'default'">
-          {{ credentialSource === 'dedicated' ? '专用凭证' : 'DNS 账户密钥' }}
+          {{ credentialSource === 'dedicated' ? t('cfRules.dedicatedCredential') : t('cfRules.dnsAccountKey') }}
         </n-tag>
       </n-space>
 
       <n-alert v-if="needCredential" type="warning" style="margin-bottom: 12px" :show-icon="true">
         {{ credentialMessage }}
         <template #action>
-          <n-button size="small" type="primary" @click="openCredential">填写专用凭证</n-button>
+          <n-button size="small" type="primary" @click="openCredential">{{ t('cfRules.fillDedicatedCredential') }}</n-button>
         </template>
       </n-alert>
 
@@ -43,51 +43,51 @@
         :data="rules"
         :loading="loading"
         :row-key="(row: any) => row.id"
-        empty-text="该规则类型下暂无规则"
+        :empty-text="t('cfRules.empty')"
       />
     </n-card>
 
     <!-- 规则编辑 -->
-    <n-modal v-model:show="showRule" preset="card" :title="editingId ? '编辑规则' : '添加规则'" style="max-width: 640px" :mask-closable="false">
+    <n-modal v-model:show="showRule" preset="card" :title="editingId ? t('cfRules.editTitle') : t('cfRules.addTitle')" style="max-width: 640px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="规则类型">
+        <n-form-item :label="t('cfRules.ruleType')">
           <n-tag size="small" type="info">{{ currentPhaseLabel }}</n-tag>
           <n-text depth="3" style="margin-left: 8px">{{ selectedPhase }}</n-text>
         </n-form-item>
 
-        <n-form-item label="匹配方式">
+        <n-form-item :label="t('cfRules.matchType')">
           <n-select v-model:value="ruleForm.matchType" :options="matchTypeOptions" style="width: 240px" />
         </n-form-item>
-        <n-form-item v-if="showSubdomain" label="子域名">
-          <n-input v-model:value="ruleForm.subdomain" placeholder="留空表示根域名" />
+        <n-form-item v-if="showSubdomain" :label="t('cfRules.subdomain')">
+          <n-input v-model:value="ruleForm.subdomain" :placeholder="t('cfRules.rootDomainPlaceholder')" />
         </n-form-item>
         <n-form-item v-if="showPath" :label="pathLabel">
           <n-input v-model:value="ruleForm.pathValue" :placeholder="pathPlaceholder" />
         </n-form-item>
-        <n-form-item v-if="ruleForm.matchType === 'custom'" label="自定义表达式">
-          <n-input v-model:value="ruleForm.expression" placeholder='如 (http.host eq "a.example.com")' />
+        <n-form-item v-if="ruleForm.matchType === 'custom'" :label="t('cfRules.customExpression')">
+          <n-input v-model:value="ruleForm.expression" :placeholder="t('cfRules.customExpressionPlaceholder')" />
         </n-form-item>
 
         <template v-if="selectedPhase === 'http_request_origin'">
-          <n-form-item label="回源端口">
+          <n-form-item :label="t('cfRules.originPort')">
             <n-input-number v-model:value="ruleForm.port" :min="1" :max="65535" style="width: 200px" />
           </n-form-item>
         </template>
 
         <template v-else-if="selectedPhase === 'http_request_dynamic_redirect'">
-          <n-form-item label="重定向地址">
+          <n-form-item :label="t('cfRules.redirectUrl')">
             <n-input v-model:value="ruleForm.redirectUrl" placeholder="https://example.com/new" />
           </n-form-item>
-          <n-form-item label="状态码">
+          <n-form-item :label="t('cfRules.statusCode')">
             <n-select v-model:value="ruleForm.redirectStatus" :options="statusOptions" style="width: 160px" />
           </n-form-item>
         </template>
 
         <template v-else-if="selectedPhase === 'http_request_transform'">
-          <n-form-item label="重写类型">
+          <n-form-item :label="t('cfRules.rewriteType')">
             <n-select v-model:value="ruleForm.rewriteType" :options="rewriteTypeOptions" style="width: 200px" />
           </n-form-item>
-          <n-form-item :label="ruleForm.rewriteType === 'path' ? '新路径表达式' : '新查询表达式'">
+          <n-form-item :label="ruleForm.rewriteType === 'path' ? t('cfRules.newPathExpression') : t('cfRules.newQueryExpression')">
             <n-input
               v-model:value="ruleForm.rewriteValue"
               :placeholder="rewritePlaceholder"
@@ -96,97 +96,97 @@
         </template>
 
         <template v-else-if="isHeaderPhase">
-          <n-form-item label="操作">
+          <n-form-item :label="t('cfRules.headerOperation')">
             <n-select v-model:value="ruleForm.headerOp" :options="headerOpOptions" style="width: 200px" />
           </n-form-item>
-          <n-form-item label="头名称">
-            <n-input v-model:value="ruleForm.headerName" placeholder="如 X-Frame-Options" />
+          <n-form-item :label="t('cfRules.headerName')">
+            <n-input v-model:value="ruleForm.headerName" :placeholder="t('cfRules.headerNamePlaceholder')" />
           </n-form-item>
-          <n-form-item v-if="ruleForm.headerOp !== 'remove'" label="头值">
-            <n-input v-model:value="ruleForm.headerValue" placeholder="如 DENY" />
+          <n-form-item v-if="ruleForm.headerOp !== 'remove'" :label="t('cfRules.headerValue')">
+            <n-input v-model:value="ruleForm.headerValue" :placeholder="t('cfRules.headerValuePlaceholder')" />
           </n-form-item>
         </template>
 
         <template v-else-if="selectedPhase === 'http_request_cache_settings'">
-          <n-form-item label="启用缓存">
+          <n-form-item :label="t('cfRules.enableCache')">
             <n-switch v-model:value="ruleForm.cacheEnabled" />
           </n-form-item>
-          <n-form-item label="边缘 TTL">
+          <n-form-item :label="t('cfRules.edgeTtl')">
             <n-select v-model:value="ruleForm.cacheTtlMode" :options="ttlModeOptions" style="width: 240px" />
           </n-form-item>
-          <n-form-item v-if="ruleForm.cacheTtlMode === 'override'" label="TTL（秒）">
+          <n-form-item v-if="ruleForm.cacheTtlMode === 'override'" :label="t('cfRules.ttlSeconds')">
             <n-input-number v-model:value="ruleForm.cacheTtlValue" :min="0" style="width: 200px" />
           </n-form-item>
         </template>
 
         <template v-else-if="selectedPhase === 'http_ratelimit'">
-          <n-form-item label="动作">
+          <n-form-item :label="t('cfRules.action')">
             <n-select v-model:value="ruleForm.ratelimitAction" :options="ratelimitActionOptions" style="width: 220px" />
           </n-form-item>
-          <n-form-item label="统计维度">
+          <n-form-item :label="t('cfRules.dimension')">
             <n-select v-model:value="ruleForm.ratelimitChars" multiple :options="ratelimitDimensionOptions" style="width: 320px" />
           </n-form-item>
-          <n-form-item label="周期（秒）">
+          <n-form-item :label="t('cfRules.periodSeconds')">
             <n-input-number v-model:value="ruleForm.ratelimitPeriod" :min="1" :max="86400" style="width: 200px" />
           </n-form-item>
-          <n-form-item label="请求数阈值">
+          <n-form-item :label="t('cfRules.requestsThreshold')">
             <n-input-number v-model:value="ruleForm.ratelimitCount" :min="1" style="width: 200px" />
           </n-form-item>
-          <n-form-item label="缓解时长（秒）">
+          <n-form-item :label="t('cfRules.mitigationSeconds')">
             <n-input-number v-model:value="ruleForm.ratelimitMitigation" :min="0" style="width: 200px" />
           </n-form-item>
         </template>
 
         <n-form-item v-if="supportsAdvanced">
-          <n-checkbox v-model:checked="ruleForm.showAdvancedJson">使用高级 JSON 模式（自定义 action / action_parameters）</n-checkbox>
+          <n-checkbox v-model:checked="ruleForm.showAdvancedJson">{{ t('cfRules.advancedJsonMode') }}</n-checkbox>
         </n-form-item>
         <n-form-item v-if="supportsAdvanced && ruleForm.showAdvancedJson" label="action JSON">
           <n-input v-model:value="ruleForm.actionJson" type="textarea" :rows="4" :placeholder="advancedPlaceholder" />
         </n-form-item>
 
-        <n-form-item label="备注">
-          <n-input v-model:value="ruleForm.description" placeholder="可留空" />
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="ruleForm.description" :placeholder="t('cfRules.leaveBlank')" />
         </n-form-item>
-        <n-form-item v-if="expressionPreview" label="生成表达式">
+        <n-form-item v-if="expressionPreview" :label="t('cfRules.generatedExpression')">
           <n-input :value="expressionPreview" type="textarea" :rows="2" readonly />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showRule = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="submitRule">保存</n-button>
+          <n-button @click="showRule = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="submitRule">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 专用凭证 -->
-    <n-modal v-model:show="showCred" preset="card" title="Cloudflare 专用凭证" style="max-width: 540px" :mask-closable="false">
+    <n-modal v-model:show="showCred" preset="card" :title="t('cfRules.credTitle')" style="max-width: 540px" :mask-closable="false">
       <n-alert type="info" style="margin-bottom: 12px">
-        当前 DNS 账户密钥不具备规则引擎权限时，请填写具备 Zone WAF / 规则集权限的专用凭证。凭证按 Cloudflare 账户加密保存并优先复用。
+        {{ t('cfRules.credHint') }}
       </n-alert>
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="认证方式">
+        <n-form-item :label="t('cfRules.authMethod')">
           <n-radio-group v-model:value="credForm.auth">
-            <n-radio :value="1">API 令牌</n-radio>
-            <n-radio :value="0">全局 API Key</n-radio>
+            <n-radio :value="1">{{ t('cfRules.apiToken') }}</n-radio>
+            <n-radio :value="0">{{ t('cfRules.globalApiKey') }}</n-radio>
           </n-radio-group>
         </n-form-item>
-        <n-form-item v-if="credForm.auth === 0" label="账户邮箱">
-          <n-input v-model:value="credForm.email" placeholder="Cloudflare 账户邮箱" />
+        <n-form-item v-if="credForm.auth === 0" :label="t('cfRules.accountEmail')">
+          <n-input v-model:value="credForm.email" :placeholder="t('cfRules.accountEmailPlaceholder')" />
         </n-form-item>
-        <n-form-item :label="credForm.auth === 1 ? 'API 令牌' : '全局 API Key'">
-          <n-input v-model:value="credForm.apikey" type="password" show-password-on="click" placeholder="填写令牌或 Key" />
+        <n-form-item :label="credForm.auth === 1 ? t('cfRules.apiToken') : t('cfRules.globalApiKey')">
+          <n-input v-model:value="credForm.apikey" type="password" show-password-on="click" :placeholder="t('cfRules.apikeyPlaceholder')" />
         </n-form-item>
         <n-form-item label="Account ID">
-          <n-input v-model:value="credForm.account_id" placeholder="可选，账户级规则需要" />
+          <n-input v-model:value="credForm.account_id" :placeholder="t('cfRules.accountIdPlaceholder')" />
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="space-between" style="width: 100%">
-          <n-button v-if="hasDedicated" type="error" ghost @click="removeCredential">移除专用凭证</n-button>
+          <n-button v-if="hasDedicated" type="error" ghost @click="removeCredential">{{ t('cfRules.removeCredential') }}</n-button>
           <n-space justify="end" style="margin-left: auto">
-            <n-button @click="showCred = false">取消</n-button>
-            <n-button type="primary" :loading="savingCred" @click="saveCredential">校验并保存</n-button>
+            <n-button @click="showCred = false">{{ t('common.cancel') }}</n-button>
+            <n-button type="primary" :loading="savingCred" @click="saveCredential">{{ t('cfRules.verifyAndSave') }}</n-button>
           </n-space>
         </n-space>
       </template>
@@ -197,12 +197,14 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, h } from 'vue';
 import { useRoute } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const route = useRoute();
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 
@@ -223,17 +225,17 @@ const needCredential = ref(false);
 const credentialMessage = ref('');
 const credentialSource = ref<'dns' | 'dedicated' | ''>('');
 
-const DEFAULT_PHASES = [
-  { value: 'http_request_origin', label: '回源', scope: 'zone', permission: 'Origin Rules Write' },
-  { value: 'http_request_dynamic_redirect', label: '重定向', scope: 'zone', permission: 'Dynamic URL Redirects Write' },
-  { value: 'http_request_transform', label: 'URL 重写', scope: 'zone', permission: 'Zone Transform Rules Write' },
-  { value: 'http_request_late_transform', label: '请求头转换', scope: 'zone', permission: 'Zone Transform Rules Write' },
-  { value: 'http_response_headers_transform', label: '响应头转换', scope: 'zone', permission: 'Zone Transform Rules Write' },
-  { value: 'http_request_cache_settings', label: '缓存设置', scope: 'zone', permission: 'Cache Settings Write' },
-  { value: 'http_request_firewall_custom', label: '防火墙', scope: 'zone', permission: 'Zone WAF Write' },
-  { value: 'http_ratelimit', label: '速率限制', scope: 'zone', permission: 'Zone WAF Write' },
-];
-const phasesMeta = ref<Array<{ value: string; label: string; scope: string; permission: string }>>(DEFAULT_PHASES);
+const DEFAULT_PHASES = computed(() => [
+  { value: 'http_request_origin', label: t('cfRules.phaseOrigin'), scope: 'zone', permission: 'Origin Rules Write' },
+  { value: 'http_request_dynamic_redirect', label: t('cfRules.phaseRedirect'), scope: 'zone', permission: 'Dynamic URL Redirects Write' },
+  { value: 'http_request_transform', label: t('cfRules.phaseUrlRewrite'), scope: 'zone', permission: 'Zone Transform Rules Write' },
+  { value: 'http_request_late_transform', label: t('cfRules.phaseRequestHeaderTransform'), scope: 'zone', permission: 'Zone Transform Rules Write' },
+  { value: 'http_response_headers_transform', label: t('cfRules.phaseResponseHeaderTransform'), scope: 'zone', permission: 'Zone Transform Rules Write' },
+  { value: 'http_request_cache_settings', label: t('cfRules.phaseCacheSettings'), scope: 'zone', permission: 'Cache Settings Write' },
+  { value: 'http_request_firewall_custom', label: t('cfRules.phaseFirewall'), scope: 'zone', permission: 'Zone WAF Write' },
+  { value: 'http_ratelimit', label: t('cfRules.phaseRateLimit'), scope: 'zone', permission: 'Zone WAF Write' },
+]);
+const phasesMeta = ref<Array<{ value: string; label: string; scope: string; permission: string }>>(DEFAULT_PHASES.value);
 
 const phaseOptions = computed(() => phasesMeta.value.map((p) => ({ label: p.label, value: p.value })));
 const currentPhaseLabel = computed(() => phasesMeta.value.find((p) => p.value === selectedPhase.value)?.label || selectedPhase.value);
@@ -242,37 +244,37 @@ const domainOptions = computed(() => domains.value.map((d) => ({ label: `${d.acc
 const selectedAid = computed(() => domains.value.find((d) => d.id === selectedDomain.value)?.aid || 0);
 const selectedDomainName = computed(() => domains.value.find((d) => d.id === selectedDomain.value)?.name || '');
 
-const matchTypeOptions = [
-  { label: '主机名', value: 'hostname' },
-  { label: '路径前缀', value: 'pathPrefix' },
-  { label: '路径正则', value: 'pathRegex' },
-  { label: '主机名 + 路径前缀', value: 'hostAndPath' },
-  { label: '自定义表达式', value: 'custom' },
-];
+const matchTypeOptions = computed(() => [
+  { label: t('cfRules.matchHostname'), value: 'hostname' },
+  { label: t('cfRules.matchPathPrefix'), value: 'pathPrefix' },
+  { label: t('cfRules.matchPathRegex'), value: 'pathRegex' },
+  { label: t('cfRules.matchHostAndPath'), value: 'hostAndPath' },
+  { label: t('cfRules.matchCustomExpression'), value: 'custom' },
+]);
 const statusOptions = [301, 302, 307, 308].map((v) => ({ label: String(v), value: v }));
-const rewriteTypeOptions = [
-  { label: '路径重写', value: 'path' },
-  { label: '查询参数重写', value: 'query' },
-];
-const headerOpOptions = [
-  { label: '设置', value: 'set' },
-  { label: '新增', value: 'add' },
-  { label: '移除', value: 'remove' },
-];
-const ttlModeOptions = [
-  { label: '遵循源站 TTL', value: 'respect_origin_ttl' },
-  { label: '自定义 TTL', value: 'override' },
-];
-const ratelimitActionOptions = [
-  { label: '阻断', value: 'block' },
-  { label: '人机验证', value: 'challenge' },
-  { label: 'JS 挑战', value: 'js_challenge' },
-];
-const ratelimitDimensionOptions = [
-  { label: 'IP', value: 'ip' },
-  { label: '路径', value: 'uri.path' },
-  { label: '主机名', value: 'http.host' },
-];
+const rewriteTypeOptions = computed(() => [
+  { label: t('cfRules.rewritePath'), value: 'path' },
+  { label: t('cfRules.rewriteQuery'), value: 'query' },
+]);
+const headerOpOptions = computed(() => [
+  { label: t('cfRules.headerOpSet'), value: 'set' },
+  { label: t('cfRules.headerOpAdd'), value: 'add' },
+  { label: t('cfRules.headerOpRemove'), value: 'remove' },
+]);
+const ttlModeOptions = computed(() => [
+  { label: t('cfRules.ttlRespectOrigin'), value: 'respect_origin_ttl' },
+  { label: t('cfRules.ttlCustom'), value: 'override' },
+]);
+const ratelimitActionOptions = computed(() => [
+  { label: t('cfRules.rateBlock'), value: 'block' },
+  { label: t('cfRules.rateChallenge'), value: 'challenge' },
+  { label: t('cfRules.rateJsChallenge'), value: 'js_challenge' },
+]);
+const ratelimitDimensionOptions = computed(() => [
+  { label: t('cfRules.dimIp'), value: 'ip' },
+  { label: t('cfRules.dimPath'), value: 'uri.path' },
+  { label: t('cfRules.dimHostname'), value: 'http.host' },
+]);
 
 const isHeaderPhase = computed(() => selectedPhase.value === 'http_request_late_transform' || selectedPhase.value === 'http_response_headers_transform');
 const supportsAdvanced = computed(() =>
@@ -280,9 +282,9 @@ const supportsAdvanced = computed(() =>
 );
 const showSubdomain = computed(() => ['hostname', 'hostAndPath'].includes(ruleForm.matchType));
 const showPath = computed(() => ['pathPrefix', 'pathRegex', 'hostAndPath'].includes(ruleForm.matchType));
-const pathLabel = computed(() => (ruleForm.matchType === 'pathRegex' ? '路径正则' : '路径前缀'));
-const pathPlaceholder = computed(() => (ruleForm.matchType === 'pathRegex' ? '如 ^/api/.*' : '如 /api'));
-const rewritePlaceholder = computed(() => (ruleForm.rewriteType === 'path' ? '如 concat("/new", http.request.uri.path)' : '如 "a=b"'));
+const pathLabel = computed(() => (ruleForm.matchType === 'pathRegex' ? t('cfRules.pathRegex') : t('cfRules.pathPrefix')));
+const pathPlaceholder = computed(() => (ruleForm.matchType === 'pathRegex' ? t('cfRules.pathRegexPlaceholder') : t('cfRules.pathPrefixPlaceholder')));
+const rewritePlaceholder = computed(() => (ruleForm.rewriteType === 'path' ? t('cfRules.rewritePlaceholderPath') : t('cfRules.rewritePlaceholderQuery')));
 
 const advancedPlaceholder = computed(() => {
   switch (selectedPhase.value) {
@@ -360,30 +362,30 @@ const expressionPreview = computed(() => {
   }
 });
 
-const columns: any[] = [
-  { title: '备注', key: 'description', minWidth: 120, render: (row: any) => h(NEllipsis, { style: 'max-width:160px' }, { default: () => row.description || '-' }) },
-  { title: '表达式', key: 'expression', minWidth: 220, render: (row: any) => h(NEllipsis, { style: 'max-width:280px' }, { default: () => row.expression || '-' }) },
-  { title: '动作', key: 'action', width: 120, render: (row: any) => h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => row.action || '-' }) },
-  { title: '参数', key: 'params', minWidth: 160, render: (row: any) => h(NEllipsis, { style: 'max-width:200px' }, { default: () => JSON.stringify(row.action_parameters || {}) }) },
+const columns = computed<any[]>(() => [
+  { title: t('common.remark'), key: 'description', minWidth: 120, render: (row: any) => h(NEllipsis, { style: 'max-width:160px' }, { default: () => row.description || '-' }) },
+  { title: t('cfRules.expressionCol'), key: 'expression', minWidth: 220, render: (row: any) => h(NEllipsis, { style: 'max-width:280px' }, { default: () => row.expression || '-' }) },
+  { title: t('cfRules.action'), key: 'action', width: 120, render: (row: any) => h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => row.action || '-' }) },
+  { title: t('cfRules.params'), key: 'params', minWidth: 160, render: (row: any) => h(NEllipsis, { style: 'max-width:200px' }, { default: () => JSON.stringify(row.action_parameters || {}) }) },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'enabled',
     width: 80,
-    render: (row: any) => h(NTag, { size: 'small', type: row.enabled ? 'success' : 'default', bordered: false }, { default: () => (row.enabled ? '启用' : '停用') }),
+    render: (row: any) => h(NTag, { size: 'small', type: row.enabled ? 'success' : 'default', bordered: false }, { default: () => (row.enabled ? t('cfRules.statusOn') : t('cfRules.statusOff')) }),
   },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 130,
     render: (row: any) =>
       h(NSpace, { size: 2 }, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEditRule(row) }, { default: () => '编辑' }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => confirmDelete(row) }, { default: () => '删除' }),
+          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEditRule(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', type: 'error', onClick: () => confirmDelete(row) }, { default: () => t('common.delete') }),
         ],
       }),
   },
-];
+]);
 
 async function loadPhases() {
   const res = await api<any>('GET', '/cf-rules/phases');
@@ -616,12 +618,12 @@ function buildAction(): { action: string; action_parameters: Record<string, any>
 async function submitRule() {
   if (!selectedDomain.value || !selectedPhase.value) return;
   const expression = expressionPreview.value;
-  if (!expression) return message.warning('请填写匹配条件或自定义表达式');
+  if (!expression) return message.warning(t('cfRules.fillCondition'));
   let built: { action: string; action_parameters: Record<string, any> };
   try {
     built = buildAction();
   } catch {
-    return message.error('action JSON 解析失败，请检查格式');
+    return message.error(t('cfRules.actionJsonParseFailed'));
   }
   const payload = {
     domain_id: selectedDomain.value,
@@ -637,7 +639,7 @@ async function submitRule() {
     : await api<any>('POST', '/cf-rules/rules', payload);
   saving.value = false;
   if (res.code === 0) {
-    message.success(res.msg || '保存成功');
+    message.success(res.msg || t('common.saved'));
     showRule.value = false;
     await loadRules();
   } else if (res.data?.needCredential) {
@@ -652,14 +654,14 @@ async function submitRule() {
 
 function confirmDelete(row: any) {
   dialog.warning({
-    title: '删除规则',
-    content: `确定删除该规则吗？\n${row.expression || ''}`,
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('cfRules.deleteTitle'),
+    content: t('cfRules.deleteConfirm', { expression: row.expression || '' }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api<any>('DELETE', `/cf-rules/rules/${row.id}?domainId=${selectedDomain.value}&phase=${selectedPhase.value}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('cfRules.deleteSuccess'));
         await loadRules();
       } else {
         message.error(res.msg);
@@ -669,7 +671,7 @@ function confirmDelete(row: any) {
 }
 
 async function openCredential() {
-  if (!selectedAid.value) return message.warning('请先选择 Cloudflare 域名');
+  if (!selectedAid.value) return message.warning(t('cfRules.selectDomainFirst'));
   const res = await api<any>('GET', `/cf-rules/credential?aid=${selectedAid.value}`);
   hasDedicated.value = !!res.data?.has_dedicated;
   credForm.auth = res.data?.config?.auth ?? 1;
@@ -692,7 +694,7 @@ async function saveCredential() {
   });
   savingCred.value = false;
   if (res.code === 0) {
-    message.success(res.msg || '专用凭证已保存');
+    message.success(res.msg || t('cfRules.credSaved'));
     hasDedicated.value = true;
     showCred.value = false;
     await loadRules();
@@ -705,7 +707,7 @@ async function removeCredential() {
   if (!selectedAid.value) return;
   const res = await api<any>('DELETE', `/cf-rules/credential?aid=${selectedAid.value}`);
   if (res.code === 0) {
-    message.success(res.msg || '已移除');
+    message.success(res.msg || t('cfRules.removed'));
     hasDedicated.value = false;
     credForm.apikey = '';
     showCred.value = false;

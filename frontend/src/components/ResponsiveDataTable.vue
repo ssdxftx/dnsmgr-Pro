@@ -15,7 +15,7 @@
       @update:checked-row-keys="onUpdateChecked"
     />
     <n-spin v-else :show="!!loading">
-      <EmptyState v-if="!data.length && !loading" :icon="FolderOpenOutline" :title="emptyText" />
+      <EmptyState v-if="!data.length && !loading" :icon="FolderOpenOutline" :title="emptyText || t('common.noData')" />
       <div v-else class="m-table-cards">
         <div
           v-for="(row, index) in data"
@@ -60,6 +60,7 @@ import { computed, h } from 'vue';
 import { NCheckbox, NDataTable, NPagination, NSpin } from 'naive-ui';
 import { FolderOpenOutline } from '@vicons/ionicons5';
 import { useResponsive } from '../composables/useResponsive';
+import { useI18n } from 'vue-i18n';
 import EmptyState from './EmptyState.vue';
 
 const props = withDefaults(
@@ -88,21 +89,26 @@ const props = withDefaults(
     size: 'medium',
     scrollX: undefined,
     titleKey: undefined,
-    emptyText: '暂无数据',
+    emptyText: '',
   },
 );
 
 const emit = defineEmits<{ (e: 'update:checkedRowKeys', keys: any[]): void }>();
 const { isMobile } = useResponsive();
+const { t } = useI18n();
 
 function isSystemColumn(col: any) {
   return col?.type === 'selection' || col?.type === 'expand';
 }
 
+function isActionColumn(col: any) {
+  return col?.key === 'actions' || col?.title === '操作' || col?.title === t('common.actions');
+}
+
 const hasSelection = computed(() => props.selectable ?? props.columns.some(isSystemColumn));
 
-const dataColumns = computed(() => props.columns.filter((c) => !isSystemColumn(c) && c.key !== 'actions' && c.title !== '操作'));
-const actionColumn = computed(() => props.columns.find((c) => c.key === 'actions' || c.title === '操作'));
+const dataColumns = computed(() => props.columns.filter((c) => !isSystemColumn(c) && !isActionColumn(c)));
+const actionColumn = computed(() => props.columns.find(isActionColumn));
 
 const TITLE_KEYS = ['name', 'domain', 'title', 'label', 'hostname', 'routename', 'username', 'email', 'subject', 'remark'];
 const titleColumn = computed(() => {

@@ -1,24 +1,24 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="数据统计" subtitle="查看 CDN 加速流量、带宽与请求统计">
+    <PageHeader :title="t('statistics.title')" :subtitle="t('statistics.subtitle')">
       <template #actions>
         <n-button @click="load" :loading="loading">
           <template #icon><n-icon :component="RefreshOutline" /></template>
-          刷新
+          {{ t('common.refresh') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
       <n-alert v-if="!isAdmin" type="info" :show-icon="false" style="margin-bottom: 16px">
-        数据来自系统缓存（由管理员定时刷新），仅展示汇总统计，不支持按账户/域名筛选。
+        {{ t('statistics.cacheDataHint') }}
       </n-alert>
       <div class="filters">
         <n-radio-group v-if="!isMobile" v-model:value="range" class="filter-range" @update:value="onRangeChange">
-          <n-radio-button value="24h">近24小时</n-radio-button>
-          <n-radio-button value="today">今天</n-radio-button>
-          <n-radio-button value="7d">近7天</n-radio-button>
-          <n-radio-button value="30d">近30天</n-radio-button>
-          <n-radio-button v-if="isAdmin" value="custom">自定义</n-radio-button>
+          <n-radio-button value="24h">{{ t('statistics.range24h') }}</n-radio-button>
+          <n-radio-button value="today">{{ t('statistics.rangeToday') }}</n-radio-button>
+          <n-radio-button value="7d">{{ t('statistics.range7d') }}</n-radio-button>
+          <n-radio-button value="30d">{{ t('statistics.range30d') }}</n-radio-button>
+          <n-radio-button v-if="isAdmin" value="custom">{{ t('statistics.rangeCustom') }}</n-radio-button>
         </n-radio-group>
         <div v-else class="range-pills">
           <n-button
@@ -47,7 +47,7 @@
             type="datetime"
             format="yyyy-MM-dd HH:mm:ss"
             class="filter-datetime"
-            placeholder="开始时间"
+            :placeholder="t('statistics.startTime')"
             clearable
             @update:value="onCustomPart"
           />
@@ -56,7 +56,7 @@
             type="datetime"
             format="yyyy-MM-dd HH:mm:ss"
             class="filter-datetime"
-            placeholder="结束时间"
+            :placeholder="t('statistics.endTime')"
             clearable
             @update:value="onCustomPart"
           />
@@ -65,7 +65,7 @@
           v-if="isAdmin"
           v-model:value="selectedAid"
           :options="accountOptions"
-          placeholder="全部 CDN 账户"
+          :placeholder="t('statistics.allAccounts')"
           clearable
           class="filter-aid"
         />
@@ -73,7 +73,7 @@
           v-if="isAdmin"
           v-model:value="selectedDomains"
           :options="domainOptions"
-          placeholder="全部加速域名"
+          :placeholder="t('statistics.allDomains')"
           multiple
           clearable
           filterable
@@ -82,46 +82,46 @@
       </div>
 
       <n-alert v-if="errors.length" type="warning" :show-icon="false" style="margin-bottom: 16px">
-        部分服务商统计获取失败：{{ errors.join('；') }}
+        {{ t('statistics.partialFail', { errors: errors.join(', ') }) }}
       </n-alert>
 
       <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
         <n-grid-item>
-          <StatCard label="加速流量" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
+          <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
         </n-grid-item>
         <n-grid-item>
-          <StatCard label="峰值带宽" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
+          <StatCard :label="t('statistics.bwLabel')" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
         </n-grid-item>
         <n-grid-item>
-          <StatCard label="回源流量" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
+          <StatCard :label="t('statistics.bsFluxLabel')" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
         </n-grid-item>
         <n-grid-item>
-          <StatCard label="请求总数" :value="summary.reqText" tone="warning" :icon="BarChartOutline" />
+          <StatCard :label="t('statistics.reqLabel')" :value="summary.reqText" tone="warning" :icon="BarChartOutline" />
         </n-grid-item>
         <n-grid-item>
-          <StatCard label="缓存命中率" :value="summary.hitRateText" tone="primary" :icon="FlashOutline" />
+          <StatCard :label="t('statistics.hitRateLabel')" :value="summary.hitRateText" tone="primary" :icon="FlashOutline" />
         </n-grid-item>
       </n-grid>
     </n-card>
 
     <n-grid cols="1 m:2" responsive="screen" :x-gap="14" :y-gap="14">
       <n-grid-item>
-        <n-card title="流量趋势" size="small">
+        <n-card :title="t('statistics.fluxTrend')" size="small">
           <div ref="fluxRef" class="chart"></div>
         </n-card>
       </n-grid-item>
       <n-grid-item>
-        <n-card title="带宽趋势（Mbps）" size="small">
+        <n-card :title="t('statistics.bwTrend')" size="small">
           <div ref="bwRef" class="chart"></div>
         </n-card>
       </n-grid-item>
       <n-grid-item>
-        <n-card title="请求趋势" size="small">
+        <n-card :title="t('statistics.reqTrend')" size="small">
           <div ref="reqRef" class="chart"></div>
         </n-card>
       </n-grid-item>
       <n-grid-item>
-        <n-card title="状态码分布" size="small">
+        <n-card :title="t('statistics.statusDist')" size="small">
           <div ref="statusRef" class="chart"></div>
         </n-card>
       </n-grid-item>
@@ -131,6 +131,7 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { CloudOutline, RefreshOutline, SpeedometerOutline, CloudDownloadOutline, BarChartOutline, FlashOutline } from '@vicons/ionicons5';
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart } from 'echarts/charts';
@@ -144,17 +145,18 @@ echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendCompone
 
 const isMobile = ref(window.innerWidth < 768);
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const { t } = useI18n();
 const loading = ref(false);
 const range = ref('24h');
-const rangeOptions = [
-  { label: '近24小时', value: '24h' },
-  { label: '今天', value: 'today' },
-  { label: '近7天', value: '7d' },
-  { label: '近30天', value: '30d' },
-  { label: '自定义', value: 'custom' },
-];
+const rangeOptions = computed(() => [
+  { label: t('statistics.range24h'), value: '24h' },
+  { label: t('statistics.rangeToday'), value: 'today' },
+  { label: t('statistics.range7d'), value: '7d' },
+  { label: t('statistics.range30d'), value: '30d' },
+  { label: t('statistics.rangeCustom'), value: 'custom' },
+]);
 const customRange = ref<[number, number] | null>(null);
-const visibleRangeOptions = computed(() => (isAdmin.value ? rangeOptions : rangeOptions.filter((o) => o.value !== 'custom')));
+const visibleRangeOptions = computed(() => (isAdmin.value ? rangeOptions.value : rangeOptions.value.filter((o) => o.value !== 'custom')));
 const customStart = ref<number | null>(null);
 const customEnd = ref<number | null>(null);
 const accountOptions = ref<{ label: string; value: number }[]>([]);
@@ -267,25 +269,25 @@ function renderCharts() {
   renderChart(fluxRef.value, {
     ...baseOption(),
     series: [
-      { name: '访问流量', type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: rs.flux || [], tooltip: { valueFormatter: (v: any) => formatBytes(Number(v)) } },
-      { name: '回源流量', type: 'line', smooth: true, data: rs.bs_flux || [] },
+      { name: t('statistics.seriesFlux'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: rs.flux || [], tooltip: { valueFormatter: (v: any) => formatBytes(Number(v)) } },
+      { name: t('statistics.seriesBsFlux'), type: 'line', smooth: true, data: rs.bs_flux || [] },
     ],
   }, null);
 
   renderChart(bwRef.value, {
     ...baseOption(),
     series: [
-      { name: '访问带宽', type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: (rs.bw || []).map((v: number) => Math.round((v || 0) / 1024 / 1024)) },
-      { name: '回源带宽', type: 'line', smooth: true, data: (rs.bs_bw || []).map((v: number) => Math.round((v || 0) / 1024 / 1024)) },
+      { name: t('statistics.seriesBw'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: (rs.bw || []).map((v: number) => Math.round((v || 0) / 1024 / 1024)) },
+      { name: t('statistics.seriesBsBw'), type: 'line', smooth: true, data: (rs.bs_bw || []).map((v: number) => Math.round((v || 0) / 1024 / 1024)) },
     ],
   }, null);
 
   renderChart(reqRef.value, {
     ...baseOption(),
     series: [
-      { name: '请求数', type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: vs.req_num || [] },
-      { name: '命中次数', type: 'line', smooth: true, data: vs.hit_num || [] },
-      { name: '回源请求', type: 'line', smooth: true, data: vs.bs_num || [] },
+      { name: t('statistics.seriesReq'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: vs.req_num || [] },
+      { name: t('statistics.seriesHit'), type: 'line', smooth: true, data: vs.hit_num || [] },
+      { name: t('statistics.seriesBsReq'), type: 'line', smooth: true, data: vs.bs_num || [] },
     ],
   }, null);
 
@@ -314,7 +316,7 @@ async function load() {
       domains: selectedDomains.value.length ? selectedDomains.value.join(',') : undefined,
       aid: selectedAid.value || undefined,
     });
-    if (res.code !== 0) throw new Error(res.msg || '查询失败');
+    if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     const data = res.data || {};
     labels.value = data.labels || [];
     resource.value = data.resource || null;
