@@ -1,115 +1,115 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="info?.name || '加速域名设置'" subtitle="配置加速域名的回源、缓存、HTTPS 与访问控制" back="/cdn-domains">
+    <PageHeader :title="info?.name || t('cdnSetting.title')" :subtitle="t('cdnSetting.subtitle')" back="/cdn-domains">
       <template #actions>
         <n-space align="center">
           <n-tag size="small">{{ info?.routename || info?.route }}</n-tag>
-          <n-tag size="small" :type="info?.status === 'offline' ? 'default' : 'success'">状态：{{ info?.status === 'offline' ? '已停用' : '已启用' }}</n-tag>
-          <span class="cname">CNAME：{{ info?.cname || '暂无' }}</span>
+          <n-tag size="small" :type="info?.status === 'offline' ? 'default' : 'success'">{{ t('cdnSetting.statusLabel') }}{{ info?.status === 'offline' ? t('cdnSetting.statusDisabled') : t('cdnSetting.statusEnabled') }}</n-tag>
+          <span class="cname">{{ t('cdnSetting.cnameLabel') }}{{ info?.cname || t('cdnSetting.cnameNone') }}</span>
         </n-space>
       </template>
     </PageHeader>
 
     <n-space vertical :size="12" style="margin-top:12px">
-      <n-card title="域名状态" size="small" :bordered="false">
+      <n-card :title="t('cdnSetting.statusCard')" size="small" :bordered="false">
         <n-space>
           <n-button :type="info?.status === 'offline' ? 'success' : 'warning'" size="small" :loading="statusBusy" @click="toggleStatus">
-            {{ info?.status === 'offline' ? '启用加速' : '停用加速' }}
+            {{ info?.status === 'offline' ? t('cdnSetting.enableAccel') : t('cdnSetting.disableAccel') }}
           </n-button>
         </n-space>
       </n-card>
 
-      <n-card title="回源配置" size="small" :bordered="false">
+      <n-card :title="t('cdnSetting.originCard')" size="small" :bordered="false">
         <n-form label-placement="left" label-width="110">
-          <n-form-item label="源站地址">
-            <n-input v-model:value="originForm.origin" placeholder="IP 或域名，多个用分号间隔" />
+          <n-form-item :label="t('cdnSetting.originLabel')">
+            <n-input v-model:value="originForm.origin" :placeholder="t('cdnSetting.originPlaceholder')" />
           </n-form-item>
-          <n-form-item label="源站类型">
+          <n-form-item :label="t('cdnSetting.originTypeLabel')">
             <n-radio-group v-model:value="originForm.origin_type">
-              <n-radio value="ipaddr">IP 源站</n-radio>
-              <n-radio value="domain">域名源站</n-radio>
+              <n-radio value="ipaddr">{{ t('cdnSetting.originIp') }}</n-radio>
+              <n-radio value="domain">{{ t('cdnSetting.originDomain') }}</n-radio>
             </n-radio-group>
           </n-form-item>
-          <n-form-item label="回源 Host">
-            <n-input v-model:value="originForm.origin_host" placeholder="可留空" />
+          <n-form-item :label="t('cdnSetting.originHostLabel')">
+            <n-input v-model:value="originForm.origin_host" :placeholder="t('cdnSetting.originHostPlaceholder')" />
           </n-form-item>
-          <n-form-item label="回源协议">
+          <n-form-item :label="t('cdnSetting.originProtocolLabel')">
             <n-select v-model:value="originForm.origin_protocol" :options="protoOptions" style="width:200px" />
           </n-form-item>
-          <n-form-item label="回源端口">
+          <n-form-item :label="t('cdnSetting.originPortLabel')">
             <n-space>
               <n-input-number v-model:value="originForm.http_port" :min="1" style="width:120px" placeholder="HTTP" />
               <n-input-number v-model:value="originForm.https_port" :min="1" style="width:120px" placeholder="HTTPS" />
             </n-space>
           </n-form-item>
-          <n-button type="primary" size="small" @click="saveOrigin">保存回源配置</n-button>
+          <n-button type="primary" size="small" @click="saveOrigin">{{ t('cdnSetting.saveOrigin') }}</n-button>
         </n-form>
       </n-card>
 
-      <n-card title="缓存规则" size="small" :bordered="false">
+      <n-card :title="t('cdnSetting.cacheCard')" size="small" :bordered="false">
         <n-space vertical size="small">
           <div v-for="(rule, idx) in cacheForm.rules" :key="idx" class="rule-row">
-            <n-input v-model:value="rule.path" placeholder="* 全部 / .jpg 后缀 / /dir/ 目录 / /a.png 路径" />
-            <n-input-number v-model:value="rule.ttl" :min="0" style="width:140px" placeholder="TTL 秒" />
-            <n-button size="small" @click="removeRule(idx)">删除</n-button>
+            <n-input v-model:value="rule.path" :placeholder="t('cdnSetting.cachePathPlaceholder')" />
+            <n-input-number v-model:value="rule.ttl" :min="0" style="width:140px" :placeholder="t('cdnSetting.ttlPlaceholder')" />
+            <n-button size="small" @click="removeRule(idx)">{{ t('common.delete') }}</n-button>
           </div>
           <n-space>
-            <n-button size="small" dashed @click="addRule">添加规则</n-button>
-            <n-button type="primary" size="small" :loading="savingCache" @click="saveCache">保存缓存规则</n-button>
+            <n-button size="small" dashed @click="addRule">{{ t('cdnSetting.addRule') }}</n-button>
+            <n-button type="primary" size="small" :loading="savingCache" @click="saveCache">{{ t('cdnSetting.saveCache') }}</n-button>
           </n-space>
-          <n-text depth="3" style="font-size: 12px">TTL 单位为秒；0 表示不缓存；「*」表示全部文件。部分服务商规则生效约需数分钟。</n-text>
+          <n-text depth="3" style="font-size: 12px">{{ t('cdnSetting.cacheHint') }}</n-text>
         </n-space>
       </n-card>
 
-      <n-card title="HTTPS 配置" size="small" :bordered="false">
+      <n-card :title="t('cdnSetting.httpsCard')" size="small" :bordered="false">
         <n-space vertical size="small">
           <n-space align="center">
-            <span style="width:120px">开启 HTTPS</span>
+            <span style="width:120px">{{ t('cdnSetting.enableHttps') }}</span>
             <n-switch v-model:value="httpsForm.https_enabled" />
           </n-space>
           <n-space align="center">
-            <span style="width:120px">强制跳转 HTTPS</span>
+            <span style="width:120px">{{ t('cdnSetting.forceHttps') }}</span>
             <n-switch v-model:value="httpsForm.force_redirect" :disabled="!httpsForm.https_enabled" />
           </n-space>
-          <n-button type="primary" size="small" :loading="savingHttps" @click="saveHttps">保存 HTTPS 配置</n-button>
-          <n-text depth="3" style="font-size: 12px">关闭 HTTPS 将停止强制跳转；HTTPS 证书由服务商分配/在云端配置。</n-text>
+          <n-button type="primary" size="small" :loading="savingHttps" @click="saveHttps">{{ t('cdnSetting.saveHttps') }}</n-button>
+          <n-text depth="3" style="font-size: 12px">{{ t('cdnSetting.httpsHint') }}</n-text>
         </n-space>
       </n-card>
 
-      <n-card title="访问控制" size="small" :bordered="false">
+      <n-card :title="t('cdnSetting.accessCard')" size="small" :bordered="false">
         <n-form label-placement="left" label-width="110">
-          <n-form-item label="防盗链 Referer">
+          <n-form-item :label="t('cdnSetting.refererLabel')">
             <n-radio-group v-model:value="accessForm.referer_mode">
-              <n-radio value="off">关闭</n-radio>
-              <n-radio value="whitelist">白名单</n-radio>
-              <n-radio value="blacklist">黑名单</n-radio>
+              <n-radio value="off">{{ t('cdnSetting.off') }}</n-radio>
+              <n-radio value="whitelist">{{ t('cdnSetting.whitelist') }}</n-radio>
+              <n-radio value="blacklist">{{ t('cdnSetting.blacklist') }}</n-radio>
             </n-radio-group>
             <n-dynamic-tags
               v-if="accessForm.referer_mode !== 'off'"
               v-model:value="accessForm.referer_list"
               style="margin-top:8px"
             />
-            <n-text v-if="accessForm.referer_mode !== 'off'" depth="3" style="font-size:12px">输入域名或空值允许，如 *.example.com（回车确认）</n-text>
+            <n-text v-if="accessForm.referer_mode !== 'off'" depth="3" style="font-size:12px">{{ t('cdnSetting.refererHint') }}</n-text>
           </n-form-item>
-          <n-form-item label="IP 黑白名单">
+          <n-form-item :label="t('cdnSetting.ipListLabel')">
             <n-radio-group v-model:value="accessForm.ip_mode">
-              <n-radio value="off">关闭</n-radio>
-              <n-radio value="whitelist">白名单</n-radio>
-              <n-radio value="blacklist">黑名单</n-radio>
+              <n-radio value="off">{{ t('cdnSetting.off') }}</n-radio>
+              <n-radio value="whitelist">{{ t('cdnSetting.whitelist') }}</n-radio>
+              <n-radio value="blacklist">{{ t('cdnSetting.blacklist') }}</n-radio>
             </n-radio-group>
             <n-dynamic-input
               v-if="accessForm.ip_mode !== 'off'"
               v-model:value="accessForm.ip_list"
-              placeholder="1.2.3.4 或 1.2.3.0/24"
+              :placeholder="t('cdnSetting.ipPlaceholder')"
               style="margin-top:8px"
               type="input"
             />
           </n-form-item>
-          <n-form-item label="UA 黑名单">
+          <n-form-item :label="t('cdnSetting.uaLabel')">
             <n-dynamic-tags v-model:value="accessForm.ua_list" style="margin-top:8px" />
-            <n-text depth="3" style="font-size:12px">命中这些 User-Agent 的请求将被拦截（留空则关闭）</n-text>
+            <n-text depth="3" style="font-size:12px">{{ t('cdnSetting.uaHint') }}</n-text>
           </n-form-item>
-          <n-button type="primary" size="small" :loading="savingAccess" @click="saveAccess">保存访问控制</n-button>
+          <n-button type="primary" size="small" :loading="savingAccess" @click="saveAccess">{{ t('cdnSetting.saveAccess') }}</n-button>
         </n-form>
       </n-card>
     </n-space>
@@ -117,12 +117,14 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 
+const { t } = useI18n();
 const route = useRoute();
 const message = useMessage();
 const domainId = Number(route.params.id);
@@ -134,11 +136,11 @@ const savingHttps = ref(false);
 const savingAccess = ref(false);
 const statusBusy = ref(false);
 
-const protoOptions = [
-  { label: '跟随', value: 'follow' },
+const protoOptions = computed(() => [
+  { label: t('cdnSetting.protoFollow'), value: 'follow' },
   { label: 'HTTP', value: 'http' },
   { label: 'HTTPS', value: 'https' },
-];
+]);
 
 const originForm = reactive<any>({ origin: '', origin_type: 'ipaddr', origin_host: '', origin_protocol: 'follow', http_port: 80, https_port: 443 });
 const httpsForm = reactive<any>({ https_enabled: false, force_redirect: false });
@@ -249,7 +251,7 @@ function toggleStatus() {
 }
 
 async function saveOrigin() {
-  if (!originForm.origin) return message.warning('源站不能为空');
+  if (!originForm.origin) return message.warning(t('cdnSetting.originRequired'));
   const res = await api('POST', `/cdn/domains/${domainId}/origin`, originForm);
   if (res.code === 0) {
     message.success(res.msg);

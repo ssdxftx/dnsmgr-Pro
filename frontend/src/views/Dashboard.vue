@@ -1,20 +1,20 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="仪表盘" subtitle="聚合 DNS 系统运行概览与快捷入口" />
+    <PageHeader :title="t('dashboard.title')" :subtitle="t('dashboard.subtitle')" />
 
     <n-grid :cols="isMobile ? 1 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
       <n-grid-item span="1">
-        <StatCard label="域名数量" :value="stats.domains" tone="primary" :icon="ServerOutline" />
+        <StatCard :label="t('dashboard.statDomains')" :value="stats.domains" tone="primary" :icon="ServerOutline" />
       </n-grid-item>
       <n-grid-item span="1">
-        <StatCard label="DNS 账户" :value="stats.accounts" tone="success" :icon="LinkOutline" />
+        <StatCard :label="t('dashboard.statAccounts')" :value="stats.accounts" tone="success" :icon="LinkOutline" />
       </n-grid-item>
       <n-grid-item span="1">
-        <StatCard label="CDN 域名" :value="stats.cdnDomains" tone="warning" :icon="GlobeOutline" />
+        <StatCard :label="t('dashboard.statCdnDomains')" :value="stats.cdnDomains" tone="warning" :icon="GlobeOutline" />
       </n-grid-item>
     </n-grid>
 
-    <n-card :bordered="false" title="快速开始">
+    <n-card :bordered="false" :title="t('dashboard.quickStart')">
       <div class="quick-grid">
         <button v-for="item in quickActions" :key="item.path" class="quick-tile" @click="router.push(item.path)">
           <span class="quick-tile__icon" :class="`quick-tile__icon--${item.tone}`">
@@ -32,7 +32,8 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { NIcon } from 'naive-ui';
 import { ServerOutline, LinkOutline, GlobeOutline, ArrowForwardOutline, CloudDownloadOutline, CloudOutline, ShieldCheckmarkOutline, RocketOutline } from '@vicons/ionicons5';
@@ -42,16 +43,17 @@ import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 
 const router = useRouter();
+const { t } = useI18n();
 const { isMobile } = useResponsive();
 const stats = ref({ domains: 0, accounts: 0, cdnDomains: 0 });
 
-const quickActions = [
-  { title: '添加 DNS 账户', desc: '接入阿里云、腾讯云、Cloudflare 等', path: '/dns-accounts', icon: LinkOutline, tone: 'primary' },
-  { title: '导入并管理域名', desc: '从 DNS 账户拉取域名并管理解析', path: '/domains', icon: CloudDownloadOutline, tone: 'success' },
-  { title: '添加 CDN 账户', desc: '配置加速域名与缓存规则', path: '/cdn-accounts', icon: CloudOutline, tone: 'info' },
-  { title: '申请 SSL 证书', desc: '自动签发并部署到目标服务器', path: '/cert-orders', icon: ShieldCheckmarkOutline, tone: 'warning' },
-  { title: '容灾切换监控', desc: '实时探测并自动切换解析线路', path: '/dm-overview', icon: RocketOutline, tone: 'error' },
-];
+const quickActions = computed(() => [
+  { title: t('dashboard.quickAddAccount'), desc: t('dashboard.quickAddAccountDesc'), path: '/dns-accounts', icon: LinkOutline, tone: 'primary' },
+  { title: t('dashboard.quickImportDomains'), desc: t('dashboard.quickImportDomainsDesc'), path: '/domains', icon: CloudDownloadOutline, tone: 'success' },
+  { title: t('dashboard.quickAddCdn'), desc: t('dashboard.quickAddCdnDesc'), path: '/cdn-accounts', icon: CloudOutline, tone: 'info' },
+  { title: t('dashboard.quickApplyCert'), desc: t('dashboard.quickApplyCertDesc'), path: '/cert-orders', icon: ShieldCheckmarkOutline, tone: 'warning' },
+  { title: t('dashboard.quickFailover'), desc: t('dashboard.quickFailoverDesc'), path: '/dm-overview', icon: RocketOutline, tone: 'error' },
+]);
 
 onMounted(async () => {
   const [d, a, c] = await Promise.all([

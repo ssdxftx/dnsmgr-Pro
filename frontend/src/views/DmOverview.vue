@@ -1,58 +1,60 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="容灾监控" subtitle="查看容灾调度运行状态与切换日志" />
+    <PageHeader :title="t('dm.title')" :subtitle="t('dm.subtitle')" />
     <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
         <n-card :bordered="false">
-          <n-statistic label="调度运行状态">
+          <n-statistic :label="t('dm.scheduleStatus')">
             <n-tag :type="info.run_state === 1 ? 'success' : 'error'" size="large" bordered>
-              {{ info.run_state === 1 ? '运行中' : '已停止' }}
+              {{ info.run_state === 1 ? t('dm.running') : t('dm.stopped') }}
             </n-tag>
           </n-statistic>
         </n-card>
       </n-grid-item>
       <n-grid-item>
         <n-card :bordered="false">
-          <n-statistic label="累计检测次数" :value="info.run_count" />
+          <n-statistic :label="t('dm.runCount')" :value="info.run_count" />
         </n-card>
       </n-grid-item>
       <n-grid-item>
         <n-card :bordered="false">
-          <n-statistic label="最近运行时间" :value="info.run_time || '无'" />
+          <n-statistic :label="t('dm.lastRunTime')" :value="info.run_time || t('common.none')" />
         </n-card>
       </n-grid-item>
       <n-grid-item>
         <n-card :bordered="false">
-          <n-statistic label="24H 切换次数" :value="info.switch_count" />
+          <n-statistic :label="t('dm.switchCount24')" :value="info.switch_count" />
         </n-card>
       </n-grid-item>
       <n-grid-item>
         <n-card :bordered="false">
-          <n-statistic label="24H 告警次数" :value="info.fail_count" />
+          <n-statistic :label="t('dm.failCount24')" :value="info.fail_count" />
         </n-card>
       </n-grid-item>
     </n-grid>
 
-    <n-card :bordered="false" style="margin-top: 16px" title="运行日志">
-      <n-alert v-if="info.run_error" type="error" style="margin-bottom: 12px">运行错误：{{ info.run_error }}</n-alert>
+    <n-card :bordered="false" style="margin-top: 16px" :title="t('dm.runLog')">
+      <n-alert v-if="info.run_error" type="error" style="margin-bottom: 12px">{{ t('dm.runError') }}{{ info.run_error }}</n-alert>
       <div class="clean-row">
         <n-input-number v-model:value="days" :min="0" class="days-input" />
-        <n-button type="warning" class="clean-btn" @click="clean">清理日志</n-button>
+        <n-button type="warning" class="clean-btn" @click="clean">{{ t('dm.cleanLog') }}</n-button>
       </div>
-      <n-text depth="3" style="display: block; margin-top: 8px">清理指定天数之前的切换日志记录</n-text>
+      <n-text depth="3" style="display: block; margin-top: 8px">{{ t('dm.cleanHint') }}</n-text>
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
 const dialog = useDialog();
-const info = ref<any>({ run_count: 0, run_time: '无', run_state: 0, run_error: null, switch_count: 0, fail_count: 0 });
+const { t } = useI18n();
+const info = ref<any>({ run_count: 0, run_time: '', run_state: 0, run_error: null, switch_count: 0, fail_count: 0 });
 const days = ref(30);
 
 async function load() {
@@ -62,10 +64,10 @@ async function load() {
 
 function clean() {
   dialog.warning({
-    title: '清理日志',
-    content: '确定清理 ' + days.value + ' 天之前的切换日志吗？',
-    positiveText: '清理',
-    negativeText: '取消',
+    title: t('dm.cleanLog'),
+    content: t('dm.cleanConfirm', { days: days.value }),
+    positiveText: t('dm.cleanLog'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('POST', '/dmonitor/clean', { days: days.value });
       if (res.code === 0) message.success(res.msg);

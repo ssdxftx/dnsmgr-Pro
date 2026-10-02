@@ -1,27 +1,27 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="自动部署任务" subtitle="管理证书自动部署任务">
+    <PageHeader :title="t('deployTask.title')" :subtitle="t('deployTask.subtitle')">
       <template #actions>
         <n-button type="primary" @click="openAdd">
           <template #icon><n-icon :component="AddOutline" /></template>
-          添加任务
+          {{ t('deployTask.add') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loading" empty-text="暂无部署任务" />
+      <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loading" :empty-text="t('deployTask.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '编辑任务' : '添加部署任务'" style="max-width:640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployTask.editTitle') : t('deployTask.addTitle')" style="max-width:640px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
-        <n-form-item label="部署账户">
+        <n-form-item :label="t('deployTask.account')">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
         </n-form-item>
-        <n-form-item label="证书订单">
-          <n-select v-model:value="form.oid" :options="orderOptions" filterable placeholder="选择已签发的证书订单" />
+        <n-form-item :label="t('deployTask.certOrder')">
+          <n-select v-model:value="form.oid" :options="orderOptions" filterable :placeholder="t('deployTask.orderPlaceholder')" />
         </n-form-item>
-        <n-form-item label="任务备注">
-          <n-input v-model:value="form.remark" placeholder="选填" />
+        <n-form-item :label="t('deployTask.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('deployTask.optional')" />
         </n-form-item>
         <template v-if="currentProvider">
           <n-alert v-if="currentProvider.tasknote" type="info" style="margin-bottom:12px" :show-icon="false">{{ currentProvider.tasknote }}</n-alert>
@@ -37,8 +37,8 @@
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEdit = false">取消</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -47,6 +47,7 @@
 
 <script setup lang="ts">
 import { h, onMounted, reactive, ref, computed } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -54,6 +55,7 @@ import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
+const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -72,14 +74,14 @@ const accountOptions = computed(() => accounts.value.map((r: any) => ({ label: r
 const orderOptions = computed(() =>
   orders.value.map((r: any) => {
     const d = (r.domains || []).join(',');
-    return { label: `${r.id}_${d}` + (r.aid === 0 ? '（手动续期）' : `（${r.typename || '手动'}）`), value: r.id, disabled: r.status !== 3 };
+    return { label: `${r.id}_${d}` + (r.aid === 0 ? `（${t('deployTask.manualRenew')}）` : `（${r.typename || t('deployTask.manual')}）`), value: r.id, disabled: r.status !== 3 };
   }),
 );
 
-const columns = [
+const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   {
-    title: '部署类型',
+    title: t('deployTask.typeCol'),
     key: 'typename',
     width: 130,
     render(row: any) {
@@ -87,7 +89,7 @@ const columns = [
     },
   },
   {
-    title: '绑定域名',
+    title: t('deployTask.domainsCol'),
     key: 'domains',
     minWidth: 180,
     render(row: any) {
@@ -96,38 +98,38 @@ const columns = [
     },
   },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'status',
     width: 90,
     render(row: any) {
-      const map: any = { 0: ['待部署', 'default'], 1: ['已部署', 'success'], [-1]: ['失败', 'error'] };
+      const map: any = { 0: [t('deployTask.pending'), 'default'], 1: [t('deployTask.deployed'), 'success'], [-1]: [t('deployTask.failed'), 'error'] };
       const [label, type] = map[row.status] || [row.status, 'default'];
       return h(NTag, { size: 'small', type }, { default: () => label });
     },
   },
   {
-    title: '启用',
+    title: t('deployTask.activeCol'),
     key: 'active',
     width: 70,
     render(row: any) {
-      return h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? '是' : '否') });
+      return h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('common.yes') : t('common.no')) });
     },
   },
-  { title: '最后部署', key: 'lasttime', width: 160 },
+  { title: t('deployTask.lastDeploy'), key: 'lasttime', width: 160 },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 240,
     render(row: any) {
       const btns: any[] = [];
-      if (row.status !== 1) btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => process(row) }, { default: () => '执行部署' }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => reset(row) }, { default: () => '重置' }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? '停用' : '启用') }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
+      if (row.status !== 1) btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => process(row) }, { default: () => t('deployTask.deploy') }));
+      btns.push(h(NButton, { size: 'tiny', onClick: () => reset(row) }, { default: () => t('deployTask.reset') }));
+      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? t('common.disable') : t('common.enable')) }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
-];
+]);
 
 function selectOptions(options: any) {
   if (Array.isArray(options)) return options;
@@ -202,7 +204,7 @@ function safeJson(s: string) {
 }
 
 async function save() {
-  if (!form.aid || !form.oid) return message.warning('请选择部署账户和证书订单');
+  if (!form.aid || !form.oid) return message.warning(t('deployTask.fillWarning'));
   saving.value = true;
   const body = { aid: form.aid, oid: form.oid, config: form.config, remark: form.remark };
   const res = editingId.value ? await api('PUT', `/deploy/tasks/${editingId.value}`, body) : await api('POST', '/deploy/tasks', body);
@@ -223,13 +225,13 @@ async function process(row: any) {
 
 function reset(row: any) {
   dialog.warning({
-    title: '重置任务',
-    content: '确定重置该部署任务吗？',
-    positiveText: '重置',
-    negativeText: '取消',
+    title: t('deployTask.resetTitle'),
+    content: t('deployTask.resetConfirm'),
+    positiveText: t('deployTask.reset'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('POST', `/deploy/tasks/${row.id}/reset`, {});
-      if (res.code === 0) message.success('重置成功');
+      if (res.code === 0) message.success(t('deployTask.resetSuccess'));
       else message.error(res.msg);
       loadTasks();
     },
@@ -238,21 +240,21 @@ function reset(row: any) {
 
 async function toggleActive(row: any) {
   const res = await api('POST', `/deploy/tasks/${row.id}/setactive`, { active: row.active ? 0 : 1 });
-  if (res.code === 0) message.success('操作成功');
+  if (res.code === 0) message.success(t('common.success'));
   else message.error(res.msg);
   loadTasks();
 }
 
 function del(row: any) {
   dialog.warning({
-    title: '删除任务',
-    content: '确定删除该部署任务吗？',
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('deployTask.deleteTitle'),
+    content: t('deployTask.deleteConfirm'),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/deploy/tasks/${row.id}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('deployTask.deleteSuccess'));
         loadTasks();
       } else message.error(res.msg);
     },

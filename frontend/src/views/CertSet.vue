@@ -1,69 +1,69 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="自动续签设置" subtitle="配置证书自动续签、运行时段与通知" back="/cert-orders" />
+    <PageHeader :title="t('certSet.title')" :subtitle="t('certSet.subtitle')" back="/cert-orders" />
     <n-card :bordered="false" style="max-width: 640px">
       <n-form :label-placement="labelPlacement" :label-width="labelWidth">
-        <n-divider title-placement="left" class="section">自动续签</n-divider>
-        <n-form-item label="到期前续签天数">
+        <n-divider title-placement="left" class="section">{{ t('certSet.sectionRenew') }}</n-divider>
+        <n-form-item :label="t('certSet.renewDays')">
           <n-input-number v-model:value="form.cert_renewdays" :min="1" :max="90" style="width: 100%" />
           <template #feedback>
-            <div class="hint">证书到期前多少天发送续签提醒（仅对开启自动续签的证书生效）。</div>
+            <div class="hint">{{ t('certSet.renewDaysHint') }}</div>
           </template>
         </n-form-item>
 
-        <n-divider title-placement="left" class="section">运行时段</n-divider>
-        <n-form-item label="运行时段（小时）">
+        <n-divider title-placement="left" class="section">{{ t('certSet.sectionHours') }}</n-divider>
+        <n-form-item :label="t('certSet.hours')">
           <div class="range-row">
             <n-select v-model:value="form.deploy_hour_start" :options="hourOptions" style="flex: 1" />
-            <span class="range-sep">至</span>
+            <span class="range-sep">{{ t('certSet.hourSep') }}</span>
             <n-select v-model:value="form.deploy_hour_end" :options="hourOptions" style="flex: 1" />
           </div>
           <template #feedback>
-            <div class="hint">自动续签与自动部署任务仅在该时段内进行，支持跨天（如 22 至 6）；起止相同表示不限时段。</div>
+            <div class="hint">{{ t('certSet.hoursHint') }}</div>
           </template>
         </n-form-item>
 
-        <n-divider title-placement="left" class="section">CDN 证书联动</n-divider>
-        <n-form-item label="证书申请账户">
+        <n-divider title-placement="left" class="section">{{ t('certSet.sectionCdn') }}</n-divider>
+        <n-form-item :label="t('certSet.certApplyAccount')">
           <n-select
             v-model:value="form.cdn_cert_aid"
             :options="certAccountOptions"
             clearable
-            placeholder="选择用于申请通配符证书的账户"
+            :placeholder="t('certSet.certAccountPlaceholder')"
           />
           <template #feedback>
-            <div class="hint">阿里云 ESA 加速域名一键申请证书时，使用该账户为站点申请通配符证书（需支持泛域名，建议 Let's Encrypt 等 ACME 账户）。</div>
+            <div class="hint">{{ t('certSet.certAccountHint') }}</div>
           </template>
         </n-form-item>
 
-        <n-divider title-placement="left" class="section">通知设置</n-divider>
-        <n-form-item label="邮件通知">
+        <n-divider title-placement="left" class="section">{{ t('certSet.sectionNotice') }}</n-divider>
+        <n-form-item :label="t('certSet.mailNotice')">
           <n-select v-model:value="form.cert_notice_mail" :options="noticeOptions" />
         </n-form-item>
-        <n-form-item label="微信公众号通知">
+        <n-form-item :label="t('certSet.wxNotice')">
           <n-select v-model:value="form.cert_notice_wxtpl" :options="noticeOptions" />
         </n-form-item>
-        <n-form-item label="Telegram 通知">
+        <n-form-item :label="t('certSet.tgNotice')">
           <n-select v-model:value="form.cert_notice_tgbot" :options="noticeOptions" />
         </n-form-item>
-        <n-form-item label="QQ 机器人通知">
+        <n-form-item :label="t('certSet.qqNotice')">
           <n-select v-model:value="form.cert_notice_qqbot" :options="noticeOptions" />
         </n-form-item>
-        <n-form-item label="群机器人 Webhook">
+        <n-form-item :label="t('certSet.groupWebhook')">
           <n-select v-model:value="form.cert_notice_webhook" :options="onOffOptions" />
         </n-form-item>
-        <n-form-item label="自定义 Webhook">
+        <n-form-item :label="t('certSet.customWebhook')">
           <n-select v-model:value="form.cert_notice_custom_webhook" :options="noticeOptions" />
           <template #feedback>
-            <div class="hint">「仅失败时」表示仅在续签或部署失败时发送通知。</div>
+            <div class="hint">{{ t('certSet.onFailOnlyHint') }}</div>
           </template>
         </n-form-item>
       </n-form>
 
       <template #footer>
         <n-space justify="end" class="footer-actions">
-          <n-button @click="goBack">返回</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
+          <n-button @click="goBack">{{ t('common.back') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-card>
@@ -73,8 +73,10 @@
 <script setup lang="ts">
 import { useBack } from '../lib/back';
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 
 const goBack = useBack('/cert-orders');
+const { t } = useI18n();
 import { useMessage } from 'naive-ui';
 import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -120,15 +122,15 @@ async function loadCertAccounts() {
 }
 
 const hourOptions = Array.from({ length: 24 }, (_, i) => ({ label: String(i), value: String(i) }));
-const onOffOptions = [
-  { label: '关闭', value: '0' },
-  { label: '开启', value: '1' },
-];
-const noticeOptions = [
-  { label: '关闭', value: '0' },
-  { label: '开启', value: '1' },
-  { label: '开启（仅失败时）', value: '2' },
-];
+const onOffOptions = computed(() => [
+  { label: t('certSet.off'), value: '0' },
+  { label: t('certSet.on'), value: '1' },
+]);
+const noticeOptions = computed(() => [
+  { label: t('certSet.off'), value: '0' },
+  { label: t('certSet.on'), value: '1' },
+  { label: t('certSet.onFailOnly'), value: '2' },
+]);
 
 async function load() {
   const res = await api<any>('GET', '/cert/settings');

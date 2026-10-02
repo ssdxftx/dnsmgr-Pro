@@ -1,12 +1,12 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="缓存刷新" subtitle="刷新或预热 CDN 缓存，并查看任务历史" />
+    <PageHeader :title="t('cache.title')" :subtitle="t('cache.subtitle')" />
     <n-card :bordered="false">
       <n-space vertical :size="16">
         <n-radio-group v-model:value="opType">
-          <n-radio-button value="url">URL 刷新</n-radio-button>
-          <n-radio-button value="dir">目录刷新</n-radio-button>
-          <n-radio-button value="preheat">缓存预热</n-radio-button>
+          <n-radio-button value="url">{{ t('cache.urlRefresh') }}</n-radio-button>
+          <n-radio-button value="dir">{{ t('cache.dirRefresh') }}</n-radio-button>
+          <n-radio-button value="preheat">{{ t('cache.preheat') }}</n-radio-button>
         </n-radio-group>
 
         <n-input
@@ -17,8 +17,8 @@
         />
 
         <n-space align="center">
-          <n-button type="primary" :loading="submitting" @click="submit">提交</n-button>
-          <n-text depth="3" style="font-size:12px">每行一个 URL；刷新缓存让最新内容立即生效，预热用于提前回源取回常用资源。</n-text>
+          <n-button type="primary" :loading="submitting" @click="submit">{{ t('common.submit') }}</n-button>
+          <n-text depth="3" style="font-size:12px">{{ t('cache.hint') }}</n-text>
         </n-space>
 
         <n-alert v-if="result.msg" :type="result.ok ? 'success' : 'warning'" :show-icon="false" :title="result.msg">
@@ -27,7 +27,7 @@
       </n-space>
     </n-card>
 
-    <n-card :bordered="false" title="任务历史" style="margin-top:12px">
+    <n-card :bordered="false" :title="t('cache.historyCard')" style="margin-top:12px">
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
@@ -41,10 +41,12 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue';
 import { NTag } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import PageHeader from '../components/PageHeader.vue';
 
+const { t } = useI18n();
 const opType = ref<'url' | 'dir' | 'preheat'>('url');
 const urlText = ref('');
 const submitting = ref(false);
@@ -53,31 +55,36 @@ const tasks = ref<any[]>([]);
 const result = ref<{ ok: boolean; msg: string; failed: { url: string; msg: string }[] }>({ ok: true, msg: '', failed: [] });
 
 const placeholderText = computed(() => {
-  if (opType.value === 'dir') return '每行一个目录 URL，例如：\nhttps://www.example.com/images/\nhttps://www.example.com/css/';
-  return '每行一个 URL，例如：\nhttps://www.example.com/index.html\nhttps://www.example.com/style.css';
+  if (opType.value === 'dir') return t('cache.dirPlaceholder');
+  return t('cache.urlPlaceholder');
 });
 
-const typeName: Record<string, string> = { url: 'URL 刷新', dir: '目录刷新', preheat: '预热', preheat_: '预热' };
+const typeName = computed<Record<string, string>>(() => ({
+  url: t('cache.typeUrl'),
+  dir: t('cache.typeDir'),
+  preheat: t('cache.typePreheat'),
+  preheat_: t('cache.typePreheat'),
+}));
 const typeTag: Record<string, string> = { url: 'info', dir: 'warning', preheat: 'success', preheat_: 'success' };
 
-const columns = [
+const columns = computed(() => [
   { title: 'URL', key: 'url', ellipsis: { tooltip: true } },
   {
-    title: '类型',
+    title: t('cache.typeCol'),
     key: 'type',
     width: 110,
-    render: (row: any) => h(NTag, { size: 'small', type: (typeTag[row.type] || 'default') as any, bordered: false }, { default: () => typeName[row.type] || row.type }),
+    render: (row: any) => h(NTag, { size: 'small', type: (typeTag[row.type] || 'default') as any, bordered: false }, { default: () => typeName.value[row.type] || row.type }),
   },
-  { title: '服务商', key: 'provider', width: 140 },
+  { title: t('cache.providerCol'), key: 'provider', width: 140 },
   {
-    title: '状态',
+    title: t('cache.statusCol'),
     key: 'status',
     width: 90,
-    render: (row: any) => h(NTag, { size: 'small', type: row.status ? 'error' : 'success', bordered: false }, { default: () => (row.status ? '失败' : '成功') }),
+    render: (row: any) => h(NTag, { size: 'small', type: row.status ? 'error' : 'success', bordered: false }, { default: () => (row.status ? t('cache.fail') : t('cache.success')) }),
   },
-  { title: '说明', key: 'msg', width: 160, ellipsis: { tooltip: true } },
-  { title: '时间', key: 'addtime', width: 180 },
-];
+  { title: t('cache.msgCol'), key: 'msg', width: 160, ellipsis: { tooltip: true } },
+  { title: t('cache.timeCol'), key: 'addtime', width: 180 },
+]);
 
 async function submit() {
   const urls = urlText.value
@@ -85,7 +92,7 @@ async function submit() {
     .map((s) => s.trim())
     .filter(Boolean);
   if (!urls.length) {
-    result.value = { ok: false, msg: '请填写至少一个 URL', failed: [] };
+    result.value = { ok: false, msg: t('cache.emptyUrls'), failed: [] };
     return;
   }
   submitting.value = true;
@@ -98,16 +105,16 @@ async function submit() {
       res = await api<any>('POST', '/cdn/purge', { type: opType.value, urls });
     }
     if (res.code !== 0) {
-      result.value = { ok: false, msg: res.msg || '提交失败', failed: [] };
+      result.value = { ok: false, msg: res.msg || t('cache.submitFailed'), failed: [] };
       return;
     }
     const success = res.success?.length || 0;
     const failed = res.failed || [];
-    const action = opType.value === 'preheat' ? '预热' : opType.value === 'dir' ? '目录刷新' : 'URL 刷新';
+    const action = opType.value === 'preheat' ? t('cache.typePreheat') : opType.value === 'dir' ? t('cache.typeDir') : t('cache.typeUrl');
     if (failed.length) {
-      result.value = { ok: false, msg: `${action}完成：成功 ${success} 个，失败 ${failed.length} 个`, failed };
+      result.value = { ok: false, msg: t('cache.doneCount', { action, success, failed: failed.length }), failed };
     } else {
-      result.value = { ok: true, msg: `${action}已提交，共 ${success} 个 URL`, failed: [] };
+      result.value = { ok: true, msg: t('cache.submittedCount', { action, success }), failed: [] };
       urlText.value = '';
     }
     loadTasks();

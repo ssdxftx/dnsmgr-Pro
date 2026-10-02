@@ -1,18 +1,18 @@
 <template>
   <div class="app-stack">
-    <PageHeader title="用户管理" subtitle="管理平台用户、权限与 API 接口">
+    <PageHeader :title="t('userList.title')" :subtitle="t('userList.subtitle')">
       <template #actions>
         <n-button type="primary" @click="openAdd">
           <template #icon><n-icon :component="AddOutline" /></template>
-          添加用户
+          {{ t('userList.addUser') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
-        <n-input v-model:value="kw" placeholder="UID或用户名" style="width: 220px" @keyup.enter="search" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>搜索</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>刷新</n-button>
+        <n-input v-model:value="kw" :placeholder="t('userList.searchPlaceholder')" style="width: 220px" @keyup.enter="search" />
+        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
       </n-space>
 
       <ResponsiveDataTable
@@ -21,65 +21,65 @@
         :loading="loading"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
-        empty-text="暂无用户"
+        :empty-text="t('userList.empty')"
       />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? '修改用户' : '添加用户'" :style="modalStyle" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('userList.editTitle') : t('userList.addTitle')" :style="modalStyle" :mask-closable="false">
       <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
-        <n-form-item label="用户名" required>
+        <n-form-item :label="t('userList.username')" required>
           <n-input v-model:value="form.username" />
         </n-form-item>
-        <n-form-item v-if="!editingId" label="密码" required>
+        <n-form-item v-if="!editingId" :label="t('userList.password')" required>
           <n-input-group>
             <n-input v-model:value="form.password" type="password" show-password-on="click" />
-            <n-button @click="genPassword">随机生成</n-button>
+            <n-button @click="genPassword">{{ t('userList.randomGenerate') }}</n-button>
           </n-input-group>
         </n-form-item>
-        <n-form-item v-if="editingId" label="重置密码">
-          <n-input v-model:value="form.repwd" type="password" show-password-on="click" placeholder="不重置密码请留空" />
+        <n-form-item v-if="editingId" :label="t('userList.resetPassword')">
+          <n-input v-model:value="form.repwd" type="password" show-password-on="click" :placeholder="t('userList.resetPasswordPlaceholder')" />
         </n-form-item>
-        <n-form-item label="API接口">
+        <n-form-item :label="t('userList.apiAccess')">
           <n-select v-model:value="form.is_api" :options="apiOptions" style="width: 160px" />
         </n-form-item>
-        <n-form-item v-if="form.is_api === 1" label="API密钥" required>
+        <n-form-item v-if="form.is_api === 1" :label="t('userList.apiKey')" required>
           <n-input-group>
             <n-input v-model:value="form.apikey" readonly />
-            <n-button @click="genApikey">生成密钥</n-button>
+            <n-button @click="genApikey">{{ t('userList.genApiKey') }}</n-button>
           </n-input-group>
         </n-form-item>
-        <n-form-item label="用户等级">
+        <n-form-item :label="t('userList.level')">
           <n-select v-model:value="form.level" :options="levelOptions" style="width: 160px" />
         </n-form-item>
-        <n-form-item v-if="form.level === 1" label="检测整域名">
+        <n-form-item v-if="form.level === 1" :label="t('userList.checkWholeDomain')">
           <n-switch v-model:value="form.check_whole" />
-          <n-text depth="3" style="font-size: 12px; margin-left: 8px">开启后该用户可对授权域名设置检测整个域名的全部子域名</n-text>
+          <n-text depth="3" style="font-size: 12px; margin-left: 8px">{{ t('userList.checkWholeHint') }}</n-text>
         </n-form-item>
-        <n-form-item v-if="form.level !== 2" label="统计缓存">
+        <n-form-item v-if="form.level !== 2" :label="t('userList.statCache')">
           <n-switch v-model:value="form.stat_cache" />
-          <n-text depth="3" style="font-size: 12px; margin-left: 8px">允许该用户查看 CDN 数据统计（需管理员在系统设置中开启统计缓存）</n-text>
+          <n-text depth="3" style="font-size: 12px; margin-left: 8px">{{ t('userList.statCacheHint') }}</n-text>
         </n-form-item>
-        <n-form-item v-if="form.level === 1" label="子域名分配">
+        <n-form-item v-if="form.level === 1" :label="t('userList.subPermission')">
           <div class="perm-list">
             <div v-for="(p, idx) in form.permission" :key="idx" class="perm-item">
               <div class="perm-row">
-                <n-select v-model:value="p.domain" :options="domainOptions" placeholder="选择域名" filterable class="perm-domain" />
+                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable class="perm-domain" />
                 <div class="perm-actions">
                   <n-select v-model:value="p.readonly" :options="modeOptions" class="perm-mode" />
-                  <n-button size="small" type="error" quaternary @click="removePerm(idx)">删除</n-button>
+                  <n-button size="small" type="error" quaternary @click="removePerm(idx)">{{ t('common.delete') }}</n-button>
                 </div>
               </div>
-              <n-input v-model:value="p.sub" placeholder="子域名前缀，如 user1 或 a.user1（留空=整域名）" />
-              <n-date-picker v-model:value="p.expiretime" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" clearable placeholder="有效期至（留空=永久）" style="width: 100%" />
+              <n-input v-model:value="p.sub" :placeholder="t('userList.subPrefixPlaceholder')" />
+              <n-date-picker v-model:value="p.expiretime" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" clearable :placeholder="t('userList.expirePlaceholder')" style="width: 100%" />
             </div>
-            <n-button size="small" dashed @click="addPerm">添加子域名授权</n-button>
+            <n-button size="small" dashed @click="addPerm">{{ t('userList.addSubPermission') }}</n-button>
           </div>
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
-          <n-button @click="showEdit = false">关闭</n-button>
-          <n-button type="primary" :loading="saving" @click="save">保存</n-button>
+          <n-button @click="showEdit = false">{{ t('common.close') }}</n-button>
+          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -88,6 +88,7 @@
 
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api } from '../api';
@@ -96,6 +97,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
 const message = useMessage();
 const dialog = useDialog();
+const { t } = useI18n();
 const loading = ref(false);
 const users = ref<any[]>([]);
 const page = ref(1);
@@ -122,18 +124,18 @@ onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
 const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
 const modalStyle = computed(() => (isMobile.value ? { width: 'calc(100vw - 24px)', maxWidth: '520px' } : { maxWidth: '520px' }));
 
-const apiOptions = [
-  { label: '关闭', value: 0 },
-  { label: '开启', value: 1 },
-];
-const levelOptions = [
-  { label: '普通用户', value: 1 },
-  { label: '管理员', value: 2 },
-];
-const modeOptions = [
-  { label: '自由解析', value: 0 },
-  { label: '仅查看', value: 1 },
-];
+const apiOptions = computed(() => [
+  { label: t('userList.apiOff'), value: 0 },
+  { label: t('userList.apiOn'), value: 1 },
+]);
+const levelOptions = computed(() => [
+  { label: t('userList.normalUser'), value: 1 },
+  { label: t('common.admin'), value: 2 },
+]);
+const modeOptions = computed(() => [
+  { label: t('userList.freeResolve'), value: 0 },
+  { label: t('userList.readOnlyView'), value: 1 },
+]);
 
 const pagination = reactive({
   page: 1,
@@ -152,29 +154,29 @@ const pagination = reactive({
   },
 });
 
-const columns: any[] = [
+const columns = computed<any[]>(() => [
   { title: 'UID', key: 'id', width: 70, sorter: true },
-  { title: '用户名', key: 'username', minWidth: 140 },
+  { title: t('userList.username'), key: 'username', minWidth: 140 },
   {
-    title: '用户等级',
+    title: t('userList.level'),
     key: 'level',
     width: 100,
     render(row: any) {
-      if (row.level === 2) return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => '管理员' });
-      if (row.level === 1) return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => '普通用户' });
+      if (row.level === 2) return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('common.admin') });
+      if (row.level === 1) return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('userList.normalUser') });
       return row.level;
     },
   },
   {
-    title: 'API接口',
+    title: t('userList.apiAccess'),
     key: 'is_api',
     width: 90,
     render(row: any) {
-      return h(NTag, { size: 'small', type: row.is_api ? 'success' : 'default', bordered: false }, { default: () => (row.is_api ? '开启' : '关闭') });
+      return h(NTag, { size: 'small', type: row.is_api ? 'success' : 'default', bordered: false }, { default: () => (row.is_api ? t('userList.apiOn') : t('userList.apiOff')) });
     },
   },
   {
-    title: '统计缓存',
+    title: t('userList.statCache'),
     key: 'stat_cache',
     width: 100,
     render(row: any) {
@@ -182,36 +184,36 @@ const columns: any[] = [
       return h(
         NButton,
         { size: 'tiny', type: row.stat_cache ? 'success' : 'default', onClick: () => toggleStatCache(row) },
-        { default: () => (row.stat_cache ? '已开启' : '未开启') }
+        { default: () => (row.stat_cache ? t('userList.statCacheOn') : t('userList.statCacheOff')) }
       );
     },
   },
-  { title: '添加时间', key: 'regtime', width: 170 },
-  { title: '上次登录', key: 'lasttime', width: 170 },
+  { title: t('userList.addTime'), key: 'regtime', width: 170 },
+  { title: t('userList.lastLogin'), key: 'lasttime', width: 170 },
   {
-    title: '状态',
+    title: t('common.status'),
     key: 'status',
     width: 90,
     render(row: any) {
       return h(
         NButton,
         { size: 'tiny', type: row.status ? 'success' : 'error', onClick: () => toggleStatus(row) },
-        { default: () => (row.status ? '正常' : '封禁') }
+        { default: () => (row.status ? t('userList.normal') : t('userList.banned')) }
       );
     },
   },
   {
-    title: '操作',
+    title: t('common.actions'),
     key: 'actions',
     width: 150,
     render(row: any) {
       const btns: any[] = [];
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => '编辑' }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => '删除' }));
+      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
-];
+]);
 
 async function loadUsers() {
   loading.value = true;
@@ -294,8 +296,8 @@ async function openEdit(row: any) {
 }
 
 async function save() {
-  if (!form.username) return message.warning('用户名不能为空');
-  if (form.is_api === 1 && !form.apikey) return message.warning('API密钥不能为空');
+  if (!form.username) return message.warning(t('userList.usernameRequired'));
+  if (form.is_api === 1 && !form.apikey) return message.warning(t('userList.apiKeyRequired'));
   saving.value = true;
   const body: any = { username: form.username, is_api: form.is_api, apikey: form.apikey, level: form.level };
   if (form.level !== 2) body.stat_cache = form.stat_cache ? 1 : 0;
@@ -335,14 +337,14 @@ function toggleStatCache(row: any) {
 
 function del(row: any) {
   dialog.warning({
-    title: '删除用户',
-    content: '确定要删除此用户吗？',
-    positiveText: '删除',
-    negativeText: '取消',
+    title: t('userList.deleteTitle'),
+    content: t('userList.deleteConfirm'),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const res = await api('DELETE', `/users/${row.id}`);
       if (res.code === 0) {
-        message.success('删除成功');
+        message.success(t('userList.deleteSuccess'));
         loadUsers();
       } else message.error(res.msg);
     },
