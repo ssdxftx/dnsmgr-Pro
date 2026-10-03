@@ -112,7 +112,7 @@
     </n-modal>
 
     <!-- Fallback Origin -->
-    <n-modal v-model:show="showFallback" preset="card" title="Fallback Origin" style="max-width:480px" :mask-closable="false">
+    <n-modal v-model:show="showFallback" preset="card" :title="t('cfHostnames.fallbackTitle')" style="max-width:480px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cfHostnames.currentOrigin')">
           <n-input :value="fallbackOrigin || t('cfHostnames.notSet')" disabled />
@@ -186,7 +186,7 @@
     </n-modal>
 
     <!-- 详情 -->
-    <n-modal v-model:show="showDetail" preset="card" :title="t('cfHostnames.verifyDetail', { hostname: detailRow?.hostname })" style="max-width:720px">
+    <n-modal v-model:show="showDetail" preset="card" :title="t('cfHostnames.verifyDetail', { hostname: detailRow?.hostname })" style="max-width:720px" :mask-closable="false">
       <n-descriptions v-if="detailRow" :column="1" label-placement="left" bordered size="small">
         <n-descriptions-item :label="t('cfHostnames.hostname')">{{ detailRow.hostname }}</n-descriptions-item>
         <n-descriptions-item :label="t('cfHostnames.customOrigin')">{{ detailRow.custom_origin_server || '-' }}</n-descriptions-item>

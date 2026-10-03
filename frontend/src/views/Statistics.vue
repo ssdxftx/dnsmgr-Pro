@@ -106,22 +106,22 @@
 
     <n-grid cols="1 m:2" responsive="screen" :x-gap="14" :y-gap="14">
       <n-grid-item>
-        <n-card :title="t('statistics.fluxTrend')" size="small">
+        <n-card :title="t('statistics.fluxTrend')" size="small" :bordered="false">
           <div ref="fluxRef" class="chart"></div>
         </n-card>
       </n-grid-item>
       <n-grid-item>
-        <n-card :title="t('statistics.bwTrend')" size="small">
+        <n-card :title="t('statistics.bwTrend')" size="small" :bordered="false">
           <div ref="bwRef" class="chart"></div>
         </n-card>
       </n-grid-item>
       <n-grid-item>
-        <n-card :title="t('statistics.reqTrend')" size="small">
+        <n-card :title="t('statistics.reqTrend')" size="small" :bordered="false">
           <div ref="reqRef" class="chart"></div>
         </n-card>
       </n-grid-item>
       <n-grid-item>
-        <n-card :title="t('statistics.statusDist')" size="small">
+        <n-card :title="t('statistics.statusDist')" size="small" :bordered="false">
           <div ref="statusRef" class="chart"></div>
         </n-card>
       </n-grid-item>

@@ -127,10 +127,10 @@ const columns = computed(() => [
     render(row: any) {
       return h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'small', type: 'primary', onClick: () => runNow(row) }, { default: () => t('preheat.runNow') }),
-          h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.active ? t('preheat.stopped') : t('common.enable')) }),
-          h(NButton, { size: 'small', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'small', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
+          h(NButton, { size: 'tiny', type: 'primary', onClick: () => runNow(row) }, { default: () => t('preheat.runNow') }),
+          h(NButton, { size: 'tiny', onClick: () => toggle(row) }, { default: () => (row.active ? t('preheat.stopped') : t('common.enable')) }),
+          h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
         ],
       });
     },

@@ -1,7 +1,7 @@
 <template>
   <div class="app-stack">
     <PageHeader :title="t('preferences.title')" :subtitle="t('preferences.subtitle')" />
-    <n-card :bordered="false" :title="t('preferences.languageTitle')" size="small" class="narrow">
+    <n-card :bordered="false" :title="t('preferences.languageTitle')" size="small" style="max-width:520px">
       <n-radio-group :value="locale" @update:value="onChange">
         <n-space>
           <n-radio-button value="zh-CN">{{ t('common.chinese') }}</n-radio-button>

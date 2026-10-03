@@ -57,7 +57,7 @@
     </n-modal>
 
     <!-- 证书详情 -->
-    <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" style="max-width:720px">
+    <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" style="max-width:720px" :mask-closable="false">
       <n-descriptions v-if="info" bordered :column="1" label-placement="left" style="margin-bottom:16px">
         <n-descriptions-item :label="t('certOrder.domains')">{{ (info.domains || []).join(', ') }}</n-descriptions-item>
         <n-descriptions-item :label="t('certOrder.issueTime')">{{ info.issuetime }}</n-descriptions-item>
@@ -79,7 +79,7 @@
     </n-modal>
 
     <!-- 日志 -->
-    <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" style="max-width:720px">
+    <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" style="max-width:720px" :mask-closable="false">
       <n-input v-model:value="logText" type="textarea" :rows="18" readonly />
     </n-modal>
   </div>
