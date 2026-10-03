@@ -114,6 +114,8 @@ export default {
     deleteConfirm: 'Delete {name}?',
     deleteCloud: 'Also delete the cloud acceleration domain (cloud deletion is irreversible)',
     deleteCloudHint: 'If unchecked, only the system record is deleted and the cloud acceleration domain is kept.',
+    deleteDns: 'Also delete the linked DNS resolution record',
+    deleteDnsHint: 'If checked, the CNAME record added automatically during onboarding will be deleted; if unchecked, the DNS record is kept and must be handled manually.',
     deleteCertHint: 'If this domain is managed by this project and linked to a certificate, deletion will first revoke the linked certificate; only after successful revocation will the domain and auto-deploy task be deleted. Failed revocation aborts the deletion.',
     confirmAgain: 'Confirm Again',
     deleteCloudConfirm: 'This will also delete the cloud acceleration domain {name}. Cloud resources are irrecoverable after deletion. Continue?',

@@ -72,6 +72,37 @@ function calcRecordName(accelDomain: string, dnsDomain: string): string {
   return accelDomain.slice(0, accelDomain.length - dnsDomain.length - 1);
 }
 
+// 删除接入 CDN 域名时联动创建的 DNS 解析记录（CNAME）。
+// 优先按 cdn_domain.dns_record 记录 ID 删除；若缺失（历史数据/接入时自动添加失败）则
+// 按「记录名 + CNAME + 目标值」精确匹配兜底，避免误删无关记录。
+async function removeLinkedDnsRecord(row: any): Promise<{ ok: boolean; message: string }> {
+  const dnsDomain: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [row.did]);
+  if (!dnsDomain) return { ok: false, message: '未找到联动域名，解析记录需手动处理' };
+  const dnsAcct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
+  if (!dnsAcct) return { ok: false, message: 'DNS账户不存在，解析记录需手动处理' };
+  const dns: any = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), dnsDomain.name, dnsDomain.thirdid);
+  if (!dns) return { ok: false, message: 'DNS模块不存在，解析记录需手动处理' };
+
+  const norm = (v: any) => String(Array.isArray(v) ? v[0] : v ?? '').trim().toLowerCase();
+  let recordId = row.dns_record ? String(row.dns_record) : '';
+  if (!recordId && row.cname) {
+    const recName = calcRecordName(row.name, dnsDomain.name);
+    const res = await dns.getDomainRecords(1, 500);
+    const hit = (res && res.list ? res.list : []).find(
+      (r: any) =>
+        String(r.Type).toUpperCase() === 'CNAME' &&
+        norm(r.Name) === norm(recName) &&
+        norm(r.Value).replace(/\.+$/, '') === norm(row.cname).replace(/\.+$/, ''),
+    );
+    if (hit) recordId = String(hit.RecordId);
+  }
+  if (!recordId) return { ok: false, message: '未找到联动创建的解析记录（可能已手动删除）' };
+
+  const ok = await dns.deleteDomainRecord(recordId);
+  if (!ok) return { ok: false, message: (dns.getError?.() || '删除解析记录失败') + '，需手动处理' };
+  return { ok: true, message: '已删除联动解析记录' };
+}
+
 function normalizeSetting(v: any): any {
   if (Array.isArray(v)) {
     return v.map(normalizeSetting).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
@@ -343,11 +374,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg, data: { id: newId, cert: certResult } };
   });
 
-  // 删除：可选同时删除云端加速域名（delete_cloud=1）；云端删除失败时不删除本地记录，便于重试
-  // 联动证书需先吊销成功才会删除；吊销失败则整体中止，云端与本地记录均不删除
+  // 删除：可选同时删除云端加速域名（delete_cloud=1）、可选同时删除联动 DNS 解析记录（delete_dns=1）；
+  // 云端删除失败时不删除本地记录，便于重试；联动证书需先吊销成功才会删除，吊销失败则整体中止
   app.delete('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;
     const deleteCloud = ['1', 'true'].includes(String(req.query?.delete_cloud || '').toLowerCase());
+    const deleteDns = ['1', 'true'].includes(String(req.query?.delete_dns || '').toLowerCase());
     const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '加速域名不存在' };
 
@@ -366,9 +398,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
         return { code: -1, msg: `删除云端加速域名失败：${provider.getError() || '未知错误'}（本地记录未删除，可重试或改为仅删除本地）` };
       }
     }
+    // 可选删除联动创建的解析记录；删除失败不阻断加速域名删除，仅提示手动处理
+    let dnsMsg = '';
+    if (deleteDns) {
+      const r = await removeLinkedDnsRecord(row);
+      dnsMsg = r.message;
+    }
     await query(`DELETE FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     let msg = deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）';
     if (linked.orders) msg += `；已吊销并删除联动证书 ${linked.orders} 个、自动部署任务 ${linked.deployTasks} 个`;
+    if (deleteDns) msg += `；${dnsMsg}`;
     return { code: 0, msg };
   });
 
