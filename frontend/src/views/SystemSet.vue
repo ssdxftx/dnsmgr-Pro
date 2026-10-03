@@ -138,7 +138,7 @@
 
         <!-- 登录设置 -->
         <n-tab-pane name="login" :tab="t('systemSet.tabLogin')">
-          <n-card :title="t('systemSet.loginCardTitle')" :bordered="false" size="small" class="narrow">
+          <n-card :title="t('systemSet.loginCardTitle')" :bordered="false" size="small" style="max-width:520px">
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.loginVcode')">
                 <n-switch :value="cfg.vcode !== '2'" @update:value="setVcode" />
@@ -149,7 +149,7 @@
 
         <!-- 注册设置 -->
         <n-tab-pane name="register" :tab="t('systemSet.tabRegister')">
-          <n-card :title="t('systemSet.regConfigTitle')" :bordered="false" size="small" class="narrow mb-16">
+          <n-card :title="t('systemSet.regConfigTitle')" :bordered="false" size="small" class="mb-16" style="max-width:520px">
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.regEnable')">
                 <n-switch :value="(cfg.register_enable || '0') === '1'" @update:value="setRegisterEnable" />
@@ -178,7 +178,7 @@
 
         <!-- 代理设置 -->
         <n-tab-pane name="proxy" :tab="t('systemSet.tabProxy')">
-          <n-card :title="t('systemSet.proxyCardTitle')" :bordered="false" size="small" class="narrow">
+          <n-card :title="t('systemSet.proxyCardTitle')" :bordered="false" size="small" style="max-width:520px">
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.proxyIp')"><n-input v-model:value="cfg.proxy_server" /></n-form-item>
               <n-form-item :label="t('systemSet.proxyPort')"><n-input v-model:value="cfg.proxy_port" /></n-form-item>
@@ -199,7 +199,7 @@
 
         <!-- 计划任务 -->
         <n-tab-pane name="cron" :tab="t('systemSet.tabCron')">
-          <n-card :title="t('systemSet.cronCardTitle')" :bordered="false" size="small" class="narrow">
+          <n-card :title="t('systemSet.cronCardTitle')" :bordered="false" size="small" style="max-width:520px">
             <n-alert type="info" class="mb-16">
               {{ t('systemSet.cronAlert') }}
             </n-alert>
@@ -219,7 +219,7 @@
 
         <!-- 统计缓存 -->
         <n-tab-pane name="statcache" :tab="t('systemSet.tabStatCache')">
-          <n-card :title="t('systemSet.statCacheCardTitle')" :bordered="false" size="small" class="narrow-wide">
+          <n-card :title="t('systemSet.statCacheCardTitle')" :bordered="false" size="small" style="max-width:560px">
             <n-alert type="info" :show-icon="false" class="mb-16">
               {{ t('systemSet.statCacheAlert') }}
             </n-alert>
@@ -250,7 +250,7 @@
     </n-card>
 
     <!-- 生成注册码弹窗 -->
-    <n-modal v-model:show="showGen" preset="card" :title="t('systemSet.genTitle')" class="narrow-sm" :mask-closable="false">
+    <n-modal v-model:show="showGen" preset="card" :title="t('systemSet.genTitle')" style="max-width:420px" :mask-closable="false">
       <n-form label-placement="top">
         <n-form-item :label="t('systemSet.genCount')">
           <n-input-number v-model:value="genForm.count" :min="1" :max="100" style="width: 100%" />
@@ -274,7 +274,7 @@
     </n-modal>
 
     <!-- 生成结果弹窗 -->
-    <n-modal v-model:show="showResult" preset="card" :title="t('systemSet.resultTitle')" class="narrow">
+    <n-modal v-model:show="showResult" preset="card" :title="t('systemSet.resultTitle')" style="max-width:520px" :mask-closable="false">
       <n-alert type="success" class="mb-12">{{ t('systemSet.resultAlert') }}</n-alert>
       <n-input v-model:value="resultText" type="textarea" :rows="8" readonly />
       <template #footer>
@@ -286,7 +286,7 @@
     </n-modal>
 
     <!-- QQ机器人使用说明 -->
-    <n-modal v-model:show="showQqbotHelp" preset="card" :title="t('systemSet.qqHelpTitle')" class="narrow-wide">
+    <n-modal v-model:show="showQqbotHelp" preset="card" :title="t('systemSet.qqHelpTitle')" style="max-width:560px" :mask-closable="false">
       <div class="help-body">
         <p><b>{{ t('systemSet.helpStep1') }}</b></p>
         <p>{{ t('systemSet.helpStep1p1') }}</p>
@@ -505,13 +505,13 @@ const regCodeColumns = computed<any[]>(() => [
     key: 'actions',
     width: 160,
     render: (row: any) =>
-      h(NSpace, { size: 'small' }, () => [
+      h(NSpace, null, () => [
         h(
           NButton,
-          { size: 'small', quaternary: true, type: row.status === 1 ? 'warning' : 'success', onClick: () => toggleCodeStatus(row) },
+          { size: 'tiny', type: row.status === 1 ? 'warning' : 'success', onClick: () => toggleCodeStatus(row) },
           { default: () => (row.status === 1 ? t('systemSet.regCodeStatusDisabled') : t('systemSet.regCodeStatusActive')) }
         ),
-        h(NButton, { size: 'small', quaternary: true, type: 'error', onClick: () => deleteCode(row) }, { default: () => t('common.delete') }),
+        h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteCode(row) }, { default: () => t('common.delete') }),
       ]),
   },
 ]);
@@ -582,9 +582,6 @@ onMounted(() => {
 <style scoped>
 .mb-12 { margin-bottom: 12px; }
 .mb-16 { margin-bottom: 16px; }
-.narrow { max-width: 520px; }
-.narrow-wide { max-width: 560px; }
-.narrow-sm { max-width: 420px; }
 .help-body p {
   margin: 0 0 8px;
   line-height: 1.7;

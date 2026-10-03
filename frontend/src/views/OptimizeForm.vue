@@ -2,7 +2,7 @@
   <div class="app-stack">
     <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('optimize.taskTitle')" :subtitle="t('optimize.formSubtitle')" back="/optimize-tasks" />
     <n-card :bordered="false">
-      <n-form label-placement="left" label-width="140" style="max-width: 720px">
+      <n-form label-placement="left" label-width="110" style="max-width: 720px">
         <n-form-item :label="t('optimize.domainSelect')" required>
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('optimize.hostRecord')" style="width: 200px" />

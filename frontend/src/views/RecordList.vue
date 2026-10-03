@@ -48,7 +48,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showValue" preset="card" :title="t('record.valueTitle')" style="max-width:560px">
+    <n-modal v-model:show="showValue" preset="card" :title="t('record.valueTitle')" style="max-width:560px" :mask-closable="false">
       <n-input type="textarea" :value="valueDetail" :autosize="{ minRows: 2, maxRows: 10 }" readonly />
       <template #footer>
         <n-space justify="end">
@@ -58,7 +58,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showRemark" preset="card" :title="t('record.editRemark')" style="max-width:480px">
+    <n-modal v-model:show="showRemark" preset="card" :title="t('record.editRemark')" style="max-width:480px" :mask-closable="false">
       <n-input v-model:value="remarkForm.remark" type="textarea" :rows="3" :placeholder="t('record.remarkContentPlaceholder')" />
       <template #footer>
         <n-space justify="end">
@@ -68,7 +68,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showCheck" preset="card" :title="t('record.checkTitle')" style="max-width:460px">
+    <n-modal v-model:show="showCheck" preset="card" :title="t('record.checkTitle')" style="max-width:460px" :mask-closable="false">
       <n-space vertical :size="12">
         <n-descriptions :column="1" size="small" label-placement="left" bordered>
           <n-descriptions-item :label="t('record.hostRecord')">{{ checkResult.name }}.{{ displayTitle }}</n-descriptions-item>

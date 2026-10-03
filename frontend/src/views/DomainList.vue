@@ -63,7 +63,7 @@
     </n-modal>
 
     <!-- 添加分类弹窗 -->
-    <n-modal v-model:show="showCategory" preset="card" :title="t('domain.addCategory')" style="max-width:400px">
+    <n-modal v-model:show="showCategory" preset="card" :title="t('domain.addCategory')" style="max-width:400px" :mask-closable="false">
       <n-input v-model:value="categoryName" :placeholder="t('domain.categoryName')" />
       <template #footer>
         <n-space justify="end">
@@ -157,8 +157,8 @@ const columns = computed(() => {
     key: 'actions',
     width: isAdmin.value ? 200 : 120,
     render(row: any) {
-      const btns: any[] = [h(NButton, { size: 'small', type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
-      if (isAdmin.value) btns.push(h(NButton, { size: 'small', type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
+      const btns: any[] = [h(NButton, { size: 'tiny', type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
+      if (isAdmin.value) btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   });

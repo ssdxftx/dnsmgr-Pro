@@ -2,7 +2,7 @@
   <div class="app-stack">
     <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('dm.policyTitle')" :subtitle="t('dm.formSubtitle')" back="/dm-tasks" />
     <n-card :bordered="false">
-      <n-form label-placement="left" label-width="140" style="max-width: 720px">
+      <n-form label-placement="left" label-width="110" style="max-width: 720px">
         <n-form-item :label="t('dm.domainSelect')" required>
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('dm.hostRecord')" style="width: 200px" />
