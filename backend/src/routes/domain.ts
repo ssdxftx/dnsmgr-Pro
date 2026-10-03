@@ -293,6 +293,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const info = await getDomainWithAccount(id);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const acc = await getUserPerms(req);
+    if (!acc.admin && !acc.perms.some((p) => p.domain === info.domain.name)) {
+      return { code: -1, msg: '无权限查看该域名' };
+    }
     const provider = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const lines = await provider.getRecordLine();

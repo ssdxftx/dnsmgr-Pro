@@ -2,6 +2,12 @@
 
 export const SECRET_MASK = '**********';
 
+// 仅允许 http/https 链接用于 href，防止后端下发的 javascript: 等协议在前端执行
+export function safeHref(url: string | null | undefined): string {
+  const s = String(url || '').trim();
+  return /^https?:\/\//i.test(s) ? s : '#';
+}
+
 const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential)/i;
 
 // 判断配置项是否为敏感字段（用于以密码框渲染、避免明文回显）

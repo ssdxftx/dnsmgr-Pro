@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet, configSet } from '../config.js';
-import { fmtDateTime } from '../lib/util.js';
+import { fmtDateTime, hasOwn } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
 
@@ -107,7 +107,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
       id: 'A.id', rr: 'A.rr', cdn_type: 'A.cdn_type', recordnum: 'A.recordnum', ip_type: 'A.ip_type',
       active: 'A.active', updatetime: 'A.updatetime', status: 'A.status',
     };
-    const orderBy = allowedSort[sort] ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
+    const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
 
     const list = await query(
       `SELECT A.*, B.name AS domain FROM ${table('optimizeip')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,

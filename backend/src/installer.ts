@@ -116,7 +116,7 @@ export async function performInstall(cfg: DbConfig, adminUsername: string, admin
 
       const hash = await bcrypt.hash(adminPassword, 10);
       await conn.query(
-        `INSERT INTO \`${prefix}user\` (username, password, is_api, apikey, level, regtime, lasttime, status) VALUES (?, ?, 0, '', 2, NOW(), NOW(), 1)`,
+        `INSERT INTO \`${prefix}user\` (username, password, is_api, apikey, level, regtime, lasttime, status, is_super) VALUES (?, ?, 0, '', 2, NOW(), NOW(), 1, 1)`,
         [adminUsername, hash]
       );
     } else {

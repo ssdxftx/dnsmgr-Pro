@@ -7,6 +7,7 @@ import { certConfig } from '../cert/factory.js';
 import { deployConfig } from '../deploy/meta.js';
 import { STATUS_LABEL } from '../certService.js';
 import { QqBot } from './qqbot.js';
+import { assertUrlAllowed } from '../netGuard.js';
 
 const SITENAME = '聚合DNS管理系统';
 
@@ -117,6 +118,11 @@ export async function sendTelegram(content: string): Promise<boolean | string> {
   const post: Record<string, any> = { chat_id: chatid, text: content, parse_mode: 'HTML' };
   const topicid = parseInt((await configGet('tgbot_topicid')) || '0');
   if (topicid > 0) post.message_thread_id = topicid;
+  try {
+    await assertUrlAllowed(base);
+  } catch (e: any) {
+    return e?.message || 'Telegram 代理地址不合法';
+  }
   const res = await fetch(`${base}/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -144,18 +150,24 @@ export async function sendWebhook(sub: string, content: string): Promise<boolean
   const url = await configGet('webhook_url');
   const atuser = await configGet('webhook_user');
   if (!url) return false;
+  let host = '';
+  try {
+    host = new URL(url).hostname.toLowerCase();
+  } catch {
+    return 'Webhook地址不合法';
+  }
   let post: Record<string, any>;
-  if (url.includes('oapi.dingtalk.com')) {
+  if (host === 'oapi.dingtalk.com') {
     const text = '### ' + sub + "  \n " + content.replace(/\n/g, "  \n ");
     post = { msgtype: 'markdown', markdown: { title: sub, text } };
     if (atuser) {
       if (atuser === 'all') post.at = { isAtAll: true };
       else post.at = { atMobiles: atuser.split(','), isAtAll: false };
     }
-  } else if (url.includes('qyapi.weixin.qq.com')) {
+  } else if (host === 'qyapi.weixin.qq.com') {
     const text = '## ' + sub + '\n' + content;
     post = { msgtype: 'markdown', markdown: { content: text } };
-  } else if (url.includes('open.feishu.cn') || url.includes('open.larksuite.com')) {
+  } else if (host === 'open.feishu.cn' || host === 'open.larksuite.com') {
     let text = content.replace('<font color="warning">', '<font color="red">');
     if (atuser) {
       if (atuser === 'all') {
@@ -180,6 +192,11 @@ export async function sendWebhook(sub: string, content: string): Promise<boolean
     };
   } else {
     return '不支持的Webhook地址';
+  }
+  try {
+    await assertUrlAllowed(url);
+  } catch (e: any) {
+    return e?.message || 'Webhook地址不合法';
   }
   const res = await fetch(url, {
     method: 'POST',
@@ -246,6 +263,7 @@ export async function sendCustomWebhook(sub: string, content: string): Promise<b
   }
 
   try {
+    await assertUrlAllowed(fetchUrl);
     const res = await fetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend });
     if (res.status >= 200 && res.status < 300) return true;
     return '请求失败，HTTP状态码：' + res.status;

@@ -159,6 +159,7 @@ const AUTH_USER_CACHE_MS = 10_000;
   req.user.username = dbUser.username;
   req.user.totp_open = Number(dbUser.totp_open);
   req.user.stat_cache = Number(dbUser.stat_cache || 0);
+  req.user.is_super = Number(dbUser.is_super || 0);
   return undefined;
 });
 

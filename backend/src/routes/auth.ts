@@ -1,13 +1,30 @@
 import type { FastifyInstance } from 'fastify';
-import { findUserByUsername, verifyPassword, findUserById } from '../auth.js';
+import { findUserByUsername, verifyPassword, findUserById, DUMMY_PASSWORD_HASH } from '../auth.js';
 import { query, table } from '../db.js';
 import { generateSecret, provisioningUri, verifyTOTP } from '../lib/totp.js';
 import { decryptText, encryptText } from '../lib/secret.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 
+// TOTP 防重放：记录每个用户在有效窗口内已使用过的动态口令，拒绝重复提交
+const TOTP_REPLAY_WINDOW_MS = 90_000;
+const usedTotp = new Map<number, Map<string, number>>();
+
+function markTotpUsed(uid: number, code: string): boolean {
+  const now = Date.now();
+  let m = usedTotp.get(uid);
+  if (!m) {
+    m = new Map();
+    usedTotp.set(uid, m);
+  }
+  for (const [k, t] of m) if (now - t > TOTP_REPLAY_WINDOW_MS) m.delete(k);
+  if (m.has(code)) return false;
+  m.set(code, now);
+  return true;
+}
+
 function publicUser(user: any) {
-  return { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open, stat_cache: Number(user.stat_cache || 0), lang: user.lang || '' };
+  return { id: user.id, username: user.username, level: user.level, totp_open: user.totp_open, stat_cache: Number(user.stat_cache || 0), is_super: Number(user.is_super || 0), lang: user.lang || '' };
 }
 
 export default async function authRoutes(app: FastifyInstance) {
@@ -15,7 +32,10 @@ export default async function authRoutes(app: FastifyInstance) {
     const { username, password } = req.body || {};
     if (!username || !password) return { code: -1, msg: '用户名或密码不能为空' };
     const user = await findUserByUsername(username);
-    if (!user) return { code: -1, msg: '用户名或密码错误' };
+    if (!user) {
+      await verifyPassword(DUMMY_PASSWORD_HASH, password);
+      return { code: -1, msg: '用户名或密码错误' };
+    }
     const ok = await verifyPassword(user.password, password);
     if (!ok) return { code: -1, msg: '用户名或密码错误' };
     // 密码正确后再提示封禁，避免未认证的用户名枚举
@@ -55,6 +75,7 @@ export default async function authRoutes(app: FastifyInstance) {
     if (user.totp_open != 1 || !user.totp_secret) return { code: -1, msg: '未开启TOTP二次验证' };
     const totpSecret = decryptText(user.totp_secret) || '';
     if (!verifyTOTP(totpSecret, code)) return { code: -1, msg: '动态口令错误' };
+    if (!markTotpUsed(user.id, String(code).trim())) return { code: -1, msg: '动态口令已被使用，请稍后再试' };
 
     const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, type: 'session' };
     const token = (app as any).jwt.sign(payload);

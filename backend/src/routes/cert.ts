@@ -241,7 +241,14 @@ export default async function certRoutes(app: FastifyInstance) {
       params.push(id);
     } else if (domain) {
       const oids = await query(`SELECT oid FROM ${table('cert_domain')} WHERE domain LIKE ?`, ['%' + domain + '%']);
-      where += ' AND A.id IN (' + (oids.map((o: any) => o.oid).join(',') || '0') + ')';
+      // 用占位符绑定，避免把库中 oid 值直接拼进 SQL 文本（二次注入）
+      const oidNums = oids.map((o: any) => Number(o.oid)).filter((n: number) => Number.isInteger(n) && n > 0);
+      if (oidNums.length) {
+        where += ' AND A.id IN (' + oidNums.map(() => '?').join(',') + ')';
+        params.push(...oidNums);
+      } else {
+        where += ' AND 1=0';
+      }
     }
     if (aid) {
       where += ' AND A.aid = ?';

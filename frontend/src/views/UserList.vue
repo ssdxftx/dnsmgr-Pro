@@ -91,7 +91,7 @@ import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline } from '@vicons/ionicons5';
-import { api } from '../api';
+import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 
@@ -100,6 +100,7 @@ const dialog = useDialog();
 const { t } = useI18n();
 const loading = ref(false);
 const users = ref<any[]>([]);
+const currentUid = computed(() => Number(getUser()?.id || 0));
 const page = ref(1);
 const pageSize = ref(10);
 const kw = ref('');
@@ -162,6 +163,7 @@ const columns = computed<any[]>(() => [
     key: 'level',
     width: 100,
     render(row: any) {
+      if (Number(row.is_super) === 1) return h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('userList.superAdmin') });
       if (row.level === 2) return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('common.admin') });
       if (row.level === 1) return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('userList.normalUser') });
       return row.level;
@@ -180,7 +182,7 @@ const columns = computed<any[]>(() => [
     key: 'stat_cache',
     width: 100,
     render(row: any) {
-      if (row.level === 2) return h('span', { class: 'app-muted' }, '—');
+      if (row.level === 2 || Number(row.is_super) === 1) return h('span', { class: 'app-muted' }, '—');
       return h(
         NButton,
         { size: 'tiny', type: row.stat_cache ? 'success' : 'default', onClick: () => toggleStatCache(row) },
@@ -195,6 +197,7 @@ const columns = computed<any[]>(() => [
     key: 'status',
     width: 90,
     render(row: any) {
+      if (Number(row.is_super) === 1) return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('userList.normal') });
       return h(
         NButton,
         { size: 'tiny', type: row.status ? 'success' : 'error', onClick: () => toggleStatus(row) },
@@ -207,9 +210,15 @@ const columns = computed<any[]>(() => [
     key: 'actions',
     width: 150,
     render(row: any) {
+      // 超级管理员不可被其他管理员修改，仅其本人可编辑自身资料
+      if (Number(row.is_super) === 1 && Number(row.id) !== currentUid.value) {
+        return h('span', { class: 'app-muted' }, '—');
+      }
       const btns: any[] = [];
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      if (Number(row.id) !== currentUid.value) {
+        btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      }
       return h(NSpace, null, { default: () => btns });
     },
   },

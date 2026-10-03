@@ -29,7 +29,7 @@
             <n-descriptions-item :label="t('about.startedAt')">{{ formatTime(info?.startedAt) }}</n-descriptions-item>
             <n-descriptions-item :label="t('about.license')">{{ info?.license || '-' }}</n-descriptions-item>
             <n-descriptions-item :label="t('about.repo')">
-              <n-a :href="info?.repo || repoFallback" target="_blank" rel="noreferrer">{{ repoLabel }}</n-a>
+              <n-a :href="safeHref(info?.repo || repoFallback)" target="_blank" rel="noreferrer">{{ repoLabel }}</n-a>
             </n-descriptions-item>
           </n-descriptions>
         </n-card>
@@ -74,10 +74,10 @@
             </n-alert>
 
             <div v-if="update?.hasUpdate && (update?.compareUrl || update?.releaseUrl)" class="ver-actions">
-              <n-button v-if="update?.compareUrl" size="small" tag="a" :href="update.compareUrl" target="_blank" rel="noreferrer">
+              <n-button v-if="update?.compareUrl" size="small" tag="a" :href="safeHref(update.compareUrl)" target="_blank" rel="noreferrer">
                 {{ t('about.viewChanges') }}
               </n-button>
-              <n-button v-if="update?.releaseUrl" size="small" type="primary" tag="a" :href="update.releaseUrl" target="_blank" rel="noreferrer">
+              <n-button v-if="update?.releaseUrl" size="small" type="primary" tag="a" :href="safeHref(update.releaseUrl)" target="_blank" rel="noreferrer">
                 {{ t('about.goDownload') }}
               </n-button>
             </div>
@@ -86,7 +86,7 @@
               <n-descriptions-item :label="t('about.publishedAt')">{{ formatTime(update?.publishedAt) }}</n-descriptions-item>
               <n-descriptions-item :label="t('about.checkedAt')">{{ formatTime(update?.checkedAt) }}</n-descriptions-item>
               <n-descriptions-item :label="t('about.updateRepo')">
-                <n-a :href="updateRepoUrl" target="_blank" rel="noreferrer">{{ update?.repo || info?.updateRepo }}</n-a>
+                <n-a :href="safeHref(updateRepoUrl)" target="_blank" rel="noreferrer">{{ update?.repo || info?.updateRepo }}</n-a>
               </n-descriptions-item>
             </n-descriptions>
 
@@ -131,6 +131,7 @@ import { RefreshOutline } from '@vicons/ionicons5';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import { safeHref } from '../lib/safe';
 
 interface AboutInfo {
   name: string;
