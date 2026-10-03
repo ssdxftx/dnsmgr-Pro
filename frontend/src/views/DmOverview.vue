@@ -3,37 +3,28 @@
     <PageHeader :title="t('dm.title')" :subtitle="t('dm.subtitle')" />
     <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item>
-        <n-card :bordered="false">
-          <n-statistic :label="t('dm.scheduleStatus')">
-            <n-tag :type="info.run_state === 1 ? 'success' : 'error'" size="large" bordered>
-              {{ info.run_state === 1 ? t('dm.running') : t('dm.stopped') }}
-            </n-tag>
-          </n-statistic>
-        </n-card>
+        <StatCard
+          :label="t('dm.scheduleStatus')"
+          :value="info.run_state === 1 ? t('dm.running') : t('dm.stopped')"
+          :tone="info.run_state === 1 ? 'success' : 'error'"
+          :icon="PulseOutline"
+        />
       </n-grid-item>
       <n-grid-item>
-        <n-card :bordered="false">
-          <n-statistic :label="t('dm.runCount')" :value="info.run_count" />
-        </n-card>
+        <StatCard :label="t('dm.runCount')" :value="info.run_count" tone="primary" :icon="SyncOutline" />
       </n-grid-item>
       <n-grid-item>
-        <n-card :bordered="false">
-          <n-statistic :label="t('dm.lastRunTime')" :value="info.run_time || t('common.none')" />
-        </n-card>
+        <StatCard :label="t('dm.lastRunTime')" :value="info.run_time || t('common.none')" tone="info" :icon="TimeOutline" />
       </n-grid-item>
       <n-grid-item>
-        <n-card :bordered="false">
-          <n-statistic :label="t('dm.switchCount24')" :value="info.switch_count" />
-        </n-card>
+        <StatCard :label="t('dm.switchCount24')" :value="info.switch_count" tone="warning" :icon="SwapHorizontalOutline" />
       </n-grid-item>
       <n-grid-item>
-        <n-card :bordered="false">
-          <n-statistic :label="t('dm.failCount24')" :value="info.fail_count" />
-        </n-card>
+        <StatCard :label="t('dm.failCount24')" :value="info.fail_count" tone="error" :icon="CloseCircleOutline" />
       </n-grid-item>
     </n-grid>
 
-    <n-card :bordered="false" style="margin-top: 16px" :title="t('dm.runLog')">
+    <n-card :bordered="false" :title="t('dm.runLog')">
       <n-alert v-if="info.run_error" type="error" style="margin-bottom: 12px">{{ t('dm.runError') }}{{ info.run_error }}</n-alert>
       <div class="clean-row">
         <n-input-number v-model:value="days" :min="0" class="days-input" />
@@ -48,8 +39,10 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage, useDialog } from 'naive-ui';
+import { PulseOutline, SyncOutline, TimeOutline, SwapHorizontalOutline, CloseCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import StatCard from '../components/StatCard.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -96,10 +89,6 @@ onMounted(load);
   }
   .days-input {
     width: 100%;
-  }
-  :deep(.n-statistic-value) {
-    font-size: 22px;
-    word-break: break-word;
   }
 }
 </style>

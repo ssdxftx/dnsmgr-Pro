@@ -153,7 +153,7 @@
     </n-modal>
 
     <!-- 同步云端弹窗 -->
-    <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" style="max-width:440px">
+    <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" style="max-width:440px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cdnDomain.account')">
           <n-select v-model:value="syncAid" :options="accountOptions" />
@@ -171,7 +171,7 @@
     </n-modal>
 
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
-    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" style="max-width:680px">
+    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" style="max-width:680px" :mask-closable="false">
       <n-spin :show="certRunning">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
           {{ t('cdnDomain.certLinkDesc') }}
@@ -204,7 +204,7 @@
     </n-modal>
 
     <!-- 由本项目管理：证书选择弹窗（选择器） -->
-    <n-modal v-model:show="showLink" preset="card" :title="t('cdnDomain.linkTitle')" style="max-width: 680px" @after-leave="onLinkAfterLeave">
+    <n-modal v-model:show="showLink" preset="card" :title="t('cdnDomain.linkTitle')" style="max-width: 680px" :mask-closable="false" @after-leave="onLinkAfterLeave">
       <n-spin :show="linkLoading">
         <div v-if="linkTarget" class="link-target">{{ t('cdnDomain.targetDomain') }}<b>{{ linkTarget.name }}</b></div>
 

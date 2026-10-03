@@ -24,7 +24,7 @@
     </n-modal>
 
     <!-- Token -->
-    <n-modal v-model:show="showToken" preset="card" title="Tunnel Token" style="max-width:640px">
+    <n-modal v-model:show="showToken" preset="card" :title="t('cfTunnels.tokenTitle')" style="max-width:640px" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item label="Tunnel"><n-input :value="tokenName" disabled /></n-form-item>
         <n-form-item label="Token"><n-input v-model:value="tokenValue" type="textarea" :rows="6" readonly /></n-form-item>
@@ -39,7 +39,7 @@
     </n-modal>
 
     <!-- 公网主机名 -->
-    <n-modal v-model:show="showPublic" preset="card" :title="t('cfTunnels.publicHostnamesTitle', { name: currentTunnelName })" style="max-width:760px">
+    <n-modal v-model:show="showPublic" preset="card" :title="t('cfTunnels.publicHostnamesTitle', { name: currentTunnelName })" style="max-width:760px" :mask-closable="false">
       <n-form label-placement="left" label-width="110" inline>
         <n-form-item :label="t('cfTunnels.hostname')"><n-input v-model:value="publicForm.hostname" placeholder="app.example.com" style="width:200px" /></n-form-item>
         <n-form-item :label="t('cfTunnels.service')"><n-input v-model:value="publicForm.service" placeholder="http://localhost:8080" style="width:200px" /></n-form-item>
@@ -54,7 +54,7 @@
     </n-modal>
 
     <!-- CIDR 路由 -->
-    <n-modal v-model:show="showCidr" preset="card" :title="t('cfTunnels.cidrRoutesTitle', { name: currentTunnelName })" style="max-width:760px">
+    <n-modal v-model:show="showCidr" preset="card" :title="t('cfTunnels.cidrRoutesTitle', { name: currentTunnelName })" style="max-width:760px" :mask-closable="false">
       <n-form label-placement="left" label-width="110" inline>
         <n-form-item label="CIDR"><n-input v-model:value="cidrForm.network" placeholder="10.0.0.0/24" style="width:180px" /></n-form-item>
         <n-form-item :label="t('common.remark')"><n-input v-model:value="cidrForm.comment" style="width:200px" /></n-form-item>
@@ -68,7 +68,7 @@
     </n-modal>
 
     <!-- 主机名路由 -->
-    <n-modal v-model:show="showRoute" preset="card" :title="t('cfTunnels.hostnameRoutesTitle', { name: currentTunnelName })" style="max-width:760px">
+    <n-modal v-model:show="showRoute" preset="card" :title="t('cfTunnels.hostnameRoutesTitle', { name: currentTunnelName })" style="max-width:760px" :mask-closable="false">
       <n-form label-placement="left" label-width="110" inline>
         <n-form-item :label="t('cfTunnels.hostname')"><n-input v-model:value="routeForm.hostname" placeholder="private.example.com" style="width:220px" /></n-form-item>
         <n-form-item :label="t('common.remark')"><n-input v-model:value="routeForm.comment" style="width:200px" /></n-form-item>

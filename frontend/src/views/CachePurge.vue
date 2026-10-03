@@ -27,7 +27,7 @@
       </n-space>
     </n-card>
 
-    <n-card :bordered="false" :title="t('cache.historyCard')" style="margin-top:12px">
+    <n-card :bordered="false" :title="t('cache.historyCard')">
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"

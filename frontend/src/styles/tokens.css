@@ -244,6 +244,7 @@ a {
   line-height: 1.2;
   color: var(--app-text);
   font-variant-numeric: tabular-nums;
+  word-break: break-word;
 }
 .stat-card__suffix {
   font-size: 13px;

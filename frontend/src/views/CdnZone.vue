@@ -12,10 +12,10 @@
       </template>
     </PageHeader>
 
-    <n-empty v-if="!zoneOptions.length" :description="t('cdnZone.empty')" style="margin-top:24px" />
+    <EmptyState v-if="!zoneOptions.length" :icon="FolderOpenOutline" :description="t('cdnZone.empty')" />
 
     <template v-if="selectedKey">
-      <n-card :bordered="false" size="small" style="margin-top:12px">
+      <n-card :bordered="false" size="small">
         <template #header>
           <n-space align="center">
             <span class="title">{{ currentZone?.routename || '' }} · {{ currentZone?.name || '' }}</span>
@@ -28,7 +28,7 @@
         </div>
       </n-card>
 
-      <n-card :title="t('cdnZone.globalCard')" size="small" :bordered="false" style="margin-top:12px">
+      <n-card :title="t('cdnZone.globalCard')" size="small" :bordered="false">
         <template #header-extra>
           <span style="color:var(--app-warning);font-size:12px">{{ t('cdnZone.globalHint') }}</span>
         </template>
@@ -120,6 +120,8 @@ import { useMessage } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import EmptyState from '../components/EmptyState.vue';
+import { FolderOpenOutline } from '@vicons/ionicons5';
 
 const { t } = useI18n();
 const message = useMessage();
