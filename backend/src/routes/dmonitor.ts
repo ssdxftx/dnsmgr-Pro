@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
-import { fmtDateTime, fmtTimestamp } from '../lib/util.js';
+import { fmtDateTime, fmtTimestamp, hasOwn } from '../lib/util.js';
 
 // 容灾监控接口仅管理员可用
 const authenticate = (app: FastifyInstance) => ({
@@ -102,7 +102,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
       frequency: 'A.frequency', status: 'A.status', active: 'A.active', checktimestr: 'A.checktime',
       addtimestr: 'A.addtime', remark: 'A.remark',
     };
-    const orderBy = allowedSort[sort] ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
+    const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
 
     const list = await query(
       `SELECT A.*, B.name AS domain FROM ${table('dmtask')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,

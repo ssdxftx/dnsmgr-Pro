@@ -3,6 +3,17 @@ import { X509Certificate } from 'node:crypto';
 import { applyHostKeyVerification } from '../sshHostKey.js';
 import type { DeployProvider } from '../types.js';
 
+// POSIX 单引号转义：整体包裹为单引号字符串，内部的单引号按 '\'' 处理。
+// 用于把远端路径/证书字段安全地拼进 shell 命令，避免命令替换（$()、反引号）与分隔符注入。
+function shq(s: string): string {
+  return "'" + String(s).replace(/'/g, "'\\''") + "'";
+}
+
+// SQL 字面量单引号转义（''）
+function sqlStr(s: string): string {
+  return String(s).replace(/'/g, "''");
+}
+
 export class FnosDeploy implements DeployProvider {
   private config: Record<string, any>;
   private logger: ((txt: string) => void) | null = null;
@@ -110,14 +121,11 @@ export class FnosDeploy implements DeployProvider {
           const validFrom = Math.floor(new Date(certInfo.validFrom).getTime() / 1000) * 1000;
           const validTo = Math.floor(new Date(certInfo.validTo).getTime() / 1000) * 1000;
           const issuerCN = certInfo.issuer.match(/CN=([^,\n]+)/)?.[1] || '';
-          await this.exec(conn, '上传证书文件', "sudo tee " + certPath + " > /dev/null <<'EOF'\n" + fullchain + "\nEOF");
-          await this.exec(conn, '上传私钥文件', "sudo tee " + keyPath + " > /dev/null <<'EOF'\n" + privatekey + "\nEOF");
-          await this.exec(conn, '刷新目录权限', 'sudo chmod 0755 "' + certDir + '" -R');
-          await this.exec(
-            conn,
-            '更新数据表',
-            "cd /tmp && sudo -u postgres psql -d trim_connect -c \"UPDATE cert SET  valid_to=" + validTo + ",valid_from=" + validFrom + ",issued_by='" + issuerCN + "',updated_time=" + Date.now() + " WHERE private_key='" + keyPath + "'\""
-          );
+          await this.exec(conn, '上传证书文件', 'sudo tee ' + shq(certPath) + " > /dev/null <<'EOF'\n" + fullchain + "\nEOF");
+          await this.exec(conn, '上传私钥文件', 'sudo tee ' + shq(keyPath) + " > /dev/null <<'EOF'\n" + privatekey + "\nEOF");
+          await this.exec(conn, '刷新目录权限', 'sudo chmod 0755 ' + shq(certDir) + ' -R');
+          const psql = 'UPDATE cert SET  valid_to=' + validTo + ',valid_from=' + validFrom + ",issued_by='" + sqlStr(issuerCN) + "',updated_time=" + Date.now() + " WHERE private_key='" + sqlStr(keyPath) + "'";
+          await this.exec(conn, '更新数据表', 'cd /tmp && sudo -u postgres psql -d trim_connect -c ' + shq(psql));
           this.log('证书 ' + row.domain + ' 更新成功');
           success++;
         }

@@ -137,6 +137,7 @@ export default {
     apiOff: 'Disabled',
     level: 'User Level',
     normalUser: 'Normal User',
+    superAdmin: 'Super Admin',
     checkWholeDomain: 'Check Whole Domain',
     checkWholeHint: 'When enabled, this user can configure authorized domains to check all subdomains of the whole domain',
     statCache: 'Statistics Cache',

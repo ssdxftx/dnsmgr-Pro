@@ -137,6 +137,7 @@ export default {
     apiOff: '关闭',
     level: '用户等级',
     normalUser: '普通用户',
+    superAdmin: '超级管理员',
     checkWholeDomain: '检测整域名',
     checkWholeHint: '开启后该用户可对授权域名设置检测整个域名的全部子域名',
     statCache: '统计缓存',

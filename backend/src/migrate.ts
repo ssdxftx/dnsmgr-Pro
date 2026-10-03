@@ -6,6 +6,7 @@ export async function migrate(): Promise<void> {
   await ensureColumn('user', 'lang', "varchar(10) NOT NULL DEFAULT ''");
   await ensureColumn('user', 'check_whole', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('user', 'stat_cache', "tinyint(1) NOT NULL DEFAULT '0'");
+  await ensureColumn('user', 'is_super', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'readonly', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'expiretime', 'datetime DEFAULT NULL');
 
@@ -142,6 +143,17 @@ export async function migrate(): Promise<void> {
       UNIQUE KEY aid (aid)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+
+  // 唯一超级管理员：全新安装由安装向导标记；旧库无标记时回填
+  // （优先 id=1000 的原创始人，否则取最小 id 的管理员），保证恰好一人为超级管理员
+  const existingSuper = await query<{ id: number }>(`SELECT id FROM ${table('user')} WHERE is_super = 1 LIMIT 1`);
+  if (existingSuper.length === 0) {
+    await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = 1000 AND level >= 2`);
+    const after = await query<{ id: number }>(`SELECT id FROM ${table('user')} WHERE is_super = 1 LIMIT 1`);
+    if (after.length === 0) {
+      await query(`UPDATE ${table('user')} SET is_super = 1 WHERE level >= 2 ORDER BY id ASC LIMIT 1`);
+    }
+  }
 }
 
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {
