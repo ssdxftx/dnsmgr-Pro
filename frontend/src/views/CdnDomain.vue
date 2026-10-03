@@ -1138,7 +1138,7 @@ async function checkPending() {
 }
 
 function del(row: any) {
-  const state = reactive({ alsoCloud: false });
+  const state = reactive({ alsoCloud: false, alsoDns: false });
   dialog.warning({
     title: t('cdnDomain.deleteTitle'),
     content: () =>
@@ -1153,6 +1153,16 @@ function del(row: any) {
           { default: () => t('cdnDomain.deleteCloud') },
         ),
         h('div', { style: 'margin-top:6px;color:var(--app-text-3);font-size:12px' }, t('cdnDomain.deleteCloudHint')),
+        h(
+          NCheckbox,
+          {
+            checked: state.alsoDns,
+            style: 'margin-top:10px',
+            'onUpdate:checked': (v: boolean) => (state.alsoDns = v),
+          },
+          { default: () => t('cdnDomain.deleteDns') },
+        ),
+        h('div', { style: 'margin-top:6px;color:var(--app-text-3);font-size:12px' }, t('cdnDomain.deleteDnsHint')),
         h('div', { style: 'margin-top:6px;color:var(--app-warning);font-size:12px' }, t('cdnDomain.deleteCertHint')),
       ]),
     positiveText: t('common.delete'),
@@ -1165,18 +1175,22 @@ function del(row: any) {
           content: t('cdnDomain.deleteCloudConfirm', { name: row.name }),
           positiveText: t('cdnDomain.confirmDelete'),
           negativeText: t('common.cancel'),
-          onPositiveClick: () => doDelete(row, true),
+          onPositiveClick: () => doDelete(row, true, state.alsoDns),
         });
         return true;
       }
-      await doDelete(row, false);
+      await doDelete(row, false, state.alsoDns);
       return true;
     },
   });
 }
 
-async function doDelete(row: any, deleteCloud: boolean) {
-  const res = await api('DELETE', `/cdn/domains/${row.id}${deleteCloud ? '?delete_cloud=1' : ''}`);
+async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
+  const params = new URLSearchParams();
+  if (deleteCloud) params.set('delete_cloud', '1');
+  if (deleteDns) params.set('delete_dns', '1');
+  const qs = params.toString();
+  const res = await api('DELETE', `/cdn/domains/${row.id}${qs ? '?' + qs : ''}`);
   if (res.code === 0) {
     message.success(res.msg);
     loadDomains();

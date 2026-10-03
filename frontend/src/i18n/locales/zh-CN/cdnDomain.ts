@@ -114,6 +114,8 @@ export default {
     deleteConfirm: '确定删除 {name} 吗？',
     deleteCloud: '同时删除云端加速域名（云端删除后不可恢复）',
     deleteCloudHint: '不勾选时仅删除本系统记录，云端加速域名保留。',
+    deleteDns: '同时删除联动的 DNS 解析记录',
+    deleteDnsHint: '勾选后将删除接入时自动添加的 CNAME 解析记录；不勾选则保留该解析记录，需自行处理。',
     deleteCertHint: '若该域名由本项目管理并已联动证书，删除时将先吊销联动证书，吊销成功后再删除该域名与自动部署任务；吊销失败会中止删除。',
     confirmAgain: '二次确认',
     deleteCloudConfirm: '将同时删除云端加速域名 {name}，删除后云端资源不可恢复，确定继续吗？',
