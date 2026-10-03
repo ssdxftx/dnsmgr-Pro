@@ -26,7 +26,7 @@
         <template v-if="currentProvider">
           <n-alert v-if="currentProvider.note" type="info" style="margin-bottom:12px" :show-icon="false">
             {{ currentProvider.note }}
-            <a v-if="currentProvider.noteUrl" :href="currentProvider.noteUrl" target="_blank" rel="noreferrer" style="margin-left:6px">{{ t('certAccount.view') }}</a>
+            <a v-if="currentProvider.noteUrl" :href="safeHref(currentProvider.noteUrl)" target="_blank" rel="noreferrer" style="margin-left:6px">{{ t('certAccount.view') }}</a>
           </n-alert>
           <n-form-item v-for="(field, key) in currentProvider.inputs" v-show="fieldVisible(field.show, form.config)" :key="key" :label="field.name" :required="field.required">
             <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
@@ -53,7 +53,7 @@ import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NEllipsis, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
 import { api } from '../api';
-import { evalShow, isSecretField } from '../lib/safe';
+import { evalShow, isSecretField, safeHref } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 

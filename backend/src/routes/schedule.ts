@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { fmtTimestamp } from '../lib/util.js';
+import { fmtTimestamp, hasOwn } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
 import { updateNexttime } from '../lib/schedule/scheduleService.js';
 
@@ -69,7 +69,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
       id: 'A.id', rr: 'A.rr', type: 'A.type', switchtype: 'A.switchtype', active: 'A.active',
       updatetimestr: 'A.updatetime', nexttimestr: 'A.nexttime', addtimestr: 'A.addtime', remark: 'A.remark',
     };
-    const orderBy = allowedSort[sort] ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
+    const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
 
     const list = await query(
       `SELECT A.*, B.name AS domain FROM ${table('sctask')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,

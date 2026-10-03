@@ -25,6 +25,9 @@ export async function verifyPassword(hash: string, password: string): Promise<bo
   return bcrypt.compare(password, hash);
 }
 
+// 用户名不存在时也执行一次 bcrypt 比对，抹平“用户是否存在”的响应时间差异，防止用户名枚举
+export const DUMMY_PASSWORD_HASH = bcrypt.hashSync('dnsmgr-dummy-password', 10);
+
 export function checkLevel(user: { level: number } | undefined, required: number): boolean {
   if (!user) return false;
   if (user.level >= 2) return true;

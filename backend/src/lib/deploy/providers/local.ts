@@ -1,9 +1,29 @@
 import { exec } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, isAbsolute, normalize, sep } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
+
+// 本地部署目标路径安全约束：必须为规范化的绝对路径；
+// 若配置了 DNSMGR_DEPLOY_LOCAL_DIRS（逗号分隔的允许目录），则目标必须位于其中之一，
+// 避免管理员误配或被滥用时向后端主机任意位置写入文件（如 crontab、systemd 单元）。
+function safeTargetPath(p: any): string {
+  const raw = String(p || '').trim();
+  if (!raw) throw new Error('目标文件路径不能为空');
+  if (!isAbsolute(raw)) throw new Error('目标文件路径必须为绝对路径：' + raw);
+  const normalized = normalize(raw);
+  const allowDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((d) => normalize(d));
+  if (allowDirs.length) {
+    const ok = allowDirs.some((d) => normalized === d || normalized.startsWith(d.endsWith(sep) ? d : d + sep));
+    if (!ok) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
+  }
+  return normalized;
+}
 
 export class LocalDeploy implements DeployProvider {
   private logger: ((txt: string) => void) | null = null;
@@ -18,20 +38,23 @@ export class LocalDeploy implements DeployProvider {
 
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {
     if (config.format === 'pem') {
-      const certDir = dirname(config.pem_cert_file);
-      const keyDir = dirname(config.pem_key_file);
+      const certFile = safeTargetPath(config.pem_cert_file);
+      const keyFile = safeTargetPath(config.pem_key_file);
+      const certDir = dirname(certFile);
+      const keyDir = dirname(keyFile);
       if (!existsSync(certDir)) throw new Error(certDir + ' 目录不存在');
       if (!existsSync(keyDir)) throw new Error(keyDir + ' 目录不存在');
-      writeFileSync(config.pem_cert_file, fullchain);
-      this.log('证书已保存到：' + config.pem_cert_file);
-      writeFileSync(config.pem_key_file, privatekey);
-      this.log('私钥已保存到：' + config.pem_key_file);
+      writeFileSync(certFile, fullchain);
+      this.log('证书已保存到：' + certFile);
+      writeFileSync(keyFile, privatekey);
+      this.log('私钥已保存到：' + keyFile);
     } else if (config.format === 'pfx') {
-      const dir = dirname(config.pfx_file);
+      const pfxFile = safeTargetPath(config.pfx_file);
+      const dir = dirname(pfxFile);
       if (!existsSync(dir)) throw new Error(dir + ' 目录不存在');
       const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
-      writeFileSync(config.pfx_file, pfx);
-      this.log('PFX证书已保存到：' + config.pfx_file);
+      writeFileSync(pfxFile, pfx);
+      this.log('PFX证书已保存到：' + pfxFile);
     }
     if (config.cmd) {
       assertCommandAllowed();

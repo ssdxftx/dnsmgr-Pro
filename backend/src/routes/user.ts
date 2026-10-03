@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
+import { hasOwn } from '../lib/util.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -47,6 +48,15 @@ async function savePermissions(uid: number, input: any[]) {
   }
 }
 
+// 超级管理员（安装服务时创建）受保护：任何其他管理员都不得修改其任何资料；
+// 仅超级管理员本人可编辑自身（但仍受「不可自我降级/禁用」约束）。
+function superBlocked(req: any, target: { id: number; is_super?: any }): string | null {
+  if (Number(target.is_super) === 1 && Number(req.user.uid) !== Number(target.id)) {
+    return '超级管理员不可被其他管理员修改';
+  }
+  return null;
+}
+
 export default async function userRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
@@ -78,10 +88,10 @@ export default async function userRoutes(app: FastifyInstance) {
     const total = totalRow?.c ?? 0;
 
     const allowedSort: Record<string, string> = { id: 'id', username: 'username', level: 'level', is_api: 'is_api', regtime: 'regtime', lasttime: 'lasttime', status: 'status' };
-    const orderBy = allowedSort[sort] ? `${allowedSort[sort]} ${orderDir}` : 'id DESC';
+    const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'id DESC';
 
     const list = await query(
-      `SELECT id, username, is_api, level, regtime, lasttime, status, totp_open, stat_cache FROM ${table('user')}${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      `SELECT id, username, is_api, level, regtime, lasttime, status, totp_open, stat_cache, is_super FROM ${table('user')}${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
       [...params, limit, offset]
     );
     return { code: 0, data: { total, list } };
@@ -91,7 +101,7 @@ export default async function userRoutes(app: FastifyInstance) {
   app.get('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id, username, is_api, apikey, level, status, totp_open, check_whole, stat_cache FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT id, username, is_api, apikey, level, status, totp_open, check_whole, stat_cache, is_super FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     const perms = await query(`SELECT domain, sub, readonly, expiretime FROM ${table('permission')} WHERE uid = ?`, [id]);
     row.permission = perms.map((p: any) => ({ domain: p.domain, sub: p.sub || null, readonly: Number(p.readonly || 0), expiretime: p.expiretime || null }));
@@ -130,8 +140,10 @@ export default async function userRoutes(app: FastifyInstance) {
   app.put('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT id, is_super FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
+    const blocked = superBlocked(req, row as any);
+    if (blocked) return { code: -1, msg: blocked };
 
     const b = req.body || {};
     const username = (b.username || '').trim();
@@ -147,7 +159,10 @@ export default async function userRoutes(app: FastifyInstance) {
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? AND id <> ?`, [username, id]);
     if (exists) return { code: -1, msg: '用户名已存在' };
-    if (level === 1 && (id === 1000 || id === req.user.uid)) {
+    // 密码校验前置，避免主 UPDATE 已落库后才因密码不合规而报错，产生部分更新
+    if (repwd && repwd.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
+    // 任何管理员（含超级管理员本人）都不能把当前登录账号降级为普通用户，避免自锁
+    if (level === 1 && id === req.user.uid) {
       level = 2;
     }
 
@@ -158,9 +173,6 @@ export default async function userRoutes(app: FastifyInstance) {
       await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
     }
     if (repwd) {
-      if (repwd.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
-      // 超级管理员（id 1000）的密码仅允许该账号本人修改
-      if (id === 1000 && req.user.uid !== 1000) return { code: -1, msg: '超级管理员密码仅能由该账号本人修改' };
       await query(`UPDATE ${table('user')} SET password = ? WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
     }
     return { code: 0, msg: '修改用户成功！' };
@@ -171,7 +183,9 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
     const status = Number((req.body || {}).status);
-    if (id === 1000) return { code: -1, msg: '此用户无法修改状态' };
+    const row = await queryOne(`SELECT is_super FROM ${table('user')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '用户不存在' };
+    if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被修改状态' };
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法修改状态' };
     await query(`UPDATE ${table('user')} SET status = ? WHERE id = ?`, [status, id]);
     return { code: 0, msg: '设置成功' };
@@ -181,8 +195,10 @@ export default async function userRoutes(app: FastifyInstance) {
   app.post('/api/users/:id/stat-cache', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT id, is_super FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
+    const blocked = superBlocked(req, row as any);
+    if (blocked) return { code: -1, msg: blocked };
     const value = Number((req.body || {}).stat_cache) === 1 ? 1 : 0;
     await query(`UPDATE ${table('user')} SET stat_cache = ? WHERE id = ?`, [value, id]);
     return { code: 0, msg: value ? '已开启统计缓存查看' : '已关闭统计缓存查看' };
@@ -192,7 +208,9 @@ export default async function userRoutes(app: FastifyInstance) {
   app.delete('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    if (id === 1000) return { code: -1, msg: '此用户无法删除' };
+    const row = await queryOne(`SELECT is_super FROM ${table('user')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '用户不存在' };
+    if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被删除' };
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法删除' };
     await query(`DELETE FROM ${table('user')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);

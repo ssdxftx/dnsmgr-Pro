@@ -118,7 +118,12 @@ export default async function registerRoutes(app: FastifyInstance) {
       if (codeRow.status !== 1) return { code: -1, msg: '该注册码已停用' };
       if (codeRow.expiretime && new Date(codeRow.expiretime).getTime() < Date.now()) return { code: -1, msg: '该注册码已过期' };
       if (codeRow.max_use > 0 && codeRow.used >= codeRow.max_use) return { code: -1, msg: '该注册码使用次数已用完' };
-      await query(`UPDATE ${table('reg_code')} SET used = used + 1 WHERE id = ?`, [codeRow.id]);
+      // 原子占用：在 UPDATE 中再次校验状态/有效期/剩余次数，避免并发下超额使用（TOCTOU）
+      const upd: any = await query(
+        `UPDATE ${table('reg_code')} SET used = used + 1 WHERE id = ? AND status = 1 AND (expiretime IS NULL OR expiretime > NOW()) AND (max_use = 0 OR used < max_use)`,
+        [codeRow.id]
+      );
+      if (!upd || !upd.affectedRows) return { code: -1, msg: '该注册码已过期、停用或使用次数已用完' };
     }
 
     const hash = await bcrypt.hash(password, 10);

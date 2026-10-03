@@ -52,6 +52,7 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_user` (
   `status` tinyint(1) NOT NULL DEFAULT '1',
   `check_whole` tinyint(1) NOT NULL DEFAULT '0',
   `stat_cache` tinyint(1) NOT NULL DEFAULT '0',
+  `is_super` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `username` (`username`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 AUTO_INCREMENT=1000;
