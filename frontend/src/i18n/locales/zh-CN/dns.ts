@@ -56,6 +56,7 @@ export default {
     noticeOff: '未开启',
     addTimeCol: '添加时间',
     records: '解析记录',
+    recordResults: '匹配的解析记录',
   },
   dnsAccount: {
     title: 'DNS 账户',

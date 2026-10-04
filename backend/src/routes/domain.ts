@@ -123,8 +123,8 @@ export default async function domainRoutes(app: FastifyInstance) {
       data = out;
     }
 
-    // 关键词搜索：优先匹配本地数据（主域名 / 备注 / 别名子域名）；
-    // 本地无任何匹配时，才逐域拉取云端解析记录按子域名匹配（记录带 60s 缓存、并发拉取）
+    // 关键词搜索：仅匹配本地数据（主域名 / 备注 / 别名子域名）；
+    // 子域名（解析记录）匹配由 /api/records/search 负责，避免在此重复拉取云端记录
     if (kw) {
       const k = kw.toLowerCase();
       const aliasRows: any[] = await query(`SELECT did, name FROM ${table('domain_alias')}`);
@@ -146,34 +146,56 @@ export default async function domainRoutes(app: FastifyInstance) {
           (aliasMap.get(Number(d.id)) || []).some((name) => name.includes(k));
         if (hit) localHits.push(d);
       }
-
-      if (localHits.length) {
-        data = localHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
-      } else {
-        const recordHits: any[] = [];
-        let cursor = 0;
-        const worker = async () => {
-          while (cursor < data.length) {
-            const d = data[cursor++];
-            try {
-              const base = baseNameOf(d);
-              const list = await fetchAllRecords({ ...d, name: base });
-              const hit = (list || []).some((r: any) => {
-                const n = String(r?.Name ?? '').toLowerCase();
-                const full = n === '@' ? base : `${n}.${base}`;
-                return n.includes(k) || full.includes(k);
-              });
-              if (hit) recordHits.push(d);
-            } catch {
-              // 单个域名记录拉取失败忽略
-            }
-          }
-        };
-        await Promise.all(Array.from({ length: Math.min(5, data.length) }, worker));
-        data = recordHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
-      }
+      data = localHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
     }
     return { code: 0, data };
+  });
+
+  // 解析记录搜索：按主机记录（子域名）跨域检索，返回可编辑的解析记录条目
+  // 供「域名列表」搜索在本地无命中时原地展示记录卡片
+  app.get('/api/records/search', auth, async (req: any) => {
+    const acc = await getUserPerms(req);
+    const kw = String(req.query?.kw || '').trim().toLowerCase();
+    if (!kw) return { code: 0, data: [] };
+    const rows = await query(
+      `SELECT A.* FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
+    );
+    let targets = rows as any[];
+    if (!acc.admin) {
+      const byName = new Map(targets.map((r: any) => [r.name, r]));
+      const uniq = new Map<string, any>();
+      for (const p of acc.perms) {
+        const d = byName.get(p.domain);
+        if (d) uniq.set(d.name, d);
+      }
+      targets = Array.from(uniq.values());
+    }
+    const out: any[] = [];
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const d = targets[cursor++];
+        try {
+          const list = await fetchAllRecords(d);
+          for (const r of list || []) {
+            const n = String(r?.Name ?? '').toLowerCase();
+            const full = n === '@' ? String(d.name).toLowerCase() : `${n}.${String(d.name).toLowerCase()}`;
+            if (!n.includes(kw) && !full.includes(kw)) continue;
+            if (acc.admin) {
+              out.push({ ...r, did: d.id, Domain: d.name, _writable: true });
+            } else {
+              const m = matchPermission(acc.perms, d.name, r.Name);
+              if (m < 0) continue;
+              out.push({ ...r, did: d.id, Domain: d.name, _writable: m === 0 });
+            }
+          }
+        } catch {
+          // 单个域名记录拉取失败忽略
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(5, targets.length) }, worker));
+    return { code: 0, data: out.slice(0, 200) };
   });
 
   app.get('/api/domains/categories', auth, async (req: any) => {

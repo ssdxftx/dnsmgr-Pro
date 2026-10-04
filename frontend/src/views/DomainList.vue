@@ -29,7 +29,18 @@
         </n-button>
         <n-button @click="clearSearch">{{ t('common.refresh') }}</n-button>
       </n-space>
+      <template v-if="showRecords">
+        <n-alert type="info" :show-icon="false" :bordered="false" style="margin-bottom: 12px">{{ t('domain.recordResults') }}</n-alert>
+        <RecordTable
+          :records="recordResults"
+          :loading="loading"
+          :show-full-name="true"
+          :show-add="false"
+          @refresh="loadDomains"
+        />
+      </template>
       <ResponsiveDataTable
+        v-else
         v-model:checked-row-keys="checked"
         :columns="columns"
         :data="domains"
@@ -84,6 +95,7 @@ import { CloudDownloadOutline, RefreshOutline, SearchOutline } from '@vicons/ion
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import RecordTable from '../components/RecordTable.vue';
 
 const router = useRouter();
 const { t } = useI18n();
@@ -92,6 +104,8 @@ const dialog = useDialog();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const loading = ref(false);
 const domains = ref<any[]>([]);
+const recordResults = ref<any[]>([]);
+const showRecords = ref(false);
 const checked = ref<string[]>([]);
 const accountOptions = ref<any[]>([]);
 const pullDomains = ref<any[]>([]);
@@ -168,7 +182,17 @@ const columns = computed(() => {
 async function loadDomains() {
   loading.value = true;
   const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined);
-  domains.value = res.code === 0 ? res.data : [];
+  let list: any[] = res.code === 0 ? res.data : [];
+  // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片
+  if (kw.value && list.length === 0) {
+    const rres = await api<any>('GET', '/records/search', { kw: kw.value });
+    recordResults.value = rres.code === 0 ? rres.data : [];
+    showRecords.value = recordResults.value.length > 0;
+  } else {
+    recordResults.value = [];
+    showRecords.value = false;
+  }
+  domains.value = list;
   loading.value = false;
 }
 
