@@ -151,7 +151,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     return { code: 0, data };
   });
 
-  // 解析记录搜索：按主机记录（子域名）跨域检索，返回可编辑的解析记录条目
+  // 解析记录搜索：按主机记录（子域名）或备注跨域模糊检索，返回可编辑的解析记录条目
   // 供「域名列表」搜索在本地无命中时原地展示记录卡片
   app.get('/api/records/search', auth, async (req: any) => {
     const acc = await getUserPerms(req);
@@ -180,7 +180,9 @@ export default async function domainRoutes(app: FastifyInstance) {
           for (const r of list || []) {
             const n = String(r?.Name ?? '').toLowerCase();
             const full = n === '@' ? String(d.name).toLowerCase() : `${n}.${String(d.name).toLowerCase()}`;
-            if (!n.includes(kw) && !full.includes(kw)) continue;
+            const remark = String(r?.Remark ?? '').toLowerCase();
+            // 模糊匹配：主机记录 / 完整子域名 / 解析记录备注
+            if (!n.includes(kw) && !full.includes(kw) && !remark.includes(kw)) continue;
             if (acc.admin) {
               out.push({ ...r, did: d.id, Domain: d.name, _writable: true });
             } else {
