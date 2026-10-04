@@ -56,6 +56,7 @@ export default {
     noticeOff: 'Disabled',
     addTimeCol: 'Added At',
     records: 'DNS Records',
+    recordResults: 'Matched DNS Records',
   },
   dnsAccount: {
     title: 'DNS Accounts',
