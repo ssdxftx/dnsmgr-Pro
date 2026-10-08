@@ -16,6 +16,7 @@ const LINE_NAME: Record<string, Record<string, string>> = {
   bt: { DEF: '0', CT: '285344768', CU: '285345792', CM: '285346816' },
   qingcloud: { DEF: '0', CT: '2', CU: '3', CM: '4', AB: '8' },
   cloudflare: { DEF: '0' },
+  aws: { DEF: 'default' },
   namesilo: { DEF: 'default' },
   henet: { DEF: 'default' },
   powerdns: { DEF: 'default' },
@@ -196,7 +197,7 @@ export async function executeOne(row: any): Promise<string> {
     if (domainRecords === false) throw new Error('获取记录列表失败，' + dns.getError());
 
     let type = row.type;
-    if (type === 1 && (!info.DEF || info.DEF.length === 0)) {
+    if (type === 1 && info.DEF && info.DEF.length > 0) {
       type = 0;
     }
 

@@ -1,7 +1,5 @@
 import { request as httpRequest } from 'node:https';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import type { DeployProvider } from '../types.js';
 
@@ -9,7 +7,7 @@ export class K8sDeploy implements DeployProvider {
   private kubeconfig: string;
   private server = '';
   private bearerToken: string | null = null;
-  private tls: { cert: string | null; key: string | null } = { cert: null, key: null };
+  private tls: { cert: Buffer | null; key: Buffer | null } = { cert: null, key: null };
   private logger: ((txt: string) => void) | null = null;
 
   constructor(config: Record<string, any>) {
@@ -64,19 +62,16 @@ export class K8sDeploy implements DeployProvider {
       (user.user && user.user['auth-provider'] && user.user['auth-provider'].config && user.user['auth-provider'].config['access-token']) ||
       null;
 
-    let clientCertFile: string | null = null;
-    let clientKeyFile: string | null = null;
+    let clientCert: Buffer | null = null;
+    let clientKey: Buffer | null = null;
     if (user.user && user.user['client-certificate-data'] && user.user['client-key-data']) {
-      const dir = mkdtempSync(join(tmpdir(), 'k8s_'));
-      clientCertFile = join(dir, 'client.crt');
-      clientKeyFile = join(dir, 'client.key');
-      writeFileSync(clientCertFile, Buffer.from(user.user['client-certificate-data'], 'base64'));
-      writeFileSync(clientKeyFile, Buffer.from(user.user['client-key-data'], 'base64'));
+      clientCert = Buffer.from(user.user['client-certificate-data'], 'base64');
+      clientKey = Buffer.from(user.user['client-key-data'], 'base64');
     } else if (user.user && user.user['client-certificate'] && user.user['client-key']) {
-      clientCertFile = user.user['client-certificate'];
-      clientKeyFile = user.user['client-key'];
+      clientCert = readFileSync(user.user['client-certificate']);
+      clientKey = readFileSync(user.user['client-key']);
     }
-    this.tls = { cert: clientCertFile, key: clientKeyFile };
+    this.tls = { cert: clientCert, key: clientKey };
   }
 
   private k8sRequest(method: string, path: string, body?: string): Promise<{ code: number; body: string; err: string }> {

@@ -88,15 +88,29 @@ export class JdcloudDns implements DnsProvider {
     const params: Record<string, any> = { hostRecord: Name, type, hostValue: Value, viewValue: Number(Line), ttl: Number(TTL) };
     if (Type === 'MX') params.mxPriority = Number(MX);
     if (Weight !== null && Weight !== undefined) params.weight = Number(Weight);
+    if (Type === 'SRV') {
+      const values = Value.split(' ');
+      params.mxPriority = Number(values[0]);
+      params.weight = Number(values[1]);
+      params.port = Number(values[2]);
+      params.hostValue = values[3];
+    }
     const data = await this.send('POST', '/domain/' + this.domainid + '/ResourceRecord', { req: params });
     return data && data.dataList?.id ? String(data.dataList.id) : false;
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '-1', TTL = 600, MX = 1, Weight: number | null = null, _Remark: string | null = null) {
     const type = this.convertType(Type);
-    const params: Record<string, any> = { hostRecord: Name, type, hostValue: Value, viewValue: Number(Line), ttl: Number(TTL) };
+    const params: Record<string, any> = { domainName: this.domain, hostRecord: Name, type, hostValue: Value, viewValue: Number(Line), ttl: Number(TTL) };
     if (Type === 'MX') params.mxPriority = Number(MX);
     if (Weight !== null && Weight !== undefined) params.weight = Number(Weight);
+    if (Type === 'SRV') {
+      const values = Value.split(' ');
+      params.mxPriority = Number(values[0]);
+      params.weight = Number(values[1]);
+      params.port = Number(values[2]);
+      params.hostValue = values[3];
+    }
     return (await this.send('PUT', '/domain/' + this.domainid + '/ResourceRecord/' + RecordId, { req: params })) !== false;
   }
 
@@ -120,7 +134,7 @@ export class JdcloudDns implements DnsProvider {
   }
 
   async addDomain(Domain: string) {
-    return (await this.send('POST', '/domain', { domainName: Domain })) !== false;
+    return (await this.send('POST', '/domain', { packId: 0, domainName: Domain })) !== false;
   }
 
   private convertType(type: string): string {

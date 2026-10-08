@@ -109,8 +109,8 @@ export const dnsProviders: Record<string, DnsProviderMeta> = {
     name: '百度云',
     icon: 'baidu.ico',
     config: {
-      accessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
-      secretAccessKey: { name: 'SecretAccessKey', type: 'input', required: true },
+      AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
+      SecretAccessKey: { name: 'SecretAccessKey', type: 'input', required: true },
       proxy: proxyField,
     },
     remark: 2, status: false, redirect: false, log: false, weight: false, page: true, add: true, sort: false,

@@ -48,7 +48,7 @@ export class Dnsla implements DnsProvider {
       };
       let url = this.baseUrl + path;
       const init: RequestInit = { method, headers };
-      if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
+      if (method === 'POST' || method === 'PUT') {
         init.body = JSON.stringify(params ?? {});
       } else if (params) {
         const qs = new URLSearchParams();

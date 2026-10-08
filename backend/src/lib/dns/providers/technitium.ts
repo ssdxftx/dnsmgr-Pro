@@ -215,11 +215,27 @@ export class TechnitiumDns implements DnsProvider {
     if (!oldRecord) return false;
     const domain = oldRecord.name;
     const newDomain = Name === '@' ? this.domain : Name + '.' + this.domain;
+    if (oldRecord.type === 'APP') {
+      let oldValue = (oldRecord.rData?.appName ?? '') + ' ' + (oldRecord.rData?.classPath ?? '');
+      if (oldRecord.rData?.recordData) oldValue += ' ' + oldRecord.rData.recordData;
+      if (oldValue !== Value.trimEnd() || domain !== newDomain) {
+        await this.deleteDomainRecord(RecordId);
+        return (await this.addDomainRecord(Name, Type, Value, _Line, TTL, MX, _Weight, Remark)) !== false;
+      }
+    }
     const params: Record<string, any> = { domain, zone: this.domain, type: oldRecord.type, ttl: Number(TTL) };
     if (domain !== newDomain) params.newDomain = newDomain;
     params.comments = Remark || '';
     Object.assign(params, this.getOldValueParams(oldRecord.type, oldRecord.rData));
     Object.assign(params, this.buildValueParams(Type, Value, MX));
+    return (await this.sendRequest('POST', '/zones/records/update', params)) !== false;
+  }
+
+  async updateDomainRecordRemark(RecordId: string, Remark: string | null): Promise<boolean> {
+    const oldRecord = this.getOldRecord(RecordId);
+    if (!oldRecord) return false;
+    const params: Record<string, any> = { domain: oldRecord.name, zone: this.domain, type: oldRecord.type, comments: Remark ?? '' };
+    Object.assign(params, this.getOldValueParams(oldRecord.type, oldRecord.rData));
     return (await this.sendRequest('POST', '/zones/records/update', params)) !== false;
   }
 

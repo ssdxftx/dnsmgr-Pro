@@ -1,8 +1,7 @@
 import { createHmac } from 'node:crypto';
 
 function percentEncode(str: string): string {
-  const encoded = encodeURIComponent(str);
-  return encoded.replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%7E/g, '~');
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 export class AliyunError extends Error {}
@@ -33,7 +32,7 @@ export class Aliyun {
 
     const url = 'https://' + this.endpoint + '/';
     const body = new URLSearchParams(data).toString();
-    const res = await fetch(url, {
+    const res = await fetch(method === 'GET' ? url + '?' + body : url, {
       method,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: method === 'POST' ? body : undefined,

@@ -69,16 +69,30 @@ export class Dnspod implements DnsProvider {
     Status: string | null = null,
   ): Promise<RecordListResult | false> {
     const offset = (PageNumber - 1) * PageSize;
-    const param: Record<string, any> = {
-      Domain: this.domain,
-      Offset: offset,
-      Limit: PageSize,
-      Keyword: KeyWord ?? undefined,
-      Subdomain: SubDomain ?? undefined,
-      RecordType: Type ? this.convertType(Type) : undefined,
-      RecordLineId: Line ?? undefined,
-    };
-    const data = await this.send('DescribeRecordList', param);
+    let action: string;
+    const param: Record<string, any> = {};
+    if (Status || Value) {
+      action = 'DescribeRecordFilterList';
+      param.Domain = this.domain;
+      param.Offset = offset;
+      param.Limit = PageSize;
+      if (SubDomain) param.SubDomain = SubDomain;
+      if (KeyWord) param.Keyword = KeyWord;
+      if (Value) param.RecordValue = Value;
+      if (Status) param.RecordStatus = [Status === '1' ? 'ENABLE' : 'DISABLE'];
+      if (Type) param.RecordType = [this.convertType(Type)];
+      if (Line) param.RecordLine = [Line];
+    } else {
+      action = 'DescribeRecordList';
+      param.Domain = this.domain;
+      param.Offset = offset;
+      param.Limit = PageSize;
+      param.Keyword = KeyWord ?? undefined;
+      param.Subdomain = SubDomain ?? undefined;
+      param.RecordType = Type ? this.convertType(Type) : undefined;
+      param.RecordLineId = Line ?? undefined;
+    }
+    const data = await this.send(action, param);
     if (!data) {
       if (this.error === '记录列表为空。' || this.error === 'No records on the list.') return { total: 0, list: [] };
       return false;
@@ -168,12 +182,40 @@ export class Dnspod implements DnsProvider {
   }
 
   async getRecordLine() {
-    const data = await this.send('DescribeRecordLineList', { Domain: this.domain });
-    if (!data) return false;
-    const lines: Record<string, string> = {};
-    for (const line of data.LineList || []) lines[line.Name] = line.LineId;
-    for (const group of data.LineGroupList || []) lines[group.Name] = group.LineId;
-    return lines;
+    const data = await this.send('DescribeRecordLineCategoryList', { Domain: this.domain });
+    if (data) {
+      const lines: Record<string, string> = {};
+      this.processLineList(lines, data.LineList || []);
+      return lines;
+    }
+    const grade = await this.getRecordLineByGrade();
+    if (grade) {
+      const lines: Record<string, string> = {};
+      for (const row of grade) lines[row.Name] = row.LineId;
+      return lines;
+    }
+    return false;
+  }
+
+  private processLineList(list: Record<string, string>, lineList: any[]): void {
+    for (const row of lineList || []) {
+      let lineId = row.LineId;
+      if (lineId === undefined || lineId === null || lineId === '') lineId = 'N.' + row.LineName;
+      if (row.Useful && !(lineId in list)) {
+        list[row.LineName] = lineId;
+        if (row.SubGroup) this.processLineList(list, row.SubGroup);
+      }
+    }
+  }
+
+  private async getRecordLineByGrade(): Promise<any[] | false> {
+    const data = await this.send('DescribeRecordLineList', { Domain: this.domain, DomainGrade: '' });
+    if (data) {
+      const lineList = [...(data.LineList || [])];
+      for (const row of data.LineGroupList || []) lineList.push({ Name: row.Name, LineId: row.LineId });
+      return lineList;
+    }
+    return false;
   }
 
   async addDomain(Domain: string) {
