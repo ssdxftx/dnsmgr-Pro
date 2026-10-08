@@ -2,8 +2,8 @@
   <div>
     <ResponsiveDataTable :columns="columns" :data="records" :loading="loading" :pagination="pagination" :empty-text="t('record.empty')" />
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('record.editTitle') : t('record.addTitle')" style="max-width:640px" :mask-closable="false">
-      <n-form label-placement="left" label-width="110">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('record.editTitle') : t('record.addTitle')" :style="modalStyle" :mask-closable="false">
+      <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
         <n-form-item :label="t('record.hostRecord')">
           <n-input v-model:value="form.name" :placeholder="t('record.hostPlaceholder')" />
         </n-form-item>
@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
@@ -137,6 +137,20 @@ const showEdit = ref(false);
 const editingId = ref<string | null>(null);
 const editingDid = ref<number | null>(null);
 const form = reactive<any>({ name: '', type: 'A', value: '', line: 'default', ttl: 600, mx: 1, remark: '' });
+
+const isMobile = ref(false);
+function checkMobile() {
+  isMobile.value = window.innerWidth < 768;
+}
+onMounted(() => {
+  checkMobile();
+  window.addEventListener('resize', checkMobile);
+});
+onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+
+// 手机端标签置顶并把弹窗限制在视口内，避免主机记录等输入框被标签挤压
+const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
+const modalStyle = computed(() => (isMobile.value ? { width: 'calc(100vw - 24px)', maxWidth: '640px' } : { maxWidth: '640px' }));
 
 const showValue = ref(false);
 const valueDetail = ref('');
