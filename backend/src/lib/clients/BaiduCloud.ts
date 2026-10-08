@@ -3,7 +3,7 @@ import { createHmac } from 'node:crypto';
 export class BaiduCloudError extends Error {}
 
 function escape(str: string): string {
-  return encodeURIComponent(str).replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%7E/g, '~');
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 function canonicalUri(path: string): string {

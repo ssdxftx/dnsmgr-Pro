@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto';
 export class VolcengineError extends Error {}
 
 function escape(str: string): string {
-  return encodeURIComponent(str).replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%7E/g, '~');
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 function canonicalQueryString(parameters: Record<string, any>): string {
@@ -50,7 +50,7 @@ export class Volcengine {
     }
 
     const time = Math.floor(Date.now() / 1000);
-    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
     const headers: Record<string, string> = { Host: this.endpoint, 'X-Date': date };
     if (body) headers['Content-Type'] = 'application/json';
 
@@ -77,7 +77,7 @@ export class Volcengine {
     const hashedPayload = createHash('sha256').update(body).digest('hex');
     const canonicalRequest = [method, uri, qs, ch, signedHeaders, hashedPayload].join('\n');
 
-    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
     const shortDate = date.slice(0, 8);
     const credentialScope = `${shortDate}/${this.region}/${this.service}/request`;
     const hashedCanonical = createHash('sha256').update(canonicalRequest).digest('hex');

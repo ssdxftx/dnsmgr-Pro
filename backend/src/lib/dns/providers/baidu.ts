@@ -7,7 +7,7 @@ export class BaiduDns implements DnsProvider {
   private domain: string;
 
   constructor(config: Record<string, any>) {
-    this.client = new BaiduCloud(config.accessKeyId, config.secretAccessKey, 'dns.baidubce.com');
+    this.client = new BaiduCloud(config.AccessKeyId ?? config.accessKeyId, config.SecretAccessKey ?? config.secretAccessKey, 'dns.baidubce.com');
     this.domain = config.domain || '';
   }
 

@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto';
 export class JdcloudError extends Error {}
 
 function escape(str: string): string {
-  return encodeURIComponent(str).replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%7E/g, '~');
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 function canonicalQueryString(parameters: Record<string, any>): string {
@@ -48,7 +48,7 @@ export class Jdcloud {
       body = Object.keys(filtered).length ? JSON.stringify(filtered) : '';
     }
 
-    const date = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const date = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
     const headers: Record<string, string> = {
       Host: this.endpoint,
       'x-jdcloud-algorithm': Jdcloud.algorithm,

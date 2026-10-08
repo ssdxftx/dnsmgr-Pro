@@ -95,7 +95,7 @@ export class BtwinDeploy implements DeployProvider {
             filename: 'cert.pfx',
             size: pfx.length,
             start: '0',
-            blob: { __blob: pfx.toString('binary'), filename: 'cert.pfx' },
+            blob: { __blob: pfx, filename: 'cert.pfx' },
             force: 'true',
           },
           true

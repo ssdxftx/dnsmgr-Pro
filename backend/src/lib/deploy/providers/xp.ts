@@ -20,6 +20,7 @@ export class XpDeploy implements DeployProvider {
     let body: string | undefined;
     if (params) {
       body = JSON.stringify(params);
+      headers['Content-Type'] = 'application/json';
     }
     const res = await fetch(url, {
       method: body ? 'POST' : 'GET',

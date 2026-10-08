@@ -3,7 +3,7 @@ import { createHash, createHmac } from 'node:crypto';
 export class HuaweiCloudError extends Error {}
 
 function escape(str: string): string {
-  return encodeURIComponent(str).replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%7E/g, '~');
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 function canonicalUri(path: string): string {
@@ -42,7 +42,7 @@ export class HuaweiCloud {
     if (params) for (const k of Object.keys(params)) if (params[k] === null || params[k] === undefined) delete params[k];
 
     const time = Math.floor(Date.now() / 1000);
-    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
     const body = params && Object.keys(params).length ? JSON.stringify(params) : '';
 
     const headers: Record<string, string> = { Host: this.endpoint, 'X-Sdk-Date': date };
@@ -77,7 +77,7 @@ export class HuaweiCloud {
     const [ch, signedHeaders] = canonicalHeaders(headers);
     const hashedPayload = createHash('sha256').update(body).digest('hex');
     const canonicalRequest = [method, uri, qs, ch, signedHeaders, hashedPayload].join('\n');
-    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');
     const hashedCanonical = createHash('sha256').update(canonicalRequest).digest('hex');
     const stringToSign = [algorithm, date, hashedCanonical].join('\n');
     const signature = createHmac('sha256', this.secretAccessKey).update(stringToSign).digest('hex');

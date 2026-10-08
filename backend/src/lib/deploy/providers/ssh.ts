@@ -1,4 +1,5 @@
 import { Client, ConnectConfig } from 'ssh2';
+import { createHash, X509Certificate } from 'node:crypto';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
 import { applyHostKeyVerification } from '../sshHostKey.js';
@@ -102,6 +103,11 @@ export class SshDeploy implements DeployProvider {
         const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
         await this.writeFile(conn, config.pfx_file, pfx);
         this.log('PFX证书已保存到：' + config.pfx_file);
+        if (config.uptype === '1' && config.iis_domain) {
+          const certHash = createHash('sha1').update(new X509Certificate(fullchain).raw).digest('hex');
+          await this.deployIis(conn, config.iis_domain, config.pfx_file, String(config.pfx_pass || ''), certHash);
+          config.cmd = null;
+        }
       }
       if (config.cmd) {
         assertCommandAllowed();
@@ -117,5 +123,28 @@ export class SshDeploy implements DeployProvider {
 
   setLogger(func: (txt: string) => void): void {
     this.logger = func;
+  }
+
+  private async deployIis(conn: Client, rawDomain: string, pfxFile: string, pfxPass: string, certHash: string): Promise<void> {
+    let domain = rawDomain;
+    if (!domain.includes(':')) domain += ':443';
+    const ret = await this.exec(conn, 'netsh http show sslcert hostnameport=' + domain);
+    const m = ret.match(/:\s+(\w{40})/);
+    if (m && m[1].toLowerCase() === certHash.toLowerCase()) {
+      this.log('IIS域名 ' + domain + ' 证书已存在，无需更新');
+      return;
+    }
+    const p = pfxPass ? '-p ' + pfxPass : '-p ""';
+    let file = pfxFile;
+    if (file.startsWith('/')) file = file.slice(1);
+    await this.exec(conn, 'certutil ' + p + ' -importPFX ' + file);
+    await this.exec(conn, 'netsh http delete sslcert hostnameport=' + domain);
+    await this.exec(conn, 'netsh http add sslcert hostnameport=' + domain + ' certhash=' + certHash + ' certstorename=MY appid=\'{' + this.uuid() + '}\'');
+    this.log('IIS域名 ' + domain + ' 证书已更新');
+  }
+
+  private uuid(): string {
+    const guid = createHash('md5').update(Math.random() + '-' + Date.now() + '-' + Math.random()).digest('hex');
+    return guid.slice(0, 8) + '-' + guid.slice(8, 12) + '-4' + guid.slice(12, 15) + '-' + guid.slice(16, 20) + '-' + guid.slice(20, 32);
   }
 }

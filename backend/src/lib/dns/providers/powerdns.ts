@@ -47,13 +47,21 @@ export class PowerDns implements DnsProvider {
     }
     try {
       const res = await fetch(url, { method, headers, body });
-      const arr = await res.json();
+      const text = await res.text();
+      let arr: any = null;
+      if (text) {
+        try {
+          arr = JSON.parse(text);
+        } catch {
+          arr = null;
+        }
+      }
       if (res.status < 400) return arr ?? true;
-      if (arr.error) {
+      if (arr?.error) {
         this.error = arr.error;
         return false;
       }
-      if (arr.errors) {
+      if (arr?.errors) {
         this.error = arr.errors.join(',');
         return false;
       }

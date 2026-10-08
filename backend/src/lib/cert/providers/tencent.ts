@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TencentCloud } from '../../clients/TencentCloud.js';
 import { getMainDomain, parseCertPem, unzip, findFileByExt } from '../utils.js';
+import { addDns } from '../../certDns.js';
 import type { CertProvider, CreateOrderResult, CertInfo } from '../types.js';
 
 export class TencentCert implements CertProvider {
@@ -118,7 +119,17 @@ export class TencentCert implements CertProvider {
   }
 
   async revoke(order: any, _pem: string): Promise<void> {
-    await this.request('RevokeCertificate', { CertificateId: order.CertificateId });
+    const data = await this.request('RevokeCertificate', { CertificateId: order.CertificateId });
+    if (data?.RevokeDomainValidateAuths?.length) {
+      const dnsList: Record<string, any[]> = {};
+      for (const opts of data.RevokeDomainValidateAuths) {
+        const mainDomain = await getMainDomain(opts.DomainValidateAuthKey);
+        const name = opts.DomainValidateAuthKey.slice(0, -(mainDomain.length + 1));
+        if (!dnsList[mainDomain]) dnsList[mainDomain] = [];
+        dnsList[mainDomain].push({ name, type: 'TXT', value: opts.DomainValidateAuthValue });
+      }
+      await addDns(dnsList, (txt) => this.log(txt));
+    }
   }
 
   async cancel(order: any): Promise<void> {

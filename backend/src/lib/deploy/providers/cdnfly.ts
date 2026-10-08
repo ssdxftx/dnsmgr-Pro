@@ -27,6 +27,7 @@ export class CdnflyDeploy implements DeployProvider {
     const url = this.url + '/v1/login';
     const res = await fetch(url, {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account: this.username, password: this.password }),
       signal: AbortSignal.timeout(15000),
     });

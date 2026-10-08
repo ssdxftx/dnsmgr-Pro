@@ -29,6 +29,7 @@ export class MwpanelDeploy implements DeployProvider {
         form.append(k, String(v));
       }
       body = form.toString();
+      headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
     const res = await fetch(url, {
       method: body ? 'POST' : 'GET',
