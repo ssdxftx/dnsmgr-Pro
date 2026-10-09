@@ -89,7 +89,7 @@ export default {
     editTitle: 'Edit Record',
     addTitle: 'Add Record',
     hostRecord: 'Host Record',
-    hostPlaceholder: 'e.g. www, @ (root domain)',
+    hostPlaceholder: "e.g. www, {'@'} (root domain)",
     recordType: 'Record Type',
     recordValue: 'Record Value',
     valuePlaceholder: 'IP or domain',

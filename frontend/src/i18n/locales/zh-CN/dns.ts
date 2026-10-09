@@ -89,7 +89,7 @@ export default {
     editTitle: '修改记录',
     addTitle: '添加记录',
     hostRecord: '主机记录',
-    hostPlaceholder: '如 www、@（根域名）',
+    hostPlaceholder: "如 www、{'@'}（根域名）",
     recordType: '记录类型',
     recordValue: '记录值',
     valuePlaceholder: 'IP 或域名',
