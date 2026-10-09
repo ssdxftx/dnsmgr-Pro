@@ -67,3 +67,23 @@ Entries discovered by the Agent during task execution should follow this format:
   - 新增文案的约定：在 `frontend/src/i18n/locales/zh-CN/*.ts` 与 `en-US/*.ts` 各放一个模块文件（`export default { '<唯一顶层命名空间>': {...} }`），由 `import.meta.glob` 自动合并；顶层命名空间必须唯一（已有 common/nav/route/layout/auth/preferences 及 login/domain/cdn/cert/dm/cf/user* 等可按阶段追加），新增模块后无需改 index.ts/core.ts
   - 视图内用 `useI18n()` 取 `t()`；含 `t()` 的 label/column/option 数组必须用 `computed` 包裹保证语言切换时响应式；带参文案用 `t('ns.key', { param })` + 语言文件中 `{param}` 占位符
   - 前端根 `n-config-provider` 的 Naive UI locale 随当前语言在 `zhCN/enUS`、`dateZhCN/dateEnUS` 间切换
+
+[Project Knowledge Summary]
+- Date: 2026-10-09
+- Context: Discovered by Agent while 本地部署预览（deploy-website）
+- Category: Operations & Deployment / Troubleshooting & Debugging
+- Instructions:
+  - 本地预览（README 方式三）：后端 `cd backend && npm start`（8082，依赖 MariaDB）；前端 `cd frontend && npm run dev`（5173，vite 已把 `/api` 代理到 8082）；对外预览请求前端端口 5173
+  - 未安装时后端只注册安装路由（日志「未安装，等待初始化」），前端展示安装页
+  - 初始化：`apt-get install -y mariadb-server` + `service mariadb start`，建库/建用户后 `POST /api/setup/install`，字段为 db_host/db_port/db_user/db_password/db_name/db_prefix/admin_username/admin_password；安装成功后后端会 `process.exit(0)`，必须重启后端进程才会加载业务路由与各调度器
+  - 本地配置落盘于 `backend/data/config.json`（0600）
+  - 为直接验证「添加记录」弹窗，可往 `dnsmgr_account` 插账户、`dnsmgr_domain` 插域名（管理员在 `/api/domains` 可见全部）；演示 provider 无凭证时 `/api/domains/:id/records` 会报错，但记录页「添加记录」按钮仍可见（access 默认 writable）
+
+[Project Knowledge Summary]
+- Date: 2026-10-09
+- Context: Discovered by Agent while 排查「添加记录」弹窗缺失「主机记录」字段
+- Category: Troubleshooting & Debugging
+- Instructions:
+  - vue-i18n 文案中的裸 `@` 会被当作「链接消息」语法（`@:key`）解析，触发 `Message compilation error: Invalid linked format`；编译失败的 `t()` 在渲染期抛错，Vue 会把对应组件（如 `n-form-item`）渲染成注释节点 `<!---->`，表现为字段凭空消失且无显式报错
+  - 本仓库 `record.hostPlaceholder`（zh/en）与 `system.webhookUser`/`webhookUserPlaceholder`（zh）曾含裸 `@`；修复方式：写成字面量 `{'@'}`
+  - 排查 i18n 相关渲染问题时，禁止用 mock 的 `useI18n`（返回 key）验证渲染，会掩盖消息编译错误；应以真实 i18n + 生产构建产物在真实浏览器中验证（必要时用无头浏览器驱动）

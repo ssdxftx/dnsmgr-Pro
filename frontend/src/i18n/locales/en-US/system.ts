@@ -45,7 +45,7 @@ export default {
     qqHelp: 'Usage Guide',
     groupCardTitle: 'Group Robot Webhook (WeCom / DingTalk / Feishu)',
     webhookUrl: 'Webhook URL',
-    webhookUser: '@User Mobile',
+    webhookUser: "{'@'}User Mobile",
     webhookUserPlaceholder: 'Optional; enter "all" to mention everyone',
     customTitle: 'Custom Webhook',
     customMethod: 'Request Method',
