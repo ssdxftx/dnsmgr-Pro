@@ -1082,6 +1082,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 }
 
+// syncFromCloud 允许写回的列白名单，避免动态拼接列名
+const CDN_SYNC_COLUMNS = new Set([
+  'origin', 'origin_type', 'origin_host', 'origin_protocol',
+  'http_port', 'https_port', 'cname', 'https_enabled', 'force_redirect',
+]);
+
 async function syncFromCloud(aid: number, did: number): Promise<any> {
   const account = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
   if (!account) return { code: -1, msg: 'CDN账户不存在', added: 0, skipped: 0, updated: 0 };
@@ -1132,9 +1138,14 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
         }
       }
       if (Object.keys(upd).length) {
-        const fields = Object.keys(upd).map((k) => `${k} = ?`).join(', ');
-        await query(`UPDATE ${table('cdn_domain')} SET ${fields} WHERE id = ?`, [...Object.values(upd), exists.id]);
-        updated++;
+        const cols = Object.keys(upd).filter((k) => CDN_SYNC_COLUMNS.has(k));
+        if (cols.length) {
+          const fields = cols.map((k) => `${k} = ?`).join(', ');
+          await query(`UPDATE ${table('cdn_domain')} SET ${fields} WHERE id = ?`, [...cols.map((k) => upd[k]), exists.id]);
+          updated++;
+        } else {
+          skipped++;
+        }
       } else {
         skipped++;
       }

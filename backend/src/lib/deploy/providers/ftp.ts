@@ -17,6 +17,8 @@ export class FtpDeploy implements DeployProvider {
   private async connect(): Promise<any> {
     const client = new Client();
     client.ftp.verbose = false;
+    // FTPS 默认校验证书，避免会话被中间人劫持窃取凭据；自签名证书可显式设置 insecure
+    const insecure = this.config.insecure === '1' || this.config.insecure === 1 || this.config.insecure === true;
     try {
       await client.access({
         host: this.config.host,
@@ -24,7 +26,7 @@ export class FtpDeploy implements DeployProvider {
         user: this.config.username,
         password: this.config.password,
         secure: this.config.secure === '1' || this.config.secure === 1,
-        secureOptions: { rejectUnauthorized: false },
+        secureOptions: { rejectUnauthorized: !insecure },
       });
       return client;
     } catch (e: any) {

@@ -247,7 +247,7 @@ export class ACMEv2 {
     const headers: Record<string, string> = {};
     if (data !== null && data !== false) headers['Content-Type'] = 'application/jose+json';
 
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = { method, headers, redirect: 'manual' };
     if (data !== null && data !== false) init.body = data as string;
     if (method === 'HEAD') init.method = 'HEAD';
 

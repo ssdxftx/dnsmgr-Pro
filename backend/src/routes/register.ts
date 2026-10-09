@@ -9,6 +9,7 @@ import { sendMail } from '../lib/monitor/msgNotice.js';
 const SITENAME = '聚合DNS管理系统';
 const CODE_TTL_SECONDS = 10 * 60; // 验证码有效期 10 分钟
 const RESEND_INTERVAL_MS = 60 * 1000; // 重发间隔 60 秒
+const MAX_VERIFY_ATTEMPTS = 5; // 单个验证码允许的最大校验失败次数
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -53,7 +54,8 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
 
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
-    if (exists) return { code: -1, msg: '该邮箱已被注册' };
+    // 防账号枚举：不区分邮箱是否已注册，统一返回相同提示（已注册则不再发送）
+    if (exists) return { code: 0, msg: '验证码已发送，请查收邮箱' };
 
     const latest = await queryOne<any>(`SELECT addtime FROM ${table('reg_verify')} WHERE email = ? ORDER BY id DESC LIMIT 1`, [email]);
     if (latest?.addtime) {
@@ -94,19 +96,35 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (!/^[A-Za-z0-9_.-]+$/.test(username)) return { code: -1, msg: '用户名仅支持字母、数字、下划线、点和横线' };
 
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? LIMIT 1`, [username]);
-    if (exists) return { code: -1, msg: '用户名已存在' };
+    // 防账号枚举：不明确区分用户名/邮箱是否已存在
+    if (exists) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
 
     if (mode === 'email') {
       if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
       const code = (b.code || '').trim();
       if (!code) return { code: -1, msg: '请输入邮箱验证码' };
       const emailUsed = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
-      if (emailUsed) return { code: -1, msg: '该邮箱已被注册' };
+      if (emailUsed) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
       const verify = await queryOne<any>(
         `SELECT * FROM ${table('reg_verify')} WHERE email = ? AND code = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
         [email, code]
       );
-      if (!verify) return { code: -1, msg: '验证码错误或已过期' };
+      if (!verify) {
+        // 校验失败计数，超过上限即作废该验证码，防止在线爆破
+        const latest = await queryOne<any>(
+          `SELECT id, attempts FROM ${table('reg_verify')} WHERE email = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
+          [email]
+        );
+        if (latest) {
+          const attempts = Number(latest.attempts || 0) + 1;
+          if (attempts >= MAX_VERIFY_ATTEMPTS) {
+            await query(`UPDATE ${table('reg_verify')} SET attempts = ?, used = 1 WHERE id = ?`, [attempts, latest.id]);
+            return { code: -1, msg: '验证码错误次数过多，请重新获取验证码' };
+          }
+          await query(`UPDATE ${table('reg_verify')} SET attempts = ? WHERE id = ?`, [attempts, latest.id]);
+        }
+        return { code: -1, msg: '验证码错误或已过期' };
+      }
       await query(`UPDATE ${table('reg_verify')} SET used = 1 WHERE id = ?`, [verify.id]);
     } else {
       // 注册码模式

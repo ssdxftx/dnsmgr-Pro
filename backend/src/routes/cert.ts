@@ -16,6 +16,8 @@ import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
 import { configGet, configSet } from '../config.js';
+import { escapeLike, clientMessage } from '../lib/util.js';
+import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
@@ -127,8 +129,8 @@ export default async function certRoutes(app: FastifyInstance) {
     let where = isDeploy ? 'deploy = 1' : 'deploy = 0';
     const params: any[] = [];
     if (kw) {
-      where += ' AND (name LIKE ? OR remark LIKE ? OR id = ?)';
-      params.push('%' + kw + '%', '%' + kw + '%', kw);
+      where += " AND (name LIKE ? ESCAPE '!' OR remark LIKE ? ESCAPE '!' OR id = ?)";
+      params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%', kw);
     }
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_account')} WHERE ${where}`, params))?.c || 0;
     const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, Number(limit), Number(offset)]);
@@ -158,6 +160,7 @@ export default async function certRoutes(app: FastifyInstance) {
       const provider = getDeployProvider(type, config);
       if (!provider) return { code: -1, msg: '该部署类型暂未支持' };
       try {
+        await assertDeployConfigAllowed(config);
         await provider.check();
       } catch (e: any) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
@@ -194,6 +197,7 @@ export default async function certRoutes(app: FastifyInstance) {
       const provider = getDeployProvider(type, merged);
       if (!provider) return { code: -1, msg: '该部署类型暂未支持' };
       try {
+        await assertDeployConfigAllowed(merged);
         await provider.check();
       } catch (e: any) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
@@ -240,7 +244,7 @@ export default async function certRoutes(app: FastifyInstance) {
       where += ' AND A.id = ?';
       params.push(id);
     } else if (domain) {
-      const oids = await query(`SELECT oid FROM ${table('cert_domain')} WHERE domain LIKE ?`, ['%' + domain + '%']);
+      const oids = await query(`SELECT oid FROM ${table('cert_domain')} WHERE domain LIKE ? ESCAPE '!'`, ['%' + escapeLike(String(domain)) + '%']);
       // 用占位符绑定，避免把库中 oid 值直接拼进 SQL 文本（二次注入）
       const oidNums = oids.map((o: any) => Number(o.oid)).filter((n: number) => Number.isInteger(n) && n > 0);
       if (oidNums.length) {
@@ -422,7 +426,7 @@ export default async function certRoutes(app: FastifyInstance) {
       return { code: 0, msg: '证书处理完成' };
     } catch (e: any) {
       certOrderSend(Number(id), false).catch(() => {});
-      return { code: -1, msg: e.message };
+      return { code: -1, msg: clientMessage(e, '证书处理失败') };
     }
   });
 
@@ -434,7 +438,7 @@ export default async function certRoutes(app: FastifyInstance) {
       await service.reset();
       return { code: 0, msg: '重置成功' };
     } catch (e: any) {
-      return { code: -1, msg: e.message };
+      return { code: -1, msg: clientMessage(e, '重置失败') };
     }
   });
 
@@ -444,7 +448,7 @@ export default async function certRoutes(app: FastifyInstance) {
       await new CertOrderService(id).revoke();
       return { code: 0, msg: '吊销成功' };
     } catch (e: any) {
-      return { code: -1, msg: e.message };
+      return { code: -1, msg: clientMessage(e, '吊销失败') };
     }
   });
 
@@ -598,7 +602,7 @@ export default async function certRoutes(app: FastifyInstance) {
       return { code: 0, msg: 'SSL证书部署任务执行成功！' };
     } catch (e: any) {
       certDeploySend(Number(id), false).catch(() => {});
-      return { code: -1, msg: e.message };
+      return { code: -1, msg: clientMessage(e, '证书部署失败') };
     }
   });
 
@@ -608,7 +612,7 @@ export default async function certRoutes(app: FastifyInstance) {
       await new CertDeployService(id).reset();
       return { code: 0, msg: '重置成功' };
     } catch (e: any) {
-      return { code: -1, msg: e.message };
+      return { code: -1, msg: clientMessage(e, '重置失败') };
     }
   });
 

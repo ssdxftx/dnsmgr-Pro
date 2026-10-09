@@ -57,6 +57,23 @@ function superBlocked(req: any, target: { id: number; is_super?: any }): string 
   return null;
 }
 
+function isSuper(req: any): boolean {
+  return Number(req.user.is_super) === 1;
+}
+
+// 普通管理员不得管理其他管理员、也不得创建/提升管理员，避免管理员间互相降级或提权
+function adminManageBlocked(req: any, target: { id: number; level?: any }, nextLevel?: number): string | null {
+  if (isSuper(req)) return null;
+  const targetLevel = Number(target.level || 0);
+  if (Number(target.id) !== Number(req.user.uid) && targetLevel >= 2) {
+    return '仅超级管理员可管理其他管理员';
+  }
+  if (nextLevel !== undefined && nextLevel >= 2 && Number(target.id) !== Number(req.user.uid)) {
+    return '仅超级管理员可授予管理员权限';
+  }
+  return null;
+}
+
 export default async function userRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
@@ -122,6 +139,7 @@ export default async function userRoutes(app: FastifyInstance) {
 
     if (!username || !password) return { code: -1, msg: '用户名或密码不能为空' };
     if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
+    if (level >= 2 && !isSuper(req)) return { code: -1, msg: '仅超级管理员可创建管理员账号' };
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ?`, [username]);
     if (exists) return { code: -1, msg: '用户名已存在' };
@@ -140,7 +158,7 @@ export default async function userRoutes(app: FastifyInstance) {
   app.put('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id, is_super FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT id, is_super, level FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     const blocked = superBlocked(req, row as any);
     if (blocked) return { code: -1, msg: blocked };
@@ -165,6 +183,8 @@ export default async function userRoutes(app: FastifyInstance) {
     if (level === 1 && id === req.user.uid) {
       level = 2;
     }
+    const levelBlocked = adminManageBlocked(req, row as any, level);
+    if (levelBlocked) return { code: -1, msg: levelBlocked };
 
     await query(`UPDATE ${table('user')} SET username = ?, is_api = ?, apikey = ?, level = ?, check_whole = ?, stat_cache = ? WHERE id = ?`, [username, isApi, apikey, level, checkWhole, statCache, id]);
     if (level === 1) {
@@ -183,10 +203,12 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
     const status = Number((req.body || {}).status);
-    const row = await queryOne(`SELECT is_super FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT is_super, level FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被修改状态' };
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法修改状态' };
+    const statusBlocked = adminManageBlocked(req, { id, level: (row as any).level });
+    if (statusBlocked) return { code: -1, msg: statusBlocked };
     await query(`UPDATE ${table('user')} SET status = ? WHERE id = ?`, [status, id]);
     return { code: 0, msg: '设置成功' };
   });
@@ -208,10 +230,12 @@ export default async function userRoutes(app: FastifyInstance) {
   app.delete('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT is_super FROM ${table('user')} WHERE id = ?`, [id]);
+    const row = await queryOne(`SELECT is_super, level FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被删除' };
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法删除' };
+    const deleteBlocked = adminManageBlocked(req, { id, level: (row as any).level });
+    if (deleteBlocked) return { code: -1, msg: deleteBlocked };
     await query(`DELETE FROM ${table('user')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
     return { code: 0, msg: '删除成功' };

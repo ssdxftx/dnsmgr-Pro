@@ -38,6 +38,8 @@ export async function migrate(): Promise<void> {
       KEY email (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  // 验证码校验失败次数：超过上限即作废，防止在线爆破
+  await ensureColumn('reg_verify', 'attempts', "int(11) NOT NULL DEFAULT '0'");
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('cdn_cache_task')} (

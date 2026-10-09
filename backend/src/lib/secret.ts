@@ -16,8 +16,10 @@ function deriveKey(): Buffer {
 }
 
 export function encryptText(plain: string): string {
-  // 密钥未初始化时退化为明文，避免把数据写入无法解开的格式
-  if (!secretKey) return plain;
+  // 密钥未初始化时拒绝保存，避免敏感配置被静默以明文写入数据库
+  if (!secretKey) {
+    throw new Error('系统密钥未初始化，出于安全考虑拒绝保存敏感配置，请重启服务后重试');
+  }
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', deriveKey(), iv);
   const enc = Buffer.concat([cipher.update(Buffer.from(plain, 'utf8')), cipher.final()]);
