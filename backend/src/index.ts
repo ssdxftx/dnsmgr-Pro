@@ -124,8 +124,12 @@ try {
 }
 // 供账号凭据加解密使用（AES-256-GCM，密钥由 sys_key 派生）
 setSecretKey(sysKey);
-// 业务令牌默认 7 天过期；TOTP 预令牌单独指定 5 分钟
-await app.register(jwt, { secret: sysKey, sign: { expiresIn: '7d' } });
+// 业务令牌默认 7 天过期；TOTP 预令牌单独指定 5 分钟。显式限定 HS256，避免算法混淆
+await app.register(jwt, {
+  secret: sysKey,
+  sign: { algorithm: 'HS256', expiresIn: '7d' },
+  verify: { algorithms: ['HS256'] },
+});
 
 // 每次请求校验账号状态与权限；用 10 秒短缓存避免高频查库
 const authUserCache = new Map<number, { user: any; at: number }>();

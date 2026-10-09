@@ -55,6 +55,10 @@ export class SshDeploy implements DeployProvider {
       conn.sftp((err, sftp) => {
         if (err) return reject(new Error('无法创建证书文件：' + err.message));
         const path = remotePath.startsWith('/') ? remotePath : '/' + remotePath;
+        // 禁止路径穿越（../），避免覆盖远端任意可写文件（如 authorized_keys）
+        if (path.split('/').includes('..')) {
+          return reject(new Error('远程路径不合法，禁止包含 .. ：' + remotePath));
+        }
         sftp.writeFile(path, data, (e) => {
           if (e) reject(new Error('无法写入文件 ' + remotePath + '：' + e.message));
           else resolve();
@@ -125,18 +129,42 @@ export class SshDeploy implements DeployProvider {
     this.logger = func;
   }
 
+  // IIS 分支的域名/密码/路径会拼进远端 shell 命令，必须严格校验字符集，防止命令注入
+  private static safeIisDomain(raw: string): string {
+    const domain = String(raw || '').trim();
+    if (!/^[A-Za-z0-9.\-]+(:[0-9]{1,5})?$/.test(domain)) {
+      throw new Error('IIS 域名不合法：' + raw);
+    }
+    return domain.includes(':') ? domain : domain + ':443';
+  }
+
+  private static safeIisPass(pass: string): string {
+    const p = String(pass || '');
+    if (!/^[A-Za-z0-9_.@#%:+\-=/]*$/.test(p)) {
+      throw new Error('PFX 密码包含不支持的字符（仅允许字母、数字及 _ . @ # % : + - = / ）');
+    }
+    return p;
+  }
+
+  private static safeIisPath(raw: string): string {
+    const f = String(raw || '').trim().replace(/^\/+/, '');
+    if (!f || !/^[A-Za-z0-9._\\/:+-]+$/.test(f)) {
+      throw new Error('PFX 文件路径不合法：' + raw);
+    }
+    return f;
+  }
+
   private async deployIis(conn: Client, rawDomain: string, pfxFile: string, pfxPass: string, certHash: string): Promise<void> {
-    let domain = rawDomain;
-    if (!domain.includes(':')) domain += ':443';
+    const domain = SshDeploy.safeIisDomain(rawDomain);
     const ret = await this.exec(conn, 'netsh http show sslcert hostnameport=' + domain);
     const m = ret.match(/:\s+(\w{40})/);
     if (m && m[1].toLowerCase() === certHash.toLowerCase()) {
       this.log('IIS域名 ' + domain + ' 证书已存在，无需更新');
       return;
     }
-    const p = pfxPass ? '-p ' + pfxPass : '-p ""';
-    let file = pfxFile;
-    if (file.startsWith('/')) file = file.slice(1);
+    const safePass = SshDeploy.safeIisPass(pfxPass);
+    const p = safePass ? '-p ' + safePass : '-p ""';
+    const file = SshDeploy.safeIisPath(pfxFile);
     await this.exec(conn, 'certutil ' + p + ' -importPFX ' + file);
     await this.exec(conn, 'netsh http delete sslcert hostnameport=' + domain);
     await this.exec(conn, 'netsh http add sslcert hostnameport=' + domain + ' certhash=' + certHash + ' certstorename=MY appid=\'{' + this.uuid() + '}\'');

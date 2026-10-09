@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
-import { fmtDateTime, fmtTimestamp, hasOwn } from '../lib/util.js';
+import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike } from '../lib/util.js';
 
 // 容灾监控接口仅管理员可用
 const authenticate = (app: FastifyInstance) => ({
@@ -70,8 +70,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     const params: any[] = [];
     if (kw) {
       if (searchType === 1) {
-        where += ' AND (A.rr LIKE ? OR B.name LIKE ?)';
-        params.push('%' + kw + '%', '%' + kw + '%');
+        where += " AND (A.rr LIKE ? ESCAPE '!' OR B.name LIKE ? ESCAPE '!')";
+        params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%');
       } else if (searchType === 2) {
         where += ' AND A.recordid = ?';
         params.push(kw);
@@ -82,8 +82,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
         where += ' AND A.backup_value = ?';
         params.push(kw);
       } else if (searchType === 5) {
-        where += ' AND A.remark LIKE ?';
-        params.push('%' + kw + '%');
+        where += " AND A.remark LIKE ? ESCAPE '!'";
+        params.push('%' + escapeLike(kw) + '%');
       }
     }
     if (!isNullOrEmpty(status)) {

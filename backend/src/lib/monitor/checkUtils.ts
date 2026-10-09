@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import net from 'node:net';
-import { assertUrlAllowed } from '../netGuard.js';
+import { safeFetch, assertHostAllowed } from '../netGuard.js';
 
 export interface CheckResult {
   status: boolean;
@@ -33,11 +33,10 @@ export async function checkCurl(url: string, timeout: number, ip: string | null 
   try {
     const u = new URL(url);
     if (!u.hostname) throw new Error('Invalid URL');
-    // 禁止监控目标指向内网/回环地址，避免被用作内网探测或 SSRF
-    await assertUrlAllowed(url);
-    const res = await fetch(url, {
+    // 禁止监控目标指向内网/回环地址，避免被用作内网探测或 SSRF；
+    // safeFetch 逐跳校验跳转目标，防止经 302 跳转到内网地址
+    const res = await safeFetch(url, {
       signal: AbortSignal.timeout(timeout * 1000),
-      redirect: 'follow',
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36' },
     });
     const httpcode = res.status;
@@ -64,6 +63,13 @@ export async function checkTcp(target: string, ip: string | null, port: number, 
   }
   if (!isIp(host)) return { status: false, errmsg: 'Invalid IP address', usetime: 0 };
 
+  // 与 http 探活一致：默认禁止探测内网/回环地址，避免被用作内网扫描
+  try {
+    await assertHostAllowed(host);
+  } catch (e: any) {
+    return { status: false, errmsg: e?.message || '禁止访问内网地址', usetime: 0 };
+  }
+
   const start = Date.now();
   const status = await new Promise<boolean>((resolve) => {
     const socket = net.connect({ host, port, timeout: timeout * 1000 });
@@ -85,6 +91,13 @@ export async function checkPing(target: string, ip: string | null): Promise<Chec
     if (!host) return { status: false, errmsg: 'DNS resolve failed', usetime: 0 };
   }
   if (!isIp(host)) return { status: false, errmsg: 'Invalid IP address', usetime: 0 };
+
+  // 与 http 探活一致：默认禁止探测内网/回环地址，避免被用作内网扫描
+  try {
+    await assertHostAllowed(host);
+  } catch (e: any) {
+    return { status: false, errmsg: e?.message || '禁止访问内网地址', usetime: 0 };
+  }
 
   const isV6 = host.includes(':');
   const args = isV6 ? ['-6', '-c', '1', '-w', '1', host] : ['-c', '1', '-w', '1', host];

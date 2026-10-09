@@ -1,6 +1,7 @@
 import { request as httpRequest } from 'node:https';
 import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
+import { assertDeployTargetAllowed } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class K8sDeploy implements DeployProvider {
@@ -8,10 +9,22 @@ export class K8sDeploy implements DeployProvider {
   private server = '';
   private bearerToken: string | null = null;
   private tls: { cert: Buffer | null; key: Buffer | null } = { cert: null, key: null };
+  private insecure = false;
   private logger: ((txt: string) => void) | null = null;
 
   constructor(config: Record<string, any>) {
     this.kubeconfig = config.kubeconfig || '';
+    // 默认校验证书；确需连接自签名集群时可显式开启 insecure
+    this.insecure = config.insecure === true || config.insecure === '1' || config.insecure === 1;
+  }
+
+  // K8s 资源名遵循 DNS-1123：仅小写字母、数字、- 与 .，用白名单阻止路径/查询注入
+  private static safeName(value: any, label: string): string {
+    const v = String(value || '').trim();
+    if (!/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(v) || v.length > 253) {
+      throw new Error(label + '不合法：仅允许小写字母、数字、- 和 .');
+    }
+    return v;
   }
 
   private log(txt: string) {
@@ -86,7 +99,7 @@ export class K8sDeploy implements DeployProvider {
           method,
           headers,
           timeout: 30000,
-          rejectUnauthorized: false,
+          rejectUnauthorized: !this.insecure,
           cert: this.tls.cert || undefined,
           key: this.tls.key || undefined,
         },
@@ -107,6 +120,7 @@ export class K8sDeploy implements DeployProvider {
 
   private async verify(): Promise<void> {
     this.parse();
+    await assertDeployTargetAllowed(this.server);
     const { code, body, err } = await this.k8sRequest('GET', '/version');
     if (err) throw new Error('连接Kubernetes API服务器失败: ' + err);
     if (code !== 200) throw new Error('连接Kubernetes API服务器失败: HTTP ' + code + ' ' + body);
@@ -119,16 +133,19 @@ export class K8sDeploy implements DeployProvider {
 
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {
     const namespace = config.namespace;
-    const secretName = config.secret_name;
+    const secretNameRaw = config.secret_name;
     if (!namespace) throw new Error('命名空间不能为空');
-    if (!secretName) throw new Error('Secret名称不能为空');
+    if (!secretNameRaw) throw new Error('Secret名称不能为空');
+    const safeNamespace = K8sDeploy.safeName(namespace, '命名空间');
+    const safeSecretName = K8sDeploy.safeName(secretNameRaw, 'Secret名称');
 
     this.parse();
+    await assertDeployTargetAllowed(this.server);
 
     const secretPayload = {
       apiVersion: 'v1',
       kind: 'Secret',
-      metadata: { name: secretName, namespace },
+      metadata: { name: safeSecretName, namespace: safeNamespace },
       type: 'kubernetes.io/tls',
       data: {
         'tls.crt': Buffer.from(config.fullchain || fullchain).toString('base64'),
@@ -136,28 +153,29 @@ export class K8sDeploy implements DeployProvider {
       },
     };
 
-    const secretUrl = '/api/v1/namespaces/' + namespace + '/secrets/' + secretName;
+    const secretUrl = '/api/v1/namespaces/' + safeNamespace + '/secrets/' + safeSecretName;
     const s = await this.k8sRequest('GET', secretUrl);
 
     if (s.code === 404) {
-      const createUrl = '/api/v1/namespaces/' + namespace + '/secrets';
-      this.log('Secret:' + secretName + ' 不存在，正在创建...');
+      const createUrl = '/api/v1/namespaces/' + safeNamespace + '/secrets';
+      this.log('Secret:' + safeSecretName + ' 不存在，正在创建...');
       const c = await this.k8sRequest('POST', createUrl, JSON.stringify(secretPayload));
       if (c.code < 200 || c.code >= 300) throw new Error('创建Secret失败 (HTTP ' + c.code + '): ' + c.body + ' | ' + c.err);
-      this.log('Secret:' + namespace + ' 创建成功');
+      this.log('Secret:' + safeNamespace + ' 创建成功');
     } else if (s.code >= 200 && s.code < 300) {
-      this.log('Secret:' + secretName + ' 已存在，正在更新...');
+      this.log('Secret:' + safeSecretName + ' 已存在，正在更新...');
       const patch = { data: secretPayload.data, type: 'kubernetes.io/tls' };
       const p = await this.k8sRequest('PATCH', secretUrl, JSON.stringify(patch));
       if (p.code < 200 || p.code >= 300) throw new Error('更新Secret失败 (HTTP ' + p.code + '): ' + p.body + ' | ' + p.err);
-      this.log('Secret:' + secretName + ' 更新成功');
+      this.log('Secret:' + safeSecretName + ' 更新成功');
     } else {
       throw new Error('获取Secret失败 (HTTP ' + s.code + '): ' + s.body + ' | ' + s.err);
     }
 
     if (config.ingresses) {
-      const ingressUrl = '/apis/networking.k8s.io/v1/namespaces/' + namespace + '/ingresses';
-      for (const ingName of String(config.ingresses).split(',')) {
+      const ingressUrl = '/apis/networking.k8s.io/v1/namespaces/' + safeNamespace + '/ingresses';
+      for (const rawName of String(config.ingresses).split(',')) {
+        const ingName = K8sDeploy.safeName(rawName.trim(), 'Ingress名称');
         const g = await this.k8sRequest('GET', ingressUrl + '/' + ingName);
         if (g.code < 200 || g.code >= 300) throw new Error("获取Ingress '" + ingName + "' 失败 (HTTP " + g.code + '): ' + g.body + ' | ' + g.err);
         let ing: any;
@@ -176,13 +194,13 @@ export class K8sDeploy implements DeployProvider {
         const tls: any[] = ing.spec?.tls || [];
         let found = false;
         for (const entry of tls) {
-          if ((entry.secretName || '') === secretName) {
+          if ((entry.secretName || '') === safeSecretName) {
             found = true;
             entry.hosts = [...new Set([...(entry.hosts || []), ...uniqueHosts])];
           }
         }
         if (!found) {
-          tls.push({ secretName, hosts: uniqueHosts });
+          tls.push({ secretName: safeSecretName, hosts: uniqueHosts });
         }
 
         const patch = { spec: { tls } };

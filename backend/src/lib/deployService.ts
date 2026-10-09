@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
 import { decryptConfig, encryptConfig } from './secret.js';
+import { assertDeployConfigAllowed } from './netGuard.js';
 
 function safeJson(s: string | null): any {
   if (!s) return null;
@@ -30,7 +31,10 @@ export class CertDeployService {
 
     const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ?`, [task.aid]);
     if (!account) throw new Error('该自动部署账户不存在');
-    const client = getDeployProvider(account.type, safeJson(account.config) || {});
+    const cfg = safeJson(account.config) || {};
+    // 拒绝指向链路本地/云元数据地址的部署目标，避免凭据被诱导窃取
+    await assertDeployConfigAllowed(cfg);
+    const client = getDeployProvider(account.type, cfg);
     if (!client) throw new Error('该自动部署任务类型不存在');
     this.client = client;
     this.info = safeJson(task.info) || {};

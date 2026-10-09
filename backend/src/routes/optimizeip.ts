@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet, configSet } from '../config.js';
-import { fmtDateTime, hasOwn } from '../lib/util.js';
+import { fmtDateTime, hasOwn, escapeLike } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
 
@@ -85,11 +85,11 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const params: any[] = [];
     if (kw) {
       if (searchType === 1) {
-        where += ' AND (A.rr LIKE ? OR B.name LIKE ?)';
-        params.push('%' + kw + '%', '%' + kw + '%');
+        where += " AND (A.rr LIKE ? ESCAPE '!' OR B.name LIKE ? ESCAPE '!')";
+        params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%');
       } else if (searchType === 2) {
-        where += ' AND A.remark LIKE ?';
-        params.push('%' + kw + '%');
+        where += " AND A.remark LIKE ? ESCAPE '!'";
+        params.push('%' + escapeLike(kw) + '%');
       }
     }
     if (!isNullOrEmpty(status)) {
