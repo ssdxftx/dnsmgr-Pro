@@ -3,29 +3,31 @@
     <ResponsiveDataTable :columns="columns" :data="records" :loading="loading" :pagination="pagination" :empty-text="t('record.empty')" />
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('record.editTitle') : t('record.addTitle')" :style="modalStyle" :mask-closable="false">
-      <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
-        <n-form-item :label="t('record.hostRecord')">
-          <n-input v-model:value="form.name" :placeholder="t('record.hostPlaceholder')" />
-        </n-form-item>
-        <n-form-item :label="t('record.recordType')">
-          <n-select v-model:value="form.type" :options="typeOptions" />
-        </n-form-item>
-        <n-form-item :label="t('record.recordValue')">
-          <n-input v-model:value="form.value" :placeholder="t('record.valuePlaceholder')" />
-        </n-form-item>
-        <n-form-item :label="t('record.line')">
-          <n-select v-model:value="form.line" :options="lineOptions" filterable :placeholder="t('record.defaultLinePlaceholder')" />
-        </n-form-item>
-        <n-form-item label="TTL">
-          <n-input-number v-model:value="form.ttl" :min="1" style="width:100%" />
-        </n-form-item>
-        <n-form-item v-if="form.type === 'MX'" :label="t('record.priority')">
-          <n-input-number v-model:value="form.mx" :min="0" style="width:100%" />
-        </n-form-item>
-        <n-form-item :label="t('common.remark')">
-          <n-input v-model:value="form.remark" :placeholder="t('record.remarkPlaceholder')" />
-        </n-form-item>
-      </n-form>
+      <div class="record-form-scroll">
+        <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
+          <n-form-item :label="t('record.hostRecord')">
+            <n-input v-model:value="form.name" :placeholder="t('record.hostPlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('record.recordType')">
+            <n-select v-model:value="form.type" :options="typeOptions" />
+          </n-form-item>
+          <n-form-item :label="t('record.recordValue')">
+            <n-input v-model:value="form.value" :placeholder="t('record.valuePlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('record.line')">
+            <n-select v-model:value="form.line" :options="lineOptions" filterable :placeholder="t('record.defaultLinePlaceholder')" />
+          </n-form-item>
+          <n-form-item label="TTL">
+            <n-input-number v-model:value="form.ttl" :min="1" style="width:100%" />
+          </n-form-item>
+          <n-form-item v-if="form.type === 'MX'" :label="t('record.priority')">
+            <n-input-number v-model:value="form.mx" :min="0" style="width:100%" />
+          </n-form-item>
+          <n-form-item :label="t('common.remark')">
+            <n-input v-model:value="form.remark" :placeholder="t('record.remarkPlaceholder')" />
+          </n-form-item>
+        </n-form>
+      </div>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
@@ -411,3 +413,13 @@ function delRecord(row: any) {
 
 defineExpose({ openAdd });
 </script>
+
+<style scoped>
+/* 表单内容超出视口时内部滚动，避免 Naive UI 模态卡片居中导致顶部字段被裁掉无法触达 */
+.record-form-scroll {
+  max-height: calc(100dvh - 200px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+</style>
