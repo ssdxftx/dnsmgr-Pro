@@ -107,11 +107,10 @@ async function getIpAddress(cdnType: number, ipType: string): Promise<Record<str
     else if (cdnType === 4) url += 'get_edgeone_ip';
   }
   const params: Record<string, any> = { type: ipType };
-  // 仅 wetest.vip 接口需要密钥；不再使用内置默认密钥，未配置时给出明确提示
+  // 仅 wetest.vip 接口需要密钥；未配置时沿用原项目内置的默认密钥，保证老库升级后任务不中断
   if (api !== 1) {
-    const key = String((await configGet('optimize_ip_key', '')) || '').trim();
-    if (!key) throw new Error('未配置优选IP接口密钥（optimize_ip_key），请在系统设置中填写');
-    params.key = key;
+    const key = String((await configGet('optimize_ip_key', 'o1zrmHAF')) || '').trim();
+    if (key) params.key = key;
   }
   const res = await fetch(url, {
     method: 'POST',
@@ -193,7 +192,10 @@ export async function executeOne(row: any): Promise<string> {
 
     const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
     if (!dns) throw new Error('DNS模块不存在');
-    const domainRecords = await dns.getDomainRecords(1, 100, null, row.rr, null, null, null, null);
+    // 优先精确子域名查询（DescribeSubDomainRecords），退化为通用模糊查询
+    const domainRecords = typeof (dns as any).getSubDomainRecords === 'function'
+      ? await (dns as any).getSubDomainRecords(row.rr, 1, 100)
+      : await dns.getDomainRecords(1, 100, null, row.rr, null, null, null, null);
     if (domainRecords === false) throw new Error('获取记录列表失败，' + dns.getError());
 
     let type = row.type;

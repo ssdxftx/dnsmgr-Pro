@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import net from 'node:net';
 import { query, queryOne, table } from '../db.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, type SubPermission } from '../auth.js';
@@ -255,6 +256,45 @@ export default async function domainRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
+  // 编辑域名属性（备注/分类/隐藏/单点登录/到期提醒/到期时间）
+  app.put('/api/domains/:id', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number((req.params as any).id);
+    const row = await queryOne(`SELECT id FROM ${table('domain')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '域名不存在' };
+    const b = req.body || {};
+    const upd: Record<string, any> = {};
+    const boolField = (k: string) => (Number(b[k]) ? 1 : 0);
+    if ('remark' in b) upd.remark = String(b.remark ?? '');
+    if ('cid' in b) upd.cid = Number(b.cid || 0);
+    if ('is_hide' in b) upd.is_hide = boolField('is_hide');
+    if ('is_sso' in b) upd.is_sso = boolField('is_sso');
+    if ('is_notice' in b) upd.is_notice = boolField('is_notice');
+    if ('expiretime' in b) upd.expiretime = b.expiretime ? String(b.expiretime) : null;
+    const cols = Object.keys(upd);
+    if (!cols.length) return { code: 0, msg: '无改动' };
+    const fields = cols.map((k) => `${k} = ?`).join(', ');
+    await query(`UPDATE ${table('domain')} SET ${fields} WHERE id = ?`, [...cols.map((k) => upd[k]), id]);
+    return { code: 0, msg: '修改成功' };
+  });
+
+  // 批量删除域名（级联清理别名与关联任务）
+  app.post('/api/domains/batch-del', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const ids: number[] = Array.isArray((req.body || {}).ids)
+      ? (req.body.ids as any[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
+      : [];
+    if (!ids.length) return { code: -1, msg: '请选择域名' };
+    const ph = ids.map(() => '?').join(',');
+    await query(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('domain_alias')} WHERE did IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('dmtask')} WHERE did IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('sctask')} WHERE did IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('dns_check_task')} WHERE did IN (${ph})`, ids);
+    return { code: 0, msg: '已删除 ' + ids.length + ' 个域名' };
+  });
+
   // ============ 解析记录 ============
   app.get('/api/domains/:id/records', auth, async (req: any) => {
     const { id } = req.params as any;
@@ -295,7 +335,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!name || !type || rawValue === undefined || rawValue === null || rawValue === '') {
       return { code: -1, msg: '参数不能为空' };
     }
-    const supported = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'SRV', 'CAA', 'PTR'];
+    const supported = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SOA', 'SRV', 'CAA', 'PTR', 'LOC', 'LUA'];
     if (!supported.includes(type)) return { code: -1, msg: '该记录类型暂不支持检测' };
     if (!acc.admin) {
       const m = matchPermission(acc.perms, info.domain.name, name);
@@ -441,8 +481,256 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!ok) return { code: -1, msg: provider.getError() };
     return { code: 0, msg: '状态更新成功' };
   });
+
+  // 批量操作解析记录：open/pause/delete/remark/value/line/group
+  app.post('/api/domains/:id/records/batch', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    const acc = await getUserPerms(req);
+    const b = req.body || {};
+    const action = String(b.action || '');
+    const records: any[] = Array.isArray(b.records) ? b.records : [];
+    if (!action || !records.length) return { code: -1, msg: '参数不能为空' };
+    if (!acc.admin) {
+      for (const r of records) {
+        const e = writeErr(acc, info.domain.name, r.Name);
+        if (e) return { code: -1, msg: e };
+      }
+    }
+    let success = 0;
+    let fail = 0;
+    if (action === 'open' || action === 'pause') {
+      const st = action === 'open' ? '1' : '0';
+      for (const r of records) {
+        if (await provider.setDomainRecordStatus(r.RecordId, st)) success++;
+        else fail++;
+      }
+      return { code: 0, msg: `成功${action === 'open' ? '启用' : '暂停'}${success}条解析记录` };
+    }
+    if (action === 'delete') {
+      for (const r of records) {
+        if (await provider.deleteDomainRecord(r.RecordId)) success++;
+        else fail++;
+      }
+      if (success) await bumpRecordCount(id, -success);
+      return { code: 0, msg: `成功删除${success}条解析记录` };
+    }
+    if (action === 'remark') {
+      const remark = b.remark ? String(b.remark) : null;
+      const fn = provider.updateDomainRecordRemark;
+      if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持备注' };
+      for (const r of records) {
+        if (await fn.call(provider, r.RecordId, remark)) success++;
+        else fail++;
+      }
+      return { code: 0, msg: `批量修改备注，成功${success}条，失败${fail}条` };
+    }
+    if (action === 'value' || action === 'line') {
+      for (const r of records) {
+        const type = action === 'value' ? String(b.type || r.Type) : r.Type;
+        const value = action === 'value' ? String(b.value ?? '') : (Array.isArray(r.Value) ? r.Value.join(',') : r.Value);
+        const line = action === 'line' ? String(b.line ?? '') : r.Line;
+        const ok = await provider.updateDomainRecord(r.RecordId, r.Name, type, value, line || 'default', Number(r.TTL || 600), Number(r.MX || 1), r.Weight ?? null, r.Remark ?? null);
+        if (ok) success++;
+        else fail++;
+      }
+      return { code: 0, msg: `批量修改${action === 'value' ? '记录值' : '线路'}，成功${success}条，失败${fail}条` };
+    }
+    if (action === 'group') {
+      if (typeof provider.changeRecordGroup !== 'function') return { code: -1, msg: '该DNS类型不支持分组' };
+      const ids = records.map((r) => String(r.RecordId));
+      const ok = await provider.changeRecordGroup(ids, String(b.groupid ?? ''));
+      return ok ? { code: 0, msg: `成功修改${ids.length}条记录的分组` } : { code: -1, msg: '修改分组失败，' + provider.getError() };
+    }
+    return { code: -1, msg: '不支持的操作' };
+  });
+
+  // 批量添加解析记录（每行「主机记录 记录值」，其余属性统一）
+  app.post('/api/domains/:id/records/batch-add', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    const b = req.body || {};
+    const raw = String(b.record ?? '');
+    const type = String(b.type ?? '').trim();
+    const line = String(b.line ?? 'default');
+    const ttl = Number(b.ttl || 600);
+    const mx = Number(b.mx || 1);
+    const remark = b.remark ? String(b.remark) : null;
+    const lines = raw.split('\n').map((s: string) => s.trim()).filter(Boolean);
+    if (!lines.length) return { code: -1, msg: '参数不能为空' };
+    const acc = await getUserPerms(req);
+    let success = 0;
+    let fail = 0;
+    for (const ln of lines) {
+      const [name, value] = ln.split(/\s+/);
+      if (!name || !value) continue;
+      const rType = type || detectType(value);
+      const e = writeErr(acc, info.domain.name, name);
+      if (e) {
+        fail++;
+        continue;
+      }
+      const rid = await provider.addDomainRecord(name, rType, value, line, ttl, mx, null, remark);
+      if (rid) success++;
+      else fail++;
+    }
+    if (success) await bumpRecordCount(id, success);
+    if (success > 0) return { code: 0, msg: `批量添加解析，成功${success}条，失败${fail}条` };
+    return { code: -1, msg: '批量添加失败，' + (provider.getError?.() || '没有可添加的记录') };
+  });
+
+  // 域名快捷信息：线路列表 + 最小 TTL + 是否支持权重/备注
+  app.get('/api/domains/:id/quickinfo', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const acc = await getUserPerms(req);
+    if (!acc.admin) {
+      const m = matchPermission(acc.perms, info.domain.name, '@');
+      if (m < 0) return { code: -1, msg: '无权限' };
+    }
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    let minTTL = 1;
+    if (typeof provider.getMinTTL === 'function') {
+      const t = await provider.getMinTTL();
+      if (t !== false && t) minTTL = t;
+    }
+    return { code: 0, data: { minTTL } };
+  });
+
+  // 解析记录分组列表（阿里云 / DNSPod）
+  app.get('/api/domains/:id/groups', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.getRecordGroups !== 'function') return { code: -1, msg: '该DNS类型不支持分组' };
+    const groups = await provider.getRecordGroups();
+    if (groups === false) return { code: -1, msg: '获取分组列表失败，' + provider.getError() };
+    const list = (groups as any[]).map((g) => ({
+      id: g.GroupId,
+      name: g.GroupName + (g.RecordCount !== undefined ? '(' + g.RecordCount + ')' : ''),
+    }));
+    return { code: 0, data: list };
+  });
+
+  // ============ 权重解析（阿里云）============
+  app.get('/api/domains/:id/weight', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.getWeightSubDomains !== 'function') return { code: -1, msg: '该DNS类型不支持权重解析（仅阿里云）' };
+    const res = await provider.getWeightSubDomains(1, Number(req.query?.pagesize || 20), req.query?.subdomain || null);
+    if (res === false) return { code: -1, msg: '获取权重列表失败，' + provider.getError() };
+    return { code: 0, data: res };
+  });
+
+  app.post('/api/domains/:id/weight', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.setWeightStatus !== 'function') return { code: -1, msg: '该DNS类型不支持权重解析（仅阿里云）' };
+    const acc = await getUserPerms(req);
+    const b = req.body || {};
+    const act = String(b.act || '');
+    const subdomain = String(b.subdomain || '').trim();
+    if (!subdomain) return { code: -1, msg: '参数不能为空' };
+    const perr = writeErr(acc, info.domain.name, subdomain);
+    if (perr) return { code: -1, msg: perr };
+    if (act === 'status') {
+      const status = String(b.status ?? '0');
+      const ok = await provider.setWeightStatus(subdomain, status, b.type ?? null, b.line ?? null);
+      return ok ? { code: 0, msg: '操作成功' } : { code: -1, msg: '操作失败，' + provider.getError() };
+    }
+    if (act === 'update') {
+      const status = String(b.status ?? '0');
+      const type = b.type ?? null;
+      const line = b.line ?? null;
+      const weight = b.weight || {};
+      if (type !== 'CNAME') {
+        const okStatus = await provider.setWeightStatus(subdomain, status, type, line);
+        if (!okStatus) return { code: -1, msg: '修改失败，' + provider.getError() };
+      }
+      if (status === '1') {
+        let success = 0;
+        for (const [recordId, w] of Object.entries(weight)) {
+          if (await provider.updateRecordWeight(recordId, Number(w))) success++;
+        }
+        if (success > 0) return { code: 0, msg: '成功修改' + success + '条解析记录权重' };
+        return { code: -1, msg: '修改权重失败，' + provider.getError() };
+      }
+      return { code: 0, msg: '修改成功' };
+    }
+    return { code: -1, msg: '参数错误' };
+  });
+
+  // ============ 域名别名（DNSPod）============
+  app.get('/api/domains/:id/aliases', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.domainAliasList !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
+    const list = await provider.domainAliasList();
+    if (list === false) return { code: -1, msg: '获取别名失败，' + provider.getError() };
+    return { code: 0, data: list };
+  });
+
+  app.post('/api/domains/:id/aliases', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number((req.params as any).id);
+    const alias = String((req.body || {}).alias || '').trim();
+    if (!alias) return { code: -1, msg: '参数不能为空' };
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.addDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
+    const ok = await provider.addDomainAlias(alias);
+    return ok ? { code: 0, msg: '添加域名别名成功' } : { code: -1, msg: '添加域名别名失败，' + provider.getError() };
+  });
+
+  app.delete('/api/domains/:id/aliases/:aliasId', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const { id, aliasId } = req.params as any;
+    const info = await getDomainWithAccount(Number(id));
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.deleteDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
+    const ok = await provider.deleteDomainAlias(String(aliasId));
+    return ok ? { code: 0, msg: '删除域名别名成功' } : { code: -1, msg: '删除域名别名失败，' + provider.getError() };
+  });
+
+  // ============ 解析操作日志（阿里云）============
+  app.get('/api/domains/:id/recordlog', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const info = await getDomainWithAccount(id);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.getDomainRecordLog !== 'function') return { code: -1, msg: '该DNS类型不支持解析日志' };
+    const q = req.query || {};
+    const res = await provider.getDomainRecordLog(Number(q.page || 1), Number(q.pagesize || 20), q.keyword || null, q.startdate || null, q.enddate || null);
+    if (res === false) return { code: -1, msg: '获取解析日志失败，' + provider.getError() };
+    return { code: 0, data: res };
+  });
 }
 
 async function bumpRecordCount(domainId: number, delta: number) {
   await query(`UPDATE ${table('domain')} SET recordcount = GREATEST(recordcount + ?, 0) WHERE id = ?`, [delta, domainId]);
+}
+
+// 依据记录值推断记录类型（与原项目 getDnsType 一致）
+function detectType(value: string): string {
+  const v = String(value).trim();
+  if (net.isIPv4(v)) return 'A';
+  if (net.isIPv6(v)) return 'AAAA';
+  return 'CNAME';
 }

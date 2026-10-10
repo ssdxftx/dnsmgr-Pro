@@ -98,6 +98,8 @@ export const certConfig: Record<string, any> = {
     wildcard: false,
     max_domains: 1,
     cname: false,
+    note: '一个账号有50张免费证书额度，证书到期或吊销可释放额度。',
+    noteUrl: 'https://cloud.tencent.com/document/product/400/89868',
     inputs: {
       SecretId: { name: 'SecretId', type: 'input', required: true },
       SecretKey: { name: 'SecretKey', type: 'input', required: true },
@@ -112,6 +114,8 @@ export const certConfig: Record<string, any> = {
     wildcard: false,
     max_domains: 1,
     cname: false,
+    note: '每个自然年有20张免费证书额度，到期或吊销不释放。需先进入阿里云控制台「数字证书管理服务」购买测试证书，并在联系人管理添加联系人。',
+    noteUrl: 'https://yundun.console.aliyun.com/?p=cas#/instance/test/cn-hangzhou',
     inputs: {
       AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
       AccessKeySecret: { name: 'AccessKeySecret', type: 'input', required: true },
@@ -125,6 +129,7 @@ export const certConfig: Record<string, any> = {
     wildcard: false,
     max_domains: 1,
     cname: false,
+    note: '一个账号有40张免费证书额度，证书到期或吊销可释放额度。',
     inputs: {
       PublicKey: { name: '公钥', type: 'input', required: true },
       PrivateKey: { name: '私钥', type: 'input', required: true },

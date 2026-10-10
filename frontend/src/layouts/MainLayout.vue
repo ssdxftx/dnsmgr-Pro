@@ -193,6 +193,7 @@ const menuOptions = computed<MenuOption[]>(() => [
     icon: renderIcon(ShieldCheckmarkOutline),
     children: [
       { label: t('nav.certAccounts'), key: 'cert-accounts', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.certCname'), key: 'cert-cname', icon: renderIcon(ShieldCheckmarkOutline) },
       { label: t('nav.certOrders'), key: 'cert-orders', icon: renderIcon(ShieldCheckmarkOutline) },
       { label: t('nav.deployAccounts'), key: 'deploy-accounts', icon: renderIcon(RocketOutline) },
       { label: t('nav.deployTasks'), key: 'deploy-tasks', icon: renderIcon(RocketOutline) },
@@ -237,6 +238,7 @@ const activeKey = computed(() => {
     'dm-overview', 'dm-tasks', 'schedule-tasks',
     'optimize-settings', 'optimize-tasks',
     'cert-accounts', 'cert-orders', 'deploy-accounts', 'deploy-tasks', 'cert-settings',
+    'cert-cname',
     'system-settings', 'users', 'logs', 'about',
   ].find((k) => route.path.startsWith('/' + k));
   return matched || 'dashboard';
@@ -252,7 +254,7 @@ const activeGroupMap: Record<string, string> = {
   'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
   'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
   'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
-  'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert',
+  'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert', 'cert-cname': 'group-cert',
   'system-settings': 'group-system', users: 'group-system', logs: 'group-system', about: 'group-system',
 };
 

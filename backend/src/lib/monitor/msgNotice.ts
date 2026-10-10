@@ -344,19 +344,25 @@ export async function sendExpireNotice(day: number, list: { name: string; expire
   for (const d of list) content += `<b>${d.name}</b> - ${d.expiretime}<br/>`;
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
-  if ((await configGet('expire_notice_mail')) === '1') {
+  // 与原项目一致：值 1 与 2 均视为开启（2 表示「始终发送」）
+  const on = async (key: string) => {
+    const v = await configGet(key, '0');
+    return v === '1' || v === '2';
+  };
+
+  if (await on('expire_notice_mail')) {
     const to = (await configGet('mail_recv')) || (await configGet('mail_name')) || '';
     if (to) await sendMail(to, title, content);
   }
-  if ((await configGet('expire_notice_wxtpl')) === '1') {
+  if (await on('expire_notice_wxtpl')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**'));
     await sendWechat(title, c);
   }
-  if ((await configGet('expire_notice_tgbot')) === '1') {
+  if (await on('expire_notice_tgbot')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n'));
     await sendTelegram(`<strong>${title}</strong>\n${c}`);
   }
-  if ((await configGet('expire_notice_qqbot')) === '1') {
+  if (await on('expire_notice_qqbot')) {
     await sendQqbot(title, content);
   }
   if ((await configGet('expire_notice_webhook')) === '1') {

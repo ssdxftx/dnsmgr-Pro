@@ -1,6 +1,25 @@
 <template>
   <div>
-    <ResponsiveDataTable :columns="columns" :data="records" :loading="loading" :pagination="pagination" :empty-text="t('record.empty')" />
+    <div v-if="checked.length" class="record-batch">
+      <n-space size="small" align="center">
+        <n-text depth="3">{{ t('record.selected', { count: checked.length }) }}</n-text>
+        <n-button size="tiny" type="success" @click="runBatch('open')">{{ t('common.enable') }}</n-button>
+        <n-button size="tiny" @click="runBatch('pause')">{{ t('record.paused') }}</n-button>
+        <n-dropdown trigger="click" :options="batchMoreOptions" @select="onBatchMore">
+          <n-button size="tiny">{{ t('record.batchMore') }}</n-button>
+        </n-dropdown>
+        <n-button size="tiny" type="error" @click="batchDelete">{{ t('common.delete') }}</n-button>
+      </n-space>
+    </div>
+    <ResponsiveDataTable
+      v-model:checked-row-keys="checked"
+      :columns="columns"
+      :data="records"
+      :loading="loading"
+      :pagination="pagination"
+      :row-key="recordKey"
+      :empty-text="t('record.empty')"
+    />
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('record.editTitle') : t('record.addTitle')" :style="modalStyle" :mask-closable="false">
       <div class="record-form-scroll">
@@ -32,6 +51,28 @@
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
           <n-button type="primary" :loading="saving" @click="saveRecord">{{ t('common.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showBatch" preset="card" :title="batchTitle" style="max-width:480px" :mask-closable="false">
+      <n-form v-if="batchAction === 'value'" label-placement="left" label-width="110">
+        <n-form-item :label="t('record.recordType')"><n-select v-model:value="batchForm.type" :options="typeOptions" /></n-form-item>
+        <n-form-item :label="t('record.recordValue')"><n-input v-model:value="batchForm.value" /></n-form-item>
+      </n-form>
+      <n-form v-else-if="batchAction === 'line'" label-placement="left" label-width="110">
+        <n-form-item :label="t('record.line')"><n-select v-model:value="batchForm.line" :options="batchLineOptions" filterable /></n-form-item>
+      </n-form>
+      <n-form v-else-if="batchAction === 'remark'" label-placement="left" label-width="110">
+        <n-form-item :label="t('common.remark')"><n-input v-model:value="batchForm.remark" /></n-form-item>
+      </n-form>
+      <n-form v-else-if="batchAction === 'group'" label-placement="left" label-width="110">
+        <n-form-item :label="t('record.batchGroup')"><n-select v-model:value="batchForm.groupid" :options="groupOptions" filterable /></n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showBatch = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="submitBatch">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -91,7 +132,7 @@
 <script setup lang="ts">
 import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
+import { NButton, NSpace, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from './ResponsiveDataTable.vue';
 
@@ -133,6 +174,11 @@ const dialog = useDialog();
 
 const linesByDid = ref<Record<number, Record<string, string>>>({});
 const currentDid = ref<number | null>(null);
+const checked = ref<string[]>([]);
+const showBatch = ref(false);
+const batchAction = ref<'' | 'value' | 'line' | 'remark' | 'group'>('');
+const batchForm = reactive<any>({ type: 'A', value: '', line: '', remark: '', groupid: null });
+const groups = ref<any[]>([]);
 
 const saving = ref(false);
 const showEdit = ref(false);
@@ -189,6 +235,95 @@ function rowDid(row: any): number | null {
   return did === null || did === undefined ? null : Number(did);
 }
 
+function recordKey(row: any): string {
+  return String(row?.RecordId ?? row?.id ?? '') + ':' + String(row?.did ?? props.domainId ?? '');
+}
+
+function selectedRows(): any[] {
+  const set = new Set(checked.value);
+  return props.records.filter((r) => set.has(recordKey(r)));
+}
+
+async function runBatch(action: string, extra: Record<string, any> = {}) {
+  const rows = selectedRows();
+  if (!rows.length) return;
+  const did = rowDid(rows[0]);
+  if (!did || rows.some((r) => rowDid(r) !== did)) return message.warning(t('record.batchSameDomain'));
+  const res = await api('POST', `/domains/${did}/records/batch`, {
+    action,
+    records: rows.map((r) => ({ RecordId: r.RecordId, Name: r.Name, Type: r.Type, Value: r.Value, Line: r.Line, TTL: r.TTL, MX: r.MX, Weight: r.Weight, Remark: r.Remark })),
+    ...extra,
+  });
+  if (res.code === 0) {
+    message.success(res.msg);
+    checked.value = [];
+    emit('refresh');
+  } else message.error(res.msg);
+}
+
+function batchDelete() {
+  if (!checked.value.length) return;
+  dialog.warning({
+    title: t('common.delete'),
+    content: t('record.batchDeleteConfirm', { count: checked.value.length }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => runBatch('delete'),
+  });
+}
+
+const batchMoreOptions = computed(() => [
+  { label: t('record.batchValue'), key: 'value' },
+  { label: t('record.batchLine'), key: 'line' },
+  { label: t('record.batchRemark'), key: 'remark' },
+  { label: t('record.batchGroup'), key: 'group' },
+]);
+
+const batchTitle = computed(() => {
+  const map: Record<string, string> = {
+    value: t('record.batchValue'),
+    line: t('record.batchLine'),
+    remark: t('record.batchRemark'),
+    group: t('record.batchGroup'),
+  };
+  return map[batchAction.value] || '';
+});
+
+const batchLineOptions = computed(() => {
+  const rows = selectedRows();
+  const did = rows.length ? rowDid(rows[0]) : null;
+  return Object.entries(linesByDid.value[did ?? -1] || {}).map(([name, code]) => ({ label: name, value: code }));
+});
+
+const groupOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })));
+
+function onBatchMore(key: string) {
+  batchAction.value = key as any;
+  const rows = selectedRows();
+  const did = rows.length ? rowDid(rows[0]) : null;
+  if (did) ensureLines(did);
+  batchForm.type = rows[0]?.Type || 'A';
+  batchForm.value = '';
+  batchForm.line = rows[0]?.Line || '';
+  batchForm.remark = '';
+  batchForm.groupid = null;
+  if (key === 'group' && did) {
+    api<any>('GET', `/domains/${did}/groups`).then((res) => {
+      if (res.code === 0) groups.value = res.data || [];
+      else message.error(res.msg);
+    });
+  }
+  showBatch.value = true;
+}
+
+function submitBatch() {
+  showBatch.value = false;
+  if (batchAction.value === 'value') runBatch('value', { type: batchForm.type, value: batchForm.value });
+  else if (batchAction.value === 'line') runBatch('line', { line: batchForm.line });
+  else if (batchAction.value === 'remark') runBatch('remark', { remark: batchForm.remark });
+  else if (batchAction.value === 'group') runBatch('group', { groupid: batchForm.groupid });
+}
+
 function rowDomainName(row: any): string {
   return String(row?.Domain ?? props.domainName ?? '');
 }
@@ -229,7 +364,9 @@ async function ensureLines(did: number | null) {
 }
 
 const columns = computed<any[]>(() => {
-  const cols: any[] = [
+  const cols: any[] = [];
+  if (props.access?.readonly !== true) cols.push({ type: 'selection', width: 40 });
+  cols.push(
     {
       title: t('record.hostRecord'),
       key: 'Name',
@@ -248,7 +385,7 @@ const columns = computed<any[]>(() => {
         );
       },
     },
-  ];
+  );
   cols.push(
     { title: t('record.typeCol'), key: 'Type', width: 90 },
     {

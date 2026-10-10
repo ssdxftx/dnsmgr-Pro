@@ -222,6 +222,32 @@ export class Dnspod implements DnsProvider {
     return (await this.send('CreateDomain', { Domain })) !== false;
   }
 
+  // 域名别名（DNSPod）
+  async domainAliasList(): Promise<any[] | false> {
+    const data = await this.send('DescribeDomainAliasList', { Domain: this.domain });
+    if (data) return data.DomainAliasList || [];
+    return false;
+  }
+
+  async addDomainAlias(Alias: string): Promise<boolean> {
+    return (await this.send('CreateDomainAlias', { Domain: this.domain, DomainAlias: Alias })) !== false;
+  }
+
+  async deleteDomainAlias(Id: string): Promise<boolean> {
+    return (await this.send('DeleteDomainAlias', { Domain: this.domain, DomainAliasId: Id })) !== false;
+  }
+
+  // 解析记录分组（DNSPod）
+  async getRecordGroups(): Promise<any[] | false> {
+    const data = await this.send('DescribeRecordGroupList', { Domain: this.domain });
+    if (data) return data.GroupList || [];
+    return false;
+  }
+
+  async changeRecordGroup(RecordIdList: string[], GroupId: string): Promise<boolean> {
+    return (await this.send('ModifyRecordToGroup', { Domain: this.domain, GroupId: Number(GroupId), RecordId: RecordIdList.join('|') })) !== false;
+  }
+
   private convertType(type: string): string {
     return type === 'REDIRECT_URL' ? '显性URL' : type === 'FORWARD_URL' ? '隐性URL' : type;
   }

@@ -18,6 +18,7 @@ import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
 import { configGet, configSet } from '../config.js';
 import { escapeLike, clientMessage } from '../lib/util.js';
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
+import { localResolve } from '../lib/dns/localResolve.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
@@ -506,8 +507,31 @@ export default async function certRoutes(app: FastifyInstance) {
   app.post('/api/cert/cnames', auth, async (req: any) => {
     const { domain, did, rr } = req.body || {};
     if (!domain || !did || !rr) return { code: -1, msg: '必填参数不能为空' };
-    await query(`INSERT INTO ${table('cert_cname')} (domain, did, rr, addtime, status) VALUES (?, ?, ?, NOW(), 1)`, [domain, did, rr]);
+    // 与原项目一致：新建 CNAME 代理默认「待验证」（status=0），需通过检测后才置为 1
+    const dup = await queryOne(`SELECT id FROM ${table('cert_cname')} WHERE domain = ?`, [domain]);
+    if (dup) return { code: -1, msg: '域名' + domain + '已存在' };
+    const dup2 = await queryOne(`SELECT id FROM ${table('cert_cname')} WHERE rr = ? AND did = ?`, [rr, did]);
+    if (dup2) return { code: -1, msg: '已存在相同CNAME记录值' };
+    await query(`INSERT INTO ${table('cert_cname')} (domain, did, rr, addtime, status) VALUES (?, ?, ?, NOW(), 0)`, [domain, did, rr]);
     return { code: 0, msg: '添加成功' };
+  });
+
+  // 检测 CNAME 代理是否已生效（_acme-challenge 是否解析到配置的 CNAME 目标）
+  app.post('/api/cert/cnames/:id/check', auth, async (req: any) => {
+    const id = Number((req.params as any).id);
+    const row: any = await queryOne(
+      `SELECT A.*, B.name AS cnamedomain FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id WHERE A.id = ?`,
+      [id]
+    );
+    if (!row) return { code: -1, msg: 'CNAME记录不存在' };
+    const checkDomain = '_acme-challenge.' + row.domain;
+    const expected = String(row.rr + '.' + (row.cnamedomain || '')).replace(/\.+$/, '').toLowerCase();
+    const actual = await localResolve(checkDomain, 'CNAME');
+    const status = (actual || []).some((v: string) => String(v).replace(/\.+$/, '').toLowerCase() === expected) ? 1 : 0;
+    if (status !== Number(row.status)) {
+      await query(`UPDATE ${table('cert_cname')} SET status = ? WHERE id = ?`, [status, id]);
+    }
+    return { code: 0, status };
   });
 
   app.delete('/api/cert/cnames/:id', auth, async (req: any) => {
