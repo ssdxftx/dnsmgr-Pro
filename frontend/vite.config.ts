@@ -9,8 +9,14 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   build: {
+    // 小于 4KB 的图标/小图内联进 JS/CSS，减少请求数（请求数越少，CDN 缓存命中率越高）
+    assetsInlineLimit: 4096,
     rollupOptions: {
       output: {
+        // 显式固化带内容哈希的产物命名：内容变更即换名，可被 CDN 与浏览器 immutable 长缓存
+        entryFileNames: 'assets/[name]-[hash].js',
+        chunkFileNames: 'assets/[name]-[hash].js',
+        assetFileNames: 'assets/[name]-[hash][extname]',
         manualChunks(id: string) {
           if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'vendor-charts';
           if (
