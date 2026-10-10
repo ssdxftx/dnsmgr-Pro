@@ -3,7 +3,7 @@ name: dnsmgr-refactor
 services:
   app:
     build: .
-    image: dnsmgr-refactor:latest
+    image: dnsmgr-refactor:${IMAGE_TAG:-1.10.0}
     container_name: dnsmgr-app
     restart: always
     ports:
