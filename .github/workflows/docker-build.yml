@@ -1,5 +1,11 @@
 name: Build and Push Docker Image
 
+# 触发策略：
+#   1) 推送到 main/master —— 自动比对「关于页版本号」（package.json 的 version）
+#      与仓库已有的 vX.Y.Z 标签：仅当版本号发生变更时才构建并推送镜像，
+#      标签与版本号一致；版本号未变则整条流水线跳过，不浪费构建资源。
+#   2) 推送 vX.Y.Z 标签 —— 立即构建，并校验标签与项目版本号一致。
+#   3) 手动触发 —— 可指定平台强制构建。
 on:
   push:
     branches:
@@ -39,88 +45,109 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 需要完整标签信息，用于判断该提交是否已有发布标签
+          # 需要完整标签信息，用于判断版本号是否变更
           fetch-depth: 0
 
-      # 版本标签来自仓库的 vX.Y.Z 标签，并要求与项目 package.json 版本一致
+      # 解析项目版本号（= 关于页展示的版本号，来自 frontend/backend 的 package.json）
       - name: Resolve project version
         id: version
         run: |
           PKG_VERSION="$(node -p "require('./backend/package.json').version")"
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG_VERSION="${GITHUB_REF_NAME#v}"
-            if [[ "${TAG_VERSION}" != "${PKG_VERSION}" ]]; then
-              echo "::error::标签 ${GITHUB_REF_NAME} 与项目版本 ${PKG_VERSION} 不一致，请使用 scripts/release.mjs 发布"
-              exit 1
-            fi
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          FE_VERSION="$(node -p "require('./frontend/package.json').version")"
+          if [[ "${PKG_VERSION}" != "${FE_VERSION}" ]]; then
+            echo "::error::前后端版本号不一致（backend=${PKG_VERSION}, frontend=${FE_VERSION}），请使用 scripts/release.mjs 统一发布"
+            exit 1
           fi
           echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "项目版本号：${PKG_VERSION}"
 
-      # 分支推送时，如果该提交已经带有发布标签，说明标签构建会产出正式镜像，跳过分支重复构建
-      - name: Detect duplicate release build
-        id: dupe
-        if: github.ref_type == 'branch'
+      # 判定本次是否需要构建：核心是「关于页版本号是否发生变化」
+      - name: Decide whether to build
+        id: gate
         run: |
-          if git describe --tags --exact-match "$GITHUB_SHA" 2>/dev/null | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            echo "该提交已存在发布标签，跳过分支构建（正式镜像由标签构建产出）"
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # 标签推送：直接构建，并校验标签与版本号一致
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "${TAG_VERSION}" != "${VERSION}" ]]; then
+              echo "::error::标签 ${GITHUB_REF_NAME} 与项目版本号 ${VERSION} 不一致，请使用 scripts/release.mjs 发布"
+              exit 1
+            fi
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "原因：推送了发布标签 ${GITHUB_REF_NAME}，构建正式镜像"
+            exit 0
+          fi
+
+          # 手动触发：直接构建
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "原因：手动触发，强制构建"
+            exit 0
+          fi
+
+          # 分支推送：仅当「版本号尚未发布」时才构建
+          # 判定标准——仓库中不存在 vX.Y.Z 标签（即该版本号从未构建推送过）
+          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "原因：版本号 ${VERSION} 已存在标签 v${VERSION}，此前已构建推送，本次普通提交跳过构建"
+            echo "::notice::版本号 ${VERSION} 未变更，跳过镜像构建（仅当版本号变更时才构建）"
           else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "原因：版本号变更为 ${VERSION}，且尚无对应标签，开始构建版本镜像"
           fi
 
       - name: Resolve build platforms
         id: platforms
+        if: steps.gate.outputs.build == 'true'
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             echo "platforms=${{ inputs.platforms }}" >> "$GITHUB_OUTPUT"
           else
             echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Set up QEMU
-        if: steps.dupe.outputs.skip != 'true' && contains(steps.platforms.outputs.platforms, 'arm64')
+        if: steps.gate.outputs.build == 'true' && contains(steps.platforms.outputs.platforms, 'arm64')
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
-        if: steps.dupe.outputs.skip != 'true'
+        if: steps.gate.outputs.build == 'true'
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: steps.dupe.outputs.skip != 'true'
+        if: steps.gate.outputs.build == 'true'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GitHub Container Registry
-        if: steps.dupe.outputs.skip != 'true'
+        if: steps.gate.outputs.build == 'true'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # 发布标签（vX.Y.Z）：项目版本 + 主/次版本 + latest；分支推送：edge + sha
+      # 版本号与关于页一致；同时产出主/次版本与 latest 便于滚动升级
       - name: Docker metadata
         id: meta
-        if: steps.dupe.outputs.skip != 'true'
+        if: steps.gate.outputs.build == 'true'
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
             ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.version }},enable=${{ steps.version.outputs.is_release == 'true' }}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=raw,value=latest,enable=${{ steps.version.outputs.is_release == 'true' && !contains(github.ref_name, '-') }}
-            type=raw,value=edge,enable=${{ steps.version.outputs.is_release != 'true' }}
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
             type=raw,value=${{ github.sha }}
             type=sha,format=short
           labels: |
@@ -129,7 +156,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
 
       - name: Build and push to Docker Hub & GHCR
-        if: steps.dupe.outputs.skip != 'true'
+        if: steps.gate.outputs.build == 'true'
         uses: docker/build-push-action@v6
         with:
           context: .
