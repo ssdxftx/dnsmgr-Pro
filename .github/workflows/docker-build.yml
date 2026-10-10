@@ -45,7 +45,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          # 需要完整标签信息，用于判断版本号是否变更
+          # 需要完整历史与标签，用于比对「版本号是否发生变化」
           fetch-depth: 0
 
       # 解析项目版本号（= 关于页展示的版本号，来自 frontend/backend 的 package.json）
@@ -62,7 +62,9 @@ jobs:
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "项目版本号：${PKG_VERSION}"
 
-      # 判定本次是否需要构建：核心是「关于页版本号是否发生变化」
+      # 判定本次是否需要构建：核心是「关于页版本号相比上一次提交是否发生变化」
+      # 判定依据为提交历史（上一提交的 package.json 版本号），不依赖标签到达顺序，
+      # 因此 release.mjs 同时推送分支与标签时，两条流水线的判定结果稳定一致。
       - name: Decide whether to build
         id: gate
         run: |
@@ -89,16 +91,20 @@ jobs:
             exit 0
           fi
 
-          # 分支推送：仅当「版本号尚未发布」时才构建
-          # 判定标准——仓库中不存在 vX.Y.Z 标签（即该版本号从未构建推送过）
-          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+          # 分支推送：比对本次提交与上一提交的版本号，仅当版本号发生变化时才构建
+          PREV_VERSION=""
+          if git rev-parse -q --verify HEAD~1 >/dev/null; then
+            PREV_VERSION="$(git show HEAD~1:backend/package.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).version||'')}catch{console.log('')}})")"
+          fi
+
+          if [[ "${PREV_VERSION}" == "${VERSION}" ]]; then
             echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "原因：版本号 ${VERSION} 已存在标签 v${VERSION}，此前已构建推送，本次普通提交跳过构建"
-            echo "::notice::版本号 ${VERSION} 未变更，跳过镜像构建（仅当版本号变更时才构建）"
+            echo "原因：版本号仍为 ${VERSION}（上一提交为 ${PREV_VERSION:-无}），未发生变化，跳过镜像构建"
+            echo "::notice::关于页版本号未变更（${VERSION}），跳过镜像构建；仅当版本号变更时才构建推送"
           else
             echo "build=true" >> "$GITHUB_OUTPUT"
             echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "原因：版本号变更为 ${VERSION}，且尚无对应标签，开始构建版本镜像"
+            echo "原因：版本号由 ${PREV_VERSION:-无} 变更为 ${VERSION}，开始构建对应版本镜像"
           fi
 
       - name: Resolve build platforms
