@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#0a7a5c" />
     <link rel="icon" type="image/webp" href="/favicon.webp" />
     <link rel="apple-touch-icon" href="/favicon.webp" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="description" content="多厂商 DNS、CDN 与 SSL 证书一体化管理平台" />
     <title>聚合 DNS 管理系统</title>
     <!-- 防主题闪烁：渲染前确定亮/暗主题（与 useThemeMode 逻辑一致） -->
@@ -20,13 +21,9 @@
         } catch (e) {}
       })();
     </script>
-    <!-- 字体：展示字 Chakra Petch / 等宽数字 IBM Plex Mono / 中文 Noto Sans SC -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+SC:wght@400;500;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- 字体：展示字 Chakra Petch / 等宽数字 IBM Plex Mono / 中文 Noto Sans SC
+         不引入第三方字体外链（源站 CSP 为 style-src/font-src 'self'，外链会被拦截且拖慢首屏）；
+         字体在 tokens.css 中以系统字体栈就近回退，全部静态资源同源、可被 CDN 长缓存。 -->
   </head>
   <body>
     <div id="app"></div>
