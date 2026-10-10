@@ -12,6 +12,11 @@
         </n-space>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="GlobeOutline" /></n-grid-item>
+    </n-grid>
 
     <n-card :bordered="false">
       <n-space class="mb-12">
@@ -223,10 +228,11 @@ import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { RefreshOutline } from '@vicons/ionicons5';
+import { RefreshOutline, ListOutline, LayersOutline, GlobeOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const route = useRoute();
 const { t } = useI18n();
@@ -236,6 +242,8 @@ const domainId = Number(route.params.id);
 const domainName = ref('');
 const loading = ref(false);
 const rows = ref<any[]>([]);
+const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
+const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const selection = ref<string[]>([]);
 const saving = ref(false);
 

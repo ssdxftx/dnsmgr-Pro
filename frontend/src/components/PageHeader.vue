@@ -1,5 +1,5 @@
 <template>
-  <div v-if="title || subtitle || $slots.actions" class="page-header">
+  <div v-if="title || subtitle || $slots.actions" v-reveal class="page-header">
     <div class="page-header__left">
       <n-button v-if="back" quaternary circle class="page-header__back" @click="goBack">
         <template #icon><n-icon :component="ArrowBackOutline" /></template>
@@ -68,7 +68,16 @@ function goBack() {
   color: var(--app-text);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
+}
+.page-header__title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 4px;
+  height: 1.05em;
+  border-radius: 99px;
+  background: var(--app-primary);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--app-primary) 70%, transparent);
 }
 .page-header__subtitle {
   margin: 4px 0 0;

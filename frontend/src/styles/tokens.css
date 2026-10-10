@@ -2,61 +2,86 @@
    设计令牌 —— 全站统一的颜色、圆角、阴影、间距与排版基准
    =========================================================================== */
 :root {
-  --app-bg: #f6f8fc;
-  --app-bg-soft: #eef2f9;
+  /* ---- 表面 ---- */
+  --app-bg: #eef2f8;
+  --app-bg-soft: #e6ecf5;
   --app-surface: #ffffff;
-  --app-surface-2: #fbfcfe;
-  --app-text: #1f2a44;
-  --app-text-2: #42506b;
-  --app-text-3: #8a99b5;
-  --app-border: #e6ebf4;
-  --app-divider: #eef1f7;
+  --app-surface-2: #f7fafc;
+  --app-text: #0f1b2d;
+  --app-text-2: #4a5872;
+  --app-text-3: #8593a8;
+  --app-border: #dde5f0;
+  --app-divider: #e8edf5;
 
-  --app-primary: #3b6df0;
-  --app-primary-weak: #eef4ff;
-  --app-primary-strong: #2c59d0;
+  /* ---- 唯一信号强调色：信号青（亮色取深一档保证正文对比度 ≥4.5） ---- */
+  --app-primary: #0a7a5c;
+  --app-primary-hover: #0d9070;
+  --app-primary-weak: #e3f4ee;
+  --app-primary-strong: #086a50;
   --app-success: #16a34a;
   --app-success-weak: #e9f9f0;
-  --app-warning: #f59e0b;
+  --app-warning: #d97706;
   --app-warning-weak: #fef5e7;
   --app-error: #e5484d;
   --app-error-weak: #fdecec;
 
+  /* ---- 字体 ---- */
+  --app-font-display: 'Chakra Petch', 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+  --app-font-body: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --app-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* ---- 圆角 ---- */
   --app-radius-sm: 8px;
   --app-radius: 12px;
   --app-radius-lg: 16px;
   --app-radius-xl: 20px;
 
-  --app-shadow-sm: 0 1px 2px rgba(31, 42, 68, 0.06);
-  --app-shadow: 0 6px 20px rgba(31, 42, 68, 0.08);
-  --app-shadow-lg: 0 18px 48px rgba(31, 42, 68, 0.14);
+  /* ---- 阴影 ---- */
+  --app-shadow-sm: 0 1px 2px rgba(20, 35, 60, 0.06);
+  --app-shadow: 0 6px 20px rgba(20, 35, 60, 0.10);
+  --app-shadow-lg: 0 18px 48px rgba(20, 35, 60, 0.14);
 
+  /* ---- 玻璃与光晕 ---- */
+  --app-glass: rgba(255, 255, 255, 0.72);
+  --app-glow: 0 0 0 1px rgba(10, 122, 92, 0.30), 0 12px 40px rgba(10, 122, 92, 0.14);
+
+  /* ---- 布局与动效 ---- */
   --app-header-h: 60px;
   --app-sidebar-w: 240px;
   --app-page-gap: 16px;
-  --app-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --app-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --app-dur-fast: 160ms;
+  --app-dur-base: 320ms;
+  --app-dur-slow: 640ms;
 }
 
 [data-theme='dark'] {
-  --app-bg: #0e1524;
-  --app-bg-soft: #121b2d;
-  --app-surface: #161f33;
-  --app-surface-2: #1a2439;
-  --app-text: #e8eefb;
-  --app-text-2: #a8b6d4;
-  --app-text-3: #6f7f9e;
-  --app-border: #26314b;
-  --app-divider: #222d47;
+  --app-bg: #0a0e16;
+  --app-bg-soft: #0d1320;
+  --app-surface: #111927;
+  --app-surface-2: #161f30;
+  --app-text: #e8edf5;
+  --app-text-2: #9aa7bd;
+  --app-text-3: #5e6b82;
+  --app-border: #24314e;
+  --app-divider: #1b2538;
 
-  --app-primary: #6b93ff;
-  --app-primary-weak: #1c2a4d;
-  --app-primary-strong: #8aa8ff;
+  --app-primary: #2ee6b6;
+  --app-primary-hover: #5deecb;
+  --app-primary-weak: #123128;
+  --app-primary-strong: #17c39a;
+  --app-success: #34d399;
   --app-success-weak: #12261d;
+  --app-warning: #fbbf24;
   --app-warning-weak: #2a2113;
+  --app-error: #fb7185;
   --app-error-weak: #2a1517;
   --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --app-shadow: 0 8px 26px rgba(0, 0, 0, 0.42);
   --app-shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.55);
+
+  --app-glass: rgba(17, 25, 39, 0.72);
+  --app-glow: 0 0 0 1px rgba(46, 230, 182, 0.42), 0 12px 40px rgba(46, 230, 182, 0.18);
 }
 
 /* ===========================================================================
@@ -85,7 +110,9 @@ body {
 body {
   background: var(--app-bg);
   color: var(--app-text);
+  font-family: var(--app-font-body);
   font-size: 14px;
+  transition: background var(--app-dur-base) var(--app-ease), color var(--app-dur-base) var(--app-ease);
 }
 
 a {
@@ -216,7 +243,7 @@ a {
   color: #fff;
 }
 .stat-card__icon--primary {
-  background: linear-gradient(135deg, #4b7bf5, #2c59d0);
+  background: linear-gradient(135deg, #0d9070, #086a50);
 }
 .stat-card__icon--success {
   background: linear-gradient(135deg, #34c778, #14833f);
@@ -228,7 +255,7 @@ a {
   background: linear-gradient(135deg, #f0686c, #c0272c);
 }
 .stat-card__icon--info {
-  background: linear-gradient(135deg, #38a3f5, #1d6fd0);
+  background: linear-gradient(135deg, #14b8a6, #0d9488);
 }
 .stat-card__body {
   min-width: 0;
@@ -376,4 +403,187 @@ a {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ===========================================================================
+   Glass NOC 氛围层 / 字体应用 / 入场动效（追加，不改动既有类）
+   =========================================================================== */
+
+/* 让应用内容位于氛围层之上 */
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+/* 渐变网格氛围（固定背景，不随滚动） */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(46rem 32rem at 8% -8%, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 60%),
+    radial-gradient(40rem 30rem at 102% 4%, rgba(56, 189, 248, 0.10), transparent 58%),
+    radial-gradient(38rem 38rem at 50% 120%, color-mix(in srgb, var(--app-primary) 8%, transparent), transparent 60%);
+}
+
+/* 颗粒噪点（极淡，仅背景氛围，避免影响正文清晰度） */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* 展示字体：仅用于标题与大数字；中文自动回退 Noto Sans SC，不污染正文可读性 */
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--app-font-display);
+  letter-spacing: -0.01em;
+}
+
+/* 等宽字体：数字与代码，避免列表跳动 */
+.font-mono,
+.app-mono {
+  font-family: var(--app-font-mono);
+}
+
+/* 玻璃面板工具类（可选） */
+.glass-panel {
+  background: var(--app-glass);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* 入场编排：错峰 reveal（配合 JS 加 .is-in；reduced-motion 下直接可见） */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--app-dur-base) var(--app-ease), transform var(--app-dur-base) var(--app-ease);
+}
+.reveal.d1 { transition-delay: 80ms; }
+.reveal.d2 { transition-delay: 160ms; }
+.reveal.d3 { transition-delay: 240ms; }
+.reveal.d4 { transition-delay: 320ms; }
+.reveal.d5 { transition-delay: 400ms; }
+/* 遥测统计条容器：与下方主内容卡片拉开间距 */
+.telemetry-row { margin-bottom: 16px; }
+
+/* 设置分区标题（n-divider.section，用于 CertSet 等）信号强化 */
+.n-divider.section .n-divider__title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.n-divider.section .n-divider__title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--app-primary) 40%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ===========================================================================
+   全局内容卡片入场 + 数据表行交互（自动覆盖所有页面，无需逐页修改）
+   =========================================================================== */
+@keyframes app-card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 主内容卡片：路由进入时上浮渐入（嵌套卡片与弹窗不受影响；含网格布局页） */
+  .app-stack > .n-card,
+  .app-page > .n-card,
+  .app-stack .n-grid-item > .n-card,
+  .app-page .n-grid-item > .n-card {
+    animation: app-card-rise 0.5s var(--app-ease) both;
+  }
+}
+
+/* 数据表行过渡与悬停信号条（作用于所有 n-data-table） */
+.n-data-table tbody tr {
+  transition: background 0.18s var(--app-ease);
+}
+.n-data-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--app-primary);
+}
+
+/* ===========================================================================
+   主内容卡片玻璃拟态 + 顶部信号线（作用于所有页面的主卡片，不含嵌套/弹窗）
+   =========================================================================== */
+.app-stack > .n-card,
+.app-page > .n-card,
+.app-stack .n-grid-item > .n-card,
+.app-page .n-grid-item > .n-card {
+  background: var(--app-glass);
+  border: 1px solid var(--app-border);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  position: relative;
+  transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
+}
+.app-stack > .n-card::before,
+.app-page > .n-card::before,
+.app-stack .n-grid-item > .n-card::before,
+.app-page .n-grid-item > .n-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--app-primary) 60%, transparent), transparent);
+  opacity: 0;
+  transition: opacity 0.25s var(--app-ease);
+  pointer-events: none;
+}
+.app-stack > .n-card:hover,
+.app-page > .n-card:hover,
+.app-stack .n-grid-item > .n-card:hover,
+.app-page .n-grid-item > .n-card:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-border));
+  box-shadow: var(--app-shadow);
+}
+.app-stack > .n-card:hover::before,
+.app-page > .n-card:hover::before,
+.app-stack .n-grid-item > .n-card:hover::before,
+.app-page .n-grid-item > .n-card:hover::before {
+  opacity: 1;
+}
+
+/* 数据表表头：遥测等宽 + 大写字距（作用于所有 n-data-table） */
+.n-data-table th {
+  font-family: var(--app-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
 }

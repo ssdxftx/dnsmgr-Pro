@@ -1,6 +1,11 @@
 <template>
   <div class="app-stack">
     <PageHeader :title="t('cache.title')" :subtitle="t('cache.subtitle')" />
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="PulseOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <n-space vertical :size="16">
         <n-radio-group v-model:value="opType">
@@ -43,8 +48,10 @@ import { computed, h, onMounted, ref } from 'vue';
 import { NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
+import { ListOutline, LayersOutline, PulseOutline } from '@vicons/ionicons5';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import PageHeader from '../components/PageHeader.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const { t } = useI18n();
 const opType = ref<'url' | 'dir' | 'preheat'>('url');
@@ -52,6 +59,8 @@ const urlText = ref('');
 const submitting = ref(false);
 const loadingTasks = ref(false);
 const tasks = ref<any[]>([]);
+const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
+const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const result = ref<{ ok: boolean; msg: string; failed: { url: string; msg: string }[] }>({ ok: true, msg: '', failed: [] });
 
 const placeholderText = computed(() => {

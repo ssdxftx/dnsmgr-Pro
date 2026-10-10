@@ -18,10 +18,8 @@ function detectInitial(): ThemeMode {
   } catch {
     /* ignore */
   }
-  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
-    return 'dark';
-  }
-  return 'light';
+  // 默认暗色：营造「玻璃控制塔」氛围（用户仍可手动切换亮色，偏好会被记忆）
+  return 'dark';
 }
 
 mode.value = detectInitial();

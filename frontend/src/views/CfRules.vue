@@ -9,6 +9,11 @@
         </n-space>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rules.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" /></n-grid-item>
+    </n-grid>
 
     <n-card :bordered="false">
       <n-space align="center" :wrap="true" class="mb-12">
@@ -200,8 +205,10 @@ import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
+import { ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const route = useRoute();
 const { t } = useI18n();
@@ -220,6 +227,8 @@ const domains = ref<DomainItem[]>([]);
 const selectedDomain = ref<number | null>(null);
 const selectedPhase = ref('http_request_origin');
 const rules = ref<any[]>([]);
+const typeCount = computed(() => new Set(rules.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
+const statusCount = computed(() => new Set(rules.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const loading = ref(false);
 const needCredential = ref(false);
 const credentialMessage = ref('');

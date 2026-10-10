@@ -582,6 +582,60 @@ onMounted(() => {
 <style scoped>
 .mb-12 { margin-bottom: 12px; }
 .mb-16 { margin-bottom: 16px; }
+
+/* —— 设置子卡片仪表化（仅 SystemSet 作用域，不影响其他页的 tabs） —— */
+.n-tabs .n-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-sm);
+  transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
+  animation: app-card-rise 0.5s var(--app-ease) both;
+}
+.n-tabs .n-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--app-primary) 55%, transparent), transparent);
+  opacity: 0;
+  transition: opacity 0.25s var(--app-ease);
+}
+.n-tabs .n-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in srgb, var(--app-primary) 38%, var(--app-border));
+  box-shadow: var(--app-shadow);
+}
+.n-tabs .n-card:hover::before { opacity: 1; }
+/* 子卡片错峰入场 */
+.n-tab-pane .n-card:nth-child(1) { animation-delay: 40ms; }
+.n-tab-pane .n-card:nth-child(2) { animation-delay: 120ms; }
+.n-tab-pane .n-card:nth-child(3) { animation-delay: 200ms; }
+.n-tab-pane .n-card:nth-child(4) { animation-delay: 280ms; }
+.n-tab-pane .n-card:nth-child(5) { animation-delay: 360ms; }
+.n-tab-pane .n-card:nth-child(6) { animation-delay: 440ms; }
+.n-tab-pane .n-card:nth-child(7) { animation-delay: 520ms; }
+/* 卡片标题遥测化 + 信号条 */
+.n-tabs .n-card :deep(.n-card-header__main) {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+.n-tabs .n-card :deep(.n-card-header__main)::before {
+  content: "";
+  display: inline-block;
+  width: 4px; height: 15px;
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--app-primary) 45%, transparent);
+}
+/* Tab 高亮过渡 */
+.n-tabs :deep(.n-tabs-tab) { transition: color 0.2s var(--app-ease); }
+@media (prefers-reduced-motion: reduce) {
+  .n-tabs .n-card { animation: none; }
+}
 .help-body p {
   margin: 0 0 8px;
   line-height: 1.7;

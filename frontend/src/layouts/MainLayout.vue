@@ -6,7 +6,7 @@
         <div class="brand-mark">
           <n-icon size="20" :component="GlobeOutline" />
         </div>
-        <span v-if="!collapsed" class="brand-name">聚合 DNS</span>
+        <span v-if="!collapsed" class="brand-name font-display">聚合 DNS</span>
       </div>
 
       <div class="app-sidebar__nav">
@@ -49,7 +49,7 @@
           <div class="brand-mark">
             <n-icon size="20" :component="GlobeOutline" />
           </div>
-          <span class="brand-name">聚合 DNS</span>
+          <span class="brand-name font-display">聚合 DNS</span>
         </div>
         <n-menu
           :value="activeKey"
@@ -77,11 +77,13 @@
             <template #icon><n-icon :component="MenuOutline" /></template>
           </n-button>
           <div class="app-header__titles">
-            <div class="app-header__title">{{ pageTitle }}</div>
+            <div class="app-header__title font-display">{{ pageTitle }}</div>
             <div v-if="!isMobile" class="app-header__crumb">聚合 DNS · {{ groupLabel }}</div>
           </div>
         </div>
         <div class="app-header__right">
+          <span v-if="!isMobile" class="hdr-clock font-mono">{{ clock }}</span>
+          <span v-if="!isMobile" class="hdr-pulse"><span class="hdr-pulse__dot"></span>{{ t('layout.online') }}</span>
           <n-button v-if="!isMobile" quaternary circle @click="toggleTheme">
             <template #icon><n-icon :component="isDark ? SunnyOutline : MoonOutline" /></template>
           </n-button>
@@ -109,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref, watch, type Component } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
 import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, OptionsOutline, InformationCircleOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
@@ -134,6 +136,22 @@ const { setLocale } = useLocale();
 const version = __APP_VERSION__;
 const collapsed = ref(false);
 const drawerShow = ref(false);
+
+/* 顶栏实时时钟 */
+const clock = ref('');
+let clockTimer: number | undefined;
+function tickClock() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  clock.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+onMounted(() => {
+  tickClock();
+  clockTimer = window.setInterval(tickClock, 1000);
+});
+onBeforeUnmount(() => {
+  if (clockTimer) window.clearInterval(clockTimer);
+});
 
 const avatarText = computed(() => String(user.value?.username || 'U').slice(0, 1).toUpperCase());
 
@@ -250,7 +268,7 @@ const pageTitle = computed(() => {
 });
 
 const activeGroupMap: Record<string, string> = {
-  domains: 'group-domain', 'dns-accounts': 'group-domain', 'expire-notice': 'group-domain', 'dns-check': 'group-domain',
+  domains: 'group-domain', 'dns-accounts': 'group-domain', 'expireNotice': 'group-domain', 'expire-notice': 'group-domain', 'dns-check': 'group-domain',
   'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
   'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
   'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
@@ -322,15 +340,35 @@ function onUserSelect(key: string) {
   background: var(--app-bg);
 }
 
-/* ---------- 侧边栏 ---------- */
+/* ---------- 入场动画 ---------- */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-down {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ping {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 侧边栏（玻璃拟态） ---------- */
 .app-sidebar {
   display: flex;
   flex-direction: column;
   width: var(--app-sidebar-w);
   flex-shrink: 0;
-  background: var(--app-surface);
-  border-right: 1px solid var(--app-divider);
+  background: var(--app-glass);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  border-right: 1px solid var(--app-border);
   transition: width 0.22s var(--app-ease);
+  animation: slide-in-left 0.5s var(--app-ease) both;
 }
 .app-sidebar.is-collapsed {
   width: 72px;
@@ -349,15 +387,25 @@ function onUserSelect(key: string) {
   padding: 0;
 }
 .brand-mark {
+  position: relative;
+  overflow: hidden;
   display: grid;
   place-items: center;
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  color: #fff;
+  color: #04140f;
   flex-shrink: 0;
-  background: linear-gradient(135deg, #4b7bf5, #2c59d0);
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--app-primary) 35%, transparent);
+  background: linear-gradient(135deg, #2ee6b6, #0a7a5c);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--app-primary) 42%, transparent);
+}
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(from 0deg, transparent 0 70%, rgba(255, 255, 255, 0.55) 85%, transparent 100%);
+  animation: spin 3.4s linear infinite;
 }
 .brand-name {
   font-size: 16px;
@@ -373,6 +421,24 @@ function onUserSelect(key: string) {
 }
 .app-sidebar.is-collapsed .app-sidebar__nav {
   padding: 6px;
+}
+/* 激活菜单：左侧信号条 + 光晕 */
+:deep(.n-menu-item-content) {
+  transition: background 0.18s var(--app-ease), color 0.18s var(--app-ease);
+}
+:deep(.n-menu-item-content--selected) {
+  position: relative;
+}
+:deep(.n-menu-item-content--selected)::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 99px;
+  background: var(--app-primary);
+  box-shadow: 0 0 12px var(--app-primary);
 }
 .app-sidebar__foot {
   flex-shrink: 0;
@@ -427,9 +493,11 @@ function onUserSelect(key: string) {
   height: var(--app-header-h);
   padding: 0 20px;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
-  backdrop-filter: saturate(1.2) blur(8px);
-  border-bottom: 1px solid var(--app-divider);
+  background: color-mix(in srgb, var(--app-surface) 70%, transparent);
+  backdrop-filter: blur(16px) saturate(1.3);
+  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  border-bottom: 1px solid var(--app-border);
+  animation: fade-down 0.5s 0.08s var(--app-ease) both;
 }
 .app-header__left {
   display: flex;
@@ -456,7 +524,40 @@ function onUserSelect(key: string) {
 .app-header__right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
+}
+/* 顶栏遥测：实时时钟 + 在线脉冲 */
+.hdr-clock {
+  font-size: 13px;
+  color: var(--app-text-2);
+  letter-spacing: 0.05em;
+}
+.hdr-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid var(--app-border);
+  border-radius: 99px;
+  background: var(--app-surface-2);
+  font-size: 12px;
+  color: var(--app-text-2);
+  white-space: nowrap;
+}
+.hdr-pulse__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--app-success);
+  position: relative;
+}
+.hdr-pulse__dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--app-success);
+  animation: ping 1.8s var(--app-ease) infinite;
 }
 .user-chip {
   display: flex;
@@ -475,9 +576,9 @@ function onUserSelect(key: string) {
   background: var(--app-bg-soft);
 }
 .user-chip__avatar {
-  background: linear-gradient(135deg, #4b7bf5, #2c59d0);
-  color: #fff;
-  font-weight: 600;
+  background: linear-gradient(135deg, #2ee6b6, #0a7a5c);
+  color: #04140f;
+  font-weight: 700;
 }
 .user-chip__name {
   font-size: 13.5px;
@@ -514,6 +615,18 @@ function onUserSelect(key: string) {
   }
   .app-content {
     padding: 12px;
+  }
+}
+
+/* 降级动效 */
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar,
+  .app-header {
+    animation: none;
+  }
+  .brand-mark::after,
+  .hdr-pulse__dot::after {
+    animation: none;
   }
 }
 </style>

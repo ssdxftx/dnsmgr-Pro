@@ -8,6 +8,11 @@
         </n-button>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable
         :columns="columns"
@@ -63,10 +68,11 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
-import { AddOutline } from '@vicons/ionicons5';
+import { AddOutline, ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const { t } = useI18n();
 const message = useMessage();
@@ -74,6 +80,8 @@ const dialog = useDialog();
 const loading = ref(false);
 const saving = ref(false);
 const tasks = ref<any[]>([]);
+const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
+const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
 const form = reactive<any>({ name: '', urls: '', op: 'preheat', cycle: 'daily', runTime: 3 * 3600000 + 30 * 60000, intervalMin: 60, active: true });

@@ -1,6 +1,11 @@
 <template>
   <div class="app-stack">
     <PageHeader :title="t('userLog.title')" :subtitle="t('userLog.subtitle')" />
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="systemEvents" :label="t('common.systemEvents')" tone="info" :icon="ShieldOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="userActions" :label="t('common.userActions')" tone="success" :icon="PersonOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-input v-if="isAdmin" v-model:value="uid" placeholder="UID" style="width: 120px" />
@@ -26,15 +31,18 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NTag, NEllipsis, useMessage } from 'naive-ui';
-import { SearchOutline, RefreshOutline } from '@vicons/ionicons5';
+import { SearchOutline, RefreshOutline, DocumentTextOutline, ShieldOutline, PersonOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const message = useMessage();
 const { t } = useI18n();
 const loading = ref(false);
 const logs = ref<any[]>([]);
+const systemEvents = computed(() => logs.value.filter((l: any) => (l.uid ?? 1) <= 0).length);
+const userActions = computed(() => logs.value.filter((l: any) => (l.uid ?? 1) > 0).length);
 const page = ref(1);
 const pageSize = ref(10);
 const uid = ref('');
