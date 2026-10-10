@@ -8,6 +8,11 @@
         </n-button>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.deployTasks')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loading" :empty-text="t('deployTask.empty')" />
     </n-card>
@@ -49,17 +54,20 @@
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { AddOutline } from '@vicons/ionicons5';
+import { AddOutline, ListOutline, CheckmarkCircleOutline, TimeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
 const tasks = ref<any[]>([]);
+const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
+const pendingTasks = computed(() => tasks.value.filter((t: any) => t.status !== 1).length);
 const providers = ref<Record<string, any>>({});
 const accounts = ref<any[]>([]);
 const orders = ref<any[]>([]);

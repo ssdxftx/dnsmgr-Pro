@@ -5,6 +5,11 @@
         <n-button type="primary" @click="openAdd"><template #icon><n-icon :component="AddOutline" /></template>{{ t('cfTunnels.createTunnel') }}</n-button>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="GlobeOutline" /></n-grid-item>
+    </n-grid>
 
     <n-card :bordered="false">
       <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :row-key="(row: any) => row.id" size="small" :empty-text="t('cfTunnels.empty')" />
@@ -88,10 +93,11 @@ import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { AddOutline } from '@vicons/ionicons5';
+import { AddOutline, ListOutline, LayersOutline, GlobeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const route = useRoute();
 const { t } = useI18n();
@@ -101,6 +107,8 @@ const accountId = Number(route.params.id);
 const accountName = ref('');
 const loading = ref(false);
 const rows = ref<any[]>([]);
+const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
+const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const saving = ref(false);
 
 const showAdd = ref(false);

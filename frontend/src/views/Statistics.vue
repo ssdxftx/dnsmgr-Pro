@@ -86,21 +86,21 @@
       </n-alert>
 
       <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
-        <n-grid-item>
-          <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
-        </n-grid-item>
-        <n-grid-item>
-          <StatCard :label="t('statistics.bwLabel')" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
-        </n-grid-item>
-        <n-grid-item>
-          <StatCard :label="t('statistics.bsFluxLabel')" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
-        </n-grid-item>
-        <n-grid-item>
-          <StatCard :label="t('statistics.reqLabel')" :value="summary.reqText" tone="warning" :icon="BarChartOutline" />
-        </n-grid-item>
-        <n-grid-item>
-          <StatCard :label="t('statistics.hitRateLabel')" :value="summary.hitRateText" tone="primary" :icon="FlashOutline" />
-        </n-grid-item>
+      <n-grid-item v-reveal class="d1">
+        <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
+      </n-grid-item>
+      <n-grid-item v-reveal class="d2">
+        <StatCard :label="t('statistics.bwLabel')" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
+      </n-grid-item>
+      <n-grid-item v-reveal class="d3">
+        <StatCard :label="t('statistics.bsFluxLabel')" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
+      </n-grid-item>
+      <n-grid-item v-reveal class="d4">
+        <StatCard :label="t('statistics.reqLabel')" :value="summary.reqText" tone="warning" :icon="BarChartOutline" />
+      </n-grid-item>
+      <n-grid-item v-reveal class="d5">
+        <StatCard :label="t('statistics.hitRateLabel')" :value="summary.hitRateText" tone="primary" :icon="FlashOutline" />
+      </n-grid-item>
       </n-grid>
     </n-card>
 
@@ -130,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { CloudOutline, RefreshOutline, SpeedometerOutline, CloudDownloadOutline, BarChartOutline, FlashOutline } from '@vicons/ionicons5';
 import * as echarts from 'echarts/core';
@@ -138,6 +138,7 @@ import { LineChart, BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { api, getUser } from '../api';
+import { useThemeMode } from '../composables/useThemeMode';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 
@@ -146,6 +147,7 @@ echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendCompone
 const isMobile = ref(window.innerWidth < 768);
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const { t } = useI18n();
+const { isDark } = useThemeMode();
 const loading = ref(false);
 const range = ref('24h');
 const rangeOptions = computed(() => [
@@ -239,13 +241,46 @@ const summary = computed(() => {
   };
 });
 
+function cssVar(name: string, fallback = ''): string {
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
+
+// 调色板跟随设计令牌：信号青为主，其余为辅，状态色仅用于区分系列
+function chartPalette(): string[] {
+  return [cssVar('--app-primary', '#0a7a5c'), '#38bdf8', '#fbbf24', '#fb7185', '#a78bfa', '#34d399'];
+}
+
 function baseOption(): any {
+  const text = cssVar('--app-text-2', '#888');
+  const faint = cssVar('--app-text-3', '#aaa');
+  const line = cssVar('--app-divider', 'rgba(0,0,0,0.1)');
+  const surface = cssVar('--app-surface', '#fff');
+  const textMain = cssVar('--app-text', '#222');
   return {
+    color: chartPalette(),
+    textStyle: { fontFamily: "'IBM Plex Mono', monospace" },
     grid: { left: 50, right: 20, top: 40, bottom: 30 },
-    tooltip: { trigger: 'axis' },
-    legend: { top: 0 },
-    xAxis: { type: 'category', data: labels.value, boundaryGap: false },
-    yAxis: { type: 'value', splitLine: { lineStyle: { type: 'dashed', opacity: 0.4 } } },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: surface,
+      borderColor: line,
+      textStyle: { color: textMain, fontSize: 12 },
+    },
+    legend: { top: 0, textStyle: { color: text } },
+    xAxis: {
+      type: 'category',
+      data: labels.value,
+      boundaryGap: false,
+      axisLine: { lineStyle: { color: line } },
+      axisTick: { show: false },
+      axisLabel: { color: faint },
+    },
+    yAxis: {
+      type: 'value',
+      axisLabel: { color: faint },
+      splitLine: { lineStyle: { type: 'dashed', color: line, opacity: 0.6 } },
+    },
   };
 }
 
@@ -363,6 +398,11 @@ async function loadOptions() {
   accountOptions.value = (a.data || []).map((x: any) => ({ label: `${x.name}（${x.typename || x.type}）`, value: x.id }));
   domainOptions.value = (d.data || []).map((x: any) => ({ label: x.name, value: x.name }));
 }
+
+// 主题切换时按新令牌重绘图表
+watch(isDark, () => {
+  renderCharts();
+});
 
 function handleResize() {
   isMobile.value = window.innerWidth < 768;

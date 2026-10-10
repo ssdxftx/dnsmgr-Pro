@@ -1,58 +1,115 @@
 import type { GlobalThemeOverrides } from 'naive-ui';
 
-const FONT_FAMILY =
-  "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', sans-serif";
-const FONT_MONO = "'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace";
+/**
+ * Glass NOC（玻璃控制塔）设计系统的 naive-ui 主题覆盖。
+ *
+ * 原则：
+ * - 唯一信号强调色：信号青（信号绿）—— 亮色用 #0a7a5c（保证正文级对比度 ≥4.5），
+ *   暗色用 #2ee6b6（在深色底上高对比、且按钮上用深色文字）。
+ * - 状态色（success/warning/error）仅用于健康指示，不抢强调色。
+ * - 结构与原有 theme.ts 完全一致，所有 override 键保留，确保不重排任何组件。
+ */
 
-const brand = {
-  primary: '#3b6df0',
-  primaryHover: '#5b87f5',
-  primaryPressed: '#2c59d0',
-  primarySuppl: '#3b6df0',
-  info: '#3b6df0',
+const FONT_FAMILY =
+  "'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+const FONT_MONO =
+  "'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace";
+
+interface Brand {
+  primary: string;
+  primaryHover: string;
+  primaryPressed: string;
+  primarySuppl: string;
+  info: string;
+  success: string;
+  warning: string;
+  error: string;
+  ink: string; // 主按钮文字色（在强调色背景上保证对比）
+  ring: string; // 焦点/输入框光晕
+}
+
+const lightBrand: Brand = {
+  primary: '#0a7a5c',
+  primaryHover: '#0d9070',
+  primaryPressed: '#086a50',
+  primarySuppl: '#0a7a5c',
+  info: '#0a7a5c',
   success: '#16a34a',
-  warning: '#f59e0b',
+  warning: '#d97706',
   error: '#e5484d',
+  ink: '#ffffff',
+  ring: 'rgba(10, 122, 92, 0.16)',
 };
 
-const lightColors = {
-  body: '#f6f8fc',
+const darkBrand: Brand = {
+  primary: '#2ee6b6',
+  primaryHover: '#5deecb',
+  primaryPressed: '#17c39a',
+  primarySuppl: '#2ee6b6',
+  info: '#2ee6b6',
+  success: '#34d399',
+  warning: '#fbbf24',
+  error: '#fb7185',
+  ink: '#04140f',
+  ring: 'rgba(46, 230, 182, 0.18)',
+};
+
+interface Surface {
+  body: string;
+  card: string;
+  modal: string;
+  popover: string;
+  tableHead: string;
+  hover: string;
+  text1: string;
+  text2: string;
+  text3: string;
+  border: string;
+  divider: string;
+  inputBg: string;
+  action: string;
+  menuActive: string;
+  menuActiveHover: string;
+}
+
+const lightColors: Surface = {
+  body: '#eef2f8',
   card: '#ffffff',
   modal: '#ffffff',
   popover: '#ffffff',
-  tableHead: '#f6f8fc',
-  hover: '#f8faff',
-  text1: '#1f2a44',
-  text2: '#42506b',
-  text3: '#8a99b5',
-  border: '#e6ebf4',
-  divider: '#eef1f7',
-  inputBg: '#fbfcfe',
-  action: '#f4f7fd',
-  menuActive: '#eef4ff',
-  menuActiveHover: '#e6efff',
+  tableHead: '#f2f6fb',
+  hover: '#f0f4fa',
+  text1: '#0f1b2d',
+  text2: '#4a5872',
+  text3: '#8593a8',
+  border: '#dde5f0',
+  divider: '#e8edf5',
+  inputBg: '#fbfdff',
+  action: '#f0f4fa',
+  menuActive: '#e3f4ee',
+  menuActiveHover: '#d5efe7',
 };
 
-const darkColors = {
-  body: '#0e1524',
-  card: '#161f33',
-  modal: '#161f33',
-  popover: '#1a2439',
-  tableHead: '#1b2540',
-  hover: '#1e2a44',
-  text1: '#e8eefb',
-  text2: '#a8b6d4',
-  text3: '#6f7f9e',
-  border: '#26314b',
-  divider: '#222d47',
-  inputBg: '#1a2439',
-  action: '#1e2a44',
-  menuActive: '#1c2a4d',
-  menuActiveHover: '#22335c',
+const darkColors: Surface = {
+  body: '#0a0e16',
+  card: '#111927',
+  modal: '#141d2d',
+  popover: '#161f30',
+  tableHead: '#16202f',
+  hover: '#16202f',
+  text1: '#e8edf5',
+  text2: '#9aa7bd',
+  text3: '#5e6b82',
+  border: '#24314e',
+  divider: '#1b2538',
+  inputBg: '#101725',
+  action: '#16202f',
+  menuActive: '#123128',
+  menuActiveHover: '#173a33',
 };
 
-function buildOverrides(c: typeof lightColors, dark = false): GlobalThemeOverrides {
-  const shadowSoft = dark ? '0 8px 28px rgba(0, 0, 0, 0.45)' : '0 10px 30px rgba(31, 42, 68, 0.08)';
+function buildOverrides(c: Surface, b: Brand, dark: boolean): GlobalThemeOverrides {
+  const shadowSoft = dark ? '0 8px 28px rgba(0, 0, 0, 0.45)' : '0 10px 30px rgba(20, 35, 60, 0.10)';
   return {
     common: {
       fontFamily: FONT_FAMILY,
@@ -66,16 +123,16 @@ function buildOverrides(c: typeof lightColors, dark = false): GlobalThemeOverrid
       borderRadiusSmall: '8px',
       heightMedium: '36px',
       heightLarge: '42px',
-      primaryColor: brand.primary,
-      primaryColorHover: brand.primaryHover,
-      primaryColorPressed: brand.primaryPressed,
-      primaryColorSuppl: brand.primarySuppl,
-      infoColor: brand.info,
-      infoColorHover: brand.primaryHover,
-      infoColorPressed: brand.primaryPressed,
-      successColor: brand.success,
-      warningColor: brand.warning,
-      errorColor: brand.error,
+      primaryColor: b.primary,
+      primaryColorHover: b.primaryHover,
+      primaryColorPressed: b.primaryPressed,
+      primaryColorSuppl: b.primarySuppl,
+      infoColor: b.info,
+      infoColorHover: b.primaryHover,
+      infoColorPressed: b.primaryPressed,
+      successColor: b.success,
+      warningColor: b.warning,
+      errorColor: b.error,
       bodyColor: c.body,
       cardColor: c.card,
       modalColor: c.modal,
@@ -91,9 +148,9 @@ function buildOverrides(c: typeof lightColors, dark = false): GlobalThemeOverrid
       textColor3: c.text3,
       borderColor: c.border,
       dividerColor: c.divider,
-      boxShadow1: dark ? '0 2px 8px rgba(0, 0, 0, 0.4)' : '0 2px 8px rgba(31, 42, 68, 0.06)',
+      boxShadow1: dark ? '0 2px 8px rgba(0, 0, 0, 0.4)' : '0 2px 8px rgba(20, 35, 60, 0.06)',
       boxShadow2: shadowSoft,
-      boxShadow3: dark ? '0 18px 48px rgba(0, 0, 0, 0.55)' : '0 18px 48px rgba(31, 42, 68, 0.16)',
+      boxShadow3: dark ? '0 18px 48px rgba(0, 0, 0, 0.55)' : '0 18px 48px rgba(20, 35, 60, 0.16)',
     },
     Card: {
       color: c.card,
@@ -109,16 +166,22 @@ function buildOverrides(c: typeof lightColors, dark = false): GlobalThemeOverrid
       borderRadiusSmall: '8px',
       fontWeight: '500',
       fontWeightStrong: '600',
+      // 主按钮文字色随主题切换，保证在强调色背景上可读
+      textColorPrimary: b.ink,
+      textColorHoverPrimary: b.ink,
+      textColorPressedPrimary: b.ink,
+      textColorFocusPrimary: b.ink,
+      textColorDisabledPrimary: dark ? 'rgba(4, 20, 15, 0.5)' : 'rgba(255, 255, 255, 0.6)',
     },
     Input: {
       borderRadius: '10px',
       color: c.inputBg,
-      colorFocus: dark ? '#1e2a44' : '#ffffff',
+      colorFocus: dark ? '#141d2d' : '#ffffff',
       border: `1px solid ${c.border}`,
-      borderHover: `1px solid ${dark ? '#3b5588' : '#bdd0ff'}`,
-      borderFocus: `1px solid ${brand.primary}`,
-      boxShadowFocus: '0 0 0 3px rgba(59, 109, 240, 0.14)',
-      caretColor: brand.primary,
+      borderHover: `1px solid ${dark ? '#3b4a66' : '#b9cbe0'}`,
+      borderFocus: `1px solid ${b.primary}`,
+      boxShadowFocus: `0 0 0 3px ${b.ring}`,
+      caretColor: b.primary,
     },
     DataTable: {
       borderRadius: '12px',
@@ -137,10 +200,10 @@ function buildOverrides(c: typeof lightColors, dark = false): GlobalThemeOverrid
       itemColorActive: c.menuActive,
       itemColorActiveHover: c.menuActiveHover,
       itemColorActiveCollapsed: c.menuActive,
-      itemTextColorActive: brand.primaryPressed,
-      itemTextColorActiveHover: brand.primaryPressed,
-      itemIconColorActive: brand.primaryPressed,
-      itemIconColorActiveHover: brand.primaryPressed,
+      itemTextColorActive: b.primaryPressed,
+      itemTextColorActiveHover: b.primaryPressed,
+      itemIconColorActive: b.primaryPressed,
+      itemIconColorActiveHover: b.primaryPressed,
       itemColorHover: c.hover,
       arrowColor: c.text3,
       groupTextColor: c.text3,
@@ -198,5 +261,5 @@ function buildOverrides(c: typeof lightColors, dark = false): GlobalThemeOverrid
   };
 }
 
-export const lightThemeOverrides: GlobalThemeOverrides = buildOverrides(lightColors, false);
-export const darkThemeOverrides: GlobalThemeOverrides = buildOverrides(darkColors, true);
+export const lightThemeOverrides: GlobalThemeOverrides = buildOverrides(lightColors, lightBrand, false);
+export const darkThemeOverrides: GlobalThemeOverrides = buildOverrides(darkColors, darkBrand, true);

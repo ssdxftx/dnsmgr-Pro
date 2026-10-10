@@ -284,4 +284,52 @@ onMounted(load);
 .rule-row .n-input {
   flex: 1;
 }
+
+/* —— CDN 域名设置子卡片仪表化（作用域，不影响其他页） —— */
+.n-space > .n-card {
+  position: relative;
+  overflow: hidden;
+  background: var(--app-glass);
+  border: 1px solid var(--app-border);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-sm);
+  transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
+  animation: app-card-rise 0.5s var(--app-ease) both;
+}
+.n-space > .n-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 18px; right: 18px; height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--app-primary) 60%, transparent), transparent);
+  opacity: 0;
+  transition: opacity 0.25s var(--app-ease);
+  pointer-events: none;
+}
+.n-space > .n-card:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-border));
+  box-shadow: var(--app-shadow);
+}
+.n-space > .n-card:hover::before { opacity: 1; }
+/* 错峰入场 */
+.n-space > .n-card:nth-child(1) { animation-delay: 40ms; }
+.n-space > .n-card:nth-child(2) { animation-delay: 120ms; }
+.n-space > .n-card:nth-child(3) { animation-delay: 200ms; }
+.n-space > .n-card:nth-child(4) { animation-delay: 280ms; }
+.n-space > .n-card:nth-child(5) { animation-delay: 360ms; }
+.n-space > .n-card:nth-child(6) { animation-delay: 440ms; }
+/* 卡片标题信号条 */
+.n-space > .n-card :deep(.n-card-header__main) { font-weight: 700; letter-spacing: 0.01em; }
+.n-space > .n-card :deep(.n-card-header__main)::before {
+  content: "";
+  display: inline-block;
+  width: 4px; height: 14px; border-radius: 2px;
+  margin-right: 8px; vertical-align: -2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--app-primary) 40%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .n-space > .n-card { animation: none; }
+}
 </style>

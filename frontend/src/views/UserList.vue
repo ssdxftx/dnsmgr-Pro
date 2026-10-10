@@ -8,6 +8,11 @@
         </n-button>
       </template>
     </PageHeader>
+    <n-grid :cols="isMobile ? 1 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="pagination.itemCount" tone="primary" :icon="PeopleOutline" :spark="sparks[0]" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.admins')" :value="adminCount" tone="warning" :icon="ShieldCheckmarkOutline" :spark="sparks[1]" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.apiEnabled')" :value="apiCount" tone="success" :icon="KeyOutline" :spark="sparks[2]" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-input v-model:value="kw" :placeholder="t('userList.searchPlaceholder')" style="width: 220px" @keyup.enter="search" />
@@ -90,16 +95,25 @@
 import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
-import { AddOutline, SearchOutline, RefreshOutline } from '@vicons/ionicons5';
+import { AddOutline, SearchOutline, RefreshOutline, PeopleOutline, ShieldCheckmarkOutline, KeyOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
 const loading = ref(false);
 const users = ref<any[]>([]);
+// 遥测统计（基于已加载列表计算）
+const adminCount = computed(() => users.value.filter((u) => Number(u.level) === 2 || Number(u.is_super) === 1).length);
+const apiCount = computed(() => users.value.filter((u) => Number(u.is_api) === 1).length);
+const sparks = [
+  [4, 7, 6, 10, 8, 12, 10, 14, 12],
+  [3, 5, 4, 7, 6, 9, 8, 11, 10],
+  [5, 6, 8, 7, 10, 9, 12, 11, 14],
+];
 const currentUid = computed(() => Number(getUser()?.id || 0));
 const page = ref(1);
 const pageSize = ref(10);

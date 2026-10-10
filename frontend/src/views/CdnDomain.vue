@@ -21,6 +21,11 @@
         </n-space>
       </template>
     </PageHeader>
+    <n-grid cols="1 s:3 m:3" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :spark="sparks[0]" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :spark="sparks[1]" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :spark="sparks[2]" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable
         :columns="columns"
@@ -432,16 +437,22 @@
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
-import { AddOutline, CloudDownloadOutline } from '@vicons/ionicons5';
+import { AddOutline, CloudDownloadOutline, GlobeOutline, CloudOutline, CheckmarkCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
 const domains = ref<any[]>([]);
+const sparks = [
+  [4, 7, 6, 10, 8, 13, 10, 15, 12],
+  [3, 5, 7, 6, 9, 8, 11, 10, 13],
+  [2, 4, 3, 6, 5, 8, 7, 10, 9],
+];
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
 const providerCaps = ref<Record<string, any>>({});

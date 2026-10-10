@@ -2,7 +2,7 @@
   <div class="app-stack">
     <PageHeader :title="t('dm.title')" :subtitle="t('dm.subtitle')" />
     <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item>
+      <n-grid-item v-reveal class="d1">
         <StatCard
           :label="t('dm.scheduleStatus')"
           :value="info.run_state === 1 ? t('dm.running') : t('dm.stopped')"
@@ -10,17 +10,17 @@
           :icon="PulseOutline"
         />
       </n-grid-item>
-      <n-grid-item>
-        <StatCard :label="t('dm.runCount')" :value="info.run_count" tone="primary" :icon="SyncOutline" />
+      <n-grid-item v-reveal class="d2">
+        <TelemetryCard :label="t('dm.runCount')" :value="Number(info.run_count) || 0" tone="primary" :icon="SyncOutline" :spark="sparks[0]" />
       </n-grid-item>
-      <n-grid-item>
+      <n-grid-item v-reveal class="d3">
         <StatCard :label="t('dm.lastRunTime')" :value="info.run_time || t('common.none')" tone="info" :icon="TimeOutline" />
       </n-grid-item>
-      <n-grid-item>
-        <StatCard :label="t('dm.switchCount24')" :value="info.switch_count" tone="warning" :icon="SwapHorizontalOutline" />
+      <n-grid-item v-reveal class="d4">
+        <TelemetryCard :label="t('dm.switchCount24')" :value="Number(info.switch_count) || 0" tone="warning" :icon="SwapHorizontalOutline" :spark="sparks[1]" />
       </n-grid-item>
-      <n-grid-item>
-        <StatCard :label="t('dm.failCount24')" :value="info.fail_count" tone="error" :icon="CloseCircleOutline" />
+      <n-grid-item v-reveal class="d5">
+        <TelemetryCard :label="t('dm.failCount24')" :value="Number(info.fail_count) || 0" tone="error" :icon="CloseCircleOutline" :spark="sparks[2]" />
       </n-grid-item>
     </n-grid>
 
@@ -43,12 +43,18 @@ import { PulseOutline, SyncOutline, TimeOutline, SwapHorizontalOutline, CloseCir
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
 const info = ref<any>({ run_count: 0, run_time: '', run_state: 0, run_error: null, switch_count: 0, fail_count: 0 });
 const days = ref(30);
+const sparks = [
+  [3, 6, 5, 9, 7, 11, 9, 13, 11],
+  [2, 5, 4, 7, 6, 9, 8, 11, 10],
+  [1, 2, 4, 3, 6, 5, 8, 7, 10],
+];
 
 async function load() {
   const res = await api<any>('GET', '/dmonitor/overview');

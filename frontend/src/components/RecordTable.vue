@@ -363,6 +363,16 @@ async function ensureLines(did: number | null) {
   if (res.code === 0) linesByDid.value[did] = res.data;
 }
 
+// 记录类型 → 徽章配色分组
+function typeClass(type: string): string {
+  const v = String(type || '').toUpperCase();
+  if (v === 'A' || v === 'AAAA') return 'addr';
+  if (v === 'CNAME') return 'cname';
+  if (v === 'MX') return 'mail';
+  if (v === 'TXT' || v === 'NS' || v === 'SRV' || v === 'CAA') return 'txt';
+  return 'url';
+}
+
 const columns = computed<any[]>(() => {
   const cols: any[] = [];
   if (props.access?.readonly !== true) cols.push({ type: 'selection', width: 40 });
@@ -374,10 +384,10 @@ const columns = computed<any[]>(() => {
       render(row: any) {
         const name = String(row.Name ?? '');
         if (props.showFullName) {
-          return h('span', null, fullRecordDomain(row, name));
+          return h('span', { class: 'rec-host font-mono' }, fullRecordDomain(row, name));
         }
         const target = resolveDomainTarget(row, name);
-        if (!target) return name || '@';
+        if (!target) return h('span', { class: 'rec-host font-mono' }, name || '@');
         return h(
           NButton,
           { text: true, size: 'tiny', type: 'primary', title: t('record.jumpTo', { domain: fullRecordDomain(row, name) }), onClick: () => jumpToDomain(row, name) },
@@ -387,7 +397,15 @@ const columns = computed<any[]>(() => {
     },
   );
   cols.push(
-    { title: t('record.typeCol'), key: 'Type', width: 90 },
+    {
+      title: t('record.typeCol'),
+      key: 'Type',
+      width: 96,
+      render(row: any) {
+        const type = String(row.Type ?? '');
+        return h('span', { class: `rec-type rec-type--${typeClass(type)}` }, type);
+      },
+    },
     {
       title: t('record.valueCol'),
       key: 'Value',
@@ -558,5 +576,41 @@ defineExpose({ openAdd });
   overflow-y: auto;
   overflow-x: hidden;
   padding-right: 4px;
+}
+
+/* 主机记录等宽 + 记录类型遥测徽章 */
+.rec-host {
+  color: var(--app-text);
+}
+.rec-type {
+  display: inline-block;
+  min-width: 34px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.rec-type--addr {
+  background: var(--app-primary-weak);
+  color: var(--app-primary-strong);
+}
+.rec-type--cname {
+  background: color-mix(in srgb, #38bdf8 16%, transparent);
+  color: color-mix(in srgb, #38bdf8 62%, var(--app-text));
+}
+.rec-type--mail {
+  background: var(--app-warning-weak);
+  color: var(--app-warning);
+}
+.rec-type--txt {
+  background: var(--app-bg-soft);
+  color: var(--app-text-2);
+}
+.rec-type--url {
+  background: var(--app-error-weak);
+  color: var(--app-error);
 }
 </style>

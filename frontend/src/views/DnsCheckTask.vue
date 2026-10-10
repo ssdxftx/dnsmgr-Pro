@@ -8,6 +8,11 @@
         </n-button>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.monitorTasks')" tone="primary" :icon="PulseOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="issueTasks" :label="t('common.abnormal')" tone="error" :icon="AlertCircleOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable
         :columns="columns"
@@ -90,10 +95,11 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
-import { AddOutline } from '@vicons/ionicons5';
+import { AddOutline, PulseOutline, CheckmarkCircleOutline, AlertCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -101,6 +107,8 @@ const { t } = useI18n();
 const loading = ref(false);
 const saving = ref(false);
 const tasks = ref<any[]>([]);
+const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
+const issueTasks = computed(() => tasks.value.filter((t: any) => t.status && t.status !== 'ok').length);
 const domainOptions = ref<any[]>([]);
 const subOptions = ref<any[]>([]);
 const showEdit = ref(false);

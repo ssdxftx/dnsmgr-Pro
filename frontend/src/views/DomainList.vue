@@ -15,6 +15,11 @@
         </n-space>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="domains.length" :label="t('common.total')" tone="primary" :icon="GlobeOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="queryFailed" :label="t('common.queryFailed')" tone="warning" :icon="AlertCircleOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <n-space style="margin-bottom: 16px">
         <n-input
@@ -112,10 +117,11 @@ import { computed, h, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
-import { CloudDownloadOutline, RefreshOutline, SearchOutline } from '@vicons/ionicons5';
+import { CloudDownloadOutline, RefreshOutline, SearchOutline, GlobeOutline, AlertCircleOutline, NotificationsOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 import RecordTable from '../components/RecordTable.vue';
 
 const router = useRouter();
@@ -125,6 +131,8 @@ const dialog = useDialog();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const loading = ref(false);
 const domains = ref<any[]>([]);
+const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatus === 2).length);
+const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
 const recordResults = ref<any[]>([]);
 const showRecords = ref(false);
 const checked = ref<string[]>([]);

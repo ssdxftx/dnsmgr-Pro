@@ -130,8 +130,19 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--app-divider);
-  border-radius: 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  background: var(--app-surface-2);
+  box-shadow: var(--app-shadow-sm);
+  padding: 10px;
+  position: relative;
+  overflow: hidden;
 }
-.qr-box img { width: 100%; height: 100%; }
+.qr-box::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--app-primary) 60%, transparent), transparent);
+}
+.qr-box img { width: 100%; height: 100%; border-radius: 8px; }
 </style>

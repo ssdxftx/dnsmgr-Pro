@@ -11,6 +11,12 @@
         </n-space>
       </template>
     </PageHeader>
+    <n-grid cols="1 s:2 m:4" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :spark="sparks[0]" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :spark="sparks[1]" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :spark="sparks[2]" /></n-grid-item>
+      <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :spark="sparks[3]" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable :columns="columns" :data="orders" :loading="loading" :empty-text="t('certOrder.empty')" />
     </n-card>
@@ -90,10 +96,11 @@ import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { AddOutline } from '@vicons/ionicons5';
+import { AddOutline, ShieldCheckmarkOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const router = useRouter();
 const { t } = useI18n();
@@ -102,6 +109,16 @@ const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
 const orders = ref<any[]>([]);
+// 遥测统计（基于完整订单列表计算）
+const issuedCount = computed(() => orders.value.filter((o) => Number(o.status) === 3).length);
+const inProgressCount = computed(() => orders.value.filter((o) => Number(o.status) === 1 || Number(o.status) === 2).length);
+const expiringCount = computed(() => orders.value.filter((o) => Number(o.status) === 3 && o.end_day != null && Number(o.end_day) <= 30).length);
+const sparks = [
+  [4, 6, 8, 7, 11, 9, 13, 11, 15],
+  [3, 5, 4, 8, 6, 10, 8, 12, 10],
+  [2, 4, 3, 6, 5, 8, 6, 9, 7],
+  [1, 3, 2, 5, 4, 7, 5, 8, 6],
+];
 const statusLabel = ref<Record<string, string>>({});
 const accounts = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);

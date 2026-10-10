@@ -5,6 +5,11 @@
         <n-button type="primary" @click="showAdd = true">{{ t('cname.add') }}</n-button>
       </template>
     </PageHeader>
+    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="LinkOutline" /></n-grid-item>
+    </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :empty-text="t('cname.empty')" />
     </n-card>
@@ -32,13 +37,17 @@ import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NModal, NForm, NFormItem, NInput, NSelect, useDialog, useMessage } from 'naive-ui';
 import { api } from '../api';
+import { ListOutline, LayersOutline, LinkOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import TelemetryCard from '../components/TelemetryCard.vue';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const rows = ref<any[]>([]);
+const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
+const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const loading = ref(false);
 const showAdd = ref(false);
 const saving = ref(false);
