@@ -42,6 +42,8 @@ export interface DnsProvider {
     Type?: string | null,
     Line?: string | null,
     Status?: string | null,
+    SortField?: string | null,
+    SortOrder?: string | null,
   ): Promise<RecordListResult | false>;
   getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false>;
   addDomainRecord(
@@ -70,4 +72,19 @@ export interface DnsProvider {
   updateDomainRecordRemark?(RecordId: string, Remark: string | null): Promise<boolean>;
   getRecordLine(): Promise<Record<string, string> | false>;
   addDomain(Domain: string): Promise<boolean>;
+
+  // 以下为可选能力：迁移自原项目，供批量/导入/优选IP 等场景按需调用
+  getSubDomainRecords?(SubDomain: string, PageNumber?: number, PageSize?: number, Type?: string | null, Line?: string | null): Promise<RecordListResult | false>;
+  getDomainRecordLog?(PageNumber?: number, PageSize?: number, KeyWord?: string | null, StartDate?: string | null, EndDate?: string | null): Promise<RecordListResult | false>;
+  getMinTTL?(): Promise<number | false>;
+  getRecordGroups?(): Promise<any[] | false>;
+  changeRecordGroup?(RecordIdList: string[], GroupId: string): Promise<boolean>;
+  // 权重解析（阿里云）
+  getWeightSubDomains?(PageNumber?: number, PageSize?: number, SubDomain?: string | null): Promise<{ total: number; list: any[] } | false>;
+  setWeightStatus?(SubDomain: string, Open: string, Type?: string | null, Line?: string | null): Promise<boolean>;
+  updateRecordWeight?(RecordId: string, Weight: number): Promise<boolean>;
+  // 域名别名（DNSPod）
+  domainAliasList?(): Promise<any[] | false>;
+  addDomainAlias?(Alias: string): Promise<boolean>;
+  deleteDomainAlias?(Id: string): Promise<boolean>;
 }

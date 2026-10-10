@@ -5,6 +5,10 @@
         <n-space>
           <n-button v-if="accountType === 'cloudflare' && isAdmin" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">{{ t('record.customHostnames') }}</n-button>
           <n-button v-if="accountType === 'cloudflare' && isAdmin" type="primary" secondary @click="router.push(`/cf-rules?domain=${domainId}`)">{{ t('record.rulesEngine') }}</n-button>
+          <n-button v-if="access.writable" @click="router.push(`/domains/${domainId}/records/import`)">{{ t('route.recordImport') }}</n-button>
+          <n-button v-if="accountType === 'aliyun'" @click="router.push(`/domains/${domainId}/weight`)">{{ t('route.recordWeight') }}</n-button>
+          <n-button v-if="accountType === 'dnspod'" @click="router.push(`/domains/${domainId}/alias`)">{{ t('route.recordAlias') }}</n-button>
+          <n-button v-if="accountType === 'aliyun'" @click="router.push(`/domains/${domainId}/recordlog`)">{{ t('route.recordLog') }}</n-button>
           <n-button v-if="access.writable" type="primary" @click="recordTable?.openAdd()">
             <template #icon><n-icon :component="AddOutline" /></template>
             {{ t('record.addRecord') }}

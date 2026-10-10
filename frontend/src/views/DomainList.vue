@@ -5,6 +5,7 @@
         <n-space v-if="isAdmin">
           <n-button v-if="checked.length" size="small" type="success" @click="batchNotice(1)">{{ t('domain.batchNoticeOn') }}</n-button>
           <n-button v-if="checked.length" size="small" @click="batchNotice(0)">{{ t('domain.batchNoticeOff') }}</n-button>
+          <n-button v-if="checked.length" size="small" type="error" @click="batchDelete">{{ t('domain.batchDelete') }}</n-button>
           <n-button @click="router.push('/expire-notice')">{{ t('domain.expireNotice') }}</n-button>
           <n-button type="primary" @click="showImport = true">
             <template #icon><n-icon :component="CloudDownloadOutline" /></template>
@@ -83,6 +84,26 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 编辑域名弹窗 -->
+    <n-modal v-model:show="showEdit" preset="card" :title="t('domain.editDomain')" style="max-width:480px" :mask-closable="false">
+      <n-form label-placement="left" label-width="110">
+        <n-form-item :label="t('domain.nameCol')"><span>{{ editRow?.name }}</span></n-form-item>
+        <n-form-item :label="t('common.remark')"><n-input v-model:value="editForm.remark" /></n-form-item>
+        <n-form-item :label="t('domain.cidLabel')">
+          <n-select v-model:value="editForm.cid" :options="categoryOptions" clearable :placeholder="t('domain.categoryNone')" />
+        </n-form-item>
+        <n-form-item :label="t('domain.expireTimeCol')"><n-input v-model:value="editForm.expiretime" placeholder="YYYY-MM-DD HH:mm:ss" /></n-form-item>
+        <n-form-item :label="t('domain.isHideLabel')"><n-switch v-model:value="editForm.is_hide" /></n-form-item>
+        <n-form-item :label="t('domain.isSsoLabel')"><n-switch v-model:value="editForm.is_sso" /></n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="doEdit">{{ t('common.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -90,7 +111,7 @@
 import { computed, h, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
 import { CloudDownloadOutline, RefreshOutline, SearchOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -116,6 +137,13 @@ const showCategory = ref(false);
 const categoryName = ref('');
 const importing = ref(false);
 const kw = ref('');
+const showEdit = ref(false);
+const editRow = ref<any>(null);
+const categories = ref<any[]>([]);
+const editForm = ref<{ remark: string; cid: number | null; is_hide: boolean; is_sso: boolean; expiretime: string }>({
+  remark: '', cid: null, is_hide: false, is_sso: false, expiretime: '',
+});
+const categoryOptions = computed(() => categories.value.map((c) => ({ label: c.name, value: c.id })));
 
 const columns = computed(() => {
   const cols: any[] = [];
@@ -172,7 +200,10 @@ const columns = computed(() => {
     width: isAdmin.value ? 200 : 120,
     render(row: any) {
       const btns: any[] = [h(NButton, { size: 'tiny', type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
-      if (isAdmin.value) btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
+      if (isAdmin.value) {
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
+        btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
+      }
       return h(NSpace, null, { default: () => btns });
     },
   });
@@ -284,6 +315,57 @@ async function updateDate(row: any) {
   } else message.error(res.msg);
 }
 
+async function loadCategories() {
+  const res = await api<any>('GET', '/domains/categories');
+  if (res.code === 0) categories.value = res.data;
+}
+
+function openEdit(row: any) {
+  editRow.value = row;
+  editForm.value = {
+    remark: row.remark || '',
+    cid: row.cid || null,
+    is_hide: row.is_hide == 1,
+    is_sso: row.is_sso == 1,
+    expiretime: row.expiretime ? String(row.expiretime).slice(0, 19) : '',
+  };
+  showEdit.value = true;
+}
+
+async function doEdit() {
+  if (!editRow.value) return;
+  const res = await api('PUT', `/domains/${editRow.value.id}`, {
+    remark: editForm.value.remark,
+    cid: editForm.value.cid || 0,
+    is_hide: editForm.value.is_hide ? 1 : 0,
+    is_sso: editForm.value.is_sso ? 1 : 0,
+    expiretime: editForm.value.expiretime || null,
+  });
+  if (res.code === 0) {
+    message.success(t('domain.editSuccess'));
+    showEdit.value = false;
+    loadDomains();
+  } else message.error(res.msg);
+}
+
+function batchDelete() {
+  if (!checked.value.length) return message.warning(t('domain.selectDomain'));
+  dialog.warning({
+    title: t('domain.batchDelete'),
+    content: t('domain.batchDeleteConfirm', { count: checked.value.length }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('POST', '/domains/batch-del', { ids: checked.value.map(Number) });
+      if (res.code === 0) {
+        message.success(res.msg);
+        checked.value = [];
+        loadDomains();
+      } else message.error(res.msg);
+    },
+  });
+}
+
 function delDomain(row: any) {
   dialog.warning({
     title: t('domain.deleteTitle'),
@@ -303,6 +385,7 @@ function delDomain(row: any) {
 onMounted(() => {
   loadDomains();
   loadAccounts();
+  loadCategories();
 });
 </script>
 

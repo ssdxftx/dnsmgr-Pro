@@ -1,4 +1,5 @@
 import { HuaweiCloud } from '../../clients/HuaweiCloud.js';
+import { HUAWEI_LINES } from './huaweiLines.js';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 
 export class HuaweiDns implements DnsProvider {
@@ -141,13 +142,8 @@ export class HuaweiDns implements DnsProvider {
   }
 
   async getRecordLine() {
-    return {
-      default: 'default_view',
-      Dianxin: 'Dianxin',
-      Liantong: 'Liantong',
-      Yidong: 'Yidong',
-      Abroad: 'Abroad',
-    };
+    // 全量线路（含运营商与地域省市），展示名 => line 标识
+    return { ...HUAWEI_LINES };
   }
 
   async addDomain(Domain: string) {
