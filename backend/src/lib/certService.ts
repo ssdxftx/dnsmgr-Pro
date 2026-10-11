@@ -1,10 +1,11 @@
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, appendFileSync, existsSync, unlinkSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query, queryOne, table } from '../db.js';
 import { getCertProvider, certConfig } from './cert/factory.js';
 import { addDns, delDns, verifyDns } from './certDns.js';
+import { appendLog } from './util.js';
 import type { CertProvider } from './cert/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -71,8 +72,7 @@ export class CertOrderService {
 
   private saveLog(txt: string) {
     if (!this.order.processid) return;
-    mkdirSync(LOG_DIR, { recursive: true });
-    appendFileSync(join(LOG_DIR, this.order.processid + '.log'), txt + '\n');
+    appendLog(join(LOG_DIR, this.order.processid + '.log'), txt + '\n');
   }
 
   private async saveResult(status: number, error: string | null = null, retrytime: string | null = null) {
@@ -146,12 +146,17 @@ export class CertOrderService {
     }
   }
 
+  private domainNames: string[] | null = null;
+
   private async getMainDomain(host: string): Promise<string> {
     if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':')) return host;
-    const rows = await query(`SELECT name FROM ${table('domain')}`);
-    const aliasRows = await query(`SELECT name FROM ${table('domain_alias')}`);
-    const domains = [...rows.map((r: any) => r.name), ...aliasRows.map((r: any) => r.name)].sort((a, b) => b.length - a.length);
-    for (const d of domains) {
+    // 单个订单内缓存域名/别名列表，避免 per-domain 重复全表查询
+    if (!this.domainNames) {
+      const rows = await query(`SELECT name FROM ${table('domain')}`);
+      const aliasRows = await query(`SELECT name FROM ${table('domain_alias')}`);
+      this.domainNames = [...rows.map((r: any) => r.name), ...aliasRows.map((r: any) => r.name)].sort((a, b) => b.length - a.length);
+    }
+    for (const d of this.domainNames) {
       if (host === d || host.endsWith('.' + d)) return d;
     }
     return host;

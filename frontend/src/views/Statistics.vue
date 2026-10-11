@@ -404,9 +404,15 @@ watch(isDark, () => {
   renderCharts();
 });
 
+let resizeRaf = 0;
 function handleResize() {
-  isMobile.value = window.innerWidth < 768;
-  charts.forEach((c) => c.resize());
+  // 用 rAF 合并连续的 resize 事件，避免每次事件都重绘 4 个 echarts
+  if (resizeRaf) return;
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = 0;
+    isMobile.value = window.innerWidth < 768;
+    charts.forEach((c) => c.resize());
+  });
 }
 
 onMounted(() => {
@@ -415,6 +421,7 @@ onMounted(() => {
   window.addEventListener('resize', handleResize);
 });
 onBeforeUnmount(() => {
+  if (resizeRaf) cancelAnimationFrame(resizeRaf);
   window.removeEventListener('resize', handleResize);
   charts.forEach((c) => c.dispose());
 });

@@ -34,7 +34,9 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_domain` (
   `checkstatus` tinyint(1) NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `name` (`name`),
-  KEY `cid` (`cid`)
+  KEY `cid` (`cid`),
+  KEY `idx_checkstatus` (`checkstatus`),
+  KEY `idx_expiretime` (`expiretime`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_user` (
@@ -106,7 +108,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_dmtask` (
   `active` tinyint(1) NOT NULL DEFAULT 0,
   `recordinfo` varchar(200) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `did` (`did`)
+  KEY `did` (`did`),
+  KEY `idx_check` (`active`, `checknexttime`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_dmlog` (
@@ -136,7 +139,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_optimizeip` (
   `active` tinyint(1) NOT NULL DEFAULT 0,
   `errmsg` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `did` (`did`)
+  KEY `did` (`did`),
+  KEY `idx_active` (`active`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_cert_account` (
@@ -175,7 +179,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_cert_order` (
   `dns` text DEFAULT NULL,
   `fullchain` text DEFAULT NULL,
   `privatekey` text DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_renew` (`status`, `isauto`, `expiretime`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_cert_domain` (
@@ -238,7 +243,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_sctask` (
   `recordinfo` varchar(200) DEFAULT NULL,
   `remark` varchar(100) DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `did` (`did`)
+  KEY `did` (`did`),
+  KEY `idx_check` (`active`, `nexttime`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_domain_alias` (
@@ -317,7 +323,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_cdn_preheat_task` (
   `last_run` datetime DEFAULT NULL,
   `next_run` datetime DEFAULT NULL,
   `addtime` datetime NOT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_check` (`active`, `next_run`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_dns_check_task` (
@@ -336,7 +343,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_dns_check_task` (
   `next_run` datetime DEFAULT NULL,
   `addtime` datetime NOT NULL,
   PRIMARY KEY (`id`),
-  KEY `did` (`did`)
+  KEY `did` (`did`),
+  KEY `idx_check` (`active`, `next_run`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_cdn_stat_data` (

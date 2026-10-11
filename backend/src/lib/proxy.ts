@@ -20,6 +20,9 @@ export async function getProxySettings(): Promise<ProxySettings> {
 }
 
 // 读取系统设置里的代理服务器配置，未配置时返回 undefined（调用方自行决定直连或报错）
+// 按配置串缓存 Agent，复用连接（配置变化时自动重建）
+let cachedProxyUrl = '';
+let cachedProxyAgent: ProxyAgent | undefined;
 export async function getConfiguredProxyAgent(): Promise<ProxyAgent | undefined> {
   const { server, port, user, pwd, type } = await getProxySettings();
   if (!server || !port) return undefined;
@@ -28,5 +31,11 @@ export async function getConfiguredProxyAgent(): Promise<ProxyAgent | undefined>
   else if (type === 'sock4' || type === 'socks4') scheme = 'socks4';
   else if (type === 'sock5' || type === 'sock5h') scheme = 'socks5';
   const authPart = user && pwd ? `${encodeURIComponent(user)}:${encodeURIComponent(pwd)}@` : '';
-  return new ProxyAgent(`${scheme}://${authPart}${server}:${port}`);
+  const url = `${scheme}://${authPart}${server}:${port}`;
+  if (cachedProxyUrl !== url) {
+    cachedProxyAgent?.close().catch(() => undefined);
+    cachedProxyAgent = new ProxyAgent(url);
+    cachedProxyUrl = url;
+  }
+  return cachedProxyAgent;
 }

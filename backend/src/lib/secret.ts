@@ -6,13 +6,17 @@ const ENC_PREFIX = 'enc:v1:';
 export const SECRET_MASK = '**********';
 
 let secretKey = '';
+let derivedKey: Buffer | null = null;
 
 export function setSecretKey(key: string): void {
   secretKey = key || '';
+  // 预计算派生密钥，避免每次加解密重复做 SHA-256
+  derivedKey = secretKey ? createHash('sha256').update('dnsmgr-config:' + secretKey).digest() : null;
 }
 
 function deriveKey(): Buffer {
-  return createHash('sha256').update('dnsmgr-config:' + secretKey).digest();
+  if (!derivedKey) derivedKey = createHash('sha256').update('dnsmgr-config:' + secretKey).digest();
+  return derivedKey;
 }
 
 export function encryptText(plain: string): string {

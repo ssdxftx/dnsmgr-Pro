@@ -226,35 +226,44 @@ try {
   console.log(`[dnsmgr-backend] 已启动，端口 ${port}${installed ? '' : '（未安装，等待初始化）'}`);
 
   if (installed) {
+    // 定时任务防重入：上一轮未结束则跳过本轮，避免网络请求超时导致的叠加执行
+    const guarded = (fn: () => Promise<unknown>, label: string) => {
+      let running = false;
+      return () => {
+        if (running) return;
+        running = true;
+        Promise.resolve()
+          .then(fn)
+          .catch((e: any) => console.error(label, e?.message || e))
+          .finally(() => {
+            running = false;
+          });
+      };
+    };
+
     startMonitorScheduler();
     console.log('[dnsmgr-backend] 容灾监控调度器已启动');
+    const gOptimize = guarded(runOptimizeAll, '[optimize] 优选IP调度异常:');
+    const gSchedule = guarded(runScheduleAll, '[schedule] 定时切换解析异常:');
     setInterval(() => {
-      runOptimizeAll().catch((e: any) => console.error('[optimize] 优选IP调度异常:', e.message));
-      runScheduleAll().catch((e: any) => console.error('[schedule] 定时切换解析异常:', e.message));
+      gOptimize();
+      gSchedule();
     }, 60 * 1000);
     console.log('[dnsmgr-backend] 优选IP调度器已启动');
     console.log('[dnsmgr-backend] 定时切换解析调度器已启动');
-    setInterval(() => {
-      expireNoticeTask().catch((e: any) => console.error('[expire] 到期提醒调度异常:', e.message));
-    }, 60 * 60 * 1000);
+    setInterval(guarded(expireNoticeTask, '[expire] 到期提醒调度异常:'), 60 * 60 * 1000);
     console.log('[dnsmgr-backend] 域名到期提醒调度器已启动');
-    setInterval(() => {
-      executePreheatTasks().catch((e: any) => console.error('[preheat] 自动预热调度异常:', e.message));
-    }, 60 * 1000);
+    setInterval(guarded(executePreheatTasks, '[preheat] 自动预热调度异常:'), 60 * 1000);
     console.log('[dnsmgr-backend] CDN 自动预热调度器已启动');
-    setInterval(() => {
-      executeCheckTasks().catch((e: any) => console.error('[dnscheck] 自动检测调度异常:', e.message));
-    }, 60 * 1000);
+    setInterval(guarded(executeCheckTasks, '[dnscheck] 自动检测调度异常:'), 60 * 1000);
     console.log('[dnsmgr-backend] DNS 劫持检测调度器已启动');
-    setInterval(() => {
-      certTaskRun().catch((e: any) => console.error('[cert] SSL证书续签调度异常:', e.message));
-    }, 5 * 60 * 1000);
+    setInterval(guarded(certTaskRun, '[cert] SSL证书续签调度异常:'), 5 * 60 * 1000);
     console.log('[dnsmgr-backend] SSL证书续签调度器已启动');
 
     // CDN 数据统计缓存：按服务商数据粒度（近 30 天按天、近 48 小时按小时）定时拉取落库
     let statCacheLast = 0;
-    setInterval(() => {
-      (async () => {
+    setInterval(
+      guarded(async () => {
         if (!(await isStatCacheEnabled())) return;
         const interval = await getStatCacheIntervalMs();
         if (Date.now() - statCacheLast < interval) return;
@@ -262,8 +271,9 @@ try {
         const r = await refreshAllStatCache();
         if (r.errors.length) console.error('[cdn-stats-cache] 部分账户刷新失败:', r.errors.join('；'));
         else console.log(`[cdn-stats-cache] 已刷新 ${r.accounts} 个账户统计`);
-      })().catch((e: any) => console.error('[cdn-stats-cache] 刷新异常:', e?.message || e));
-    }, 60 * 1000);
+      }, '[cdn-stats-cache] 刷新异常:'),
+      60 * 1000,
+    );
     console.log('[dnsmgr-backend] CDN 数据统计缓存调度器已启动');
   }
 } catch (e) {

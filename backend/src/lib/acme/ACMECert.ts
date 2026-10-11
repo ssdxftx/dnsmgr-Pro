@@ -53,6 +53,77 @@ function derOid(dotted: string): Buffer {
   return der(0x06, Buffer.from(out));
 }
 
+// 极简 ASN.1 DER 读取，用于进程内解析证书的 Authority Key Identifier，避免起 openssl 子进程
+function derRead(buf: Buffer, pos: number): { tag: number; start: number; end: number; next: number } | null {
+  if (pos + 2 > buf.length) return null;
+  const tag = buf[pos];
+  let p = pos + 1;
+  let len = buf[p++];
+  if (len & 0x80) {
+    const n = len & 0x7f;
+    if (n === 0 || n > 4 || p + n > buf.length) return null;
+    len = 0;
+    for (let i = 0; i < n; i++) len = (len << 8) | buf[p++];
+  }
+  const start = p;
+  const end = p + len;
+  if (end > buf.length) return null;
+  return { tag, start, end, next: end };
+}
+
+function derChildren(buf: Buffer, start: number, end: number): { tag: number; start: number; end: number }[] {
+  const out: { tag: number; start: number; end: number }[] = [];
+  let p = start;
+  while (p < end) {
+    const el = derRead(buf, p);
+    if (!el) break;
+    out.push({ tag: el.tag, start: el.start, end: el.end });
+    p = el.next;
+  }
+  return out;
+}
+
+function derOidToString(buf: Buffer, start: number, end: number): string {
+  if (end <= start) return '';
+  const first = buf[start];
+  const parts = [Math.floor(first / 40), first % 40];
+  let v = 0;
+  for (let i = start + 1; i < end; i++) {
+    v = (v << 7) | (buf[i] & 0x7f);
+    if (!(buf[i] & 0x80)) {
+      parts.push(v);
+      v = 0;
+    }
+  }
+  return parts.join('.');
+}
+
+/** 从证书 DER 中提取 Authority Key Identifier 的 keyIdentifier，返回冒号分隔大写十六进制；解析失败返回 '' */
+function parseAkiKeyId(der: Buffer): string {
+  const cert = derRead(der, 0);
+  if (!cert || cert.tag !== 0x30) return '';
+  const tbs = derChildren(der, cert.start, cert.end)[0];
+  if (!tbs) return '';
+  const extWrap = derChildren(der, tbs.start, tbs.end).find((c) => c.tag === 0xa3);
+  if (!extWrap) return '';
+  const extensions = derChildren(der, extWrap.start, extWrap.end)[0];
+  if (!extensions) return '';
+  for (const ext of derChildren(der, extensions.start, extensions.end)) {
+    const fields = derChildren(der, ext.start, ext.end);
+    if (!fields.length || fields[0].tag !== 0x06) continue;
+    if (derOidToString(der, fields[0].start, fields[0].end) !== '2.5.29.35') continue;
+    const octet = fields.find((f) => f.tag === 0x04);
+    if (!octet) return '';
+    const akiSeq = derChildren(der, octet.start, octet.end)[0];
+    if (!akiSeq) return '';
+    const kid = derChildren(der, akiSeq.start, akiSeq.end).find((f) => f.tag === 0x80);
+    if (!kid) return '';
+    const hex = der.subarray(kid.start, kid.end).toString('hex').toUpperCase();
+    return hex.replace(/(..)(?=.)/g, '$1:');
+  }
+  return '';
+}
+
 export class ACMECert extends ACMEv2 {
   private alternateChains: string[] = [];
 
@@ -408,6 +479,13 @@ export class ACMECert extends ACMEv2 {
   }
 
   private getAKI(certPem: string): string {
+    // 优先进程内解析，避免每次解析证书都启动 openssl 子进程阻塞事件循环
+    try {
+      const keyid = parseAkiKeyId(new X509Certificate(certPem).raw);
+      if (keyid) return 'keyid:' + keyid;
+    } catch {
+      // 落入下方 openssl 兜底
+    }
     const dir = mkdtempSync(join(tmpdir(), 'aki_'));
     const certFile = join(dir, 'c.pem');
     try {

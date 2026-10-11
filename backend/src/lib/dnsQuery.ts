@@ -21,7 +21,10 @@ export async function queryDnsDoh(domain: string, type: string): Promise<string[
   if (!rrtype) return false;
   for (const server of dohServers) {
     try {
-      const res = await fetch(`${server}?name=${encodeURIComponent(domain)}&type=${rrtype}`);
+      const res = await fetch(`${server}?name=${encodeURIComponent(domain)}&type=${rrtype}`, {
+        headers: { Accept: 'application/dns-json' },
+        signal: AbortSignal.timeout(6000),
+      });
       if (!res.ok) continue;
       const arr = await res.json();
       const result: string[] = [];

@@ -156,6 +156,26 @@ export async function migrate(): Promise<void> {
       await query(`UPDATE ${table('user')} SET is_super = 1 WHERE level >= 2 ORDER BY id ASC LIMIT 1`);
     }
   }
+
+  // 调度热路径索引：为按 active / 时间 / 状态过滤的定时任务补二级索引，避免随数据量增长的全表扫描
+  await ensureIndex('dmtask', 'idx_check', '(`active`, `checknexttime`)');
+  await ensureIndex('sctask', 'idx_check', '(`active`, `nexttime`)');
+  await ensureIndex('optimizeip', 'idx_active', '(`active`)');
+  await ensureIndex('dns_check_task', 'idx_check', '(`active`, `next_run`)');
+  await ensureIndex('cdn_preheat_task', 'idx_check', '(`active`, `next_run`)');
+  await ensureIndex('domain', 'idx_checkstatus', '(`checkstatus`)');
+  await ensureIndex('domain', 'idx_expiretime', '(`expiretime`)');
+  await ensureIndex('cert_order', 'idx_renew', '(`status`, `isauto`, `expiretime`)');
+}
+
+async function ensureIndex(tableName: string, indexName: string, columns: string): Promise<void> {
+  const rows = await query<any>(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+    [table(tableName), indexName]
+  );
+  if (rows.length === 0) {
+    await query(`ALTER TABLE ${table(tableName)} ADD INDEX ${indexName} ${columns}`);
+  }
 }
 
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {

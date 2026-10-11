@@ -6,6 +6,8 @@ import { runMonitorTask } from './taskRunner.js';
 let running = false;
 let day = '';
 let count = 0;
+let lastWriteAt = 0;
+let lastWrittenCount = -1;
 
 export function startMonitorScheduler(): void {
   day = formatDay(new Date());
@@ -54,6 +56,12 @@ async function tick(): Promise<void> {
     count++;
   }
 
-  await configSet('run_time', fmtDateTime());
-  await configSet('run_count', String(count));
+  // 心跳写库降频：仅在计数变化或距上次写入超过 30s 时落库，避免每秒 2 次无条件写
+  const nowMs = Date.now();
+  if (count !== lastWrittenCount || nowMs - lastWriteAt >= 30_000) {
+    await configSet('run_time', fmtDateTime());
+    await configSet('run_count', String(count));
+    lastWrittenCount = count;
+    lastWriteAt = nowMs;
+  }
 }

@@ -38,6 +38,25 @@ async function fetchAllRecords(d: any): Promise<any[]> {
   return list;
 }
 
+const recordTotalCache = new Map<string, { at: number; total: number }>();
+
+/** 仅取某域名的记录总数（不带子域名过滤时使用）：只请求 1 条 + 读取分页 total，避免全量拉取 */
+async function fetchRecordTotal(d: any): Promise<number> {
+  const cached = recordTotalCache.get(d.name);
+  if (cached && Date.now() - cached.at < RECORDS_TTL) return cached.total;
+  let total = Number(d.recordcount || 0);
+  const acct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
+  if (acct) {
+    const provider = getDnsProvider(acct.type, safeJson(acct.config), d.name, d.thirdid);
+    if (provider) {
+      const r = await provider.getDomainRecords(1, 1, null, null, null, null, null, null);
+      if (r && typeof (r as any).total === 'number') total = Number((r as any).total);
+    }
+  }
+  recordTotalCache.set(d.name, { at: Date.now(), total });
+  return total;
+}
+
 async function getUserPerms(req: any): Promise<{ admin: boolean; perms: SubPermission[] }> {
   if (Number(req.user?.level ?? 0) >= 2) return { admin: true, perms: [] };
   return { admin: false, perms: await getUserPermissions(req.user.uid) };
@@ -107,8 +126,9 @@ export default async function domainRoutes(app: FastifyInstance) {
       for (const p of acc.perms) {
         const d: any = byName.get(p.domain);
         if (!d) continue;
-        const all = await fetchAllRecords(d);
-        const cnt = p.sub ? all.filter((r: any) => isRecordInScope(r.Name, p.sub)).length : (all.length || Number(d.recordcount || 0));
+        const cnt = p.sub
+          ? (await fetchAllRecords(d)).filter((r: any) => isRecordInScope(r.Name, p.sub)).length
+          : await fetchRecordTotal(d);
         // 普通用户不需要知道底层云账号别名，剔除避免信息泄露
         const dSafe = { ...d };
         delete dSafe.account_type;

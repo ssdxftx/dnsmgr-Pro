@@ -14,6 +14,12 @@ function buildPool(cfg: DbConfig): mysql.Pool {
     database: cfg.db_name,
     waitForConnections: true,
     connectionLimit: 10,
+    maxIdle: 10,
+    idleTimeout: 60000,
+    // DB 不可达时快速失败，避免请求长时间挂起
+    connectTimeout: 10000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
     charset: 'utf8mb4',
     dateStrings: true,
   });

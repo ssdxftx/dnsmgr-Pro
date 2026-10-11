@@ -25,6 +25,21 @@ const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
 import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
 
+// 批量取多个订单绑定的域名，避免证书/部署列表逐条查询（N+1）
+async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
+  const map = new Map<number, string[]>();
+  const ids = [...new Set(oids.filter((n) => Number.isInteger(n) && n > 0))];
+  if (!ids.length) return map;
+  const ph = ids.map(() => '?').join(',');
+  const rows = await query<any>(`SELECT oid, domain FROM ${table('cert_domain')} WHERE oid IN (${ph}) ORDER BY sort ASC`, ids);
+  for (const r of rows) {
+    const arr = map.get(Number(r.oid)) || [];
+    arr.push(r.domain);
+    map.set(Number(r.oid), arr);
+  }
+  return map;
+}
+
 function parseCertKey(fullchain: string, privatekey: string) {
   let cert: X509Certificate;
   try {
@@ -278,8 +293,8 @@ export default async function certRoutes(app: FastifyInstance) {
       [...params, Number(limit), Number(offset)],
     );
     const list = [];
+    const oidDomains = await fetchDomainMap(rows.map((r: any) => r.id));
     for (const r of rows) {
-      const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [r.id]);
       list.push({
         id: r.id,
         aid: r.aid,
@@ -287,7 +302,7 @@ export default async function certRoutes(app: FastifyInstance) {
         typename: r.type ? certConfig[r.type]?.name || '' : null,
         keytype: r.keytype,
         keysize: r.keysize,
-        domains: domains.map((d: any) => d.domain),
+        domains: oidDomains.get(r.id) || [],
         status: r.status,
         error: r.error,
         isauto: r.isauto,
@@ -569,8 +584,8 @@ export default async function certRoutes(app: FastifyInstance) {
       [...params, Number(limit), Number(offset)],
     );
     const list = [];
+    const oidDomains = await fetchDomainMap(rows.map((r: any) => r.oid));
     for (const r of rows) {
-      const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [r.oid]);
       list.push({
         id: r.id,
         aid: r.aid,
@@ -586,7 +601,7 @@ export default async function certRoutes(app: FastifyInstance) {
         error: r.error,
         lasttime: r.lasttime,
         addtime: r.addtime,
-        domains: domains.map((d: any) => d.domain),
+        domains: oidDomains.get(r.oid) || [],
       });
     }
     return { code: 0, total, data: list };
