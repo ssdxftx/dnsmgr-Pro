@@ -10,6 +10,10 @@ RUN npm run build
 FROM node:22-alpine
 WORKDIR /app
 
+# buildPfx（证书 PFX 下载 / PFX 部署）依赖 openssl CLI；unzip 用于证书包解压。
+# 显式安装，避免依赖基础镜像的偶然内容（alpine 基础镜像不含 openssl）。
+RUN apk add --no-cache openssl unzip
+
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
     PORT=8082 \

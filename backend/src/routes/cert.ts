@@ -471,7 +471,9 @@ export default async function certRoutes(app: FastifyInstance) {
         // PFX 密码由调用方指定，默认不设置密码（不再使用内置弱口令）
         const pfxPass = String(req.query?.pfx_pass || '');
         pfx = (await buildPfx(row.fullchain, row.privatekey, pfxPass)).toString('base64');
-      } catch {
+      } catch (e: any) {
+        // 记录失败原因（如容器缺少 openssl），避免同类环境问题无声失败难以排查
+        console.error('[cert] 生成 PFX 失败 order=' + id + '：', e?.message || e);
         pfx = null;
       }
     }

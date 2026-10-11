@@ -1,7 +1,5 @@
-import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, appendFileSync, existsSync, unlinkSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, appendFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query, queryOne, table } from '../db.js';
@@ -30,20 +28,8 @@ export function genSid(): string {
   return Date.now().toString(36) + randomBytes(6).toString('hex');
 }
 
-export async function buildPfx(fullchain: string, privatekey: string, pwd: string): Promise<Buffer> {
-  const dir = mkdtempSync(join(tmpdir(), 'pfx_'));
-  const certFile = join(dir, 'fullchain.pem');
-  const keyFile = join(dir, 'key.pem');
-  const pfxFile = join(dir, 'out.pfx');
-  try {
-    writeFileSync(certFile, fullchain);
-    writeFileSync(keyFile, privatekey);
-    execFileSync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', 'pass:' + pwd]);
-    return readFileSync(pfxFile);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-}
+// PFX 生成统一实现在 lib/cert/utils.ts，避免多处重复；此处仅做转发以保持既有导入路径。
+export { buildPfx } from './cert/utils.js';
 
 export class CertOrderService {
   private client!: CertProvider;
