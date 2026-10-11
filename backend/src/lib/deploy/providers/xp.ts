@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class XpDeploy implements DeployProvider {
@@ -22,7 +23,7 @@ export class XpDeploy implements DeployProvider {
       body = JSON.stringify(params);
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: body ? 'POST' : 'GET',
       headers,
       body,

@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash, createHmac } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -77,7 +78,7 @@ export class S3storageDeploy implements DeployProvider {
 
     const url = scheme + '://' + host + path;
 
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method,
       headers,
       body: body !== null && body !== '' ? body : undefined,

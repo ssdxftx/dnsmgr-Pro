@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHmac } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -32,7 +33,7 @@ export class AmhDeploy implements DeployProvider {
     const cookie = 'PHPSESSID=' + createHmac('md5', this.apikey).update('php_sessid=' + this.apikey).digest('hex');
     const headers: Record<string, string> = { 'User-Agent': UA, Cookie: cookie };
     if (postData !== undefined) headers['Content-Type'] = 'application/x-www-form-urlencoded';
-    const res = await fetch(url, { method: postData !== undefined ? 'POST' : 'GET', headers, body: postData, redirect: 'manual' });
+    const res = await safeFetchDeploy(url, { method: postData !== undefined ? 'POST' : 'GET', headers, body: postData, redirect: 'manual' });
     const body = await res.text();
     return { code: res.status, redirectUrl: res.headers.get('location') || '', body };
   }

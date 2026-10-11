@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -23,7 +24,7 @@ export class BtwafDeploy implements DeployProvider {
       waf_request_token: createHash('md5').update(nowTime + createHash('md5').update(this.key).digest('hex')).digest('hex'),
       'Content-Type': 'application/json',
     };
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: 'POST',
       headers,
       body: JSON.stringify(params || {}),

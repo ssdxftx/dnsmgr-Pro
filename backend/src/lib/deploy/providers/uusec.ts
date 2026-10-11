@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class UusecDeploy implements DeployProvider {
@@ -41,7 +42,7 @@ export class UusecDeploy implements DeployProvider {
       headers['Content-Type'] = 'application/json;charset=UTF-8';
       body = JSON.stringify(params);
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body,

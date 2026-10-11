@@ -1,9 +1,74 @@
 import { Client, ConnectConfig } from 'ssh2';
 import { createHash, X509Certificate } from 'node:crypto';
+import { posix } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
 import { applyHostKeyVerification } from '../sshHostKey.js';
 import type { DeployProvider } from '../types.js';
+
+// 远端部署目标路径安全约束：禁止路径穿越；可通过 DNSMGR_SSH_DEPLOY_DIRS 提供目录白名单；
+// 默认拒绝写入高风险系统位置（authorized_keys、crontab、/etc/passwd、systemd 单元等），
+// 避免管理员误配或凭据被滥用时覆盖远端任意可写文件实现提权/持久化。
+const SSH_DENY_PREFIXES = [
+  '/etc/passwd',
+  '/etc/shadow',
+  '/etc/sudoers',
+  '/etc/crontab',
+  '/etc/cron.d',
+  '/etc/cron.daily',
+  '/etc/cron.hourly',
+  '/etc/cron.weekly',
+  '/etc/cron.monthly',
+  '/etc/cron.yearly',
+  '/etc/cron.minutely',
+  '/etc/ssh',
+  '/etc/ld.so.preload',
+  '/etc/systemd',
+  '/etc/init.d',
+  '/etc/rc.local',
+  '/etc/rc.d',
+  '/etc/rc0.d',
+  '/etc/rc1.d',
+  '/etc/rc2.d',
+  '/etc/rc3.d',
+  '/etc/rc4.d',
+  '/etc/rc5.d',
+  '/etc/rc6.d',
+  '/etc/rcS.d',
+  '/etc/profile.d',
+  '/var/spool/cron',
+  '/boot',
+  '/sys',
+  '/proc',
+  '/dev',
+];
+
+function safeRemotePath(p: any): string {
+  const raw = String(p || '').trim();
+  if (!raw) throw new Error('远程目标文件路径不能为空');
+  const path = raw.startsWith('/') ? raw : '/' + raw;
+  if (path.split('/').includes('..')) {
+    throw new Error('远程路径不合法，禁止包含 .. ：' + raw);
+  }
+  const normalized = posix.normalize(path);
+  const allowDirs = (process.env.DNSMGR_SSH_DEPLOY_DIRS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((d) => posix.normalize(d));
+  if (allowDirs.length) {
+    const ok = allowDirs.some((d) => normalized === d || normalized.startsWith(d.endsWith('/') ? d : d + '/'));
+    if (!ok) throw new Error('远程路径不在允许目录内（可通过 DNSMGR_SSH_DEPLOY_DIRS 配置）：' + raw);
+  }
+  const low = normalized.toLowerCase();
+  const denied =
+    SSH_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
+    low.includes('/.ssh/') ||
+    low.endsWith('/authorized_keys') ||
+    low.endsWith('/authorized_keys2');
+  if (denied) throw new Error('远程路径指向受保护的系统位置，禁止写入：' + raw);
+  return normalized;
+}
 
 export class SshDeploy implements DeployProvider {
   private config: Record<string, any>;
@@ -54,10 +119,11 @@ export class SshDeploy implements DeployProvider {
     return new Promise((resolve, reject) => {
       conn.sftp((err, sftp) => {
         if (err) return reject(new Error('无法创建证书文件：' + err.message));
-        const path = remotePath.startsWith('/') ? remotePath : '/' + remotePath;
-        // 禁止路径穿越（../），避免覆盖远端任意可写文件（如 authorized_keys）
-        if (path.split('/').includes('..')) {
-          return reject(new Error('远程路径不合法，禁止包含 .. ：' + remotePath));
+        let path: string;
+        try {
+          path = safeRemotePath(remotePath);
+        } catch (e: any) {
+          return reject(e);
         }
         sftp.writeFile(path, data, (e) => {
           if (e) reject(new Error('无法写入文件 ' + remotePath + '：' + e.message));

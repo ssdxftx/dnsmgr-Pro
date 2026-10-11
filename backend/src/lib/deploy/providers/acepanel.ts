@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash, createHmac } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -43,7 +44,7 @@ export class AcepanelDeploy implements DeployProvider {
     const url = this.url + '/api' + path;
     const body = method === 'GET' ? null : JSON.stringify(params || {});
     const sign = this.signRequest(method, url, body, this.id, this.token);
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method,
       headers: {
         'Content-Type': 'application/json',

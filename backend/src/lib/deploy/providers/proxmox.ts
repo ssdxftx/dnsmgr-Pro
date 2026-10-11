@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { X509Certificate } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -28,7 +29,7 @@ export class ProxmoxDeploy implements DeployProvider {
       }
       body = form.toString();
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: body ? 'POST' : 'GET',
       headers,
       body,

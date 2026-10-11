@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -84,7 +85,7 @@ export class WestDeploy implements DeployProvider {
       .digest('hex');
 
     const body = new URLSearchParams(params as any).toString().replace(/\+/g, '%20');
-    const res = await fetch(this.baseUrl + path, {
+    const res = await safeFetchDeploy(this.baseUrl + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body,

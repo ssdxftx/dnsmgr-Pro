@@ -56,13 +56,13 @@ export function decryptConfig(raw: string | null | undefined): Record<string, an
   }
 }
 
-const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential)/i;
+const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential|passphrase|hmac|skey)/i;
 
 export function isSecretKey(key: string): boolean {
   const k = String(key || '');
   if (SECRET_KEY_RE.test(k)) return true;
   if (/(^|_)key$/i.test(k)) return true;
-  return ['SecretId', 'AccessKeyId', 'api_password'].includes(k);
+  return ['SecretId', 'AccessKeyId', 'api_password', 'skey', 'passphrase'].includes(k);
 }
 
 // 返回给前端的配置：敏感字段以掩码替换，避免明文回显

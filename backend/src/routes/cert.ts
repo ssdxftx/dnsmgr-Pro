@@ -593,6 +593,11 @@ export default async function certRoutes(app: FastifyInstance) {
   app.post('/api/deploy/tasks', auth, async (req: any) => {
     const { aid, oid, config, remark } = req.body || {};
     if (!aid || !oid || !config) return { code: -1, msg: '必填参数不能为空' };
+    try {
+      await assertDeployConfigAllowed(config);
+    } catch (e: any) {
+      return { code: -1, msg: '部署配置校验失败，' + e.message };
+    }
     await query(
       `INSERT INTO ${table('cert_deploy')} (aid, oid, config, remark, addtime, status, active) VALUES (?, ?, ?, ?, NOW(), 0, 1)`,
       [aid, oid, encryptConfig(config), remark || ''],
@@ -608,6 +613,11 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!row) return { code: -1, msg: '任务不存在' };
     // 前端回显的是掩码，敏感字段保持不变
     const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    try {
+      await assertDeployConfigAllowed(merged);
+    } catch (e: any) {
+      return { code: -1, msg: '部署配置校验失败，' + e.message };
+    }
     await query(`UPDATE ${table('cert_deploy')} SET aid = ?, oid = ?, config = ?, remark = ? WHERE id = ?`, [aid, oid, encryptConfig(merged), remark || '', id]);
     return { code: 0, msg: '修改自动部署任务成功！' };
   });

@@ -8,14 +8,14 @@ export function safeHref(url: string | null | undefined): string {
   return /^https?:\/\//i.test(s) ? s : '#';
 }
 
-const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential)/i;
+const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential|passphrase|hmac|skey)/i;
 
 // 判断配置项是否为敏感字段（用于以密码框渲染、避免明文回显）
 export function isSecretField(name: string | number): boolean {
   const k = String(name || '');
   if (SECRET_KEY_RE.test(k)) return true;
   if (/(^|_)key$/i.test(k)) return true;
-  return ['SecretId', 'AccessKeyId', 'api_password'].includes(k);
+  return ['SecretId', 'AccessKeyId', 'api_password', 'skey', 'passphrase'].includes(k);
 }
 
 type Tok = { t: 'id' | 'num' | 'str' | 'op' | 'punc'; v: string };

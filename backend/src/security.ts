@@ -134,6 +134,8 @@ export interface RateLimitOptions {
 export function createRateLimit(opts: RateLimitOptions = {}) {
   const windowMs = opts.windowMs ?? 60_000;
   const max = opts.max ?? 30;
+  // 桶数量上限，防止大量不同来源 IP 持续写入 Map 撑爆内存
+  const maxBuckets = Number(process.env.DNSMGR_RATELIMIT_MAX_BUCKETS || 50_000);
   const buckets = new Map<string, { count: number; reset: number }>();
   let lastSweep = Date.now();
 
@@ -142,6 +144,15 @@ export function createRateLimit(opts: RateLimitOptions = {}) {
     if (now - lastSweep > windowMs) {
       for (const [k, b] of buckets) if (b.reset <= now) buckets.delete(k);
       lastSweep = now;
+    }
+    // 容量保护：超限时先清理过期项，仍超限则按插入顺序淘汰最旧项
+    if (buckets.size >= maxBuckets) {
+      for (const [k, b] of buckets) if (b.reset <= now) buckets.delete(k);
+      while (buckets.size >= maxBuckets) {
+        const oldest = buckets.keys().next().value;
+        if (oldest === undefined) break;
+        buckets.delete(oldest);
+      }
     }
     const key = req.ip || 'unknown';
     let bucket = buckets.get(key);

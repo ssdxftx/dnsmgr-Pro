@@ -63,7 +63,13 @@ function resolveTrustProxy(): boolean | string | number {
   const raw = (process.env.DNSMGR_TRUST_PROXY || '').trim();
   if (!raw) return false;
   const low = raw.toLowerCase();
-  if (['1', 'true', 'yes', 'on'].includes(low)) return true;
+  if (['1', 'true', 'yes', 'on'].includes(low)) {
+    console.warn(
+      '[dnsmgr-backend] DNSMGR_TRUST_PROXY=true 会信任任意 X-Forwarded-For。仅在服务确实位于受信反向代理之后时才可开启，' +
+        '否则攻击者可伪造 IP 绕过登录/注册限流；建议改为配置受信代理的 IP 或网段。',
+    );
+    return true;
+  }
   if (['0', 'false', 'no', 'off'].includes(low)) return false;
   if (/^\d+$/.test(raw)) return Number(raw);
   return raw;

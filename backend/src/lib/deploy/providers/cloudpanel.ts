@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 interface HttpResponse {
@@ -201,7 +202,7 @@ export class CloudpanelDeploy implements DeployProvider {
       body = params instanceof URLSearchParams ? params.toString() : new URLSearchParams(params).toString();
     }
 
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method,
       headers,
       body,

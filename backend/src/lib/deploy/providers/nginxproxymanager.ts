@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class NginxProxyManagerDeploy implements DeployProvider {
@@ -30,7 +31,7 @@ export class NginxProxyManagerDeploy implements DeployProvider {
       if (!this.token) throw new Error('NPM 访问令牌不存在，请先登录');
       headers.Authorization = 'Bearer ' + this.token;
     }
-    const res = await fetch(this.url + '/api' + path, { method, headers, body });
+    const res = await safeFetchDeploy(this.url + '/api' + path, { method, headers, body });
     const text = await res.text();
     let result: any;
     try {

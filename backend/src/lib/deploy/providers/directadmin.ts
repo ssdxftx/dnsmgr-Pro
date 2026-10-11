@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createPrivateKey, KeyObject } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -229,7 +230,7 @@ export class DirectadminDeploy implements DeployProvider {
     let code = 0;
     let text = '';
     try {
-      const res = await fetch(url, { method, headers, body, redirect: 'manual' });
+      const res = await safeFetchDeploy(url, { method, headers, body, redirect: 'manual' });
       code = res.status;
       text = await res.text();
     } catch (e: any) {

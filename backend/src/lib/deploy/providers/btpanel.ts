@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -23,7 +24,7 @@ export class BtpanelDeploy implements DeployProvider {
     for (const [k, v] of Object.entries(params)) {
       form.append(k, String(v));
     }
-    const res = await fetch(this.url + path, {
+    const res = await safeFetchDeploy(this.url + path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: form.toString(),

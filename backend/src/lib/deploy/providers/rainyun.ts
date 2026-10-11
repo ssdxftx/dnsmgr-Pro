@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class RainyunDeploy implements DeployProvider {
@@ -21,7 +22,7 @@ export class RainyunDeploy implements DeployProvider {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(params);
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body,

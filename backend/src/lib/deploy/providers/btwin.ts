@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { buildPfx } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
@@ -32,7 +33,7 @@ export class BtwinDeploy implements DeployProvider {
           form.append(k, String(v));
         }
       }
-      res = await fetch(url, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) });
+      res = await safeFetchDeploy(url, { method: 'POST', body: form, signal: AbortSignal.timeout(20000) });
     } else {
       const form = new URLSearchParams();
       form.append('request_token', createHash('md5').update(nowTime + createHash('md5').update(this.key).digest('hex')).digest('hex'));
@@ -40,7 +41,7 @@ export class BtwinDeploy implements DeployProvider {
       for (const [k, v] of Object.entries(params)) {
         form.append(k, String(v));
       }
-      res = await fetch(url, {
+      res = await safeFetchDeploy(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: form.toString(),

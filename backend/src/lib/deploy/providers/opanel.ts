@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -36,7 +37,7 @@ export class OpanelDeploy implements DeployProvider {
     }
     headers['Content-Type'] = 'application/json';
     const body = params ? JSON.stringify(params) : '{}';
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: 'POST',
       headers,
       body,

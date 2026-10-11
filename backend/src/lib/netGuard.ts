@@ -133,3 +133,69 @@ export async function safeFetch(raw: string, init: RequestInit = {}, maxRedirect
   }
   throw new Error('重定向次数过多');
 }
+
+// 跳转时会随请求转发的敏感凭据头，跨主机跳转时必须剥离，避免被 302 带到攻击者/元数据地址
+const SENSITIVE_FETCH_HEADERS = new Set([
+  'authorization',
+  'cookie',
+  'x-api-key',
+  'x-auth-token',
+  'x-access-token',
+  'x-token',
+  'x-cloud-access-token',
+  'x-edge-access-token',
+  'x-panel-token',
+  'x-bt-key',
+]);
+
+function toHeaderPairs(init: RequestInit): [string, string][] {
+  const h = init.headers;
+  if (!h) return [];
+  if (h instanceof Headers) return [...h.entries()];
+  if (Array.isArray(h)) return h as [string, string][];
+  return Object.entries(h as Record<string, string>);
+}
+
+function buildFetchHeaders(pairs: [string, string][], stripSensitive: boolean): Headers {
+  const out = new Headers();
+  for (const [k, v] of pairs) {
+    if (stripSensitive && SENSITIVE_FETCH_HEADERS.has(String(k).toLowerCase())) continue;
+    out.set(k, v);
+  }
+  return out;
+}
+
+// 部署商出站请求：允许内网/局域网面板（自建与内网部署是核心功能），
+// 但手动逐跳跟随跳转并复校目标，拒绝链路本地/云元数据地址；
+// 跨主机跳转时剥离 Authorization / Cookie / 面板 Token 等敏感头，防止凭据经 302 外泄。
+export async function safeFetchDeploy(raw: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
+  let current = raw;
+  let method = String(init.method || 'GET').toUpperCase();
+  let body = init.body;
+  const baseHeaders = toHeaderPairs(init);
+  const origin = new URL(raw).origin;
+  for (let hop = 0; hop <= maxRedirects; hop++) {
+    await assertDeployTargetAllowed(current);
+    const u = new URL(current);
+    const crossOrigin = u.origin !== origin;
+    const res = await fetch(current, {
+      ...init,
+      method,
+      body,
+      headers: buildFetchHeaders(baseHeaders, crossOrigin),
+      redirect: 'manual',
+    });
+    if (!REDIRECT_STATUS.has(res.status)) return res;
+    const location = res.headers.get('location');
+    if (!location) return res;
+    await res.body?.cancel().catch(() => undefined);
+    const next = new URL(location, u).toString();
+    // 303，以及 301/302 下的 POST，按规范降级为 GET 且丢弃请求体
+    if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === 'POST')) {
+      method = 'GET';
+      body = undefined;
+    }
+    current = next;
+  }
+  throw new Error('重定向次数过多');
+}

@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -53,7 +54,7 @@ export class KangleadminDeploy implements DeployProvider {
     const headers: Record<string, string> = { 'User-Agent': UA };
     if (options.body !== undefined && method.toUpperCase() === 'POST') headers['Content-Type'] = 'application/x-www-form-urlencoded';
     if (options.cookie) headers['Cookie'] = options.cookie;
-    const res = await fetch(url, { method, headers, body: options.body, redirect: 'manual' });
+    const res = await safeFetchDeploy(url, { method, headers, body: options.body, redirect: 'manual' });
     const body = await res.text();
     return { code: res.status, redirectUrl: res.headers.get('location') || '', cookies: res.headers.getSetCookie(), body };
   }

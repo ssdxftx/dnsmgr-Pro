@@ -109,8 +109,12 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (!d) continue;
         const all = await fetchAllRecords(d);
         const cnt = p.sub ? all.filter((r: any) => isRecordInScope(r.Name, p.sub)).length : (all.length || Number(d.recordcount || 0));
+        // 普通用户不需要知道底层云账号别名，剔除避免信息泄露
+        const dSafe = { ...d };
+        delete dSafe.account_type;
+        delete dSafe.account_name;
         out.push({
-          ...d,
+          ...dSafe,
           recordcount: cnt,
           expiretime: p.expiretime || d.expiretime || null,
           checkstatus: p.expiretime ? 1 : d.checkstatus,
@@ -496,8 +500,18 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!action || !records.length) return { code: -1, msg: '参数不能为空' };
     if (!acc.admin) {
       for (const r of records) {
-        const e = writeErr(acc, info.domain.name, r.Name);
+        // 以云端真实记录名判权，避免客户端用 r.Name 通过校验、却用 r.RecordId 越权操作
+        const fn = provider.getDomainRecordInfo;
+        if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持批量操作' };
+        const cur = await fn.call(provider, r.RecordId);
+        if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
+        // 修改记录值/线路时会改写记录名，需同时对目标名判权
+        if ((action === 'value' || action === 'line') && r.Name) {
+          const e2 = writeErr(acc, info.domain.name, r.Name);
+          if (e2) return { code: -1, msg: '新记录超出授权子域名范围' };
+        }
       }
     }
     let success = 0;
@@ -610,6 +624,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = Number((req.params as any).id);
     const info = await getDomainWithAccount(id);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const acc = await getUserPerms(req);
+    if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getRecordGroups !== 'function') return { code: -1, msg: '该DNS类型不支持分组' };
     const groups = await provider.getRecordGroups();
@@ -626,6 +642,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = Number((req.params as any).id);
     const info = await getDomainWithAccount(id);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const acc = await getUserPerms(req);
+    if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getWeightSubDomains !== 'function') return { code: -1, msg: '该DNS类型不支持权重解析（仅阿里云）' };
     const res = await provider.getWeightSubDomains(1, Number(req.query?.pagesize || 20), req.query?.subdomain || null);
@@ -678,6 +696,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = Number((req.params as any).id);
     const info = await getDomainWithAccount(id);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const acc = await getUserPerms(req);
+    if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.domainAliasList !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
     const list = await provider.domainAliasList();
@@ -714,6 +734,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = Number((req.params as any).id);
     const info = await getDomainWithAccount(id);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const acc = await getUserPerms(req);
+    if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getDomainRecordLog !== 'function') return { code: -1, msg: '该DNS类型不支持解析日志' };
     const q = req.query || {};

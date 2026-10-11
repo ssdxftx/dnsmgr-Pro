@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 const BASE_URL = 'https://panel.qzyun.cn';
@@ -382,7 +383,7 @@ export class QzyunDeploy implements DeployProvider {
     };
     if (this.cookie) finalHeaders.Cookie = this.cookie;
 
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method,
       headers: finalHeaders,
       body: method === 'GET' ? undefined : (data ?? undefined),

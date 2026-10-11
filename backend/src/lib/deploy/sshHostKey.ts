@@ -8,12 +8,21 @@ function normalizeFingerprint(v: string): string {
 /**
  * SSH 主机密钥校验（防中间人）。
  * - 配置 host_fingerprint（形如 `SHA256:base64`）或 host_key（主机公钥 base64）时，严格校验，不匹配即拒绝连接。
- * - 未配置时保持向后兼容，接受任意主机密钥（与历史行为一致）。
+ * - 未配置时默认拒绝连接（严格模式），避免接受任意主机密钥被中间人截获凭据；
+ *   如确需跳过校验以兼容历史行为，可设置 DNSMGR_SSH_STRICT_HOSTKEY=0。
  */
 export function applyHostKeyVerification(connectConfig: Record<string, any>, config: Record<string, any>): void {
   const fingerprint = normalizeFingerprint(config?.host_fingerprint || '');
   const rawKey = String(config?.host_key || '').replace(/\s+/g, '');
-  if (!fingerprint && !rawKey) return;
+  if (!fingerprint && !rawKey) {
+    const strict = (process.env.DNSMGR_SSH_STRICT_HOSTKEY ?? '1').trim() !== '0';
+    if (strict) {
+      throw new Error(
+        '为防止中间人攻击，请配置 SSH 主机密钥指纹（host_fingerprint）或主机公钥（host_key）；如确需跳过校验，可设置 DNSMGR_SSH_STRICT_HOSTKEY=0',
+      );
+    }
+    return;
+  }
   connectConfig.hostVerifier = (key: Buffer): boolean => {
     try {
       if (rawKey && key.toString('base64') === rawKey) return true;
