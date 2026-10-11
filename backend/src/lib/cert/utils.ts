@@ -47,7 +47,16 @@ export function buildPfx(fullchain: string, privatekey: string, pwd: string): Bu
   try {
     writeFileSync(certFile, fullchain);
     writeFileSync(keyFile, privatekey);
-    execFileSync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', `pass:${pwd}`]);
+    try {
+      execFileSync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', `pass:${pwd}`]);
+    } catch (e: any) {
+      // 区分「未安装 openssl」与「openssl 执行失败」，避免环境问题被误判为证书内容问题
+      if (e && e.code === 'ENOENT') {
+        throw new Error('服务器缺少 openssl 命令，无法生成 PFX；请安装 openssl（Docker 镜像已内置）');
+      }
+      const detail = e && e.stderr ? String(e.stderr).trim() : e?.message || String(e);
+      throw new Error('生成 PFX 失败：' + detail);
+    }
     return readFileSync(pfxFile);
   } finally {
     rmSync(dir, { recursive: true, force: true });
