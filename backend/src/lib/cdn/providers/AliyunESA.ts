@@ -72,7 +72,10 @@ export class AliyunESA implements CdnProvider {
       for (const s of data.Sites || []) {
         const siteName = s.SiteName || '';
         if (!siteName) continue;
-        if (domain === siteName) return String(s.SiteId);
+        if (domain === siteName) {
+          this.siteId = String(s.SiteId);
+          return this.siteId;
+        }
         if (domain.endsWith('.' + siteName)) {
           if (!best || siteName.length > (best.SiteName || '').length) best = s;
         }
@@ -81,7 +84,11 @@ export class AliyunESA implements CdnProvider {
       if ((data.Sites || []).length < size || page * size >= total) break;
       page++;
     }
-    return best ? String(best.SiteId) : false;
+    if (best) {
+      this.siteId = String(best.SiteId);
+      return this.siteId;
+    }
+    return false;
   }
 
   private async getSiteName(siteId: string): Promise<string> {

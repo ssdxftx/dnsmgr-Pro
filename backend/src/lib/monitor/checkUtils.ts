@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import net from 'node:net';
+import dns from 'node:dns';
 import { Agent } from 'undici';
 import { safeFetch, assertHostAllowed } from '../netGuard.js';
 import { getConfiguredProxyAgent } from '../proxy.js';
@@ -10,6 +11,28 @@ export interface CheckResult {
   usetime: number;
 }
 
+// 强制解析到指定 IP 的 Agent 按 host|ip 缓存复用连接，避免每次监控请求都新建 Agent
+const ipAgentCache = new Map<string, Agent>();
+function getIpForcingAgent(host: string, ip: string, family: number): Agent {
+  const key = `${host}|${ip}`;
+  const cached = ipAgentCache.get(key);
+  if (cached) return cached;
+  const agent = new Agent({
+    connect: {
+      lookup: (hostname: string, options: any, callback: any) => {
+        if (hostname === host) return callback(null, ip, family);
+        return dns.lookup(hostname, options, callback);
+      },
+    },
+  });
+  if (ipAgentCache.size >= 200) {
+    const oldest = ipAgentCache.keys().next().value;
+    if (oldest !== undefined) ipAgentCache.delete(oldest);
+  }
+  ipAgentCache.set(key, agent);
+  return agent;
+}
+
 // 构造监控请求的 dispatcher：支持「系统代理」与「强制解析到指定 IP」（等价原版 CURLOPT_RESOLVE）
 async function buildDispatcher(host: string, ip: string | null, proxy: boolean): Promise<any> {
   if (proxy) {
@@ -17,16 +40,8 @@ async function buildDispatcher(host: string, ip: string | null, proxy: boolean):
     return agent || undefined;
   }
   if (ip && net.isIP(ip) && !net.isIP(host)) {
-    const dns = await import('node:dns');
     const family = ip.includes(':') ? 6 : 4;
-    return new Agent({
-      connect: {
-        lookup: (hostname: string, options: any, callback: any) => {
-          if (hostname === host) return callback(null, ip, family);
-          return (dns as any).lookup(hostname, options, callback);
-        },
-      },
-    });
+    return getIpForcingAgent(host, ip, family);
   }
   return undefined;
 }

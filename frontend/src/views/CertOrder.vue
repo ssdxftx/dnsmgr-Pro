@@ -109,10 +109,25 @@ const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
 const orders = ref<any[]>([]);
-// 遥测统计（基于完整订单列表计算）
-const issuedCount = computed(() => orders.value.filter((o) => Number(o.status) === 3).length);
-const inProgressCount = computed(() => orders.value.filter((o) => Number(o.status) === 1 || Number(o.status) === 2).length);
-const expiringCount = computed(() => orders.value.filter((o) => Number(o.status) === 3 && o.end_day != null && Number(o.end_day) <= 30).length);
+// 遥测统计（基于完整订单列表，单次遍历计算）
+const orderStats = computed(() => {
+  let issued = 0;
+  let inProgress = 0;
+  let expiring = 0;
+  for (const o of orders.value) {
+    const st = Number(o.status);
+    if (st === 3) {
+      issued++;
+      if (o.end_day != null && Number(o.end_day) <= 30) expiring++;
+    } else if (st === 1 || st === 2) {
+      inProgress++;
+    }
+  }
+  return { issued, inProgress, expiring };
+});
+const issuedCount = computed(() => orderStats.value.issued);
+const inProgressCount = computed(() => orderStats.value.inProgress);
+const expiringCount = computed(() => orderStats.value.expiring);
 const sparks = [
   [4, 6, 8, 7, 11, 9, 13, 11, 15],
   [3, 5, 4, 8, 6, 10, 8, 12, 10],

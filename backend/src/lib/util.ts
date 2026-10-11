@@ -1,3 +1,6 @@
+import { appendFile, mkdir } from 'node:fs/promises';
+import { dirname } from 'node:path';
+
 export function fmtDateTime(d: Date = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -23,4 +26,27 @@ export function clientMessage(e: any, fallback = '操作失败'): string {
   const raw = typeof e === 'string' ? e : e && e.message ? String(e.message) : '';
   const cleaned = raw.replace(/[\r\n\t]+/g, ' ').trim();
   return cleaned ? cleaned.slice(0, 200) : fallback;
+}
+
+// 异步串行追加日志：避免 appendFileSync 阻塞事件循环；按文件串行保证写入顺序，目录只建一次
+const logDirReady = new Set<string>();
+const logChains = new Map<string, Promise<unknown>>();
+export function appendLog(file: string, line: string): void {
+  const dir = dirname(file);
+  const ensureDir =
+    dir && !logDirReady.has(dir)
+      ? mkdir(dir, { recursive: true })
+          .then(() => {
+            logDirReady.add(dir);
+          })
+          .catch(() => undefined)
+      : Promise.resolve();
+  const prev = logChains.get(file) || Promise.resolve();
+  const next = Promise.all([prev, ensureDir])
+    .then(() => appendFile(file, line))
+    .catch(() => undefined);
+  logChains.set(file, next);
+  void next.finally(() => {
+    if (logChains.get(file) === next) logChains.delete(file);
+  });
 }

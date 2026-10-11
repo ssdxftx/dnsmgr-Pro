@@ -761,7 +761,10 @@ async function retryLink() {
 
 function startLinkLogTimer() {
   stopLinkLogTimer();
-  linkLogTimer = setInterval(() => fetchLinkLog(), 3000);
+  // 后台标签页不轮询，避免不可见的持续请求
+  linkLogTimer = setInterval(() => {
+    if (!document.hidden) fetchLinkLog();
+  }, 3000);
 }
 function stopLinkLogTimer() {
   if (linkLogTimer) {
@@ -903,9 +906,14 @@ function matchDnsDomain(name: string) {
   }
 }
 
+let nameMatchTimer: number | null = null;
 watch(
   () => form.name,
-  (v) => matchDnsDomain(v),
+  (v) => {
+    // 输入防抖：匹配需遍历全部域名，避免每次按键都计算
+    if (nameMatchTimer) window.clearTimeout(nameMatchTimer);
+    nameMatchTimer = window.setTimeout(() => matchDnsDomain(v), 200);
+  },
 );
 
 // 已选站点时，加速域名由「子域名 + 站点域名」自动拼接（用户只需输入子域名）
@@ -1217,6 +1225,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   stopLinkLogTimer();
+  if (nameMatchTimer) window.clearTimeout(nameMatchTimer);
 });
 </script>
 

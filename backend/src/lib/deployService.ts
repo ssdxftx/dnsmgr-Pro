@@ -1,10 +1,10 @@
-import { mkdirSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query, queryOne, table } from '../db.js';
 import { getDeployProvider } from './deploy/factory.js';
 import type { DeployProvider } from './deploy/types.js';
 import { genSid } from './certService.js';
+import { appendLog } from './util.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
@@ -42,8 +42,7 @@ export class CertDeployService {
 
   private saveLog(txt: string) {
     if (!this.task.processid) return;
-    mkdirSync(LOG_DIR, { recursive: true });
-    appendFileSync(join(LOG_DIR, this.task.processid + '.log'), txt + '\n');
+    appendLog(join(LOG_DIR, this.task.processid + '.log'), txt + '\n');
   }
 
   private async saveResult(status: number, error: string | null = null, retrytime: string | null = null) {

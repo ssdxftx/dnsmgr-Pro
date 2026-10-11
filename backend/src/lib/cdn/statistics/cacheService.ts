@@ -82,6 +82,9 @@ async function storeResult(
   const sd = res.status?.status_detail || [];
   const bsd = res.status?.bs_status_detail || [];
 
+  // 单账户一次多值 INSERT，替代逐行写入（近 78 行/账户/粒度 → 1 次往返）
+  const placeholders: string[] = [];
+  const values: any[] = [];
   for (let i = 0; i < labels.length; i++) {
     const data: BucketData = {
       flux: num(rd.flux?.[i]),
@@ -96,10 +99,14 @@ async function storeResult(
       bs_status: [num(bsd[0]?.[i]), num(bsd[1]?.[i]), num(bsd[2]?.[i]), num(bsd[3]?.[i])],
     };
     const ts = fmt(new Date(start.getTime() + i * stepMs));
+    placeholders.push('(?, ?, ?, ?, ?, NOW())');
+    values.push(route, aid, granularity, ts, JSON.stringify(data));
+  }
+  if (placeholders.length) {
     await query(
-      `INSERT INTO ${table('cdn_stat_data')} (route, aid, granularity, ts, data, addtime) VALUES (?, ?, ?, ?, ?, NOW())
+      `INSERT INTO ${table('cdn_stat_data')} (route, aid, granularity, ts, data, addtime) VALUES ${placeholders.join(',')}
        ON DUPLICATE KEY UPDATE data = VALUES(data)`,
-      [route, aid, granularity, ts, JSON.stringify(data)],
+      values,
     );
   }
 }

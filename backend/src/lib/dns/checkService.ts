@@ -93,7 +93,7 @@ export async function checkDomainRecords(
 
   const typeSet = types && types.length ? new Set(types) : null;
   const issues: CheckIssue[] = [];
-  let checked = 0;
+  const targetsToCheck: { name: any; type: any; value: any; fullDomain: string }[] = [];
   for (const r of list) {
     if (typeSet && !typeSet.has(r.Type)) continue;
     if (String(r.Status) === '0') continue;
@@ -102,17 +102,25 @@ export async function checkDomainRecords(
     const fullDomain = (r.Name === '@' ? d.name : `${r.Name}.${d.name}`).toLowerCase();
     // 校验层级：管理员未选子域名→整个域名；否则目标域名的严格子域名（比目标多至少一层）
     if (!wholeDomain && !targets.some((t) => fullDomain.endsWith('.' + t))) continue;
-    checked++;
-    const actual = await localResolve(fullDomain, r.Type);
-    if (!actual.length) {
-      issues.push({ name: r.Name, type: r.Type, value: String(value), status: 'not_found', actual: [] });
-      continue;
-    }
-    if (!recordValueMatches(String(value), actual)) {
-      issues.push({ name: r.Name, type: r.Type, value: String(value), status: 'mismatch', actual });
-    }
+    targetsToCheck.push({ name: r.Name, type: r.Type, value, fullDomain });
   }
-  return { total: checked, issues };
+
+  // 受限并发解析：每条记录解析失败会退化到 DoH（最长 6s），串行在 N 大时可达数秒
+  const CONCURRENCY = 10;
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < targetsToCheck.length) {
+      const c = targetsToCheck[cursor++];
+      const actual = await localResolve(c.fullDomain, c.type);
+      if (!actual.length) {
+        issues.push({ name: c.name, type: c.type, value: String(c.value), status: 'not_found', actual: [] });
+      } else if (!recordValueMatches(String(c.value), actual)) {
+        issues.push({ name: c.name, type: c.type, value: String(c.value), status: 'mismatch', actual });
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targetsToCheck.length) }, () => worker()));
+  return { total: targetsToCheck.length, issues };
 }
 
 /** 根据任务配置计算下一次执行时间 */

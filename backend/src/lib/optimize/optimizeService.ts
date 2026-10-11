@@ -132,20 +132,25 @@ async function getIpAddress(cdnType: number, ipType: string): Promise<Record<str
   throw new Error('获取优选IP数据失败，原因未知');
 }
 
-const ipCache: Record<string, Record<string, any>> = {};
+const IP_CACHE_TTL = 30 * 60 * 1000;
+const ipCache: Record<string, { at: number; data: Record<string, any> }> = {};
+
+function clearIpCache(): void {
+  for (const k of Object.keys(ipCache)) delete ipCache[k];
+}
 
 async function getIpAddress2(cdnType: number, ipType: string): Promise<Record<string, any>> {
   const key = cdnType + '_' + ipType;
-  if (!ipCache[key]) {
-    const info = await getIpAddress(cdnType, ipType);
-    const res: Record<string, any> = {};
-    if (info.DEF) res.DEF = info.DEF;
-    if (info.CT) res.CT = info.CT;
-    if (info.CU) res.CU = info.CU;
-    if (info.CM) res.CM = info.CM;
-    ipCache[key] = res;
-  }
-  return ipCache[key];
+  const cached = ipCache[key];
+  if (cached && Date.now() - cached.at < IP_CACHE_TTL) return cached.data;
+  const info = await getIpAddress(cdnType, ipType);
+  const res: Record<string, any> = {};
+  if (info.DEF) res.DEF = info.DEF;
+  if (info.CT) res.CT = info.CT;
+  if (info.CU) res.CU = info.CU;
+  if (info.CM) res.CM = info.CM;
+  ipCache[key] = { at: Date.now(), data: res };
+  return res;
 }
 
 export async function executeAll(): Promise<boolean> {
@@ -155,6 +160,8 @@ export async function executeAll(): Promise<boolean> {
     const t = new Date(last.replace(/-/g, '/')).getTime();
     if (t > Date.now() - minute * 60 * 1000) return false;
   }
+  // 每轮优选开始清空 IP 缓存，确保本轮使用最新优选结果（仅本轮内共享，避免逐任务重复拉取）
+  clearIpCache();
   const list = await query(`SELECT * FROM ${table('optimizeip')} WHERE active = 1`);
   if (list.length === 0) return false;
   console.log('开始执行IP优选任务，共获取到' + list.length + '个待执行任务');
@@ -178,15 +185,15 @@ export async function executeOne(row: any): Promise<string> {
   let delNum = 0;
 
   const ipTypes = String(row.ip_type || '').split(',');
+  const drow = await queryOne(
+    `SELECT A.*, B.type AS account_type, B.config AS account_config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
+    [row.did]
+  );
+  if (!drow) throw new Error('域名不存在（ID：' + row.did + '）');
+  if (!LINE_NAME[drow.account_type]) throw new Error('不支持的DNS服务商');
+
   for (const ipType of ipTypes) {
     if (!ipType) continue;
-
-    const drow = await queryOne(
-      `SELECT A.*, B.type AS account_type, B.config AS account_config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
-      [row.did]
-    );
-    if (!drow) throw new Error('域名不存在（ID：' + row.did + '）');
-    if (!LINE_NAME[drow.account_type]) throw new Error('不支持的DNS服务商');
 
     const info = await getIpAddress2(row.cdn_type, ipType);
 

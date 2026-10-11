@@ -82,7 +82,7 @@
           </div>
         </div>
         <div class="app-header__right">
-          <span v-if="!isMobile" class="hdr-clock font-mono">{{ clock }}</span>
+          <span v-if="!isMobile" ref="clockEl" class="hdr-clock font-mono"></span>
           <span v-if="!isMobile" class="hdr-pulse"><span class="hdr-pulse__dot"></span>{{ t('layout.online') }}</span>
           <n-button v-if="!isMobile" quaternary circle @click="toggleTheme">
             <template #icon><n-icon :component="isDark ? SunnyOutline : MoonOutline" /></template>
@@ -137,13 +137,14 @@ const version = __APP_VERSION__;
 const collapsed = ref(false);
 const drawerShow = ref(false);
 
-/* 顶栏实时时钟 */
-const clock = ref('');
+/* 顶栏实时时钟：直接更新 DOM 文本，避免每秒触发整个布局重渲染 */
+const clockEl = ref<HTMLElement | null>(null);
 let clockTimer: number | undefined;
 function tickClock() {
+  if (!clockEl.value) return;
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
-  clock.value = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  clockEl.value.textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 onMounted(() => {
   tickClock();

@@ -188,21 +188,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const q = req.query || {};
     const rows = await query(`SELECT * FROM ${table('cdn_domain')} ORDER BY id DESC`);
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
-    const freeAids = new Set(
-      (await query(`SELECT id, type FROM ${table('cdn_account')}`))
-        .filter((a: any) => cdnConfig[a.type]?.freecert)
-        .map((a: any) => a.id),
-    );
-    const certAids = new Set(
-      (await query(`SELECT id, type FROM ${table('cdn_account')}`))
-        .filter((a: any) => cdnConfig[a.type]?.certapply)
-        .map((a: any) => a.id),
-    );
-    const linkAids = new Set(
-      (await query(`SELECT id, type FROM ${table('cdn_account')}`))
-        .filter((a: any) => cdnConfig[a.type]?.certlink)
-        .map((a: any) => a.id),
-    );
+    const cdnAccounts = await query(`SELECT id, type FROM ${table('cdn_account')}`);
+    const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
+    const certAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certapply).map((a: any) => a.id));
+    const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
     // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
     const linkedDids = new Set<number>();
     for (const o of await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%cdnDomainId%'])) {
@@ -1101,6 +1090,12 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
   const dnsMap: Record<string, any> = {};
   for (const d of dnsRows) dnsMap[d.name] = d;
 
+  // 预加载已有加速域名与 DNS 账户，避免循环内逐条 SELECT（N+1）
+  const cdnByName = new Map<string, any>();
+  for (const r of await query(`SELECT * FROM ${table('cdn_domain')}`)) cdnByName.set(r.name, r);
+  const acctById = new Map<number, any>();
+  for (const a of await query(`SELECT * FROM ${table('account')}`)) acctById.set(Number(a.id), a);
+
   let filterDnsName: string | null = null;
   for (const d of dnsRows as any[]) if (d.id == did) filterDnsName = d.name;
 
@@ -1117,7 +1112,7 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
       const suffix = '.' + filterDnsName;
       if (name !== filterDnsName && !name.endsWith(suffix)) continue;
     }
-    const exists = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE name = ?`, [name]);
+    const exists = cdnByName.get(name);
     if (exists) {
       const upd: Record<string, any> = {};
       if (!exists.origin && item.origin) {
@@ -1171,7 +1166,7 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
     const cname = item.cname || '';
     let dnsRecord: string | null = null;
     if (belongDomain && cname) {
-      const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [belongDomain.aid]);
+      const dnsAcct = acctById.get(Number(belongDomain.aid));
       if (dnsAcct) {
         const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), belongDomain.name, belongDomain.thirdid);
         if (dns) {
@@ -1184,7 +1179,7 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
       } else dnsFail++;
     }
 
-    await query(
+    const ins: any = await query(
       `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, https_enabled, force_redirect, addtime)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
@@ -1207,6 +1202,8 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
         item.force_redirect ? 1 : 0,
       ],
     );
+    // 登记到内存映射，避免云端列表出现同名项时重复插入
+    cdnByName.set(name, { id: ins.insertId, name, origin: item.origin || '', https_enabled: item.https_enabled ? 1 : 0, force_redirect: item.force_redirect ? 1 : 0 });
     added++;
   }
 
