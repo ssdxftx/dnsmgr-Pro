@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { randomUUID } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -35,7 +36,7 @@ export class KuocaiDeploy implements DeployProvider {
     if (this.token) {
       headers['Cookie'] = 'kuocai_cdn_token=' + this.token;
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: body ? 'POST' : 'GET',
       headers,
       body,

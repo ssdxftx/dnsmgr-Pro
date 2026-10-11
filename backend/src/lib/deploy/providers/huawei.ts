@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash, createHmac } from 'node:crypto';
 import { HuaweiCloud } from '../../clients/HuaweiCloud.js';
 import { parseCertPem } from '../../cert/utils.js';
@@ -166,7 +167,7 @@ export class HuaweiDeploy implements DeployProvider {
     const authorization = 'OBS ' + this.AccessKeyId + ':' + signature;
 
     const url = 'https://' + hostname + '/?customdomain=' + encodeURIComponent(domain);
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: 'PUT',
       headers: {
         'Content-Type': contentType,

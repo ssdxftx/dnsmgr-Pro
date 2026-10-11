@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { X509Certificate } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -28,7 +29,7 @@ export class UpyunDeploy implements DeployProvider {
     };
     if (cookie) headers.Cookie = cookie;
 
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: isGet ? 'GET' : 'POST',
       headers,
       body: isGet ? undefined : data,

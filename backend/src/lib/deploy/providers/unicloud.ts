@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHmac, createCipheriv, randomBytes, publicEncrypt, constants } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -71,7 +72,7 @@ export class UnicloudDeploy implements DeployProvider {
       timestamp: Date.now(),
     };
     const sign = this.sign(params, signKey);
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -245,7 +246,7 @@ export class UnicloudDeploy implements DeployProvider {
         cert: encodeURIComponent(fullchain),
         key: encodeURIComponent(privatekey),
       };
-      const res = await fetch(url, {
+      const res = await safeFetchDeploy(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Token: this.token },
         body: JSON.stringify(params),

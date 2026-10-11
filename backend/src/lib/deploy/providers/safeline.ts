@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class SafelineDeploy implements DeployProvider {
@@ -22,7 +23,7 @@ export class SafelineDeploy implements DeployProvider {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(params);
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: body ? 'POST' : 'GET',
       headers,
       body,

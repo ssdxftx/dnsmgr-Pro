@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
 
@@ -32,7 +33,7 @@ export class SynologyDeploy implements DeployProvider {
       format: 'sid',
       enable_syno_token: 'yes',
     });
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: 'POST',
       body: form.toString(),
       signal: AbortSignal.timeout(15000),
@@ -65,7 +66,7 @@ export class SynologyDeploy implements DeployProvider {
       _sid: this.token!.sid,
       SynoToken: this.token!.synotoken,
     });
-    const res = await fetch(this.url + '/webapi/entry.cgi?' + query.toString(), {
+    const res = await safeFetchDeploy(this.url + '/webapi/entry.cgi?' + query.toString(), {
       signal: AbortSignal.timeout(15000),
     });
     const text = await res.text();
@@ -117,7 +118,7 @@ export class SynologyDeploy implements DeployProvider {
     form.append('cert', new Blob([fullchain]), 'cert.pem');
     if (id) form.append('id', id);
     form.append('desc', config.desc || '');
-    const res = await fetch(this.url + '/webapi/entry.cgi?' + query.toString(), {
+    const res = await safeFetchDeploy(this.url + '/webapi/entry.cgi?' + query.toString(), {
       method: 'POST',
       body: form,
       signal: AbortSignal.timeout(20000),

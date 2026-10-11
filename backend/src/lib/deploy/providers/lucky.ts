@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
 
@@ -23,7 +24,7 @@ export class LuckyDeploy implements DeployProvider {
       body = JSON.stringify(params);
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body,

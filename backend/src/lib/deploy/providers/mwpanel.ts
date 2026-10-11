@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class MwpanelDeploy implements DeployProvider {
@@ -31,7 +32,7 @@ export class MwpanelDeploy implements DeployProvider {
       body = form.toString();
       headers['Content-Type'] = 'application/x-www-form-urlencoded';
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: body ? 'POST' : 'GET',
       headers,
       body,

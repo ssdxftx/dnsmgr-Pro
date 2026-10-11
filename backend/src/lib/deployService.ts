@@ -95,6 +95,8 @@ export class CertDeployService {
     this.client.setLogger((txt) => this.saveLog(txt));
     this.saveLog(new Date().toISOString());
     const config = safeJson(this.task.config) || {};
+    // 纵深防御：任务级 config 也可能携带 URL（如面板地址），执行前再校验一次
+    await assertDeployConfigAllowed(config);
     const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [this.task.oid]);
     config.domainList = domains.map((d: any) => d.domain);
     try {

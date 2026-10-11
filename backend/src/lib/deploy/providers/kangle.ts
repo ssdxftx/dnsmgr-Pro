@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -56,7 +57,7 @@ export class KangleDeploy implements DeployProvider {
     if (options.body !== undefined && method.toUpperCase() === 'POST') headers['Content-Type'] = 'application/x-www-form-urlencoded';
     if (options.cookie) headers['Cookie'] = options.cookie;
     if (options.referer) headers['Referer'] = options.referer;
-    const res = await fetch(url, { method, headers, body: options.body, redirect: 'manual' });
+    const res = await safeFetchDeploy(url, { method, headers, body: options.body, redirect: 'manual' });
     const body = await res.text();
     return { code: res.status, redirectUrl: res.headers.get('location') || '', cookies: res.headers.getSetCookie(), body };
   }

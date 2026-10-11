@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
 
@@ -25,7 +26,7 @@ export class CdnflyDeploy implements DeployProvider {
 
   async login(): Promise<string> {
     const url = this.url + '/v1/login';
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ account: this.username, password: this.password }),
@@ -53,7 +54,7 @@ export class CdnflyDeploy implements DeployProvider {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(params);
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body,
@@ -76,7 +77,7 @@ export class CdnflyDeploy implements DeployProvider {
   private async authedRequest(path: string, body: string, method: string): Promise<any> {
     const accessToken = await this.login();
     const url = this.url + path;
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method,
       headers: { 'Access-Token': accessToken, 'Content-Type': 'application/json' },
       body,

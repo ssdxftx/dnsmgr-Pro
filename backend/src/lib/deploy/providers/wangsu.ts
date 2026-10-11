@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHmac, createCipheriv, X509Certificate } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
 
@@ -78,7 +79,7 @@ export class WangsuDeploy implements DeployProvider {
       headers['Content-Type'] = 'application/json';
     }
 
-    const res = await fetch('https://open.chinanetcenter.com' + path, {
+    const res = await safeFetchDeploy('https://open.chinanetcenter.com' + path, {
       method: method || (body ? 'POST' : 'GET'),
       headers,
       body,

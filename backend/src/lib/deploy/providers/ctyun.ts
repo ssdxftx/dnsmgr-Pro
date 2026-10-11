@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash, createHmac, randomUUID } from 'node:crypto';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
@@ -220,7 +221,7 @@ export class CtyunDeploy implements DeployProvider {
     let url = 'https://' + endpoint + path;
     if (q && Object.keys(q).length) url += '?' + new URLSearchParams(q as any).toString();
 
-    const res = await fetch(url, { method, headers, body: body || undefined });
+    const res = await safeFetchDeploy(url, { method, headers, body: body || undefined });
     const text = await res.text();
     let arr: any = null;
     try {

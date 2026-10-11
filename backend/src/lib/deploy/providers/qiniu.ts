@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHmac } from 'node:crypto';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
@@ -55,7 +56,7 @@ export class QiniuDeploy implements DeployProvider {
     const headers: Record<string, string> = { Authorization: 'QBox ' + sign };
     if (body) headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(url, { method, headers, body: body || undefined });
+    const res = await safeFetchDeploy(url, { method, headers, body: body || undefined });
     const text = await res.text();
     let arr: any = null;
     try {
@@ -106,7 +107,7 @@ export class QiniuDeploy implements DeployProvider {
     const headers: Record<string, string> = { Authorization: 'Qiniu ' + sign };
     if (body) headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(url, { method, headers, body: body || undefined });
+    const res = await safeFetchDeploy(url, { method, headers, body: body || undefined });
     const text = await res.text();
     let arr: any = null;
     try {

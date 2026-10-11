@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHash, createHmac } from 'node:crypto';
 import { Volcengine } from '../../clients/Volcengine.js';
 import { parseCertPem } from '../../cert/utils.js';
@@ -199,7 +200,7 @@ export class HuoshanDeploy implements DeployProvider {
         algorithm: 'TOS4-HMAC-SHA256',
       });
       const url = 'https://' + endpoint + '/?customdomain=';
-      const res = await fetch(url, { method: 'PUT', headers, body });
+      const res = await safeFetchDeploy(url, { method: 'PUT', headers, body });
       await this.volcParse(res);
       this.log('对象存储域名 ' + config.domain + ' 部署证书成功！');
     }
@@ -230,7 +231,7 @@ export class HuoshanDeploy implements DeployProvider {
         algorithm: 'HMAC-SHA256',
       });
       const url = 'https://' + endpoint + '/?' + new URLSearchParams(query).toString();
-      const res = await fetch(url, { method: 'POST', headers, body });
+      const res = await safeFetchDeploy(url, { method: 'POST', headers, body });
       const result = await this.volcParse(res);
       if (result && result.SuccessDomains && result.SuccessDomains.length > 0) {
         this.log('veImageX域名 ' + domain + ' 部署证书成功！');

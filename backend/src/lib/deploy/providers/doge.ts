@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { createHmac } from 'node:crypto';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
@@ -92,7 +93,7 @@ export class DogeDeploy implements DeployProvider {
     }
 
     const url = 'https://api.dogecloud.com' + path;
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method: data ? 'POST' : 'GET',
       headers,
       body: body || undefined,

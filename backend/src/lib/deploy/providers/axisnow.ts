@@ -1,3 +1,4 @@
+import { safeFetchDeploy } from '../../netGuard.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
 
@@ -43,7 +44,7 @@ export class AxisnowDeploy implements DeployProvider {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(data);
     }
-    const res = await fetch(url, {
+    const res = await safeFetchDeploy(url, {
       method,
       headers,
       body,
@@ -68,7 +69,7 @@ export class AxisnowDeploy implements DeployProvider {
       Accept: 'application/json',
       Authorization: 'Bearer ' + this.token,
     };
-    const res = await fetch('https://api.axisnow.io/client/v1/certificates', {
+    const res = await safeFetchDeploy('https://api.axisnow.io/client/v1/certificates', {
       method: 'GET',
       headers,
       signal: AbortSignal.timeout(15000),
