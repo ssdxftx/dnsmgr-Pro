@@ -96,20 +96,15 @@ export class AliyunESA implements CdnProvider {
     return data?.SiteModel?.SiteName || '';
   }
 
-  private calcRecordName(domain: string, siteName: string): string {
-    if (domain === siteName) return '@';
-    return domain.slice(0, domain.length - siteName.length - 1);
-  }
-
   private async findRecord(domain: string): Promise<{ siteId: string; siteName: string; record: any } | false> {
     const siteId = await this.findSite(domain);
     if (!siteId) return false;
     const siteName = (await this.getSiteName(siteId)) || this.getRootDomain(domain);
-    const recordName = this.calcRecordName(domain, siteName);
-    const data = await this.call({ Action: 'ListRecords', SiteId: siteId, PageNumber: 1, PageSize: 100, RecordName: recordName });
+    // ESA 的 ListRecords.RecordName 过滤与返回均为完整域名（FQDN），非主机前缀
+    const data = await this.call({ Action: 'ListRecords', SiteId: siteId, PageNumber: 1, PageSize: 100, RecordName: domain });
     if (!data) return false;
     for (const r of data.Records || []) {
-      if (r.RecordName === recordName) return { siteId, siteName, record: r };
+      if (r.RecordName === domain) return { siteId, siteName, record: r };
     }
     return false;
   }
@@ -121,19 +116,18 @@ export class AliyunESA implements CdnProvider {
       this.error = '未找到该域名的 ESA 站点，请先在阿里云 ESA 控制台创建站点后再接入';
       return false;
     }
-    const siteName = await this.getSiteName(siteId);
-    const recordName = this.calcRecordName(domain, siteName);
     const originVal = origin.split(';')[0].trim();
-    const type = originType === 'ipaddr' ? 'A' : 'CNAME';
+    // ESA 对 IPv4/IPv6 统一使用 A/AAAA 记录类型，主机记录为完整域名
+    const type = originType === 'ipaddr' ? 'A/AAAA' : 'CNAME';
     const param: Record<string, any> = {
       Action: 'CreateRecord',
       SiteId: siteId,
-      RecordName: recordName,
+      RecordName: domain,
       Type: type,
       Data: JSON.stringify({ value: originVal }),
       Proxied: true,
     };
-    if (originType === 'domain') param.SourceType = 'domain';
+    if (originType === 'domain') param.SourceType = 'Domain';
     if (!(await this.call(param))) return false;
     for (let i = 0; i < 10; i++) {
       const cname = await this.getDomainCname(domain);
@@ -168,12 +162,12 @@ export class AliyunESA implements CdnProvider {
           const records = rr.Records || [];
           for (const r of records) {
             if (!r.Proxied) continue;
-            if (!['A', 'AAAA', 'CNAME'].includes(r.RecordType || '')) continue;
+            if (r.RecordType !== 'A/AAAA' && r.RecordType !== 'CNAME') continue;
             const recordName = r.RecordName || '';
-            const domain = recordName === '@' ? siteName : recordName + '.' + siteName;
+            const domain = recordName;
             const dataObj = r.Data && typeof r.Data === 'object' ? r.Data : {};
             const origin = dataObj.value ? String(dataObj.value) : '';
-            const originType = (r.RecordType === 'A' || r.RecordType === 'AAAA') ? 'ipaddr' : 'domain';
+            const originType = r.RecordType === 'A/AAAA' ? 'ipaddr' : 'domain';
             list.push({
               domain,
               cname: r.RecordCname || '',
@@ -227,7 +221,7 @@ export class AliyunESA implements CdnProvider {
       return false;
     }
     const originVal = origin.split(';')[0].trim();
-    const type = originType === 'ipaddr' ? 'A' : 'CNAME';
+    const type = originType === 'ipaddr' ? 'A/AAAA' : 'CNAME';
     const param: Record<string, any> = {
       Action: 'UpdateRecord',
       RecordId: found.record.RecordId,
@@ -236,7 +230,7 @@ export class AliyunESA implements CdnProvider {
       HttpPorts: String(httpPort),
       HttpsPorts: String(httpsPort),
     };
-    if (originType === 'domain') param.SourceType = 'domain';
+    if (originType === 'domain') param.SourceType = 'Domain';
     if (originHost) param.HostPolicy = originHost;
     return (await this.call(param)) !== false;
   }
