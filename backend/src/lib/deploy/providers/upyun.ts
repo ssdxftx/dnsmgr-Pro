@@ -1,6 +1,15 @@
 import { safeFetchDeploy } from '../../netGuard.js';
-import { X509Certificate } from 'node:crypto';
+import { createPrivateKey, X509Certificate } from 'node:crypto';
 import type { DeployProvider } from '../types.js';
+
+// 将 EC 私钥（PKCS#8 "PRIVATE KEY"）转换为云存储平台要求的 SEC1 "EC PRIVATE KEY"。
+// 单纯改 PEM 头不会改变 DER 编码，会产出畸形私钥，故此处按规则真正重编码。
+function toSec1Pem(pkcs8Pem: string): string {
+  const key = createPrivateKey(pkcs8Pem);
+  const der = key.export({ type: 'sec1', format: 'der' });
+  const b64 = Buffer.from(der).toString('base64').replace(/(.{64})/g, '$1\n').trim();
+  return `-----BEGIN EC PRIVATE KEY-----\n${b64}\n-----END EC PRIVATE KEY-----\n`;
+}
 
 export class UpyunDeploy implements DeployProvider {
   private username: string;
@@ -56,8 +65,12 @@ export class UpyunDeploy implements DeployProvider {
 
     let privatekey_send = privatekey;
     if (this.isEcCertificate(fullchain)) {
-      privatekey_send = privatekey_send.split('-----BEGIN PRIVATE KEY-----').join('-----BEGIN EC PRIVATE KEY-----');
-      privatekey_send = privatekey_send.split('-----END PRIVATE KEY-----').join('-----END EC PRIVATE KEY-----');
+      try {
+        privatekey_send = toSec1Pem(privatekey);
+      } catch {
+        // 转换失败时保留原始 PEM，避免发送畸形私钥
+        privatekey_send = privatekey;
+      }
     }
     const params = { certificate: fullchain, private_key: privatekey_send };
 

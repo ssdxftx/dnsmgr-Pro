@@ -905,20 +905,29 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
       const isAdmin = checkLevel(req.user, 2);
       const cacheEnabled = await isStatCacheEnabled();
-      // 普通用户仅能查看已缓存的汇总统计（不支持按域名筛选，避免暴露账号/域名信息）
+      // 普通用户仅能查看缓存覆盖期内、且不区分账号的汇总统计：
+      // 严禁落入实时查询分支，否则可传任意 aid 越权读取账号/域名明细并触发上游调用
       if (!isAdmin) {
         if (!cacheEnabled) return { code: -1, msg: '数据统计缓存未开启，暂无法查看统计' };
         if (domainNames.length) return { code: -1, msg: '普通用户不支持按域名筛选' };
+        if (start.getTime() >= Date.now() - STAT_COVER_MS) {
+          try {
+            const cached = await loadCachedStatistics(start, end, type, undefined);
+            if (cached && cached.labels?.length) return { code: 0, data: cached };
+          } catch {
+            // 读取缓存失败按未缓存处理
+          }
+        }
+        return { code: 0, data: { labels: [], _errors: ['该时间范围暂未缓存，请稍后再试'] } };
       }
-      // 缓存命中：开启缓存且未按域名筛选、时间范围在保留期内
+      // 管理员：缓存命中（开启缓存且未按域名筛选、时间范围在保留期内）
       if (cacheEnabled && !domainNames.length && start.getTime() >= Date.now() - STAT_COVER_MS) {
         try {
           const cached = await loadCachedStatistics(start, end, type, aid ? [aid] : undefined);
           if (cached && cached.labels?.length) return { code: 0, data: cached };
         } catch {
-          // 读取缓存失败则继续走实时查询（仅管理员）
+          // 读取缓存失败则继续走实时查询
         }
-        if (!isAdmin) return { code: 0, data: { labels: [], _errors: ['该时间范围暂未缓存，请稍后再试'] } };
       }
 
       const where: string[] = [];
@@ -1021,11 +1030,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { success, failed };
   }
 
-  // 缓存刷新
+  // 缓存刷新/预热单次请求的最大 URL 数，避免单请求扇出过多上游调用
+const MAX_CACHE_OP_URLS = 100;
+
+// 缓存刷新
   app.post('/api/cdn/purge', auth, async (req: any) => {
     const { type, urls } = req.body || {};
     const list = dedupe(Array.isArray(urls) ? urls : []);
     if (!list.length) return { code: -1, msg: '请填写需要刷新的 URL' };
+    if (list.length > MAX_CACHE_OP_URLS) return { code: -1, msg: `单次最多提交 ${MAX_CACHE_OP_URLS} 个 URL` };
     const result = await dispatchCacheOp('purge', type === 'dir' ? 'dir' : 'url', list);
     return { code: 0, ...result };
   });
@@ -1035,6 +1048,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const { urls } = req.body || {};
     const list = dedupe(Array.isArray(urls) ? urls : []);
     if (!list.length) return { code: -1, msg: '请填写需要预热的 URL' };
+    if (list.length > MAX_CACHE_OP_URLS) return { code: -1, msg: `单次最多提交 ${MAX_CACHE_OP_URLS} 个 URL` };
     const result = await dispatchCacheOp('preheat', 'preheat', list);
     return { code: 0, ...result };
   });

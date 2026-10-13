@@ -1,5 +1,6 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
+import { safeFetchDeploy } from '../../netGuard.js';
 
 interface PdnsRecord {
   id: number;
@@ -46,7 +47,7 @@ export class PowerDns implements DnsProvider {
       headers['Content-Type'] = 'application/json';
     }
     try {
-      const res = await fetch(url, { method, headers, body });
+      const res = await safeFetchDeploy(url, { method, headers, body });
       const text = await res.text();
       let arr: any = null;
       if (text) {

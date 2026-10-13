@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Ucloud } from '../../clients/Ucloud.js';
 import { getMainDomain, unzip, findFileByExt } from '../utils.js';
+import { safeFetch } from '../../netGuard.js';
 import type { CertProvider, CreateOrderResult, CertInfo } from '../types.js';
 
 export class UcloudCert implements CertProvider {
@@ -50,7 +51,7 @@ export class UcloudCert implements CertProvider {
     if (!domainList.length) throw new Error('域名列表不能为空');
     const domain = domainList[0];
 
-    const keyParamMap: Record<string, string> = { '2048': '2048', '3072': '3072', '256': 'prime256v1', '384': 'prime384v1' };
+    const keyParamMap: Record<string, string> = { '2048': '2048', '3072': '3072', '256': 'prime256v1', '384': 'secp384r1' };
     await this.request('ComplementCSRInfo', {
       CertificateID: order.CertificateID,
       Domains: domain,
@@ -104,7 +105,7 @@ export class UcloudCert implements CertProvider {
     const info = await this.request('GetCertificateDetailInfo', { CertificateID: order.CertificateID });
 
     const data = await this.request('DownloadCertificate', { CertificateID: order.CertificateID });
-    const res = await fetch(data.CertificateUrl);
+    const res = await safeFetch(data.CertificateUrl);
     const buf = Buffer.from(await res.arrayBuffer());
 
     const dir = mkdtempSync(join(tmpdir(), 'cert_'));

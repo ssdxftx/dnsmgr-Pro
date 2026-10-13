@@ -64,20 +64,25 @@ export class FnosDeploy implements DeployProvider {
         let errorOutput = '';
         stream.on('data', (d: Buffer) => (output += d.toString()));
         stream.stderr.on('data', (d: Buffer) => (errorOutput += d.toString()));
-        stream.on('close', () => {
-          if (errorOutput.trim()) {
-            if (errorOutput.includes('a password is required')) {
+        stream.on('close', (code: number) => {
+          const err = errorOutput.trim();
+          if (err) {
+            if (err.includes('a password is required')) {
               reject(new Error('权限不足，请先配置 sudo 免密'));
             } else {
-              reject(new Error(name + '失败：' + errorOutput.trim()));
+              reject(new Error(name + '失败：' + err));
             }
+            return;
+          }
+          if (code !== 0) {
+            reject(new Error(name + '失败：退出码 ' + code + (output.trim() ? ' ' + output.trim() : '')));
+            return;
+          }
+          if (output.length > 200) {
+            resolve(output);
           } else {
-            if (output.length > 200) {
-              resolve(output);
-            } else {
-              this.log(name + '成功 ' + output.trim());
-              resolve(output);
-            }
+            this.log(name + '成功 ' + output.trim());
+            resolve(output);
           }
         });
       });
@@ -121,8 +126,11 @@ export class FnosDeploy implements DeployProvider {
           const validFrom = Math.floor(new Date(certInfo.validFrom).getTime() / 1000) * 1000;
           const validTo = Math.floor(new Date(certInfo.validTo).getTime() / 1000) * 1000;
           const issuerCN = certInfo.issuer.match(/CN=([^,\n]+)/)?.[1] || '';
-          await this.exec(conn, '上传证书文件', 'sudo tee ' + shq(certPath) + " > /dev/null <<'EOF'\n" + fullchain + "\nEOF");
-          await this.exec(conn, '上传私钥文件', 'sudo tee ' + shq(keyPath) + " > /dev/null <<'EOF'\n" + privatekey + "\nEOF");
+          // 证书/私钥内容经 base64 传输，避免内容中出现 EOF 分隔符或特殊字符破坏 heredoc
+          const certB64 = Buffer.from(fullchain).toString('base64');
+          const keyB64 = Buffer.from(privatekey).toString('base64');
+          await this.exec(conn, '上传证书文件', 'printf %s ' + shq(certB64) + ' | base64 -d | sudo tee ' + shq(certPath) + ' > /dev/null');
+          await this.exec(conn, '上传私钥文件', 'printf %s ' + shq(keyB64) + ' | base64 -d | sudo tee ' + shq(keyPath) + ' > /dev/null');
           await this.exec(conn, '刷新目录权限', 'sudo chmod 0755 ' + shq(certDir) + ' -R');
           const psql = 'UPDATE cert SET  valid_to=' + validTo + ',valid_from=' + validFrom + ",issued_by='" + sqlStr(issuerCN) + "',updated_time=" + Date.now() + " WHERE private_key='" + sqlStr(keyPath) + "'";
           await this.exec(conn, '更新数据表', 'cd /tmp && sudo -u postgres psql -d trim_connect -c ' + shq(psql));

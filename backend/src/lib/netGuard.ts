@@ -146,6 +146,13 @@ const SENSITIVE_FETCH_HEADERS = new Set([
   'x-edge-access-token',
   'x-panel-token',
   'x-bt-key',
+  'access-token',
+  'eop-authorization',
+  'x-cf-authorization',
+  'x-slce-api-token',
+  'x-client-token',
+  'token',
+  'opentoken',
 ]);
 
 function toHeaderPairs(init: RequestInit): [string, string][] {

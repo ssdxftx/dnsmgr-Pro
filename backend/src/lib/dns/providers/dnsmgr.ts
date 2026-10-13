@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
+import { safeFetchDeploy } from '../../netGuard.js';
 
 export class DnsmgrDns implements DnsProvider {
   private uid: string;
@@ -32,7 +33,7 @@ export class DnsmgrDns implements DnsProvider {
       for (const [k, v] of Object.entries(all)) {
         if (v !== null && v !== undefined) body.append(k, String(v));
       }
-      const res = await fetch(this.baseUrl + path, {
+      const res = await safeFetchDeploy(this.baseUrl + path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: body.toString(),

@@ -6,12 +6,27 @@ import { assertCommandAllowed } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
 
 // 本地部署目标路径安全约束：必须为规范化的绝对路径；
-// 若配置了 DNSMGR_DEPLOY_LOCAL_DIRS（逗号分隔的允许目录），则目标必须位于其中之一，
-// 避免管理员误配或被滥用时向后端主机任意位置写入文件（如 crontab、systemd 单元）。
+// 若配置了 DNSMGR_DEPLOY_LOCAL_DIRS（逗号分隔的允许目录），则目标必须位于其中之一；
+// 同时默认拒绝写入高风险系统位置（authorized_keys、crontab、/etc/passwd、systemd 单元等），
+// 避免管理员误配或被滥用时向本机任意位置写入文件（如提权/持久化）。
+const LOCAL_DENY_PREFIXES = [
+  '/etc',
+  '/boot',
+  '/sys',
+  '/proc',
+  '/dev',
+  '/var/spool/cron',
+  '/var/spool/at',
+  '/root',
+  '/usr/lib/systemd',
+  '/lib/systemd',
+];
+
 function safeTargetPath(p: any): string {
   const raw = String(p || '').trim();
   if (!raw) throw new Error('目标文件路径不能为空');
   if (!isAbsolute(raw)) throw new Error('目标文件路径必须为绝对路径：' + raw);
+  if (raw.split(/[\\/]/).includes('..')) throw new Error('目标文件路径不合法，禁止包含 .. ：' + raw);
   const normalized = normalize(raw);
   const allowDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
     .split(',')
@@ -21,6 +36,17 @@ function safeTargetPath(p: any): string {
   if (allowDirs.length) {
     const ok = allowDirs.some((d) => normalized === d || normalized.startsWith(d.endsWith(sep) ? d : d + sep));
     if (!ok) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
+  }
+  // 仅对 POSIX 绝对路径做系统位置拒绝（Windows 本地部署的场景较少，避免误伤盘符路径）
+  if (normalized.startsWith('/')) {
+    const low = normalized.toLowerCase();
+    const denied =
+      LOCAL_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
+      low.includes('/.ssh/') ||
+      low.endsWith('/.ssh') ||
+      low.endsWith('/authorized_keys') ||
+      low.endsWith('/authorized_keys2');
+    if (denied) throw new Error('目标文件路径指向受保护的系统位置，禁止写入：' + raw);
   }
   return normalized;
 }
@@ -46,7 +72,8 @@ export class LocalDeploy implements DeployProvider {
       if (!existsSync(keyDir)) throw new Error(keyDir + ' 目录不存在');
       writeFileSync(certFile, fullchain);
       this.log('证书已保存到：' + certFile);
-      writeFileSync(keyFile, privatekey);
+      // 私钥显式以 0600 写入，避免按进程 umask 落盘为全局可读
+      writeFileSync(keyFile, privatekey, { mode: 0o600 });
       this.log('私钥已保存到：' + keyFile);
     } else if (config.format === 'pfx') {
       const pfxFile = safeTargetPath(config.pfx_file);

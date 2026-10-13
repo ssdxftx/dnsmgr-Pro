@@ -18,7 +18,8 @@ export class AliyunCert implements CertProvider {
     this.log('Request:' + JSON.stringify(param));
     const result = await this.client.request(param, 'POST');
     const response = JSON.stringify(result);
-    if (!response.includes('"Type":"certificate"')) {
+    // 证书接口的响应可能含私钥/证书明文（Key/Cert），一律不落日志
+    if (!/("Key"|"Cert"|certificate)/i.test(response)) {
       this.log('Response:' + response);
     }
     return returnData ? result : true;

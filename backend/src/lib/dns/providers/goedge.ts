@@ -1,4 +1,5 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
+import { safeFetchDeploy } from '../../netGuard.js';
 
 export class GoEdgeDns implements DnsProvider {
   private baseUrl: string;
@@ -32,7 +33,7 @@ export class GoEdgeDns implements DnsProvider {
   }
 
   private async getAccessToken(): Promise<void> {
-    const res = await fetch(this.baseUrl + '/APIAccessTokenService/getAPIAccessToken', {
+    const res = await safeFetchDeploy(this.baseUrl + '/APIAccessTokenService/getAPIAccessToken', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type: this.userType, accessKeyId: this.accessKeyId, accessKey: this.accessKey }),
@@ -53,7 +54,7 @@ export class GoEdgeDns implements DnsProvider {
   private async request(path: string, payload: Record<string, any>): Promise<any> {
     if (this.accessToken === null) await this.getAccessToken();
     const body = JSON.stringify(Object.keys(payload).length === 0 ? {} : payload);
-    const res = await fetch(this.baseUrl + path, {
+    const res = await safeFetchDeploy(this.baseUrl + path, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
