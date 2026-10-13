@@ -79,6 +79,8 @@
         <n-space justify="end">
           <n-button @click="copyText('crt')">{{ t('certOrder.copyCert') }}</n-button>
           <n-button @click="copyText('key')">{{ t('certOrder.copyKey') }}</n-button>
+          <n-button @click="downloadCert">{{ t('certOrder.downloadCert') }}</n-button>
+          <n-button @click="downloadKey">{{ t('certOrder.downloadKey') }}</n-button>
           <n-button type="primary" @click="downloadPfx">{{ t('certOrder.downloadPfx') }}</n-button>
         </n-space>
       </template>
@@ -350,15 +352,28 @@ function copyText(key: 'crt' | 'key') {
   navigator.clipboard.writeText(info.value?.[key] || '').then(() => message.success(t('common.copied')));
 }
 
+function downloadBlob(filename: string, blob: Blob) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function downloadCert() {
+  if (!info.value?.crt) return message.warning(t('certOrder.noCert'));
+  downloadBlob('fullchain.crt', new Blob([info.value.crt], { type: 'application/x-pem-file' }));
+}
+
+function downloadKey() {
+  if (!info.value?.key) return message.warning(t('certOrder.noKey'));
+  downloadBlob('private.key', new Blob([info.value.key], { type: 'application/x-pem-file' }));
+}
+
 function downloadPfx() {
   if (!info.value?.pfx) return message.warning(t('certOrder.noPfx'));
   const bytes = Uint8Array.from(atob(info.value.pfx), (c) => c.charCodeAt(0));
-  const blob = new Blob([bytes], { type: 'application/x-pkcs12' });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'cert.pfx';
-  a.click();
-  URL.revokeObjectURL(a.href);
+  downloadBlob('cert.pfx', new Blob([bytes], { type: 'application/x-pkcs12' }));
 }
 
 function del(row: any) {
