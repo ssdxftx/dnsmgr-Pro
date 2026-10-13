@@ -73,7 +73,7 @@ export class AmhDeploy implements DeployProvider {
       const vhostName = raw.trim();
       if (!vhostName) continue;
 
-      const path = '/?c=amssl&a=admin_amssl&envs_name=' + config.env_name + '&vhost_name=' + vhostName + '&ModuleSort=app';
+      const path = '/?c=amssl&a=admin_amssl&envs_name=' + encodeURIComponent(String(config.env_name)) + '&vhost_name=' + encodeURIComponent(vhostName) + '&ModuleSort=app';
       const params: Record<string, string> = {
         submit_key_crt: 'y',
         key_input1: 'key_input1',

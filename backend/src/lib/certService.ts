@@ -18,7 +18,7 @@ export const STATUS_LABEL: Record<number, string> = {
 
 const RETRY_INTERVAL = [60, 180, 300, 600, 600];
 
-import { decryptConfig, encryptConfig } from './secret.js';
+import { decryptConfig, encryptConfig, encryptText } from './secret.js';
 
 function safeJson(s: string | null): any {
   if (!s) return null;
@@ -108,13 +108,13 @@ export class CertOrderService {
   }
 
   private async lockOrder() {
-    const locked = await queryOne(`SELECT islock, locktime FROM ${table('cert_order')} WHERE id = ? FOR UPDATE`, [this.oid]).catch(() => null);
-    const islock = locked ? locked.islock : this.order.islock;
-    if (islock == 1 && Date.now() - new Date(this.order.locktime || 0).getTime() < 3600 * 1000) {
-      throw new Error('订单正在处理中，请稍后再试');
-    }
     if (!this.order.processid) this.order.processid = genSid();
-    await query(`UPDATE ${table('cert_order')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ?`, [this.order.processid, this.oid]);
+    // 原子加锁：仅当当前未锁、或锁已超时（1 小时）时才更新成功，避免并发重复处理同一订单
+    const res: any = await query(
+      `UPDATE ${table('cert_order')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
+      [this.order.processid, this.oid],
+    );
+    if (!res || !res.affectedRows) throw new Error('订单正在处理中，请稍后再试');
   }
 
   private async unlockOrder() {
@@ -364,7 +364,7 @@ export class CertOrderService {
       `UPDATE ${table('cert_order')} SET fullchain = ?, privatekey = ?, issuer = ?, issuetime = ?, expiretime = ? WHERE id = ?`,
       [
         result.fullchain,
-        result.private_key,
+        encryptText(result.private_key),
         result.issuer,
         new Date(result.validFrom * 1000),
         new Date(result.validTo * 1000),

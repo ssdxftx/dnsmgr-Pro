@@ -69,7 +69,7 @@ export class KangleDeploy implements DeployProvider {
 
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {
     await this.login();
-    this.log('登录成功 cookie:' + this.cookie);
+    this.log('登录成功');
     await this.getMain();
 
     if (config.type === '1' && config.domains) {

@@ -38,6 +38,7 @@ export async function sendMail(to: string, sub: string, msg: string): Promise<bo
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ apiUser, apiKey, from: from || '', fromName: SITENAME, to, subject: sub, html: msg }),
+      signal: AbortSignal.timeout(15000),
     });
     const arr: any = await res.json().catch(() => null);
     if (arr && arr.statusCode === 200) return true;
@@ -100,6 +101,7 @@ export async function sendWechat(sub: string, content: string): Promise<boolean 
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify({ appToken: apptoken, content, summary: sub, contentType: 3, uids: [appuid] }),
+    signal: AbortSignal.timeout(15000),
   });
   const arr: any = await res.json().catch(() => null);
   if (arr && arr.success === true) return true;
@@ -127,6 +129,7 @@ export async function sendTelegram(content: string): Promise<boolean | string> {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams(Object.fromEntries(Object.entries(post).map(([k, v]) => [k, String(v)]))),
+    signal: AbortSignal.timeout(15000),
   });
   const arr: any = await res.json().catch(() => null);
   if (arr && arr.ok === true) return true;
@@ -202,6 +205,7 @@ export async function sendWebhook(sub: string, content: string): Promise<boolean
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify(post),
+    signal: AbortSignal.timeout(15000),
   });
   const arr: any = await res.json().catch(() => null);
   if ((arr && arr.errcode === 0) || (arr && arr.code === 0)) return true;
@@ -264,7 +268,7 @@ export async function sendCustomWebhook(sub: string, content: string): Promise<b
 
   try {
     await assertUrlAllowed(fetchUrl);
-    const res = await fetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend });
+    const res = await fetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend, signal: AbortSignal.timeout(15000) });
     if (res.status >= 200 && res.status < 300) return true;
     return '请求失败，HTTP状态码：' + res.status;
   } catch (e: any) {

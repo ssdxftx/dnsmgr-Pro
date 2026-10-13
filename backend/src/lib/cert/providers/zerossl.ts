@@ -32,6 +32,7 @@ export class ZerosslCert extends AcmeCertBase {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ email }).toString(),
+      signal: AbortSignal.timeout(15000),
     });
     const text = await res.text();
     let result: any;

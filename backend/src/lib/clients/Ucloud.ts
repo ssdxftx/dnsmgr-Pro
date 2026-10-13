@@ -17,6 +17,7 @@ export class Ucloud {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(param),
+      signal: AbortSignal.timeout(15000),
     });
     const text = await res.text();
     let result: any;

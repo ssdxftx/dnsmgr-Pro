@@ -34,7 +34,7 @@ export class GoogleCert extends AcmeCertBase {
   }
 
   private async getEAB(): Promise<{ kid: string; key: string }> {
-    const res = await fetch('https://gts.rat.dev/eab');
+    const res = await fetch('https://gts.rat.dev/eab', { signal: AbortSignal.timeout(15000) });
     const text = await res.text();
     let result: any;
     try {

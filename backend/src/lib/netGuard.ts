@@ -118,7 +118,7 @@ export async function safeFetch(raw: string, init: RequestInit = {}, maxRedirect
   let body = init.body;
   for (let hop = 0; hop <= maxRedirects; hop++) {
     const u = await assertUrlAllowed(current);
-    const res = await fetch(u, { ...init, method, body, redirect: 'manual' });
+    const res = await fetch(u, { ...init, method, body, redirect: 'manual', signal: init.signal ?? AbortSignal.timeout(30000) });
     if (!REDIRECT_STATUS.has(res.status)) return res;
     const location = res.headers.get('location');
     if (!location) return res;
@@ -191,6 +191,7 @@ export async function safeFetchDeploy(raw: string, init: RequestInit = {}, maxRe
       body,
       headers: buildFetchHeaders(baseHeaders, crossOrigin),
       redirect: 'manual',
+      signal: init.signal ?? AbortSignal.timeout(30000),
     });
     if (!REDIRECT_STATUS.has(res.status)) return res;
     const location = res.headers.get('location');

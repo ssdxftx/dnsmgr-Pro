@@ -48,7 +48,7 @@ export class QingcloudDns implements DnsProvider {
         Date: date,
       };
       let url = this.baseUrl + path;
-      const init: RequestInit = { method, headers };
+      const init: RequestInit = { method, headers, signal: AbortSignal.timeout(15000) };
       if (method === 'POST' || method === 'PUT' || method === 'DELETE') {
         headers['Content-Type'] = 'application/json; charset=utf-8';
         init.body = JSON.stringify(params ?? {});

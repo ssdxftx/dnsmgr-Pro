@@ -32,7 +32,7 @@ export class Dynv6Dns implements DnsProvider {
     try {
       const headers: Record<string, string> = { Authorization: 'Bearer ' + this.token };
       let url = this.baseUrl + path;
-      const init: RequestInit = { method, headers };
+      const init: RequestInit = { method, headers, signal: AbortSignal.timeout(15000) };
       if (method === 'GET' || method === 'DELETE') {
         if (params) {
           const qs = new URLSearchParams();

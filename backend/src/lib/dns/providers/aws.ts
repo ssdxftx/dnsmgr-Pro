@@ -78,13 +78,15 @@ export class AwsDns implements DnsProvider {
   private async listAllRecordSets(): Promise<any[] | false> {
     const list: any[] = [];
     const params: Record<string, any> = { maxitems: '300' };
-    for (;;) {
+    for (let guard = 0; guard < 1000; guard++) {
       const data = await this.send('GET', `/hostedzone/${this.zoneId()}/rrset`, params);
       if (data === false) return false;
       for (const set of asList(data.ResourceRecordSets?.ResourceRecordSet)) list.push(set);
-      const truncated = str(data.IsTruncated) === 'true';
-      if (!truncated) break;
-      params.name = str(data.NextRecordName);
+      if (str(data.IsTruncated) !== 'true') break;
+      const nextName = str(data.NextRecordName);
+      // 游标不前进时终止，避免死循环
+      if (!nextName || nextName === params.name) break;
+      params.name = nextName;
       params.type = str(data.NextRecordType);
       if (data.NextRecordIdentifier) params.identifier = str(data.NextRecordIdentifier);
       else delete params.identifier;

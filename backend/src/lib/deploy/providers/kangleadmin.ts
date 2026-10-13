@@ -67,7 +67,7 @@ export class KangleadminDeploy implements DeployProvider {
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {
     if (!config.name) throw new Error('网站用户名不能为空');
     await this.login();
-    this.log('登录成功 cookie:' + this.cookie);
+    this.log('登录成功');
     await this.loginVhost(config.name);
 
     if (config.type === '1' && config.domains) {

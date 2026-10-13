@@ -44,7 +44,7 @@ export class Qiniu {
     const headers: Record<string, string> = { Authorization: 'QBox ' + this.sign(path, queryStr) };
     if (body) headers['Content-Type'] = 'application/json';
 
-    const res = await fetch(url, { method, headers, body: body || undefined });
+    const res = await fetch(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
     const text = await res.text();
     let json: any = null;
     try {

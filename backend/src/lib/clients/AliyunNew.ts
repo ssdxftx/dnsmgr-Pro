@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { assertDeployTargetAllowed } from '../netGuard.js';
 
 export class AliyunNew {
   private AccessKeyId: string;
@@ -47,6 +48,8 @@ export class AliyunNew {
     const qs = this.buildQuery(query);
     if (qs) url += '?' + qs;
 
+    // Endpoint 来自部署配置，出站前拒绝链路本地/云元数据地址
+    await assertDeployTargetAllowed(url);
     const res = await fetch(url, {
       method,
       headers,

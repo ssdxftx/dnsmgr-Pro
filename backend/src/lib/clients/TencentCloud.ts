@@ -40,6 +40,7 @@ export class TencentCloud {
       method: 'POST',
       headers,
       body: payload,
+      signal: AbortSignal.timeout(15000),
     });
     const json = await res.json();
     if (json.Response?.Error) {

@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, normalize, sep } from 'node:path';
+import { existsSync, writeFileSync, realpathSync } from 'node:fs';
+import { dirname, isAbsolute, normalize, sep, basename, join } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
@@ -28,18 +28,25 @@ function safeTargetPath(p: any): string {
   if (!isAbsolute(raw)) throw new Error('目标文件路径必须为绝对路径：' + raw);
   if (raw.split(/[\\/]/).includes('..')) throw new Error('目标文件路径不合法，禁止包含 .. ：' + raw);
   const normalized = normalize(raw);
+  // 解析父目录符号链接，得到真实写入路径，避免经允许目录内的软链绕过位置限制
+  let resolved = normalized;
+  try {
+    resolved = join(realpathSync(dirname(normalized)), basename(normalized));
+  } catch {
+    resolved = normalized;
+  }
   const allowDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .map((d) => normalize(d));
   if (allowDirs.length) {
-    const ok = allowDirs.some((d) => normalized === d || normalized.startsWith(d.endsWith(sep) ? d : d + sep));
+    const ok = allowDirs.some((d) => resolved === d || resolved.startsWith(d.endsWith(sep) ? d : d + sep));
     if (!ok) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
   }
   // 仅对 POSIX 绝对路径做系统位置拒绝（Windows 本地部署的场景较少，避免误伤盘符路径）
-  if (normalized.startsWith('/')) {
-    const low = normalized.toLowerCase();
+  if (resolved.startsWith('/')) {
+    const low = resolved.toLowerCase();
     const denied =
       LOCAL_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
       low.includes('/.ssh/') ||
@@ -48,7 +55,7 @@ function safeTargetPath(p: any): string {
       low.endsWith('/authorized_keys2');
     if (denied) throw new Error('目标文件路径指向受保护的系统位置，禁止写入：' + raw);
   }
-  return normalized;
+  return resolved;
 }
 
 export class LocalDeploy implements DeployProvider {

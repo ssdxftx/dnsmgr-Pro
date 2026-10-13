@@ -12,6 +12,16 @@ function safeJson(s: string): Record<string, any> {
   return decryptConfig(s) || {};
 }
 
+// 告警邮件 HTML 转义，避免记录名/值注入标记
+function esc(v: any): string {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export interface CheckIssue {
   name: string;
   type: string;
@@ -148,7 +158,12 @@ export async function executeCheckTasks(): Promise<number> {
   let run = 0;
   for (const t of rows) {
     const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
-    await query(`UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [fmtDateTime(next), t.id]);
+    // 原子领取：仅当任务仍处于到期状态时才更新成功，避免并发调度重复执行
+    const claim: any = await query(
+      `UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ? WHERE id = ? AND active = 1 AND (next_run IS NULL OR next_run <= NOW())`,
+      [fmtDateTime(next), t.id],
+    );
+    if (!claim || !claim.affectedRows) continue;
     const { issues } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
     if (issues && issues.length) {
       await notifyHijack(t, issues);
@@ -164,11 +179,12 @@ async function notifyHijack(task: any, issues: CheckIssue[]): Promise<void> {
   const to = String(task.notice_email || '').trim() || (await configGet('mail_recv')) || (await configGet('mail_name')) || '';
   if (!to) return;
   const title = `【DNS劫持告警】域名 ${domain} 部分解析记录异常`;
-  let content = `尊敬的用户，您好：<br/>检测到域名 <b>${domain}</b> 的以下解析记录与本地解析结果不一致，可能存在 DNS 劫持：<br/><br/>`;
+  let content = `尊敬的用户，您好：<br/>检测到域名 <b>${esc(domain)}</b> 的以下解析记录与本地解析结果不一致，可能存在 DNS 劫持：<br/><br/>`;
   content += `<table border="1" cellpadding="4" cellspacing="0" style="border-collapse:collapse"><tr><th>主机记录</th><th>类型</th><th>期望值</th><th>本地解析值</th><th>状态</th></tr>`;
   for (const it of issues) {
     const status = it.status === 'not_found' ? '未查询到' : '不匹配';
-    content += `<tr><td>${it.name}</td><td>${it.type}</td><td>${it.value}</td><td>${it.actual.join('<br/>') || '-'}</td><td><font color="red">${status}</font></td></tr>`;
+    const actual = (it.actual || []).map(esc).join('<br/>') || '-';
+    content += `<tr><td>${esc(it.name)}</td><td>${esc(it.type)}</td><td>${esc(it.value)}</td><td>${actual}</td><td><font color="red">${status}</font></td></tr>`;
   }
   content += `</table><br/><font color="grey">聚合DNS管理系统</font><br/><font color="grey">${fmtDateTime()}</font>`;
   await sendMail(to, title, content);

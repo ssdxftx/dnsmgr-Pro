@@ -23,7 +23,7 @@ import { localResolve } from '../lib/dns/localResolve.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
-import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
+import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig, encryptText, decryptText } from '../lib/secret.js';
 
 // 批量取多个订单绑定的域名，避免证书/部署列表逐条查询（N+1）
 async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
@@ -346,7 +346,7 @@ export default async function certRoutes(app: FastifyInstance) {
         status: 3,
         isauto: 1,
         fullchain,
-        privatekey,
+        privatekey: encryptText(privatekey),
       };
     } else {
       order = { aid, keytype, keysize, addtime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date() };
@@ -391,7 +391,7 @@ export default async function certRoutes(app: FastifyInstance) {
         status: 3,
         issend: 0,
         fullchain,
-        privatekey,
+        privatekey: encryptText(privatekey),
       };
     } else {
       domList = (domains || []).map((d: string) => d.trim()).filter(Boolean);
@@ -480,12 +480,14 @@ export default async function certRoutes(app: FastifyInstance) {
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '证书订单不存在' };
     const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
+    // 私钥为加密存储，读取时解密（兼容历史明文）
+    const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
     let pfx = null;
-    if (row.fullchain && row.privatekey) {
+    if (row.fullchain && privateKey) {
       try {
         // PFX 密码由调用方指定，默认不设置密码（不再使用内置弱口令）
         const pfxPass = String(req.query?.pfx_pass || '');
-        pfx = (await buildPfx(row.fullchain, row.privatekey, pfxPass)).toString('base64');
+        pfx = (await buildPfx(row.fullchain, privateKey, pfxPass)).toString('base64');
       } catch (e: any) {
         // 记录失败原因（如容器缺少 openssl），避免同类环境问题无声失败难以排查
         console.error('[cert] 生成 PFX 失败 order=' + id + '：', e?.message || e);
@@ -497,7 +499,7 @@ export default async function certRoutes(app: FastifyInstance) {
       data: {
         id: row.id,
         crt: row.fullchain,
-        key: row.privatekey,
+        key: privateKey,
         pfx,
         issuetime: row.issuetime,
         expiretime: row.expiretime,

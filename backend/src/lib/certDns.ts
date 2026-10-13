@@ -90,6 +90,16 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
     let records = list.slice().sort((a, b) => a.name.localeCompare(b.name));
     if (drow.type === 'huawei') records = getHuaweiDnsRecords(records);
 
+    // 同一记录名下本批次需保留的全部值：通配符+主域会在同一 _acme-challenge 名下产生多条 TXT，
+    // 清理同名同类型旧记录时必须避开本批次仍需保留的值，避免误删导致校验失败
+    const neededValues: Record<string, Set<string>> = {};
+    for (const r of records) {
+      if (!neededValues[r.name]) neededValues[r.name] = new Set<string>();
+      const v = String(r.value);
+      neededValues[r.name].add(v);
+      neededValues[r.name].add(v.replace(/\.$/, ''));
+    }
+
     const cache: Record<string, any> = {};
     for (const row of records) {
       const domain = row.name + '.' + mainDomain;
@@ -108,8 +118,12 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
         continue;
       }
 
+      const keep = neededValues[row.name] || new Set<string>();
       const sameType = list2.filter((v: any) => v.Type === row.type);
       for (const rec of sameType) {
+        const rv = Array.isArray(rec.Value) ? rec.Value.join(',') : String(rec.Value ?? '');
+        // 本批次仍需保留的值（如通配符与主域各自的 TXT）跳过，避免误删
+        if (keep.has(rv) || keep.has(rv.replace(/\.$/, ''))) continue;
         await provider.deleteDomainRecord(rec.RecordId);
         cache[row.name].list = cache[row.name].list.filter((v: any) => v.RecordId !== rec.RecordId);
         log('Delete DNS Record: ' + domain + ' ' + row.type);

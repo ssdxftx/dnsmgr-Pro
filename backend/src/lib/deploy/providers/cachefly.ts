@@ -36,7 +36,7 @@ export class CacheflyDeploy implements DeployProvider {
       result = null;
     }
     if (res.status >= 200 && res.status < 300) return result;
-    if (text) this.log('Response:' + text);
+    this.log('HTTP ' + res.status);
     throw new Error('请求失败(httpCode=' + res.status + ')');
   }
 

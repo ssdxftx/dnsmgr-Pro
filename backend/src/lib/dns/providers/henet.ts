@@ -63,7 +63,7 @@ export class HenetDns implements DnsProvider {
     const headers: Record<string, string> = {};
     if (this.cookie) headers.Cookie = this.cookie;
     let body: string | undefined;
-    const init: RequestInit = { method, headers, redirect: 'manual' };
+    const init: RequestInit = { method, headers, redirect: 'manual', signal: AbortSignal.timeout(15000) };
     if (method === 'POST' && params) {
       const qs = new URLSearchParams();
       for (const [k, v] of Object.entries(params)) {

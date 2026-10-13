@@ -72,7 +72,9 @@ export class QiniuCDN implements CdnProvider {
   async listDomains(): Promise<CdnDomainItem[] | false> {
     const list: CdnDomainItem[] = [];
     let marker = '';
+    let guard = 0;
     do {
+      if (guard++ > 1000) break;
       const query: Record<string, any> = { limit: 100 };
       if (marker) query.marker = marker;
       const data = await this.call('GET', '/domain', query);
@@ -85,8 +87,10 @@ export class QiniuCDN implements CdnProvider {
         if (!detail) continue;
         list.push(this.mapDomain(detail));
       }
-      marker = data.marker || '';
-      if (!domains.length) break;
+      const nextMarker = data.marker || '';
+      // 无数据或游标不前进时终止，避免死循环
+      if (!domains.length || !nextMarker || nextMarker === marker) break;
+      marker = nextMarker;
     } while (marker);
     return list;
   }

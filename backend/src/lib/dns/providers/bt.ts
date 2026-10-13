@@ -52,6 +52,7 @@ export class BtDns implements DnsProvider {
           'X-Signature': signature,
         },
         body,
+        signal: AbortSignal.timeout(15000),
       });
       const text = await res.text();
       let arr: any;

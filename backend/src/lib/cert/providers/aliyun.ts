@@ -65,7 +65,9 @@ export class AliyunCert implements CertProvider {
     await new Promise((r) => setTimeout(r, 1000));
 
     let status = '';
+    let poll = 0;
     do {
+      if (poll++ > 120) throw new Error('申请证书超时，请稍后重试');
       data = await this.request({ Action: 'GetTaskAttribute', TaskId: instanceId }, true);
       status = data.TaskStatus;
       if (status === 'processing') {

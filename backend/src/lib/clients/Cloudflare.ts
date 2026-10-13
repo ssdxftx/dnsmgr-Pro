@@ -33,6 +33,7 @@ export class Cloudflare {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(15000),
     });
     const json = await res.json();
     if (!json.success) {

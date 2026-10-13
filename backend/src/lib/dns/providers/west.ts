@@ -29,6 +29,7 @@ export class WestDns implements DnsProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(params).toString(),
+        signal: AbortSignal.timeout(15000),
       });
       const buf = await res.arrayBuffer();
       const text = new TextDecoder('gbk').decode(buf);

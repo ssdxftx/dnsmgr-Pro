@@ -9,7 +9,7 @@ import { appendLog } from './util.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
-import { decryptConfig, encryptConfig } from './secret.js';
+import { decryptConfig, encryptConfig, decryptText } from './secret.js';
 import { assertDeployConfigAllowed } from './netGuard.js';
 
 function safeJson(s: string | null): any {
@@ -64,7 +64,12 @@ export class CertDeployService {
 
   private async lockTask() {
     if (!this.task.processid) this.task.processid = genSid();
-    await query(`UPDATE ${table('cert_deploy')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ?`, [this.task.processid, this.tid]);
+    // 原子加锁：仅当未锁或锁已超时（1 小时）时才成功，避免并发重复部署
+    const res: any = await query(
+      `UPDATE ${table('cert_deploy')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
+      [this.task.processid, this.tid],
+    );
+    if (!res || !res.affectedRows) throw new Error('该部署任务正在处理中，请稍后再试');
   }
 
   private async unlockTask() {
@@ -81,10 +86,12 @@ export class CertDeployService {
     if (order.status === 4) throw new Error('SSL证书订单已吊销');
     if (order.status !== 3) throw new Error('SSL证书订单未完成签发');
     if (!order.fullchain || !order.privatekey) throw new Error('SSL证书或私钥内容不存在');
+    // 私钥为加密存储，部署前解密（兼容历史明文）
+    const privateKey = decryptText(order.privatekey) ?? order.privatekey;
 
     await this.lockTask();
     try {
-      await this.deploy(order.fullchain, order.privatekey);
+      await this.deploy(order.fullchain, privateKey);
     } finally {
       await this.unlockTask();
     }

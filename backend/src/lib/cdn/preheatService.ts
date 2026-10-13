@@ -130,7 +130,12 @@ export async function executePreheatTasks(): Promise<number> {
   let run = 0;
   for (const t of rows) {
     const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
-    await query(`UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [fmtDateTime(next), t.id]);
+    // 原子领取：仅当任务仍处于到期状态时才更新成功，避免并发调度重复执行
+    const claim: any = await query(
+      `UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ? AND active = 1 AND (next_run IS NULL OR next_run <= NOW())`,
+      [fmtDateTime(next), t.id],
+    );
+    if (!claim || !claim.affectedRows) continue;
     const urls = loadUrls(t.urls);
     if (urls.length) {
       try {
