@@ -203,7 +203,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
 
   app.post('/api/dmonitor/tasks/:id/active', auth, async (req: any) => {
     const id = Number(req.params.id);
-    const active = Number((req.body || {}).active);
+    const active = Number((req.body || {}).active) === 1 ? 1 : 0;
     await query(`UPDATE ${table('dmtask')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: '设置成功' };
   });

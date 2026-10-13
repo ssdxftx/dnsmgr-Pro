@@ -1,5 +1,6 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
+import { safeFetchDeploy } from '../../netGuard.js';
 
 export class TechnitiumDns implements DnsProvider {
   private url: string;
@@ -34,7 +35,7 @@ export class TechnitiumDns implements DnsProvider {
         init.body = body.toString();
         init.headers = { 'Content-Type': 'application/x-www-form-urlencoded' };
       }
-      const res = await fetch(url, init);
+      const res = await safeFetchDeploy(url, init);
       const text = await res.text();
       let arr: any;
       try {

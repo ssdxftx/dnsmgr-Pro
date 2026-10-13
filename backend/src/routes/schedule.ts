@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { fmtTimestamp, hasOwn } from '../lib/util.js';
+import { fmtTimestamp, hasOwn, escapeLike } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
 import { updateNexttime } from '../lib/schedule/scheduleService.js';
 
@@ -41,8 +41,8 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const params: any[] = [];
     if (kw) {
       if (searchType === 1) {
-        where += ' AND (A.rr LIKE ? OR B.name LIKE ?)';
-        params.push('%' + kw + '%', '%' + kw + '%');
+        where += " AND (A.rr LIKE ? ESCAPE '!' OR B.name LIKE ? ESCAPE '!')";
+        params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%');
       } else if (searchType === 2) {
         where += ' AND A.recordid = ?';
         params.push(kw);
@@ -50,8 +50,8 @@ export default async function scheduleRoutes(app: FastifyInstance) {
         where += ' AND A.value = ?';
         params.push(kw);
       } else if (searchType === 4) {
-        where += ' AND A.remark LIKE ?';
-        params.push('%' + kw + '%');
+        where += " AND A.remark LIKE ? ESCAPE '!'";
+        params.push('%' + escapeLike(kw) + '%');
       }
     }
     if (!isNullOrEmpty(stype)) {
@@ -137,7 +137,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
 
   app.post('/api/schedule/tasks/:id/active', auth, async (req: any) => {
     const id = Number(req.params.id);
-    const active = Number((req.body || {}).active);
+    const active = Number((req.body || {}).active) === 1 ? 1 : 0;
     await query(`UPDATE ${table('sctask')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: '设置成功' };
   });

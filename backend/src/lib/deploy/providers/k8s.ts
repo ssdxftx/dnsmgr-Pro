@@ -1,5 +1,4 @@
 import { request as httpRequest } from 'node:https';
-import { readFileSync } from 'node:fs';
 import { parse as parseYaml } from 'yaml';
 import { assertDeployTargetAllowed } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
@@ -80,9 +79,10 @@ export class K8sDeploy implements DeployProvider {
     if (user.user && user.user['client-certificate-data'] && user.user['client-key-data']) {
       clientCert = Buffer.from(user.user['client-certificate-data'], 'base64');
       clientKey = Buffer.from(user.user['client-key-data'], 'base64');
-    } else if (user.user && user.user['client-certificate'] && user.user['client-key']) {
-      clientCert = readFileSync(user.user['client-certificate']);
-      clientKey = readFileSync(user.user['client-key']);
+    } else if (user.user && (user.user['client-certificate'] || user.user['client-key'])) {
+      // 拒绝读取 kubeconfig 中引用的本地文件路径，避免任意文件读取；
+      // 请改用内联的 client-certificate-data / client-key-data
+      throw new Error('出于安全考虑，不支持 kubeconfig 中的 client-certificate / client-key 文件路径，请改用内联的 client-certificate-data / client-key-data');
     }
     this.tls = { cert: clientCert, key: clientKey };
   }

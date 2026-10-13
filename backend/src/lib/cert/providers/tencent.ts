@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { TencentCloud } from '../../clients/TencentCloud.js';
 import { getMainDomain, parseCertPem, unzip, findFileByExt } from '../utils.js';
 import { addDns } from '../../certDns.js';
+import { safeFetch } from '../../netGuard.js';
 import type { CertProvider, CreateOrderResult, CertInfo } from '../types.js';
 
 export class TencentCert implements CertProvider {
@@ -90,13 +91,14 @@ export class TencentCert implements CertProvider {
       ServiceType: 'nginx',
     });
 
-    const res = await fetch(data.DownloadCertificateUrl);
+    const res = await safeFetch(data.DownloadCertificateUrl);
     const buf = Buffer.from(await res.arrayBuffer());
     if (!buf.length) throw new Error('下载证书失败');
 
     const dir = mkdtempSync(join(tmpdir(), 'cert_'));
     try {
-      const zipPath = join(dir, data.DownloadFilename);
+      // 下载文件名来自服务端响应，使用固定名避免其中的 ../ 穿越临时目录
+      const zipPath = join(dir, 'cert.zip');
       writeFileSync(zipPath, buf);
       unzip(zipPath, dir);
       const keyFile = findFileByExt(dir, ['.key']);

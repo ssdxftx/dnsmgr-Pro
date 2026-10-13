@@ -4,6 +4,7 @@ import { configGet, configSet } from '../config.js';
 import { fmtDateTime, hasOwn, escapeLike } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
+import { SECRET_MASK } from '../lib/secret.js';
 
 // 优选IP接口仅管理员可用
 const authenticate = (app: FastifyInstance) => ({
@@ -31,11 +32,13 @@ export default async function optimizeRoutes(app: FastifyInstance) {
 
   // 设置
   app.get('/api/optimize/settings', auth, async () => {
+    const key = (await configGet('optimize_ip_key', '')) || '';
     return {
       code: 0,
       data: {
         optimize_ip_api: (await configGet('optimize_ip_api', '0')) || '0',
-        optimize_ip_key: (await configGet('optimize_ip_key', '')) || '',
+        // 密钥不回显明文，以掩码返回
+        optimize_ip_key: key ? SECRET_MASK : '',
         optimize_ip_proxy: (await configGet('optimize_ip_proxy', '')) || '',
         optimize_ip_min: (await configGet('optimize_ip_min', '30')) || '30',
       },
@@ -49,6 +52,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     for (const key of allowed) {
       if (!(key in b)) continue;
       const value = b[key];
+      // 掩码表示未修改密钥，沿用原值
+      if (key === 'optimize_ip_key' && String(value) === SECRET_MASK) continue;
       if (key === 'optimize_ip_min' && parseInt(String(value)) < 10) {
         return { code: -1, msg: '自动更新时间间隔不能小于10分钟' };
       }
@@ -60,7 +65,9 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 查询积分
   app.post('/api/optimize/queryapi', auth, async (req: any) => {
     const api = Number((req.body || {}).optimize_ip_api);
-    const key = ((req.body || {}).optimize_ip_key || '').trim();
+    let key = ((req.body || {}).optimize_ip_key || '').trim();
+    // 前端未重新输入密钥时提交的是掩码，回退使用已保存的密钥
+    if (key === SECRET_MASK) key = ((await configGet('optimize_ip_key', '')) || '').trim();
     if (!key) return { code: -1, msg: '参数不能为空' };
     try {
       const result = await getLicense(api, key);
@@ -186,7 +193,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 启停
   app.post('/api/optimize/tasks/:id/active', auth, async (req: any) => {
     const id = Number(req.params.id);
-    const active = Number((req.body || {}).active);
+    const active = Number((req.body || {}).active) === 1 ? 1 : 0;
     await query(`UPDATE ${table('optimizeip')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: '设置成功' };
   });

@@ -143,8 +143,8 @@ export class SshDeploy implements DeployProvider {
         stream.on('data', (d: Buffer) => (output += d.toString()));
         stream.stderr.on('data', (d: Buffer) => (errorOutput += d.toString()));
         stream.on('close', (code: number) => {
-          if (code !== 0 && errorOutput.trim()) {
-            reject(new Error('执行命令失败：' + errorOutput.trim()));
+          if (code !== 0) {
+            reject(new Error('执行命令失败：' + (errorOutput.trim() || '退出码 ' + code)));
           } else {
             this.log('执行命令成功：' + output.trim());
             resolve(output);
