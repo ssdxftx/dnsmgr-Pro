@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
+import { assertDeployTargetAllowed } from '../netGuard.js';
 
 export class AliyunOSS {
   private AccessKeyId: string;
@@ -66,6 +67,8 @@ export class AliyunOSS {
     };
     headers['Authorization'] = this.getAuthorization(method, path, query, headers, options);
 
+    // Endpoint 来自部署配置，出站前拒绝链路本地/云元数据地址
+    await assertDeployTargetAllowed(requestUrl);
     const res = await fetch(requestUrl, {
       method,
       headers,

@@ -42,7 +42,7 @@ export class GcoreDeploy implements DeployProvider {
       const errors = result.errors[firstKey];
       throw new Error(Array.isArray(errors) ? String(errors[0]) : String(errors));
     }
-    if (text) this.log('Response:' + text);
+    this.log('HTTP ' + res.status);
     throw new Error('请求失败(httpCode=' + res.status + ')');
   }
 

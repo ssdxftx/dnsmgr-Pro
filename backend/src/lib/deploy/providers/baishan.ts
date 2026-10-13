@@ -38,7 +38,7 @@ export class BaishanDeploy implements DeployProvider {
     }
     if (result && result.code === 0) return result;
     if (result && result.message !== undefined) throw new Error(result.message);
-    if (text) this.log('Response:' + text);
+    this.log('HTTP ' + res.status);
     throw new Error('请求失败(httpCode=' + res.status + ')');
   }
 

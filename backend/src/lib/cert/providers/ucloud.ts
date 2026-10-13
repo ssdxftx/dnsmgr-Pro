@@ -23,7 +23,8 @@ export class UcloudCert implements CertProvider {
   private request(action: string, params: Record<string, any>): Promise<any> {
     this.log('Action:' + action + '\nRequest:' + JSON.stringify(params));
     return this.client.request(action, params).then((result) => {
-      this.log('Response:' + JSON.stringify(result));
+      // 仅记录响应字段名，避免把含签名下载地址等敏感内容写入日志
+      this.log('Response keys: ' + Object.keys(result || {}).join(','));
       return result;
     });
   }
@@ -110,11 +111,13 @@ export class UcloudCert implements CertProvider {
 
     const dir = mkdtempSync(join(tmpdir(), 'cert_'));
     try {
-      const zipPath = join(dir, 'USSL_' + order.CertificateID + '.zip');
+      // CertificateID 来自接口响应，仅保留安全字符再拼入文件名，避免路径穿越
+      const safeId = String(order.CertificateID ?? '').replace(/[^A-Za-z0-9_-]/g, '');
+      const zipPath = join(dir, 'USSL_' + safeId + '.zip');
       writeFileSync(zipPath, buf);
       unzip(zipPath, dir);
-      const keyFile = findFileByExt(dir, ['.key']);
-      const pemFile = findFileByExt(dir, ['.pem']);
+      const keyFile = findFileByExt(dir, ['.key'], dir);
+      const pemFile = findFileByExt(dir, ['.pem'], dir);
       if (!keyFile || !pemFile) throw new Error('解压后的证书文件夹内未找到证书文件');
       const private_key = readFileSync(keyFile, 'utf8');
       const fullchain = readFileSync(pemFile, 'utf8');

@@ -8,7 +8,10 @@ export class AliyunEsaDns implements DnsProvider {
   private domainid: string;
 
   constructor(config: Record<string, any>) {
-    const endpoint = config.region ? `esa.${config.region}.aliyuncs.com` : 'esa.cn-hangzhou.aliyuncs.com';
+    // region 会拼入 endpoint 主机名，白名单校验避免注入 host（如含 / 截断域名）
+    const region = String(config.region || '').trim();
+    const validRegion = /^[a-z0-9-]+$/i.test(region) ? region : '';
+    const endpoint = validRegion ? `esa.${validRegion}.aliyuncs.com` : 'esa.cn-hangzhou.aliyuncs.com';
     this.client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, endpoint, '2024-09-10');
     this.domain = config.domain || '';
     this.domainid = config.domainid || '';

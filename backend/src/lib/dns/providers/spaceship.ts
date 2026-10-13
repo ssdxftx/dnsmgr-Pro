@@ -25,7 +25,7 @@ export class SpaceshipDns implements DnsProvider {
         'X-API-Secret': this.apiSecret,
       };
       let url = this.baseUrl + path;
-      const init: RequestInit = { method, headers };
+      const init: RequestInit = { method, headers, signal: AbortSignal.timeout(15000) };
       if (method === 'GET' && params) {
         const qs = new URLSearchParams();
         for (const [k, v] of Object.entries(params)) {

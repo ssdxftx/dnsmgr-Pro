@@ -62,7 +62,7 @@ export class Jdcloud {
     let url = 'https://' + this.endpoint + path;
     if (Object.keys(query).length) url += '?' + new URLSearchParams(query).toString();
 
-    const res = await fetch(url, { method, headers, body: body || undefined });
+    const res = await fetch(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
     const json = await res.json();
     if (res.status === 200) {
       if (json.result !== undefined) return json.result;

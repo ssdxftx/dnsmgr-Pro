@@ -29,7 +29,7 @@ export class NamesiloDns implements DnsProvider {
       for (const [k, v] of Object.entries(params)) {
         if (v !== null && v !== undefined) qs.append(k, String(v));
       }
-      const res = await fetch(this.baseUrl + operation + '?' + qs.toString());
+      const res = await fetch(this.baseUrl + operation + '?' + qs.toString(), { signal: AbortSignal.timeout(15000) });
       const text = await res.text();
       let arr: any;
       try {

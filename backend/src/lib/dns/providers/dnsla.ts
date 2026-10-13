@@ -47,7 +47,7 @@ export class Dnsla implements DnsProvider {
         'Content-Type': 'application/json; charset=utf-8',
       };
       let url = this.baseUrl + path;
-      const init: RequestInit = { method, headers };
+      const init: RequestInit = { method, headers, signal: AbortSignal.timeout(15000) };
       if (method === 'POST' || method === 'PUT') {
         init.body = JSON.stringify(params ?? {});
       } else if (params) {

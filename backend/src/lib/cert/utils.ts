@@ -1,18 +1,21 @@
 import { X509Certificate } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { readdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { readdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { query, table } from '../../db.js';
 
 let domainsCache: string[] | null = null;
+let domainsCacheAt = 0;
+const DOMAINS_CACHE_MS = 60_000;
 
 export async function getMainDomain(host: string): Promise<string> {
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':')) return host;
-  if (!domainsCache) {
+  if (!domainsCache || Date.now() - domainsCacheAt > DOMAINS_CACHE_MS) {
     const rows = await query<{ name: string }>(`SELECT name FROM ${table('domain')}`);
     const aliasRows = await query<{ name: string }>(`SELECT name FROM ${table('domain_alias')}`);
     domainsCache = [...rows.map((r) => r.name), ...aliasRows.map((r) => r.name)].sort((a, b) => b.length - a.length);
+    domainsCacheAt = Date.now();
   }
   for (const domain of domainsCache) {
     if (host === domain || host.endsWith('.' + domain)) return domain;
@@ -63,13 +66,30 @@ export function buildPfx(fullchain: string, privatekey: string, pwd: string): Bu
   }
 }
 
-export function findFileByExt(dir: string, exts: string[]): string | null {
+export function findFileByExt(dir: string, exts: string[], root: string = dir): string | null {
+  const rootReal = (() => {
+    try {
+      return realpathSync(root);
+    } catch {
+      return root;
+    }
+  })();
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    // 拒绝符号链接，避免读取解压目录之外的文件
+    if (entry.isSymbolicLink()) continue;
     const p = join(dir, entry.name);
     if (entry.isDirectory()) {
-      const r = findFileByExt(p, exts);
+      const r = findFileByExt(p, exts, root);
       if (r) return r;
     } else if (exts.some((e) => entry.name.endsWith(e))) {
+      const real = (() => {
+        try {
+          return realpathSync(p);
+        } catch {
+          return p;
+        }
+      })();
+      if (rootReal && !(real === rootReal || real.startsWith(rootReal + sep))) continue;
       return p;
     }
   }

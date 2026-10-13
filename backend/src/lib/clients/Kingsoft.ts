@@ -82,6 +82,7 @@ export class Kingsoft {
     const res = await fetch(url, {
       method: 'GET',
       headers: { Host: this.endpoint, 'X-Amz-Date': ts, 'X-Action': action, 'X-Version': version },
+      signal: AbortSignal.timeout(15000),
     });
     return this.parse(res);
   }
@@ -122,6 +123,7 @@ export class Kingsoft {
         'X-Version': version,
       },
       body: payload,
+      signal: AbortSignal.timeout(15000),
     });
     return this.parse(res);
   }

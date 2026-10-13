@@ -23,7 +23,7 @@ export class BaiShan {
       payload = JSON.stringify({ ...filterNull(body), token: this.token });
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, { method, headers, body: payload });
+    const res = await fetch(url, { method, headers, body: payload, signal: AbortSignal.timeout(15000) });
     const text = await res.text();
     let json: any = null;
     try {

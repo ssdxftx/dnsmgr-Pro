@@ -39,7 +39,7 @@ export class RainyunDeploy implements DeployProvider {
       return result.data ?? null;
     }
     if (result && result.message !== undefined) throw new Error(result.message);
-    if (text) this.log('Response:' + text);
+    this.log('HTTP ' + res.status);
     throw new Error('请求失败(httpCode=' + res.status + ')');
   }
 

@@ -1,4 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
+import { assertDeployTargetAllowed } from '../netGuard.js';
 
 export class CdnetworksError extends Error {}
 
@@ -46,10 +47,14 @@ export class Cdnetworks {
     };
     headers.Authorization = this.sign(method, path, payload, this.endpoint, timestamp);
 
-    const res = await fetch('https://' + this.endpoint + path, {
+    const requestUrl = 'https://' + this.endpoint + path;
+    // Endpoint 来自账户配置，出站前拒绝链路本地/云元数据地址
+    await assertDeployTargetAllowed(requestUrl);
+    const res = await fetch(requestUrl, {
       method,
       headers,
       body: payload || undefined,
+      signal: AbortSignal.timeout(15000),
     });
     const text = await res.text();
     const respHeaders: Record<string, string> = {};

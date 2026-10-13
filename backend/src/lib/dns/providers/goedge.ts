@@ -202,10 +202,22 @@ export class GoEdgeDns implements DnsProvider {
     }
   }
 
+  // 记录必须属于当前配置的域名，避免以任意 nsRecordId 跨域名读取/改写（IDOR）
+  private assertRecordInDomain(record: Record<string, any>): boolean {
+    if (!this.domainid) return true;
+    if (record.nsDomainId === undefined || record.nsDomainId === null) return true;
+    if (Number(record.nsDomainId) !== Number(this.domainid)) {
+      this.setError('该解析记录不属于当前域名');
+      return false;
+    }
+    return true;
+  }
+
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
     try {
       const data = await this.request('/NSRecordService/findNSRecord', { nsRecordId: Number(RecordId) });
       if (!data.nsRecord) return false;
+      if (!this.assertRecordInDomain(data.nsRecord)) return false;
       return this.normalizeRecord(data.nsRecord);
     } catch (e: any) {
       this.setError(e.message || String(e));
@@ -257,6 +269,8 @@ export class GoEdgeDns implements DnsProvider {
   }
 
   async deleteDomainRecord(RecordId: string) {
+    const current = await this.getDomainRecordInfo(RecordId);
+    if (!current) return false;
     try {
       await this.request('/NSRecordService/deleteNSRecord', { nsRecordId: Number(RecordId) });
       return true;

@@ -24,7 +24,8 @@ export class TencentCert implements CertProvider {
   private request(action: string, param: Record<string, any>): Promise<any> {
     this.log('Action:' + action + '\nRequest:' + JSON.stringify(param));
     return this.client.request(action, param).then((result) => {
-      this.log('Response:' + JSON.stringify(result));
+      // 仅记录响应字段名，避免把含签名下载地址等敏感内容写入日志
+      this.log('Response keys: ' + Object.keys(result || {}).join(','));
       return result;
     });
   }

@@ -125,7 +125,9 @@ export async function refreshAllStatCache(): Promise<{ accounts: number; errors:
   const now = new Date();
   const dayStart = startOfDay(new Date(now.getTime() - (STAT_RETENTION_DAYS - 1) * 86400000));
   const dayEnd = new Date(startOfDay(now).getTime() + 86400000);
-  const hourStart = new Date(startOfHour(now).getTime() - 47 * 3600000);
+  // 小时缓存窗口需保持在 1 天内：buildLabels 以跨度 >1 天切换为「天」标签，
+  // 若窗口超过 1 天，小时粒度会写入按天聚合的数据导致图表错乱
+  const hourStart = new Date(startOfHour(now).getTime() - 23 * 3600000);
   const hourEnd = now;
 
   const errors: string[] = [];

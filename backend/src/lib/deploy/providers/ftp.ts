@@ -15,7 +15,8 @@ export class FtpDeploy implements DeployProvider {
   }
 
   private async connect(): Promise<any> {
-    const client = new Client();
+    // 连接/读写超时（毫秒），避免上游无响应时任务长时间挂起
+    const client = new Client(15000);
     client.ftp.verbose = false;
     // FTPS 默认校验证书，避免会话被中间人劫持窃取凭据；自签名证书可显式设置 insecure
     const insecure = this.config.insecure === '1' || this.config.insecure === 1 || this.config.insecure === true;
