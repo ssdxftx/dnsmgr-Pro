@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { fmtTimestamp, hasOwn, escapeLike } from '../lib/util.js';
+import { fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
 import { updateNexttime } from '../lib/schedule/scheduleService.js';
 
@@ -32,8 +32,8 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const kw = q.kw || '';
     const stype = q.stype;
     const searchType = Number(q.type || 1);
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
     const sort = q.sortName || '';
     const orderDir = String(q.sortOrder || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 

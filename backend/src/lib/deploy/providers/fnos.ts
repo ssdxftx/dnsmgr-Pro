@@ -131,7 +131,10 @@ export class FnosDeploy implements DeployProvider {
           const keyB64 = Buffer.from(privatekey).toString('base64');
           await this.exec(conn, '上传证书文件', 'printf %s ' + shq(certB64) + ' | base64 -d | sudo tee ' + shq(certPath) + ' > /dev/null');
           await this.exec(conn, '上传私钥文件', 'printf %s ' + shq(keyB64) + ' | base64 -d | sudo tee ' + shq(keyPath) + ' > /dev/null');
-          await this.exec(conn, '刷新目录权限', 'sudo chmod 0755 ' + shq(certDir) + ' -R');
+          // 目录与证书文件分别设权，私钥单独收紧为 0600，避免 -R 递归把私钥放开
+          await this.exec(conn, '刷新目录权限', 'sudo chmod 0755 ' + shq(certDir));
+          await this.exec(conn, '设置证书文件权限', 'sudo chmod 0644 ' + shq(certPath));
+          await this.exec(conn, '设置私钥文件权限', 'sudo chmod 0600 ' + shq(keyPath));
           const psql = 'UPDATE cert SET  valid_to=' + validTo + ',valid_from=' + validFrom + ",issued_by='" + sqlStr(issuerCN) + "',updated_time=" + Date.now() + " WHERE private_key='" + sqlStr(keyPath) + "'";
           await this.exec(conn, '更新数据表', 'cd /tmp && sudo -u postgres psql -d trim_connect -c ' + shq(psql));
           this.log('证书 ' + row.domain + ' 更新成功');

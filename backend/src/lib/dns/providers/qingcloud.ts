@@ -5,6 +5,8 @@ import { findRecordById } from '../recordLookup.js';
 export class QingcloudDns implements DnsProvider {
   private access_key_id: string;
   private secret_access_key: string;
+  // 注意：上游 routewize 仅提供 HTTP 端点（HTTPS 不可用），签名凭据在传输层存在被中间人窃取/重放的风险。
+  // 该服务商签名仅绑定 method/date/path，若厂商后续支持 HTTPS 应立即切换。
   private baseUrl = 'http://api.routewize.com';
   private error = '';
   private domain: string;

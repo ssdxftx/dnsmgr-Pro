@@ -245,23 +245,28 @@ export class AliyunESA implements CdnProvider {
     return '(http.host eq "' + normalizeValue(domain).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
   }
 
+  // ESA 规则表达式字符串字面量转义：转义反斜杠与双引号，避免值中的 " 关闭字面量造成表达式注入
+  private esaEscape(s: string): string {
+    return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
   // dnsmgr 的 path 规则 → ESA 规则表达式的补充条件（不含 host 前缀，返回闭括号结尾的片段）
   private esaPathCondition(parsed: { type: PathRuleType; value: string }): string {
     if (parsed.type === 'file_extension') {
       const exts = fileExtensions(parsed.value);
       if (!exts.length) throw new Error('文件后缀缓存规则内容不能为空');
-      return ' and http.request.uri.path matches "\\.(' + exts.join('|') + ')$")';
+      return ' and http.request.uri.path matches "\\.(' + exts.map((e) => this.esaEscape(e)).join('|') + ')$")';
     }
     if (parsed.type === 'catalog') {
       const path = catalogPath(parsed.value);
-      return ' and starts_with(http.request.uri.path, "' + path + '"))';
+      return ' and starts_with(http.request.uri.path, "' + this.esaEscape(path) + '"))';
     }
     // full_path
     const v = normalizeValue(parsed.value);
     if (v.includes('*') || v.includes('?')) {
-      return ' and http.request.uri.path matches "' + wildcardToRegex(v) + '"))';
+      return ' and http.request.uri.path matches "' + wildcardToRegex(v).replace(/"/g, '\\"') + '"))';
     }
-    return ' and http.request.uri.path eq "' + v.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"))';
+    return ' and http.request.uri.path eq "' + this.esaEscape(v) + '"))';
   }
 
   private async findEsaRule(action: string, siteId: number, ruleName: string): Promise<any | null> {

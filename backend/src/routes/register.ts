@@ -5,6 +5,7 @@ import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { sendMail } from '../lib/monitor/msgNotice.js';
+import { clampLimit, clampOffset } from '../lib/util.js';
 
 const SITENAME = '聚合DNS管理系统';
 const CODE_TTL_SECONDS = 10 * 60; // 验证码有效期 10 分钟
@@ -125,7 +126,9 @@ export default async function registerRoutes(app: FastifyInstance) {
         }
         return { code: -1, msg: '验证码错误或已过期' };
       }
-      await query(`UPDATE ${table('reg_verify')} SET used = 1 WHERE id = ?`, [verify.id]);
+      // 原子占用验证码：在 UPDATE 中再次校验 used=0，避免并发下同一验证码重复注册
+      const consumed: any = await query(`UPDATE ${table('reg_verify')} SET used = 1 WHERE id = ? AND used = 0`, [verify.id]);
+      if (!consumed || !consumed.affectedRows) return { code: -1, msg: '验证码错误或已过期' };
     } else {
       // 注册码模式
       const regCode = (b.reg_code || '').trim().toUpperCase();
@@ -159,8 +162,8 @@ export default async function registerRoutes(app: FastifyInstance) {
   app.get('/api/register/codes', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const q = req.query || {};
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
     const totalRow = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('reg_code')}`);
     const list = await query(
       `SELECT * FROM ${table('reg_code')} ORDER BY id DESC LIMIT ? OFFSET ?`,

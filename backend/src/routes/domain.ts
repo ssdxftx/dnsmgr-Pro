@@ -95,7 +95,7 @@ function filterRecords(acc: { admin: boolean; perms: SubPermission[] }, domainNa
 function buildAccess(acc: { admin: boolean; perms: SubPermission[] }, domainName: string) {
   if (acc.admin) return { admin: true, readonly: false, writable: true, subs: [] };
   const mine = acc.perms.filter((p) => p.domain === domainName);
-  const writable = mine.some((p) => p.readonly !== 1);
+  const writable = mine.some((p) => Number(p.readonly) !== 1);
   return { admin: false, readonly: !writable, writable, subs: mine.map((p) => p.sub).filter(Boolean) };
 }
 
@@ -598,6 +598,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const remark = b.remark ? String(b.remark) : null;
     const lines = raw.split('\n').map((s: string) => s.trim()).filter(Boolean);
     if (!lines.length) return { code: -1, msg: '参数不能为空' };
+    if (lines.length > 500) return { code: -1, msg: '单次最多添加 500 条解析记录' };
     const acc = await getUserPerms(req);
     let success = 0;
     let fail = 0;
@@ -701,6 +702,12 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (status === '1') {
         let success = 0;
         for (const [recordId, w] of Object.entries(weight)) {
+          // 逐条判权：避免以任意 recordId 修改授权子域名之外的记录权重
+          if (!acc.admin) {
+            const cur = await (provider as any).getDomainRecordInfo(recordId);
+            if (!cur) continue;
+            if (writeErr(acc, info.domain.name, cur.Name)) continue;
+          }
           if (await provider.updateRecordWeight(recordId, Number(w))) success++;
         }
         if (success > 0) return { code: 0, msg: '成功修改' + success + '条解析记录权重' };

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
-import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike } from '../lib/util.js';
+import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 
 // 容灾监控接口仅管理员可用
 const authenticate = (app: FastifyInstance) => ({
@@ -60,8 +60,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     const q = req.query || {};
     const kw = q.kw || '';
     const status = q.status;
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
     const sort = q.sortName || '';
     const orderDir = String(q.sortOrder || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const searchType = Number(q.type || 1);
@@ -254,8 +254,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const q = req.query || {};
     const action = Number(q.action || 0);
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
     let where = 'taskid = ?';
     const params: any[] = [id];
     if (action > 0) {

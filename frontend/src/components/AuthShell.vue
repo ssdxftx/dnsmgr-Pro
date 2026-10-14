@@ -67,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { NIcon } from 'naive-ui';
 import { GlobeOutline } from '@vicons/ionicons5';
 import { useI18n } from 'vue-i18n';
@@ -87,6 +87,7 @@ const platforms = [
 const n1 = ref(0);
 const n2 = ref(0);
 const n3 = ref(0);
+const rafIds = new Set<number>();
 function countTo(target: number, out: typeof n1, dur = 1200) {
   const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
   if (reduce) { out.value = target; return; }
@@ -95,14 +96,18 @@ function countTo(target: number, out: typeof n1, dur = 1200) {
     const p = Math.min(1, (now - start) / dur);
     const eased = 1 - Math.pow(1 - p, 3);
     out.value = Math.round(target * eased);
-    if (p < 1) requestAnimationFrame(step);
+    if (p < 1) rafIds.add(requestAnimationFrame(step));
   };
-  requestAnimationFrame(step);
+  rafIds.add(requestAnimationFrame(step));
 }
 onMounted(() => {
   countTo(20, n1);
   countTo(40, n2, 1400);
   countTo(4, n3, 900);
+});
+onBeforeUnmount(() => {
+  for (const id of rafIds) cancelAnimationFrame(id);
+  rafIds.clear();
 });
 </script>
 

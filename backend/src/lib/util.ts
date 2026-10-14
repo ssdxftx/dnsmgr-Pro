@@ -21,6 +21,18 @@ export function escapeLike(s: string): string {
   return String(s).replace(/[!%_]/g, (m) => '!' + m);
 }
 
+// 分页参数归一化：limit 限制在 [1, max]，非法值回退默认；offset 非负
+export function clampLimit(v: any, def = 10, max = 200): number {
+  const n = Math.floor(Number(v));
+  if (!Number.isFinite(n) || n <= 0) return def;
+  return Math.min(n, max);
+}
+
+export function clampOffset(v: any): number {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
 // 面向客户端返回的错误信息：去除换行/制表等控制符并限制长度，避免泄露多行堆栈等内部细节
 export function clientMessage(e: any, fallback = '操作失败'): string {
   const raw = typeof e === 'string' ? e : e && e.message ? String(e.message) : '';

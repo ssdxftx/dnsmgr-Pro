@@ -39,6 +39,20 @@ export function parseCertPem(pem: string): { issuer: string; subject: string; va
 }
 
 export function unzip(zipPath: string, destDir: string): void {
+  // 预检压缩包条目：拒绝绝对路径、盘符/UNC、含 .. 段的条目，防止 zip-slip 越界落盘
+  let listing = '';
+  try {
+    listing = execFileSync('unzip', ['-Z1', zipPath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+  } catch {
+    listing = '';
+  }
+  for (const raw of listing.split(/\r?\n/)) {
+    const name = raw.trim();
+    if (!name) continue;
+    if (name.startsWith('/') || name.startsWith('\\') || /^[a-zA-Z]:[\\/]/.test(name) || name.split(/[\\/]/).includes('..')) {
+      throw new Error('压缩包包含非法/越界路径条目：' + name);
+    }
+  }
   execFileSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
 }
 
@@ -49,7 +63,7 @@ export function buildPfx(fullchain: string, privatekey: string, pwd: string): Bu
   const pfxFile = join(dir, 'out.pfx');
   try {
     writeFileSync(certFile, fullchain);
-    writeFileSync(keyFile, privatekey);
+    writeFileSync(keyFile, privatekey, { mode: 0o600 });
     try {
       execFileSync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', `pass:${pwd}`]);
     } catch (e: any) {

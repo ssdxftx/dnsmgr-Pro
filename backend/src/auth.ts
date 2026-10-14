@@ -66,7 +66,7 @@ export function matchPermission(perms: SubPermission[], domain: string, recordNa
   for (const p of perms) {
     if (p.domain !== domain) continue;
     if (isRecordInScope(recordName, p.sub)) {
-      if (p.readonly !== 1) return 0;
+      if (Number(p.readonly) !== 1) return 0;
       best = 1;
     }
   }

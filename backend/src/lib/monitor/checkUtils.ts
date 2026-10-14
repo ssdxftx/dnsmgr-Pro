@@ -71,6 +71,8 @@ export async function checkCurl(url: string, timeout: number, ip: string | null 
   try {
     const u = new URL(url);
     if (!u.hostname) throw new Error('Invalid URL');
+    // 强制解析到指定 IP 时，需对该 IP 本身做内网校验，避免「域名公网 + ip 内网」绕过内网限制
+    if (ip && net.isIP(ip)) await assertHostAllowed(ip);
     // 禁止监控目标指向内网/回环地址，避免被用作内网探测或 SSRF；
     // safeFetch 逐跳校验跳转目标，防止经 302 跳转到内网地址
     const dispatcher = await buildDispatcher(u.hostname, ip, proxy);

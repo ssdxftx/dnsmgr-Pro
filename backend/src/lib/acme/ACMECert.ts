@@ -212,19 +212,6 @@ export class ACMECert extends ACMEv2 {
     return this.resources!.meta.caaIdentities;
   }
 
-  async keyChange(newAccountKeyPem: string): Promise<any> {
-    this.loadAccountKey(newAccountKeyPem);
-    const account = await this.getAccountID();
-    this.log('Account Key Roll-Over');
-    const ret = await this.request(
-      'keyChange',
-      await this.jwsEncapsulate('keyChange', { account, oldKey: this.jwkHeader!.jwk }, true),
-    );
-    this.log('Account Key Roll-Over successful');
-    this.loadAccountKey(newAccountKeyPem);
-    return ret.body;
-  }
-
   async revoke(pem: string): Promise<void> {
     let cert: X509Certificate;
     try {
@@ -430,7 +417,7 @@ export class ACMECert extends ACMEv2 {
     const dir = mkdtempSync(join(tmpdir(), 'csr_'));
     const keyFile = join(dir, 'key.pem');
     try {
-      writeFileSync(keyFile, domainKeyPem);
+      writeFileSync(keyFile, domainKeyPem, { mode: 0o600 });
       const args = ['req', '-new', '-key', keyFile, '-sha512', '-subj', subj];
       if (san) args.push('-addext', 'subjectAltName=' + san);
       const out = execFileSync('openssl', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
