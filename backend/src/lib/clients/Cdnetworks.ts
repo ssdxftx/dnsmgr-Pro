@@ -1,4 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
+import { fetch as undiciFetch } from 'undici';
 import { pinnedDispatcherFor, isMetadataIp } from '../netGuard.js';
 
 export class CdnetworksError extends Error {}
@@ -50,13 +51,13 @@ export class Cdnetworks {
     const requestUrl = 'https://' + this.endpoint + path;
     // Endpoint 来自账户配置：校验目标并 pin 解析 IP，避免链路本地/云元数据与 DNS 重绑定
     const dispatcher = await pinnedDispatcherFor(new URL(requestUrl).hostname, isMetadataIp, '禁止访问链路本地/云元数据地址');
-    const res = await fetch(requestUrl, {
+    const res = await undiciFetch(requestUrl, {
       method,
       headers,
       body: payload || undefined,
       signal: AbortSignal.timeout(15000),
       ...(dispatcher ? { dispatcher } : {}),
-    });
+    } as any);
     const text = await res.text();
     const respHeaders: Record<string, string> = {};
     res.headers.forEach((v, k) => {

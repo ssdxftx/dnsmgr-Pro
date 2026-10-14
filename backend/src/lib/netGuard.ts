@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises';
 import dns from 'node:dns';
 import net from 'node:net';
-import { Agent } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 
 // SSRF 防护：默认禁止请求内网/回环/链路本地/云元数据地址。
 // 如需访问内网目标（自建服务等），显式设置 DNSMGR_ALLOW_PRIVATE_FETCH=1。
@@ -115,19 +115,22 @@ export async function assertDeployConfigAllowed(config: any): Promise<void> {
 }
 
 // 将「校验通过的 IP」固定（pin）到 undici Agent，避免校验后再解析导致的 DNS 重绑定（TOCTOU）
+// 注意：undici / node 在连接时可能以 { all: true } 调用 lookup，此时必须回传地址数组，
+// 否则会以 ERR_INVALID_IP_ADDRESS 失败（标量返回仅适用于 all:false）。
+function makePinnedLookup(host: string, address: string, family: number) {
+  return (hostname: string, options: any, callback: any) => {
+    if (hostname !== host) return dns.lookup(hostname, options, callback);
+    if (options && options.all) return callback(null, [{ address, family }]);
+    return callback(null, address, family);
+  };
+}
+
 const pinnedAgents = new Map<string, Agent>();
 function getPinnedAgent(host: string, address: string, family: number): Agent {
   const key = host + '|' + address;
   const cached = pinnedAgents.get(key);
   if (cached) return cached;
-  const agent = new Agent({
-    connect: {
-      lookup: (hostname: string, options: any, callback: any) => {
-        if (hostname === host) return callback(null, address, family);
-        return dns.lookup(hostname, options, callback);
-      },
-    },
-  });
+  const agent = new Agent({ connect: { lookup: makePinnedLookup(host, address, family) } });
   if (pinnedAgents.size >= 200) {
     const oldest = pinnedAgents.keys().next().value;
     if (oldest !== undefined) {
@@ -174,10 +177,7 @@ export async function pinnedLookupFor(
   const pin = await resolveForPin(host, blocked, blockMsg);
   if (!pin) return undefined;
   const target = host.replace(/^\[|\]$/g, '');
-  return (hostname: string, options: any, cb: any) => {
-    if (hostname === target) return cb(null, pin.address, pin.family);
-    return dns.lookup(hostname, options, cb);
-  };
+  return makePinnedLookup(target, pin.address, pin.family);
 }
 
 // 统一的逐跳跳转处理：仅 http/https、逐跳复校目标、跨主机剥离敏感头、跨域 307/308 丢弃请求体、IP pin 防重绑定
@@ -204,7 +204,7 @@ async function followFetch(raw: string, init: RequestInit, maxRedirects: number,
     if (!reqInit.dispatcher && pin) {
       reqInit.dispatcher = getPinnedAgent(u.hostname.replace(/^\[|\]$/g, ''), pin.address, pin.family);
     }
-    const res = await fetch(current, reqInit);
+    const res = (await undiciFetch(current, reqInit as any)) as unknown as Response;
     if (!REDIRECT_STATUS.has(res.status)) return res;
     const location = res.headers.get('location');
     if (!location) return res;
