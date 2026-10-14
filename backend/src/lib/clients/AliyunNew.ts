@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { assertDeployTargetAllowed } from '../netGuard.js';
+import { pinnedDispatcherFor, isMetadataIp } from '../netGuard.js';
 
 export class AliyunNew {
   private AccessKeyId: string;
@@ -48,13 +48,14 @@ export class AliyunNew {
     const qs = this.buildQuery(query);
     if (qs) url += '?' + qs;
 
-    // Endpoint 来自部署配置，出站前拒绝链路本地/云元数据地址
-    await assertDeployTargetAllowed(url);
+    // Endpoint 来自部署配置：校验目标并 pin 解析 IP，避免链路本地/云元数据与 DNS 重绑定
+    const dispatcher = await pinnedDispatcherFor(new URL(url).hostname, isMetadataIp, '禁止访问链路本地/云元数据地址');
     const res = await fetch(url, {
       method,
       headers,
       body: body || undefined,
       signal: AbortSignal.timeout(15000),
+      ...(dispatcher ? { dispatcher } : {}),
     });
     const text = await res.text();
     let arr: any = null;

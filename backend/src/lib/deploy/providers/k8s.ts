@@ -1,6 +1,6 @@
 import { request as httpRequest } from 'node:https';
 import { parse as parseYaml } from 'yaml';
-import { assertDeployTargetAllowed } from '../../netGuard.js';
+import { pinnedLookupFor } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class K8sDeploy implements DeployProvider {
@@ -87,12 +87,14 @@ export class K8sDeploy implements DeployProvider {
     this.tls = { cert: clientCert, key: clientKey };
   }
 
-  private k8sRequest(method: string, path: string, body?: string): Promise<{ code: number; body: string; err: string }> {
+  private async k8sRequest(method: string, path: string, body?: string): Promise<{ code: number; body: string; err: string }> {
+    const url = new URL(this.server + path);
+    // node 原生 https 无 undici dispatcher，改用自定义 lookup 把校验通过的 IP 固定，避免 DNS 重绑定
+    const lookup = await pinnedLookupFor(url.hostname);
     return new Promise((resolve) => {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (this.bearerToken) headers['Authorization'] = 'Bearer ' + this.bearerToken;
       if (body !== undefined) headers['Content-Type'] = 'application/json';
-      const url = new URL(this.server + path);
       const req = httpRequest(
         url,
         {
@@ -102,6 +104,7 @@ export class K8sDeploy implements DeployProvider {
           rejectUnauthorized: !this.insecure,
           cert: this.tls.cert || undefined,
           key: this.tls.key || undefined,
+          ...(lookup ? { lookup } : {}),
         },
         (res) => {
           let data = '';
@@ -120,7 +123,6 @@ export class K8sDeploy implements DeployProvider {
 
   private async verify(): Promise<void> {
     this.parse();
-    await assertDeployTargetAllowed(this.server);
     const { code, body, err } = await this.k8sRequest('GET', '/version');
     if (err) throw new Error('连接Kubernetes API服务器失败: ' + err);
     if (code !== 200) throw new Error('连接Kubernetes API服务器失败: HTTP ' + code + ' ' + body);
@@ -140,7 +142,6 @@ export class K8sDeploy implements DeployProvider {
     const safeSecretName = K8sDeploy.safeName(secretNameRaw, 'Secret名称');
 
     this.parse();
-    await assertDeployTargetAllowed(this.server);
 
     const secretPayload = {
       apiVersion: 'v1',

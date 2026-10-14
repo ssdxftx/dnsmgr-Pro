@@ -1,5 +1,5 @@
 import { createHash, createHmac } from 'node:crypto';
-import { assertDeployTargetAllowed } from '../netGuard.js';
+import { pinnedDispatcherFor, isMetadataIp } from '../netGuard.js';
 
 export class CdnetworksError extends Error {}
 
@@ -48,13 +48,14 @@ export class Cdnetworks {
     headers.Authorization = this.sign(method, path, payload, this.endpoint, timestamp);
 
     const requestUrl = 'https://' + this.endpoint + path;
-    // Endpoint 来自账户配置，出站前拒绝链路本地/云元数据地址
-    await assertDeployTargetAllowed(requestUrl);
+    // Endpoint 来自账户配置：校验目标并 pin 解析 IP，避免链路本地/云元数据与 DNS 重绑定
+    const dispatcher = await pinnedDispatcherFor(new URL(requestUrl).hostname, isMetadataIp, '禁止访问链路本地/云元数据地址');
     const res = await fetch(requestUrl, {
       method,
       headers,
       body: payload || undefined,
       signal: AbortSignal.timeout(15000),
+      ...(dispatcher ? { dispatcher } : {}),
     });
     const text = await res.text();
     const respHeaders: Record<string, string> = {};
