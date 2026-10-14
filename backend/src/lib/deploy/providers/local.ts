@@ -1,6 +1,6 @@
 import { exec } from 'node:child_process';
 import { existsSync, writeFileSync, realpathSync } from 'node:fs';
-import { dirname, isAbsolute, normalize, sep, basename, join } from 'node:path';
+import { dirname, normalize, sep, basename, join, win32 } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
@@ -22,16 +22,53 @@ const LOCAL_DENY_PREFIXES = [
   '/lib/systemd',
 ];
 
+// Windows 受保护系统位置（盘符/UNC 路径）
+const WIN_DENY_PREFIXES = ['c:\\windows', 'c:\\program files', 'c:\\program files (x86)', 'c:\\programdata'];
+
+// POSIX 敏感文件/目录（denylist 之外的持久化落点）
+function isDeniedPosix(low: string): boolean {
+  return (
+    LOCAL_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
+    low.includes('/.ssh/') ||
+    low.endsWith('/.ssh') ||
+    low.endsWith('/authorized_keys') ||
+    low.endsWith('/authorized_keys2') ||
+    low.endsWith('/.bashrc') ||
+    low.endsWith('/.bash_profile') ||
+    low.endsWith('/.profile') ||
+    low.endsWith('/.zshrc') ||
+    low.includes('/.config/')
+  );
+}
+
 function safeTargetPath(p: any): string {
   const raw = String(p || '').trim();
   if (!raw) throw new Error('目标文件路径不能为空');
-  if (!isAbsolute(raw)) throw new Error('目标文件路径必须为绝对路径：' + raw);
+  const isPosixAbs = raw.startsWith('/');
+  const isWinAbs = /^[a-zA-Z]:[\\/]/.test(raw) || /^\\\\/.test(raw);
+  if (!isPosixAbs && !isWinAbs) throw new Error('目标文件路径必须为绝对路径：' + raw);
   if (raw.split(/[\\/]/).includes('..')) throw new Error('目标文件路径不合法，禁止包含 .. ：' + raw);
+
+  if (isWinAbs && !isPosixAbs) {
+    // Windows 路径：按 win32 语义规范化后做系统位置拒绝
+    const wn = win32.normalize(raw).toLowerCase();
+    const denied =
+      WIN_DENY_PREFIXES.some((pre) => wn === pre || wn.startsWith(pre + '\\')) ||
+      wn.includes('\\.ssh\\') ||
+      wn.endsWith('\\.ssh') ||
+      wn.endsWith('\\authorized_keys') ||
+      wn.endsWith('\\authorized_keys2') ||
+      wn.includes('\\start menu\\') ||
+      wn.includes('\\startup\\');
+    if (denied) throw new Error('目标文件路径指向受保护的系统位置，禁止写入：' + raw);
+    return raw;
+  }
+
   const normalized = normalize(raw);
-  // 解析父目录符号链接，得到真实写入路径，避免经允许目录内的软链绕过位置限制
+  // 解析符号链接：目标已存在则解析完整真实路径（含末段软链），否则解析父目录，避免经软链绕过位置限制
   let resolved = normalized;
   try {
-    resolved = join(realpathSync(dirname(normalized)), basename(normalized));
+    resolved = existsSync(normalized) ? realpathSync(normalized) : join(realpathSync(dirname(normalized)), basename(normalized));
   } catch {
     resolved = normalized;
   }
@@ -44,17 +81,8 @@ function safeTargetPath(p: any): string {
     const ok = allowDirs.some((d) => resolved === d || resolved.startsWith(d.endsWith(sep) ? d : d + sep));
     if (!ok) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
   }
-  // 仅对 POSIX 绝对路径做系统位置拒绝（Windows 本地部署的场景较少，避免误伤盘符路径）
-  if (resolved.startsWith('/')) {
-    const low = resolved.toLowerCase();
-    const denied =
-      LOCAL_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
-      low.includes('/.ssh/') ||
-      low.endsWith('/.ssh') ||
-      low.endsWith('/authorized_keys') ||
-      low.endsWith('/authorized_keys2');
-    if (denied) throw new Error('目标文件路径指向受保护的系统位置，禁止写入：' + raw);
-  }
+  const low = resolved.toLowerCase();
+  if (isDeniedPosix(low)) throw new Error('目标文件路径指向受保护的系统位置，禁止写入：' + raw);
   return resolved;
 }
 

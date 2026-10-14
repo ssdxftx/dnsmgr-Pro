@@ -11,6 +11,16 @@ import { assertUrlAllowed } from '../netGuard.js';
 
 const SITENAME = '聚合DNS管理系统';
 
+// 通知邮件 HTML 转义，避免域名/记录值/错误信息/备注注入标记
+function esc(v: any): string {
+  return String(v ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, '');
 }
@@ -290,20 +300,20 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
   let mailContent: string;
   if (action === 1) {
     mailTitle = 'DNS容灾切换-发生告警通知';
-    mailContent = `尊敬的用户，您好：<br/>您的域名 <b>${task.domain}</b> 的 <b>${task.main_value}</b> 记录发生了异常`;
+    mailContent = `尊敬的用户，您好：<br/>您的域名 <b>${esc(task.domain)}</b> 的 <b>${esc(task.main_value)}</b> 记录发生了异常`;
     if (task.type === 2) {
-      mailContent += `，已自动切换为备用解析记录 ${task.backup_value} `;
+      mailContent += `，已自动切换为备用解析记录 ${esc(task.backup_value)} `;
     } else if (task.type === 1) {
       mailContent += '，已自动暂停解析';
     } else {
       mailContent += '，请及时处理';
     }
     if (result.errmsg) {
-      mailContent += `。<br/>异常信息：<font color="warning">${result.errmsg}</font>`;
+      mailContent += `。<br/>异常信息：<font color="warning">${esc(result.errmsg)}</font>`;
     }
   } else {
     mailTitle = 'DNS容灾切换-恢复正常通知';
-    mailContent = `尊敬的用户，您好：<br/>您的域名 <b>${task.domain}</b> 的 <b>${task.main_value}</b> 记录已恢复正常`;
+    mailContent = `尊敬的用户，您好：<br/>您的域名 <b>${esc(task.domain)}</b> 的 <b>${esc(task.main_value)}</b> 记录已恢复正常`;
     if (task.type === 2) {
       mailContent += '，已自动切换回当前解析记录';
     } else if (task.type === 1) {
@@ -314,7 +324,7 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
   }
   if (task.remark) {
     mailTitle += '(' + task.remark + ')';
-    mailContent += '<br/>备注：' + task.remark;
+    mailContent += '<br/>备注：' + esc(task.remark);
   }
   mailContent += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 

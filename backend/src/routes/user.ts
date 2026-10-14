@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
-import { hasOwn } from '../lib/util.js';
+import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -89,16 +89,16 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const q = req.query || {};
     const kw = (q.kw || '').trim();
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
     const sort = q.sortName || '';
     const orderDir = String(q.sortOrder || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 
     let where = '';
     const params: any[] = [];
     if (kw) {
-      where = ' WHERE (username LIKE ? OR id LIKE ?)';
-      params.push('%' + kw + '%', '%' + kw + '%');
+      where = " WHERE (username LIKE ? ESCAPE '!' OR id LIKE ? ESCAPE '!')";
+      params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%');
     }
 
     const totalRow = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('user')}${where}`, params);
@@ -120,6 +120,8 @@ export default async function userRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const row = await queryOne(`SELECT id, username, is_api, apikey, level, status, totp_open, check_whole, stat_cache, is_super FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
+    const blocked = superBlocked(req, row as any);
+    if (blocked) return { code: -1, msg: blocked };
     const perms = await query(`SELECT domain, sub, readonly, expiretime FROM ${table('permission')} WHERE uid = ?`, [id]);
     row.permission = perms.map((p: any) => ({ domain: p.domain, sub: p.sub || null, readonly: Number(p.readonly || 0), expiretime: p.expiretime || null }));
     return { code: 0, data: row };
@@ -247,8 +249,8 @@ export default async function userRoutes(app: FastifyInstance) {
     const uid = (q.uid || '').trim();
     const domain = (q.domain || '').trim();
     const kw = (q.kw || '').trim();
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
 
     let where = ' WHERE 1=1';
     const params: any[] = [];

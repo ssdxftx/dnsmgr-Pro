@@ -115,7 +115,7 @@ export class SshDeploy implements DeployProvider {
     conn.end();
   }
 
-  private writeFile(conn: Client, remotePath: string, data: Buffer): Promise<void> {
+  private writeFile(conn: Client, remotePath: string, data: Buffer, mode = 0o644): Promise<void> {
     return new Promise((resolve, reject) => {
       conn.sftp((err, sftp) => {
         if (err) return reject(new Error('无法创建证书文件：' + err.message));
@@ -126,8 +126,12 @@ export class SshDeploy implements DeployProvider {
           return reject(e);
         }
         sftp.writeFile(path, data, (e) => {
-          if (e) reject(new Error('无法写入文件 ' + remotePath + '：' + e.message));
-          else resolve();
+          if (e) return reject(new Error('无法写入文件 ' + remotePath + '：' + e.message));
+          // 显式设置权限（尤其是私钥 0600），避免依赖远端 umask 落成全局可读
+          sftp.chmod(path, mode, (ce) => {
+            if (ce) reject(new Error('无法设置文件权限 ' + remotePath + '：' + ce.message));
+            else resolve();
+          });
         });
       });
     });
@@ -165,13 +169,13 @@ export class SshDeploy implements DeployProvider {
         }
       }
       if (config.format === 'pem') {
-        await this.writeFile(conn, config.pem_cert_file, Buffer.from(fullchain));
+        await this.writeFile(conn, config.pem_cert_file, Buffer.from(fullchain), 0o644);
         this.log('证书已保存到：' + config.pem_cert_file);
-        await this.writeFile(conn, config.pem_key_file, Buffer.from(privatekey));
+        await this.writeFile(conn, config.pem_key_file, Buffer.from(privatekey), 0o600);
         this.log('私钥已保存到：' + config.pem_key_file);
       } else if (config.format === 'pfx') {
         const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
-        await this.writeFile(conn, config.pfx_file, pfx);
+        await this.writeFile(conn, config.pfx_file, pfx, 0o600);
         this.log('PFX证书已保存到：' + config.pfx_file);
         if (config.uptype === '1' && config.iis_domain) {
           const certHash = createHash('sha1').update(new X509Certificate(fullchain).raw).digest('hex');

@@ -1,5 +1,5 @@
 import { createHash, createHmac, createPrivateKey, createSign, KeyObject } from 'node:crypto';
-import { assertUrlAllowed } from '../netGuard.js';
+import { assertUrlAllowed, pinnedDispatcherFor } from '../netGuard.js';
 
 export class ACMEException extends Error {
   type: string;
@@ -255,7 +255,10 @@ export class ACMEv2 {
     let res: Response;
     try {
       // 禁止 ACME 地址指向内网（自建内网 CA 可设置 DNSMGR_ALLOW_PRIVATE_FETCH=1 放行）
-      await assertUrlAllowed(url);
+      const target = await assertUrlAllowed(url);
+      // pin 校验通过的 IP，避免校验后再解析导致的 DNS 重绑定
+      const dispatcher = await pinnedDispatcherFor(target.hostname);
+      if (dispatcher) (init as any).dispatcher = dispatcher;
       res = await fetch(url, init);
     } catch (e: any) {
       throw new Error('HTTP Request Error: ' + e.message);

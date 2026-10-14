@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet, configSet } from '../config.js';
-import { fmtDateTime, hasOwn, escapeLike } from '../lib/util.js';
+import { fmtDateTime, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK } from '../lib/secret.js';
@@ -83,8 +83,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const kw = q.kw || '';
     const status = q.status;
     const searchType = Number(q.type || 1);
-    const offset = Number(q.offset || 0);
-    const limit = Number(q.limit || 10);
+    const offset = clampOffset(q.offset);
+    const limit = clampLimit(q.limit);
     const sort = q.sortName || '';
     const orderDir = String(q.sortOrder || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
 

@@ -16,7 +16,7 @@ import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
 import { configGet, configSet } from '../config.js';
-import { escapeLike, clientMessage } from '../lib/util.js';
+import { escapeLike, clientMessage, clampLimit, clampOffset } from '../lib/util.js';
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 import { localResolve } from '../lib/dns/localResolve.js';
 
@@ -149,7 +149,7 @@ export default async function certRoutes(app: FastifyInstance) {
       params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%', kw);
     }
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_account')} WHERE ${where}`, params))?.c || 0;
-    const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, Number(limit), Number(offset)]);
+    const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, clampLimit(limit, 20), clampOffset(offset)]);
     const list = rows.map((r: any) => ({
       id: r.id,
       type: r.type,

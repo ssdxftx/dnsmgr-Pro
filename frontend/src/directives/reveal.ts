@@ -13,6 +13,7 @@ const reduce =
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 let io: IntersectionObserver | null = null;
+const timers = new WeakMap<HTMLElement, number>();
 
 function getIO(): IntersectionObserver | null {
   if (io || typeof IntersectionObserver === 'undefined') return io;
@@ -39,9 +40,18 @@ export const vReveal: Directive = {
     }
     getIO()?.observe(el);
     // 兜底：避免极端情况下元素停留在透明态
-    window.setTimeout(() => el.classList.add('is-in'), 1000);
+    const t = window.setTimeout(() => {
+      el.classList.add('is-in');
+      timers.delete(el);
+    }, 1000);
+    timers.set(el, t);
   },
   unmounted(el: HTMLElement) {
     io?.unobserve(el);
+    const t = timers.get(el);
+    if (t !== undefined) {
+      clearTimeout(t);
+      timers.delete(el);
+    }
   },
 };
