@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
+import { fetch as undiciFetch } from 'undici';
 import { pinnedDispatcherFor, isMetadataIp } from '../netGuard.js';
 
 export class AliyunNew {
@@ -50,13 +51,13 @@ export class AliyunNew {
 
     // Endpoint 来自部署配置：校验目标并 pin 解析 IP，避免链路本地/云元数据与 DNS 重绑定
     const dispatcher = await pinnedDispatcherFor(new URL(url).hostname, isMetadataIp, '禁止访问链路本地/云元数据地址');
-    const res = await fetch(url, {
+    const res = await undiciFetch(url, {
       method,
       headers,
       body: body || undefined,
       signal: AbortSignal.timeout(15000),
       ...(dispatcher ? { dispatcher } : {}),
-    });
+    } as any);
     const text = await res.text();
     let arr: any = null;
     try {

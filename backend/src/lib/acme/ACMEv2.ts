@@ -1,4 +1,5 @@
 import { createHash, createHmac, createPrivateKey, createSign, KeyObject } from 'node:crypto';
+import { fetch as undiciFetch } from 'undici';
 import { assertUrlAllowed, pinnedDispatcherFor } from '../netGuard.js';
 
 export class ACMEException extends Error {
@@ -259,7 +260,7 @@ export class ACMEv2 {
       // pin 校验通过的 IP，避免校验后再解析导致的 DNS 重绑定
       const dispatcher = await pinnedDispatcherFor(target.hostname);
       if (dispatcher) (init as any).dispatcher = dispatcher;
-      res = await fetch(url, init);
+      res = (await undiciFetch(url, init as any)) as unknown as Response;
     } catch (e: any) {
       throw new Error('HTTP Request Error: ' + e.message);
     }

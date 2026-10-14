@@ -20,8 +20,10 @@ function getIpForcingAgent(host: string, ip: string, family: number): Agent {
   const agent = new Agent({
     connect: {
       lookup: (hostname: string, options: any, callback: any) => {
-        if (hostname === host) return callback(null, ip, family);
-        return dns.lookup(hostname, options, callback);
+        if (hostname !== host) return dns.lookup(hostname, options, callback);
+        // undici 连接时可能以 { all: true } 调用 lookup，此时必须回传地址数组
+        if (options && options.all) return callback(null, [{ address: ip, family }]);
+        return callback(null, ip, family);
       },
     },
   });
