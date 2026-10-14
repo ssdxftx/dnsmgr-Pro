@@ -49,7 +49,15 @@ function safeTargetPath(p: any): string {
   if (!isPosixAbs && !isWinAbs) throw new Error('目标文件路径必须为绝对路径：' + raw);
   if (raw.split(/[\\/]/).includes('..')) throw new Error('目标文件路径不合法，禁止包含 .. ：' + raw);
 
+  const allowDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((d) => normalize(d));
+
   if (isWinAbs && !isPosixAbs) {
+    // 配置了允许目录白名单时，Windows 风格路径无法落在其中，直接拒绝
+    if (allowDirs.length) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
     // Windows 路径：按 win32 语义规范化后做系统位置拒绝
     const wn = win32.normalize(raw).toLowerCase();
     const denied =
@@ -72,11 +80,6 @@ function safeTargetPath(p: any): string {
   } catch {
     resolved = normalized;
   }
-  const allowDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((d) => normalize(d));
   if (allowDirs.length) {
     const ok = allowDirs.some((d) => resolved === d || resolved.startsWith(d.endsWith(sep) ? d : d + sep));
     if (!ok) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);

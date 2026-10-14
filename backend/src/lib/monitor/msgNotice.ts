@@ -428,17 +428,17 @@ export async function certOrderSend(orderId: number, result: boolean): Promise<v
   let content = '';
   if (row.aid == 0) {
     title = domains.length > 1 ? `${domains[0]}等${domains.length}个域名SSL证书即将到期提醒` : `${domains[0]}域名SSL证书即将到期提醒`;
-    content = `尊敬的用户，您好：您有一张SSL证书将在${(await configGet('cert_renewdays', '7')) || '7'}天后到期，该证书为手动续期证书，请及时续期！<br/><b>证书域名：</b> ${domains.join('、')}<br/><b>签发时间：</b> ${row.issuetime || ''}<br/><b>到期时间：</b> ${row.expiretime || ''}<br/><b>颁发机构：</b> ${row.issuer || ''}`;
+    content = `尊敬的用户，您好：您有一张SSL证书将在${(await configGet('cert_renewdays', '7')) || '7'}天后到期，该证书为手动续期证书，请及时续期！<br/><b>证书域名：</b> ${domains.map(esc).join('、')}<br/><b>签发时间：</b> ${esc(row.issuetime || '')}<br/><b>到期时间：</b> ${esc(row.expiretime || '')}<br/><b>颁发机构：</b> ${esc(row.issuer || '')}`;
   } else {
     const acct: any = (await query(`SELECT type FROM ${table('cert_account')} WHERE id = ?`, [row.aid]))?.[0];
     const typename = certConfig[acct?.type]?.name || acct?.type || '未知';
     if (result) {
       title = domains.length > 1 ? `${domains[0]}等${domains.length}个域名SSL证书签发成功通知` : `${domains[0]}域名SSL证书签发成功通知`;
-      content = `尊敬的用户，您好：您的SSL证书已签发成功！<br/><b>证书账户：</b> ${typename}(${row.aid})<br/><b>证书域名：</b> ${domains.join('、')}<br/><b>签发时间：</b> ${row.issuetime || ''}<br/><b>到期时间：</b> ${row.expiretime || ''}<br/><b>颁发机构：</b> ${row.issuer || ''}`;
+      content = `尊敬的用户，您好：您的SSL证书已签发成功！<br/><b>证书账户：</b> ${esc(typename)}(${row.aid})<br/><b>证书域名：</b> ${domains.map(esc).join('、')}<br/><b>签发时间：</b> ${esc(row.issuetime || '')}<br/><b>到期时间：</b> ${esc(row.expiretime || '')}<br/><b>颁发机构：</b> ${esc(row.issuer || '')}`;
     } else {
       const statusName = STATUS_LABEL[row.status] || '处理失败';
       title = domains.length > 1 ? `${domains[0]}等${domains.length}个域名SSL证书${statusName}通知` : `${domains[0]}域名SSL证书${statusName}通知`;
-      content = `尊敬的用户，您好：您的SSL证书${statusName}！<br/><b>证书账户：</b> ${typename}(${row.aid})<br/><b>证书域名：</b> ${domains.join('、')}<br/><b>失败时间：</b> ${fmtDateTime()}<br/><b>失败原因：</b> <font color="warning">${row.error || ''}</font>`;
+      content = `尊敬的用户，您好：您的SSL证书${statusName}！<br/><b>证书账户：</b> ${esc(typename)}(${row.aid})<br/><b>证书域名：</b> ${domains.map(esc).join('、')}<br/><b>失败时间：</b> ${fmtDateTime()}<br/><b>失败原因：</b> <font color="warning">${esc(row.error || '')}</font>`;
     }
   }
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
@@ -461,9 +461,9 @@ export async function certDeploySend(deployId: number, result: boolean): Promise
   title += `SSL证书部署${result ? '成功' : '失败'}通知`;
   let content: string;
   if (result) {
-    content = `尊敬的用户，您好：您的SSL证书已成功部署到${typename}！<br/><b>自动部署账户：</b> [${account.id}]${typename}(${account.remark ? account.remark : account.name})<br/><b>关联SSL证书：</b> [${row.oid}]${domains.join('、')}<br/><b>任务备注：</b> ${row.remark ? row.remark : '无'}`;
+    content = `尊敬的用户，您好：您的SSL证书已成功部署到${esc(typename)}！<br/><b>自动部署账户：</b> [${account.id}]${esc(typename)}(${esc(account.remark ? account.remark : account.name)})<br/><b>关联SSL证书：</b> [${row.oid}]${domains.map(esc).join('、')}<br/><b>任务备注：</b> ${esc(row.remark ? row.remark : '无')}`;
   } else {
-    content = `尊敬的用户，您好：您的SSL证书部署失败！<br/><b>失败原因：</b> <font color="warning">${row.error || ''}</font><br/><b>自动部署账户：</b> [${account.id}]${typename}(${account.remark ? account.remark : account.name})<br/><b>关联SSL证书：</b> [${row.oid}]${domains.join('、')}<br/><b>任务备注：</b> ${row.remark ? row.remark : '无'}`;
+    content = `尊敬的用户，您好：您的SSL证书部署失败！<br/><b>失败原因：</b> <font color="warning">${esc(row.error || '')}</font><br/><b>自动部署账户：</b> [${account.id}]${esc(typename)}(${esc(account.remark ? account.remark : account.name)})<br/><b>关联SSL证书：</b> [${row.oid}]${domains.map(esc).join('、')}<br/><b>任务备注：</b> ${esc(row.remark ? row.remark : '无')}`;
   }
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 

@@ -165,6 +165,21 @@ export async function pinnedDispatcherFor(host: string, blocked: (ip: string) =>
   return pin ? getPinnedAgent(host.replace(/^\[|\]$/g, ''), pin.address, pin.family) : undefined;
 }
 
+// 供 node 原生 https/http 使用：校验并返回 pin 到已解析 IP 的自定义 lookup（无需 pin 时返回 undefined）
+export async function pinnedLookupFor(
+  host: string,
+  blocked: (ip: string) => boolean = isMetadataIp,
+  blockMsg = '禁止访问链路本地/云元数据地址',
+): Promise<((hostname: string, options: any, cb: any) => void) | undefined> {
+  const pin = await resolveForPin(host, blocked, blockMsg);
+  if (!pin) return undefined;
+  const target = host.replace(/^\[|\]$/g, '');
+  return (hostname: string, options: any, cb: any) => {
+    if (hostname === target) return cb(null, pin.address, pin.family);
+    return dns.lookup(hostname, options, cb);
+  };
+}
+
 // 统一的逐跳跳转处理：仅 http/https、逐跳复校目标、跨主机剥离敏感头、跨域 307/308 丢弃请求体、IP pin 防重绑定
 async function followFetch(raw: string, init: RequestInit, maxRedirects: number, resolve: PinResolver): Promise<Response> {
   let current = raw;
@@ -184,10 +199,10 @@ async function followFetch(raw: string, init: RequestInit, maxRedirects: number,
       redirect: 'manual',
       signal: init.signal ?? AbortSignal.timeout(30000),
     };
-    // 调用方自带 dispatcher（如监控强制解析 IP）时保留，避免覆盖其语义
-    if (!reqInit.dispatcher) {
-      const pin = await resolve(u);
-      if (pin) reqInit.dispatcher = getPinnedAgent(u.hostname.replace(/^\[|\]$/g, ''), pin.address, pin.family);
+    // 始终校验目标地址（协议在上方已校验）；仅当调用方未自带 dispatcher 时注入 pinned dispatcher
+    const pin = await resolve(u);
+    if (!reqInit.dispatcher && pin) {
+      reqInit.dispatcher = getPinnedAgent(u.hostname.replace(/^\[|\]$/g, ''), pin.address, pin.family);
     }
     const res = await fetch(current, reqInit);
     if (!REDIRECT_STATUS.has(res.status)) return res;

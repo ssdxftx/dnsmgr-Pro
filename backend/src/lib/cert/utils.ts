@@ -40,11 +40,12 @@ export function parseCertPem(pem: string): { issuer: string; subject: string; va
 
 export function unzip(zipPath: string, destDir: string): void {
   // 预检压缩包条目：拒绝绝对路径、盘符/UNC、含 .. 段的条目，防止 zip-slip 越界落盘
-  let listing = '';
+  let listing: string;
   try {
     listing = execFileSync('unzip', ['-Z1', zipPath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
-  } catch {
-    listing = '';
+  } catch (e: any) {
+    // 安全校验应 fail-closed：无法列出条目即拒绝解压
+    throw new Error('无法读取压缩包目录，已拒绝解压：' + (e?.message || String(e)));
   }
   for (const raw of listing.split(/\r?\n/)) {
     const name = raw.trim();
