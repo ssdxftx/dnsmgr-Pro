@@ -25,5 +25,7 @@ export default {
     needName: '请填写名称',
     needRecords: '请至少填写一条源站记录',
     needSite: '请先选择站点',
+    extraParams: '额外参数 (JSON)',
+    extraParamsHint: '额外参数（JSON，选填；ESA 需按官方字段名填写，如 {"FallbackPool":123,"SteeringPolicy":"order","Monitor":{...}}）',
   },
 };

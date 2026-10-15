@@ -101,6 +101,7 @@
                 <n-button type="primary" size="small" :loading="ogSaving" @click="createOriginGroup">{{ t('cdnOrigin.create') }}</n-button>
               </n-space>
               <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" />
+              <n-input v-if="originIsEsa" v-model:value="ogForm.params" type="textarea" :rows="3" :placeholder="t('cdnOrigin.extraParamsHint')" />
               <n-data-table :columns="ogColumns" :data="originGroups" :loading="originLoading" size="small" :bordered="false" />
             </n-space>
           </n-tab-pane>
@@ -112,6 +113,7 @@
                 <n-button type="primary" size="small" :loading="lbSaving" @click="createLoadBalancer">{{ t('cdnOrigin.create') }}</n-button>
               </n-space>
               <n-select v-model:value="lbForm.originGroups" multiple :options="ogOptions" :placeholder="t('cdnOrigin.originGroupsPick')" />
+              <n-input v-if="originIsEsa" v-model:value="lbForm.params" type="textarea" :rows="3" :placeholder="t('cdnOrigin.extraParamsHint')" />
               <n-data-table :columns="lbColumns" :data="loadBalancers" :loading="originLoading" size="small" :bordered="false" />
             </n-space>
           </n-tab-pane>
@@ -196,6 +198,7 @@
                 <n-input v-model:value="l4Form.area" :placeholder="t('cdnAdvanced.area')" style="width:140px" />
                 <n-button type="primary" size="small" :loading="l4Saving" @click="createL4Proxy">{{ t('cdnAdvanced.create') }}</n-button>
               </n-space>
+              <n-input v-if="advIsEsa" v-model:value="l4Form.params" type="textarea" :rows="3" :placeholder="t('cdnAdvanced.extraParamsHint')" />
               <n-data-table :columns="l4Columns" :data="l4Proxies" :loading="advLoading" size="small" :bordered="false" />
             </n-space>
           </n-tab-pane>
@@ -319,11 +322,12 @@ const loadBalancers = ref<any[]>([]);
 const originLoading = ref(false);
 const ogSaving = ref(false);
 const lbSaving = ref(false);
-const ogForm = reactive<any>({ name: '', hostHeader: '', records: '' });
-const lbForm = reactive<any>({ name: '', type: 'HTTP', originGroups: [] });
+const ogForm = reactive<any>({ name: '', hostHeader: '', records: '', params: '' });
+const lbForm = reactive<any>({ name: '', type: 'HTTP', originGroups: [], params: '' });
 
 const originSiteOptions = computed(() => originSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
 const ogOptions = computed(() => originGroups.value.map((g: any) => ({ label: g.name || String(g.groupId), value: String(g.groupId) })));
+const originIsEsa = computed(() => originAcct.value?.type === 'aliyun_esa');
 const lbTypeOptions = computed(() => [
   { label: 'HTTP', value: 'HTTP' },
   { label: 'HTTP_V2', value: 'HTTP_V2' },
@@ -433,12 +437,13 @@ const advSites = ref<any[]>([]);
 const advZone = ref<string>('');
 const advLoading = ref(false);
 const l4Proxies = ref<any[]>([]);
-const l4Form = reactive<any>({ name: '', area: '' });
+const l4Form = reactive<any>({ name: '', area: '', params: '' });
 const l4Saving = ref(false);
 const purgeTasks = ref<any[]>([]);
 const prefetchTasks = ref<any[]>([]);
 const advJson = reactive<any>({ quota: '', analysis: '' });
 const advCaps = computed(() => providers.value[advAcct.value?.type]?.capabilities || {});
+const advIsEsa = computed(() => advAcct.value?.type === 'aliyun_esa');
 const advSiteOptions = computed(() => advSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
 const l4Columns = computed(() => [
   { title: t('cdnAdvanced.colName'), key: 'name', minWidth: 160 },
@@ -711,6 +716,17 @@ function parseRecords(text: string) {
     });
 }
 
+function parseExtraParams(text: string) {
+  const s = String(text || '').trim();
+  if (!s) return undefined;
+  try {
+    const o = JSON.parse(s);
+    return o && typeof o === 'object' && !Array.isArray(o) ? o : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function createOriginGroup() {
   if (!originZone.value) return message.warning(t('cdnOrigin.needSite'));
   if (!ogForm.name) return message.warning(t('cdnOrigin.needName'));
@@ -722,6 +738,7 @@ async function createOriginGroup() {
     name: ogForm.name,
     records,
     hostHeader: ogForm.hostHeader || undefined,
+    params: parseExtraParams(ogForm.params),
   });
   ogSaving.value = false;
   if (res.code === 0) {
@@ -729,6 +746,7 @@ async function createOriginGroup() {
     ogForm.name = '';
     ogForm.records = '';
     ogForm.hostHeader = '';
+    ogForm.params = '';
     loadOriginData();
   } else message.error(res.msg);
 }
@@ -759,12 +777,14 @@ async function createLoadBalancer() {
     name: lbForm.name,
     type: lbForm.type,
     originGroups: originGroupsPayload,
+    params: parseExtraParams(lbForm.params),
   });
   lbSaving.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     lbForm.name = '';
     lbForm.originGroups = [];
+    lbForm.params = '';
     loadOriginData();
   } else message.error(res.msg);
 }
@@ -1009,12 +1029,13 @@ async function createL4Proxy() {
   if (!advZone.value) return message.warning(t('cdnAdvanced.needSite'));
   if (!l4Form.name) return message.warning(t('cdnAdvanced.needName'));
   l4Saving.value = true;
-  const res = await api<any>('POST', `/cdn/accounts/${advAcct.value.id}/l4-proxies`, { zoneId: advZone.value, name: l4Form.name, area: l4Form.area || undefined });
+  const res = await api<any>('POST', `/cdn/accounts/${advAcct.value.id}/l4-proxies`, { zoneId: advZone.value, name: l4Form.name, area: l4Form.area || undefined, params: parseExtraParams(l4Form.params) });
   l4Saving.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     l4Form.name = '';
     l4Form.area = '';
+    l4Form.params = '';
     loadAdvanced();
   } else message.error(res.msg);
 }

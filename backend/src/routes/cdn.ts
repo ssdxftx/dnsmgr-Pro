@@ -433,7 +433,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !b.name) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.createOriginGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
-    const id = await provider.createOriginGroup(zoneId, { name: b.name, type: b.type, records: b.records, hostHeader: b.hostHeader });
+    const id = await provider.createOriginGroup(zoneId, { name: b.name, type: b.type, records: b.records, hostHeader: b.hostHeader, params: b.params });
     if (id === false) return { code: -1, msg: '创建源站组失败，' + provider.getError() };
     return { code: 0, msg: '创建成功', data: { groupId: id } };
   });
@@ -446,7 +446,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.updateOriginGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
-    if (!(await provider.updateOriginGroup(zoneId, groupId, { name: b.name, type: b.type, records: b.records, hostHeader: b.hostHeader }))) {
+    if (!(await provider.updateOriginGroup(zoneId, groupId, { name: b.name, type: b.type, records: b.records, hostHeader: b.hostHeader, params: b.params }))) {
       return { code: -1, msg: '更新失败，' + provider.getError() };
     }
     return { code: 0, msg: '更新成功' };
@@ -489,6 +489,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       healthChecker: b.healthChecker,
       steeringPolicy: b.steeringPolicy,
       failoverPolicy: b.failoverPolicy,
+      params: b.params,
     });
     if (id === false) return { code: -1, msg: '创建负载均衡失败，' + provider.getError() };
     return { code: 0, msg: '创建成功', data: { instanceId: id } };
@@ -508,6 +509,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       healthChecker: b.healthChecker,
       steeringPolicy: b.steeringPolicy,
       failoverPolicy: b.failoverPolicy,
+      params: b.params,
     }))) {
       return { code: -1, msg: '更新失败，' + provider.getError() };
     }
@@ -748,7 +750,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !b.name) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.createL4Proxy !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
-    const id = await provider.createL4Proxy(zoneId, { name: b.name, area: b.area, ipv6: b.ipv6, staticIp: b.staticIp, accelerateMainland: b.accelerateMainland, ddosProtectionConfig: b.ddosProtectionConfig });
+    const id = await provider.createL4Proxy(zoneId, { name: b.name, area: b.area, ipv6: b.ipv6, staticIp: b.staticIp, accelerateMainland: b.accelerateMainland, ddosProtectionConfig: b.ddosProtectionConfig, rules: b.rules, params: b.params });
     if (id === false) return { code: -1, msg: '创建四层代理失败，' + provider.getError() };
     return { code: 0, msg: '创建成功', data: { proxyId: id } };
   });
@@ -761,7 +763,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !proxyId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.updateL4Proxy !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
-    if (!(await provider.updateL4Proxy(zoneId, proxyId, { ipv6: b.ipv6, accelerateMainland: b.accelerateMainland }))) {
+    if (!(await provider.updateL4Proxy(zoneId, proxyId, { ipv6: b.ipv6, staticIp: b.staticIp, rules: b.rules, params: b.params }))) {
       return { code: -1, msg: '更新四层代理失败，' + provider.getError() };
     }
     return { code: 0, msg: '更新成功' };
