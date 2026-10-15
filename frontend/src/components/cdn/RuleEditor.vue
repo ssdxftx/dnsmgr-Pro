@@ -18,7 +18,7 @@
         <div class="zone-panel__head">
           <h3 class="zone-panel__title">{{ t('cdnRules.groupCommon') }}</h3>
         </div>
-        <n-form label-placement="left" label-width="132">
+        <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth">
           <n-form-item :label="t('cdnRules.ruleName')" required>
             <n-input v-model:value="form.ruleName" :placeholder="t('cdnRules.ruleName')" />
           </n-form-item>
@@ -68,7 +68,7 @@
         <div class="zone-panel__head">
           <h3 class="zone-panel__title">{{ t('cdnRules.groupAction') }}</h3>
         </div>
-        <n-form label-placement="left" label-width="132">
+        <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth">
           <n-form-item
             v-for="f in esaActionFields"
             :key="f.name"
@@ -112,7 +112,7 @@
             </div>
 
             <!-- 注释（官方：IF 注释） -->
-            <n-form label-placement="left" label-width="132" style="margin-bottom: 10px">
+            <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth" style="margin-bottom: 10px">
               <n-form-item :label="t('cdnRules.branchComment')">
                 <n-input v-model:value="br.comment" size="small" clearable :placeholder="t('cdnRules.branchCommentPlaceholder')" />
               </n-form-item>
@@ -214,7 +214,7 @@
                   </n-button>
                 </div>
                 <div v-if="eoActionFields(a.name).length" class="rule-editor__params">
-                  <EoParamFields :fields="eoActionFields(a.name)" :model="a.params" :locale="localeKey" />
+                  <EoParamFields :fields="eoActionFields(a.name)" :model="a.params" :locale="localeKey" :stacked="isMobile" />
                 </div>
               </div>
               <n-button size="small" dashed block style="margin-top: 6px" @click="addEoAction(bi)">
@@ -254,6 +254,7 @@ import {
 import { CloseOutline } from '@vicons/ionicons5';
 import RuleFieldControl from './RuleFieldControl.vue';
 import EoParamFields from './EoParamFields.vue';
+import { useResponsive } from '../../composables/useResponsive';
 import { toEnabled } from '../../lib/cdnSwitch';
 import {
   EO_ACTION_GROUPS, EO_OPERATORS, EO_TARGETS,
@@ -277,9 +278,14 @@ const emit = defineEmits<{
 }>();
 
 const { t, te, locale } = useI18n();
+const { isMobile } = useResponsive();
 const isEsa = computed(() => props.vendor === 'esa');
 const isZh = computed(() => String(locale.value || '').toLowerCase().startsWith('zh'));
 const localeKey = computed<EoLocale>(() => (isZh.value ? 'zh' : 'en'));
+
+/** 窄屏标签置顶，宽屏左右布局 */
+const formLabelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
+const formLabelWidth = computed(() => (isMobile.value ? undefined : 132));
 
 const mode = ref<'visual' | 'json'>('visual');
 const jsonText = ref('');
@@ -799,24 +805,27 @@ watch(
 
 /* 移动端：全部固定宽度改为弹性，避免横向溢出 */
 @media (max-width: 767px) {
-  .rule-editor__cond-target {
-    width: auto;
-    flex: 1 1 150px;
-    min-width: 0;
+  /* 条件行整体竖向堆叠，每个控件占满整行 */
+  .rule-editor__cond-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
   }
-  .rule-editor__cond-op {
-    width: auto;
-    flex: 1 1 120px;
-    min-width: 0;
-  }
-  .rule-editor__cond-name {
-    width: auto;
-    flex: 1 1 120px;
-    min-width: 0;
-  }
+  .rule-editor__cond-target,
+  .rule-editor__cond-op,
+  .rule-editor__cond-name,
   .rule-editor__cond-values {
-    min-width: 130px;
+    width: 100%;
+    flex: 1 1 auto;
+    min-width: 0;
   }
+  .rule-editor__cond-case {
+    align-self: flex-start;
+  }
+  .rule-editor__cond-row > .n-button {
+    align-self: flex-end;
+  }
+  /* 操作选择占满整行 */
   .rule-editor__action-pick {
     width: 100%;
     min-width: 0;
@@ -828,6 +837,16 @@ watch(
   }
   .rule-editor__group {
     padding: 8px 10px;
+  }
+  /* 减少分支卡片内外边距，给内容让出宽度 */
+  .rule-editor__branch {
+    padding: 10px;
+  }
+  .rule-editor__branch-head {
+    gap: 8px;
+  }
+  .rule-editor__group-head {
+    gap: 6px;
   }
 }
 </style>

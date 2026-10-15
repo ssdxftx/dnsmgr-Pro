@@ -14,6 +14,15 @@
   .n-modal.n-card {
     max-width: calc(100vw - 24px) !important;
   }
+  /* 弹窗内边距收紧，把宽度让给内容（如规则编辑器） */
+  .n-modal.n-card .n-card__content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .n-modal.n-card .n-card-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
   .n-drawer .n-drawer-content {
     max-width: 86vw;
   }
