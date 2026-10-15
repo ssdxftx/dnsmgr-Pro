@@ -18,6 +18,7 @@ export default {
     colActions: 'Actions',
     pause: 'Pause',
     resume: 'Resume',
+    delete: 'Delete',
     verify: 'Verify',
     ns: 'NS',
     nsTitle: 'Nameservers',
@@ -41,5 +42,10 @@ export default {
     areaGlobal: 'Global',
     areaMainland: 'Chinese Mainland',
     areaOverseas: 'Outside Chinese Mainland',
+    statusPaused: 'Paused',
+    statusActive: 'Active',
+    statusPending: 'Pending',
+    statusOffline: 'Offline',
+    statusConfigured: 'Configured',
   },
 };

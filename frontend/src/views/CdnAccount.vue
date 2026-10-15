@@ -288,13 +288,23 @@ const areaOptions = computed(() => [
 ]);
 const instanceOptions = computed(() =>
   instanceList.value.map((it: any) => ({
-    label: it.InstanceName || it.Name || it.Remark || String(it.InstanceId || it.Id || ''),
+    label: it.PlanName || it.InstanceName || String(it.InstanceId || it.Id || ''),
     value: String(it.InstanceId || it.Id || ''),
   })),
 );
+function siteStatusLabel(row: any) {
+  if (row.paused) return t('cdnSite.statusPaused');
+  const map: Record<string, string> = {
+    active: t('cdnSite.statusActive'),
+    pending: t('cdnSite.statusPending'),
+    offline: t('cdnSite.statusOffline'),
+    configured: t('cdnSite.statusConfigured'),
+  };
+  return map[String(row.status || '').toLowerCase()] || (row.status || '');
+}
 const siteColumns = computed(() => [
   { title: t('cdnSite.colName'), key: 'zoneName', minWidth: 160 },
-  { title: t('cdnSite.colStatus'), key: 'status', width: 110, render: (row: any) => (row.paused ? t('cdnSite.pausedOk') : row.status || '') },
+  { title: t('cdnSite.colStatus'), key: 'status', width: 110, render: (row: any) => siteStatusLabel(row) },
   { title: t('cdnSite.colArea'), key: 'area', width: 130 },
   {
     title: t('cdnSite.colActions'),
@@ -683,9 +693,11 @@ async function openOrigin(row: any) {
   ogForm.name = '';
   ogForm.hostHeader = '';
   ogForm.records = '';
+  ogForm.params = '';
   lbForm.name = '';
   lbForm.type = 'HTTP';
   lbForm.originGroups = [];
+  lbForm.params = '';
   showOrigin.value = true;
   const res = await api<any>('GET', `/cdn/accounts/${row.id}/sites`);
   originSites.value = res.code === 0 ? res.data : [];
@@ -1002,6 +1014,7 @@ async function openAdvanced(row: any) {
   advJson.analysis = '';
   l4Form.name = '';
   l4Form.area = '';
+  l4Form.params = '';
   showAdvanced.value = true;
   const res = await api<any>('GET', `/cdn/accounts/${row.id}/sites`);
   advSites.value = res.code === 0 ? res.data : [];

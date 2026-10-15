@@ -18,6 +18,7 @@ export default {
     colActions: '操作',
     pause: '暂停',
     resume: '启用',
+    delete: '删除',
     verify: '验证归属',
     ns: 'NS',
     nsTitle: 'NS 服务器',
@@ -41,5 +42,10 @@ export default {
     areaGlobal: '全球',
     areaMainland: '中国内地',
     areaOverseas: '非中国内地',
+    statusPaused: '已暂停',
+    statusActive: '已启用',
+    statusPending: '配置中',
+    statusOffline: '已下线',
+    statusConfigured: '已配置',
   },
 };
