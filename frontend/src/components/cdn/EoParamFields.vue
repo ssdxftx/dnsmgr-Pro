@@ -1,12 +1,24 @@
 <template>
-  <n-form label-placement="left" label-width="170" size="small">
+  <n-form
+    class="eo-params"
+    :class="{ 'eo-params--stacked': stacked }"
+    :label-placement="stacked ? 'top' : 'left'"
+    :label-width="stacked ? undefined : 170"
+    size="small"
+  >
     <template v-for="f in visibleFields" :key="f.name">
       <!-- 互斥分支（行为选择） -->
       <n-form-item v-if="f.type === 'oneof'" :label="labelOf(f)" :label-props="descProps(f)">
         <div class="eo-params__oneof">
-          <n-select :value="activeKey(f)" :options="variantOptions(f)" size="small" @update:value="(v: string) => setVariant(f, v)" />
+          <n-select
+            :value="activeKey(f)"
+            :options="variantOptions(f)"
+            size="small"
+            style="width: 100%"
+            @update:value="(v: string) => setVariant(f, v)"
+          />
           <div v-if="activeVariant(f)" class="eo-params__group">
-            <EoParamFields :fields="activeVariant(f)?.fields || []" :model="ensureObj(activeKey(f))" :locale="locale" />
+            <EoParamFields :fields="activeVariant(f)?.fields || []" :model="ensureObj(activeKey(f))" :locale="locale" :stacked="stacked" />
           </div>
         </div>
       </n-form-item>
@@ -14,7 +26,7 @@
       <!-- 分组：嵌套对象 -->
       <n-form-item v-else-if="f.type === 'group'" :label="labelOf(f)" :label-props="descProps(f)">
         <div class="eo-params__group">
-          <EoParamFields :fields="f.fields || []" :model="ensureGroup(f.name)" :locale="locale" />
+          <EoParamFields :fields="f.fields || []" :model="ensureGroup(f.name)" :locale="locale" :stacked="stacked" />
         </div>
       </n-form-item>
 
@@ -23,7 +35,7 @@
         <div class="eo-params__list">
           <div v-for="(item, i) in listOf(f.name)" :key="i" class="eo-params__list-item">
             <div class="eo-params__list-body">
-              <EoParamFields :fields="f.itemFields || []" :model="item" :locale="locale" />
+              <EoParamFields :fields="f.itemFields || []" :model="item" :locale="locale" :stacked="stacked" />
             </div>
             <n-button size="tiny" type="error" quaternary @click="removeItem(f.name, i)">{{ t('cdnRules.actionRemove') }}</n-button>
           </div>
@@ -45,6 +57,7 @@
           :options="optionsOf(f)"
           size="small"
           clearable
+          style="width: 100%"
           @update:value="(v: any) => setVal(f.name, v)"
         />
         <n-input-number
@@ -61,9 +74,10 @@
           v-else-if="f.type === 'tags'"
           :value="arrOf(f.name)"
           size="small"
+          style="width: 100%"
           @update:value="(v: any) => setVal(f.name, v)"
         />
-        <n-input v-else :value="strOf(f.name)" size="small" :placeholder="placeholderOf(f)" @update:value="(v: string) => setVal(f.name, v)" />
+        <n-input v-else :value="strOf(f.name)" size="small" style="width: 100%" :placeholder="placeholderOf(f)" @update:value="(v: string) => setVal(f.name, v)" />
       </n-form-item>
     </template>
   </n-form>
@@ -80,6 +94,8 @@ const props = defineProps<{
   fields: EoField[];
   model: Record<string, any>;
   locale: EoLocale;
+  /** 窄屏：标签置顶、控件占满整行 */
+  stacked?: boolean;
 }>();
 
 const { t } = useI18n();
@@ -164,12 +180,27 @@ function removeItem(name: string, index: number) {
 </script>
 
 <style scoped>
+.eo-params :deep(.n-form-item-blank) {
+  min-width: 0;
+}
+.eo-params :deep(.n-form-item) {
+  margin-bottom: 12px;
+}
+.eo-params--stacked :deep(.n-form-item) {
+  margin-bottom: 14px;
+}
+.eo-params--stacked :deep(.n-form-item-label) {
+  padding-bottom: 4px;
+}
 .eo-params__group {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius);
   background: var(--app-bg-soft);
+}
+.eo-params--stacked .eo-params__group {
+  padding: 8px 10px;
 }
 .eo-params__oneof {
   width: 100%;
