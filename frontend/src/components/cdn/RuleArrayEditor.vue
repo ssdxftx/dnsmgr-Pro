@@ -11,7 +11,7 @@
             :options="optionsOf(f)"
             :placeholder="f.label || f.name"
             size="small"
-            style="width: 130px"
+            class="rule-array__cell rule-array__cell--enum"
             @update:value="(v: any) => setCell(idx, f.name, v)"
           />
           <n-switch
@@ -25,7 +25,7 @@
             :value="row[f.name] === undefined || row[f.name] === null ? '' : String(row[f.name])"
             :placeholder="f.label || f.name"
             size="small"
-            :style="{ width: f.name.toLowerCase().includes('value') ? '220px' : '140px' }"
+            :class="['rule-array__cell', f.name.toLowerCase().includes('value') ? 'rule-array__cell--wide' : '']"
             @update:value="(v: string) => setCell(idx, f.name, v)"
           />
         </template>
@@ -122,5 +122,26 @@ function removeRow(idx: number) {
   border: 1px dashed var(--app-divider);
   border-radius: var(--app-radius);
   margin-bottom: 6px;
+}
+.rule-array__cell {
+  width: 140px;
+}
+.rule-array__cell--enum {
+  width: 130px;
+}
+.rule-array__cell--wide {
+  width: 220px;
+}
+
+/* 移动端：单元格弹性换行，避免横向溢出 */
+@media (max-width: 767px) {
+  .rule-array__cell,
+  .rule-array__cell--enum,
+  .rule-array__cell--wide {
+    width: auto;
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+    max-width: 100%;
+  }
 }
 </style>

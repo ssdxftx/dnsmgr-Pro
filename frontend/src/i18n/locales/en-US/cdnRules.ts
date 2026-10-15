@@ -62,6 +62,14 @@ export default {
     condGroupTitle: 'Group {index}',
     condGroupHint: 'All conditions in a group must match (AND)',
     condNoValue: 'No value needed for this operator',
+    condParamName: 'Parameter name',
+    condIgnoreCase: 'Ignore case',
+
+    branchAddElseIf: 'Add ELSE IF',
+    branchAddElse: 'Add ELSE',
+    branchRemove: 'Remove branch',
+    branchElseHint: 'Executed when none of the branches above match',
+    branchHint: 'Conditions are evaluated top-down; when a branch matches, its actions run and the rest are skipped (official IF / ELSE IF / ELSE semantics)',
 
     actionTitle: 'Actions',
     actionAdd: 'Add action',

@@ -252,7 +252,7 @@
       v-model:show="showRuleEditor"
       preset="card"
       :title="ruleEditingId ? t('cdnRules.editRule') : t('cdnRules.createRule')"
-      style="max-width: 960px"
+      style="width: min(960px, calc(100vw - 24px))"
       :mask-closable="false"
     >
       <RuleEditor
