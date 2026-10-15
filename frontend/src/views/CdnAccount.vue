@@ -141,6 +141,47 @@
         <n-data-table :columns="ruleColumns" :data="ruleList" :loading="ruleLoading" size="small" :bordered="false" :row-key="(r:any) => String(r.ruleId || r.configId)" />
       </n-space>
     </n-modal>
+
+    <n-modal v-model:show="showSecurity" preset="card" :title="t('cdnSecurity.title', { name: secAcct?.name || '' })" style="max-width:900px" :mask-closable="false">
+      <n-space vertical :size="14">
+        <n-form-item :label="t('cdnSecurity.site')" :show-feedback="false">
+          <n-select v-model:value="secZone" :options="secSiteOptions" :placeholder="t('cdnSecurity.selectSite')" @update:value="loadSecurity" />
+        </n-form-item>
+        <n-tabs type="line" animated>
+          <n-tab-pane v-if="secCaps.securityIpGroup" name="ipg" :tab="t('cdnSecurity.ipGroups')">
+            <n-space vertical :size="10">
+              <n-space :size="8">
+                <n-input v-model:value="ipForm.name" :placeholder="t('cdnSecurity.name')" style="width:180px" />
+                <n-button type="primary" size="small" :loading="ipSaving" @click="createIpGroup">{{ t('cdnSecurity.create') }}</n-button>
+              </n-space>
+              <n-input v-model:value="ipForm.content" type="textarea" :rows="3" :placeholder="t('cdnSecurity.contentHint')" />
+              <n-data-table :columns="ipColumns" :data="ipGroups" :loading="secLoading" size="small" :bordered="false" />
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane v-if="secCaps.ddos" name="ddos" :tab="t('cdnSecurity.ddos')">
+            <n-space vertical :size="8">
+              <n-button size="small" @click="loadSecurityConfig('ddos')">{{ t('cdnSecurity.load') }}</n-button>
+              <n-input v-model:value="secJson.ddos" type="textarea" :rows="8" :placeholder="t('cdnSecurity.configJson')" />
+              <n-button size="small" type="primary" @click="saveSecurityConfig('ddos')">{{ t('common.save') }}</n-button>
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane v-if="secCaps.waf" name="waf" :tab="t('cdnSecurity.waf')">
+            <n-space vertical :size="8">
+              <n-button size="small" @click="loadSecurityConfig('waf')">{{ t('cdnSecurity.load') }}</n-button>
+              <n-input v-model:value="secJson.waf" type="textarea" :rows="8" :placeholder="t('cdnSecurity.configJson')" />
+              <n-button size="small" type="primary" @click="saveSecurityConfig('waf')">{{ t('common.save') }}</n-button>
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane v-if="secCaps.originProtection" name="op" :tab="t('cdnSecurity.originProtection')">
+            <n-space vertical :size="8">
+              <n-button size="small" @click="loadSecurityConfig('originProtection')">{{ t('cdnSecurity.load') }}</n-button>
+              <n-input v-model:value="secJson.originProtection" type="textarea" :rows="8" :placeholder="t('cdnSecurity.configJson')" />
+              <n-button size="small" type="primary" @click="saveSecurityConfig('originProtection')">{{ t('common.save') }}</n-button>
+            </n-space>
+          </n-tab-pane>
+        </n-tabs>
+      </n-space>
+    </n-modal>
   </div>
 </template>
 
@@ -313,6 +354,35 @@ const ruleColumns = computed(() => [
   },
 ]);
 
+// ===== 安全配置 =====
+const showSecurity = ref(false);
+const secAcct = ref<any>(null);
+const secSites = ref<any[]>([]);
+const secZone = ref<string>('');
+const secLoading = ref(false);
+const ipGroups = ref<any[]>([]);
+const ipSaving = ref(false);
+const ipForm = reactive<any>({ name: '', content: '' });
+const secJson = reactive<any>({ ddos: '', waf: '', originProtection: '' });
+const secCaps = computed(() => providers.value[secAcct.value?.type]?.capabilities || {});
+const secSiteOptions = computed(() => secSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
+const ipColumns = computed(() => [
+  { title: t('cdnSecurity.colName'), key: 'name', minWidth: 160 },
+  { title: t('cdnSecurity.content'), key: 'content', minWidth: 200, render: (r: any) => (Array.isArray(r.content) ? r.content.join(', ') : '') },
+  {
+    title: t('cdnSecurity.colActions'),
+    key: 'actions',
+    width: 160,
+    render: (r: any) =>
+      h(NSpace, null, {
+        default: () => [
+          h(NButton, { size: 'tiny', onClick: () => loadIpContent(r) }, { default: () => t('cdnSecurity.load') }),
+          h(NButton, { size: 'tiny', type: 'error', onClick: () => delIpGroup(r) }, { default: () => t('common.delete') }),
+        ],
+      }),
+  },
+]);
+
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   { title: t('cdnAccount.providerCol'), key: 'typename', width: 140 },
@@ -336,7 +406,7 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 520,
+    width: 620,
     render(row: any) {
       const caps = providers.value[row.type]?.capabilities || {};
       const btns: any[] = [];
@@ -348,6 +418,9 @@ const columns = computed(() => [
       }
       if (caps.rules) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openRules(row) }, { default: () => t('cdnRules.manage') }));
+      }
+      if (caps.security) {
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openSecurity(row) }, { default: () => t('cdnSecurity.manage') }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
@@ -729,6 +802,98 @@ function delRule(r: any) {
       if (res.code === 0) {
         message.success(res.msg);
         loadRules();
+      } else message.error(res.msg);
+    },
+  });
+}
+
+// ===== 安全配置 =====
+async function openSecurity(row: any) {
+  secAcct.value = row;
+  secZone.value = '';
+  ipGroups.value = [];
+  secJson.ddos = '';
+  secJson.waf = '';
+  secJson.originProtection = '';
+  showSecurity.value = true;
+  const res = await api<any>('GET', `/cdn/accounts/${row.id}/sites`);
+  secSites.value = res.code === 0 ? res.data : [];
+}
+
+function secRoute(key: string) {
+  return key === 'originProtection' ? 'origin-protection' : key;
+}
+
+async function loadSecurityConfig(key: string, silent = false) {
+  if (!secZone.value || !secAcct.value) return;
+  const res = await api<any>('GET', `/cdn/accounts/${secAcct.value.id}/security/${secRoute(key)}`, { zoneId: secZone.value });
+  if (res.code === 0) secJson[key] = JSON.stringify(res.data, null, 2);
+  else if (!silent) message.error(res.msg);
+}
+
+async function loadSecurity() {
+  if (!secZone.value || !secAcct.value) return;
+  secLoading.value = true;
+  const aid = secAcct.value.id;
+  if (secCaps.value.securityIpGroup) {
+    const res = await api<any>('GET', `/cdn/accounts/${aid}/security/ip-groups`, { zoneId: secZone.value });
+    ipGroups.value = res.code === 0 ? res.data : [];
+  }
+  if (secCaps.value.ddos) await loadSecurityConfig('ddos', true);
+  if (secCaps.value.waf) await loadSecurityConfig('waf', true);
+  if (secCaps.value.originProtection) await loadSecurityConfig('originProtection', true);
+  secLoading.value = false;
+}
+
+async function saveSecurityConfig(key: string) {
+  if (!secZone.value) return message.warning(t('cdnSecurity.needSite'));
+  let config: any;
+  try {
+    config = secJson[key] ? JSON.parse(secJson[key]) : {};
+  } catch {
+    return message.error(t('cdnSecurity.invalidJson'));
+  }
+  const res = await api('POST', `/cdn/accounts/${secAcct.value.id}/security/${secRoute(key)}`, { zoneId: secZone.value, config });
+  if (res.code === 0) message.success(res.msg);
+  else message.error(res.msg);
+}
+
+async function createIpGroup() {
+  if (!secZone.value) return message.warning(t('cdnSecurity.needSite'));
+  if (!ipForm.name) return message.warning(t('cdnSecurity.needName'));
+  const content = String(ipForm.content || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  ipSaving.value = true;
+  const res = await api<any>('POST', `/cdn/accounts/${secAcct.value.id}/security/ip-groups`, { zoneId: secZone.value, name: ipForm.name, content });
+  ipSaving.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    ipForm.name = '';
+    ipForm.content = '';
+    loadSecurity();
+  } else message.error(res.msg);
+}
+
+async function loadIpContent(r: any) {
+  const res = await api<any>('GET', `/cdn/accounts/${secAcct.value.id}/security/ip-groups/${r.groupId}/content`, { zoneId: secZone.value });
+  if (res.code === 0) {
+    dialog.info({ title: t('cdnSecurity.content'), content: () => h('div', { style: 'white-space:pre-wrap' }, (res.data || []).join('\n') || '-') });
+  } else message.error(res.msg);
+}
+
+function delIpGroup(r: any) {
+  dialog.warning({
+    title: t('common.delete'),
+    content: t('cdnSecurity.confirmDelete', { name: r.name }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('DELETE', `/cdn/accounts/${secAcct.value.id}/security/ip-groups/${r.groupId}`, { zoneId: secZone.value });
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadSecurity();
       } else message.error(res.msg);
     },
   });

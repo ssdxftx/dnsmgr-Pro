@@ -213,6 +213,9 @@ export interface CdnProvider {
   setDdosProtection?(zoneId: string, config: Record<string, any>): Promise<boolean>;
   getWafInfo?(zoneId: string): Promise<Record<string, any> | false>;
   setWafInfo?(zoneId: string, config: Record<string, any>): Promise<boolean>;
+  // ESA 源站防护
+  getOriginProtection?(zoneId: string): Promise<Record<string, any> | false>;
+  setOriginProtection?(zoneId: string, config: Record<string, any>): Promise<boolean>;
 
   // ===== 四层代理 =====
   listL4Proxies?(zoneId: string, page?: number, size?: number): Promise<PagedResult<L4ProxyItem> | false>;

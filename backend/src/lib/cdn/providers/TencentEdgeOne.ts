@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, SecurityIpGroupItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -845,5 +845,56 @@ export class TencentEdgeOne implements CdnProvider {
 
   async setRulePriority(zoneId: string, ruleIds: string[]): Promise<boolean> {
     return (await this.send('ModifyL7AccRulePriority', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
+  }
+
+  // ===== Phase 4：安全 =====
+
+  async listSecurityIpGroups(zoneId: string): Promise<SecurityIpGroupItem[] | false> {
+    const data = await this.send('DescribeSecurityIPGroup', { ZoneId: zoneId });
+    if (!data) return false;
+    return (data.IPGroups || []).map((g: any) => ({ groupId: Number(g.GroupId || 0), name: g.Name || '', content: g.Content || [], ...g }));
+  }
+
+  async createSecurityIpGroup(zoneId: string, name: string, content: string[]): Promise<number | false> {
+    const d = await this.send('CreateSecurityIPGroup', { ZoneId: zoneId, IPGroup: { GroupId: 0, Name: name, Content: content } });
+    return d && d.GroupId !== undefined ? Number(d.GroupId) : false;
+  }
+
+  async updateSecurityIpGroup(zoneId: string, groupId: number, name: string, content: string[], mode = 'update'): Promise<boolean> {
+    return (await this.send('ModifySecurityIPGroup', { ZoneId: zoneId, IPGroup: { GroupId: groupId, Name: name, Content: content }, Mode: mode })) !== false;
+  }
+
+  async deleteSecurityIpGroup(zoneId: string, groupId: number): Promise<boolean> {
+    return (await this.send('DeleteSecurityIPGroup', { ZoneId: zoneId, GroupId: groupId })) !== false;
+  }
+
+  async getSecurityIpGroupContent(zoneId: string, groupId: number): Promise<string[] | false> {
+    const d = await this.send('DescribeSecurityIPGroupContent', { ZoneId: zoneId, GroupId: groupId, Limit: 1000, Offset: 0 });
+    if (!d) return false;
+    return d.IPs || d.Content || d.IPList || [];
+  }
+
+  async getDdosProtection(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeDDoSProtection', { ZoneId: zoneId });
+    if (!d) return false;
+    return d.DDoSProtection || d;
+  }
+
+  async setDdosProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyDDoSProtection', { ZoneId: zoneId, DDoSProtection: config })) !== false;
+  }
+
+  async getWafInfo(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeWebSecurityTemplates', { ZoneId: zoneId });
+    if (!d) return false;
+    return { templates: d.SecurityTemplates || d.Templates || [] };
+  }
+
+  async setWafInfo(zoneId: string, config: Record<string, any>): Promise<boolean> {
+    if (config && config.TemplateId) {
+      const { TemplateId, ...rest } = config;
+      return (await this.send('ModifyWebSecurityTemplate', { ZoneId: zoneId, TemplateId, ...rest })) !== false;
+    }
+    return (await this.send('CreateWebSecurityTemplate', { ZoneId: zoneId, ...config })) !== false;
   }
 }

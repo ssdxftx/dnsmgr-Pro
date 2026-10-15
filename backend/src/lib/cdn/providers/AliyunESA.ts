@@ -688,4 +688,36 @@ export class AliyunESA implements CdnProvider {
     const sid = Number(zoneId);
     return (await this.call({ Action: `Delete${kind}`, SiteId: sid, ConfigId: /^\d+$/.test(configId) ? Number(configId) : configId })) !== false;
   }
+
+  // ===== Phase 4：安全 =====
+
+  async getWafInfo(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.call({ Action: 'ListWafPhases', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return { phases: d.Phases || d.WafPhases || [] };
+  }
+
+  async setWafInfo(zoneId: string, config: Record<string, any>): Promise<boolean> {
+    return (await this.call(this.withJson({ Action: 'CreateWafRule', SiteId: Number(zoneId), ...config }))) !== false;
+  }
+
+  async getOriginProtection(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.call({ Action: 'GetOriginProtection', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return d.OriginProtection || d;
+  }
+
+  async setOriginProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
+    return (await this.call(this.withJson({ Action: 'UpdateOriginProtection', SiteId: Number(zoneId), ...config }))) !== false;
+  }
+
+  async getDdosProtection(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.call({ Action: 'DescribeHttpDDoSAttackProtection', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return d;
+  }
+
+  async setDdosProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
+    return (await this.call(this.withJson({ Action: 'SetHttpDDoSAttackProtection', SiteId: Number(zoneId), ...config }))) !== false;
+  }
 }
