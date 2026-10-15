@@ -248,7 +248,7 @@ export class AliyunESA implements CdnProvider {
   }
 
   private esaHostCondition(domain: string): string {
-    return '(http.host eq "' + normalizeValue(domain).replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+    return '(http.host eq "' + this.esaEscape(normalizeValue(domain)) + '"';
   }
 
   // ESA 规则表达式字符串字面量转义：转义反斜杠与双引号，避免值中的 " 关闭字面量造成表达式注入
@@ -270,16 +270,22 @@ export class AliyunESA implements CdnProvider {
     // full_path
     const v = normalizeValue(parsed.value);
     if (v.includes('*') || v.includes('?')) {
-      return ' and http.request.uri.path matches "' + wildcardToRegex(v).replace(/"/g, '\\"') + '"))';
+      return ' and http.request.uri.path matches "' + this.esaEscape(wildcardToRegex(v)) + '"))';
     }
     return ' and http.request.uri.path eq "' + this.esaEscape(v) + '"))';
   }
 
   private async findEsaRule(action: string, siteId: number, ruleName: string): Promise<any | null> {
-    const data = await this.call({ Action: action, SiteId: siteId, RuleName: ruleName, PageNumber: 1, PageSize: 100 });
-    if (!data) return undefined;
-    for (const c of data.Configs || []) {
-      if (c.RuleName === ruleName) return c;
+    const size = 100;
+    for (let page = 1; page <= 50; page++) {
+      const data = await this.call({ Action: action, SiteId: siteId, RuleName: ruleName, PageNumber: page, PageSize: size });
+      if (!data) return undefined;
+      const configs = data.Configs || [];
+      for (const c of configs) {
+        if (c.RuleName === ruleName) return c;
+      }
+      const total = Number(data.TotalCount || 0);
+      if (configs.length < size || page * size >= total) break;
     }
     return null;
   }
@@ -580,15 +586,21 @@ export class AliyunESA implements CdnProvider {
     return out;
   }
 
-  // 合并调用方提供的 ESA 原生字段（PascalCase），用于传入通用参数无法表达的必填项
-  private applyRaw(body: Record<string, any>, params: Record<string, any>): Record<string, any> {
-    const raw = params?.params;
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-      for (const [k, v] of Object.entries(raw)) {
+  // 过滤用户对象中的保留键，避免对象展开覆盖 Action/SiteId/Id 等
+  private sanitizeUser(obj: any): Record<string, any> {
+    const out: Record<string, any> = {};
+    if (obj && typeof obj === 'object' && !Array.isArray(obj)) {
+      for (const [k, v] of Object.entries(obj)) {
         if (ESA_RESERVED_PARAM_KEYS.has(k)) continue;
-        body[k] = v;
+        out[k] = v;
       }
     }
+    return out;
+  }
+
+  // 合并调用方提供的 ESA 原生字段（PascalCase），用于传入通用参数无法表达的必填项
+  private applyRaw(body: Record<string, any>, params: Record<string, any>): Record<string, any> {
+    for (const [k, v] of Object.entries(this.sanitizeUser(params?.params))) body[k] = v;
     return body;
   }
 
@@ -732,6 +744,7 @@ export class AliyunESA implements CdnProvider {
     delete body.Id;
     delete body.SiteId;
     delete body.Action;
+    delete body.SiteVersion;
     body.RuleName = ruleName;
     const existing = await this.findEsaRule(`List${kind}s`, sid, ruleName);
     if (existing === undefined) return false;
@@ -755,7 +768,7 @@ export class AliyunESA implements CdnProvider {
   }
 
   async setWafInfo(zoneId: string, config: Record<string, any>): Promise<boolean> {
-    return (await this.call(this.withJson({ Action: 'CreateWafRule', SiteId: Number(zoneId), ...config }))) !== false;
+    return (await this.call(this.withJson({ Action: 'CreateWafRule', SiteId: Number(zoneId), ...this.sanitizeUser(config) }))) !== false;
   }
 
   async getOriginProtection(zoneId: string): Promise<Record<string, any> | false> {
@@ -765,7 +778,7 @@ export class AliyunESA implements CdnProvider {
   }
 
   async setOriginProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
-    return (await this.call(this.withJson({ Action: 'UpdateOriginProtection', SiteId: Number(zoneId), ...config }))) !== false;
+    return (await this.call(this.withJson({ Action: 'UpdateOriginProtection', SiteId: Number(zoneId), ...this.sanitizeUser(config) }))) !== false;
   }
 
   async getDdosProtection(zoneId: string): Promise<Record<string, any> | false> {
@@ -775,7 +788,7 @@ export class AliyunESA implements CdnProvider {
   }
 
   async setDdosProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
-    return (await this.call(this.withJson({ Action: 'SetHttpDDoSAttackProtection', SiteId: Number(zoneId), ...config }))) !== false;
+    return (await this.call(this.withJson({ Action: 'SetHttpDDoSAttackProtection', SiteId: Number(zoneId), ...this.sanitizeUser(config) }))) !== false;
   }
 
   // ===== Phase 5：四层代理（TransportLayerApplication）=====
@@ -854,7 +867,7 @@ export class AliyunESA implements CdnProvider {
   }
 
   async updateCacheTag(zoneId: string, params: Record<string, any>): Promise<boolean> {
-    return (await this.call(this.withJson({ Action: 'UpdateCacheTag', SiteId: Number(zoneId), ...params }))) !== false;
+    return (await this.call(this.withJson({ Action: 'UpdateCacheTag', SiteId: Number(zoneId), ...this.sanitizeUser(params) }))) !== false;
   }
 
   async blockObject(zoneId: string, type: string, content: string[], maxage?: number): Promise<string | false> {
