@@ -3,6 +3,9 @@ import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertI
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
+// params 透传时禁止覆盖的服务端控制键（由 provider 依业务语义设定）
+const ESA_RESERVED_PARAM_KEYS = new Set(['Action', 'SiteId', 'Id', 'ApplicationId', 'ConfigId', 'SiteVersion']);
+
 export class AliyunESA implements CdnProvider {
   private client: Aliyun;
   private accessKeyId: string;
@@ -580,7 +583,12 @@ export class AliyunESA implements CdnProvider {
   // 合并调用方提供的 ESA 原生字段（PascalCase），用于传入通用参数无法表达的必填项
   private applyRaw(body: Record<string, any>, params: Record<string, any>): Record<string, any> {
     const raw = params?.params;
-    if (raw && typeof raw === 'object' && !Array.isArray(raw)) Object.assign(body, raw);
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+      for (const [k, v] of Object.entries(raw)) {
+        if (ESA_RESERVED_PARAM_KEYS.has(k)) continue;
+        body[k] = v;
+      }
+    }
     return body;
   }
 
@@ -776,7 +784,7 @@ export class AliyunESA implements CdnProvider {
     const d = await this.call({ Action: 'ListTransportLayerApplications', SiteId: Number(zoneId), PageNumber: page, PageSize: size });
     if (!d) return false;
     const arr = d.Applications || d.TransportLayerApplications || [];
-    const list: L4ProxyItem[] = arr.map((p: any) => ({ proxyId: String(p.Id ?? p.ApplicationId ?? ''), name: p.RecordName || p.Name || '', area: p.Area, ...p }));
+    const list: L4ProxyItem[] = arr.map((p: any) => ({ proxyId: String(p.Id ?? p.ApplicationId ?? ''), name: p.RecordName || p.Name || '', ...p }));
     return { total: Number(d.TotalCount || list.length), list };
   }
 

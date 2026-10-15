@@ -363,6 +363,7 @@ const ruleEditingId = ref<string>('');
 const ruleForm = reactive<any>({ ruleName: '', status: 'enable', json: '' });
 const ruleIsEsa = computed(() => ruleAcct.value?.type === 'aliyun_esa');
 const ruleSiteOptions = computed(() => ruleSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
+// 与后端 routes/cdn.ts 的 ESA_RULE_KINDS 白名单保持一致
 const ruleKindOptions = [
   'RedirectRule',
   'RewriteUrlRule',
