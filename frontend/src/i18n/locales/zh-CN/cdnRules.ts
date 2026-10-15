@@ -62,6 +62,14 @@ export default {
     condGroupTitle: '条件组 {index}',
     condGroupHint: '组内条件需全部满足（AND）',
     condNoValue: '该运算符无需取值',
+    condParamName: '参数名',
+    condIgnoreCase: '忽略大小写',
+
+    branchAddElseIf: '添加 ELSE IF',
+    branchAddElse: '添加 ELSE',
+    branchRemove: '删除分支',
+    branchElseHint: '以上分支均未命中时执行',
+    branchHint: '条件自上而下依次判定；命中某分支后执行其操作，跳过其余分支（官方 IF / ELSE IF / ELSE 语义）',
 
     actionTitle: '执行动作',
     actionAdd: '添加动作',
