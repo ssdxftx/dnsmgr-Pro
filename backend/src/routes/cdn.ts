@@ -455,7 +455,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.delete('/api/cdn/accounts/:aid/origin-groups/:groupId', auth, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = String((req.params as any).groupId || '');
-    const zoneId = String(req.query.zoneId || '').trim();
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
     if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteOriginGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
@@ -517,7 +517,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.delete('/api/cdn/accounts/:aid/load-balancers/:instanceId', auth, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const instanceId = String((req.params as any).instanceId || '');
-    const zoneId = String(req.query.zoneId || '').trim();
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
     if (!zoneId || !instanceId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteLoadBalancer !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
@@ -625,8 +625,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.delete('/api/cdn/accounts/:aid/rule-configs/:configId', auth, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const configId = String((req.params as any).configId || '');
-    const zoneId = String(req.query.zoneId || '').trim();
-    const kind = String(req.query.kind || '').trim();
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    const kind = String((req.body || {}).kind || req.query.kind || '').trim();
     if (!zoneId || !kind || !configId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
@@ -677,7 +677,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.delete('/api/cdn/accounts/:aid/security/ip-groups/:groupId', auth, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = Number((req.params as any).groupId);
-    const zoneId = String(req.query.zoneId || '').trim();
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
     if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteSecurityIpGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 组' };
@@ -770,7 +770,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId', auth, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
-    const zoneId = String(req.query.zoneId || '').trim();
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
     if (!zoneId || !proxyId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteL4Proxy !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
