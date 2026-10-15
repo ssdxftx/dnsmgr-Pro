@@ -27,7 +27,9 @@ export async function queryAliyunEsaStatistics(
   end: Date,
   type: string,
 ): Promise<CdnStatisticsResult> {
-  const client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, 'esa.aliyuncs.com', '2024-09-10');
+  const region = String(config.region || '').trim();
+  const validRegion = /^[a-z0-9-]+$/i.test(region) ? region : 'cn-hangzhou';
+  const client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, `esa.${validRegion}.aliyuncs.com`, '2024-09-10');
   const { labels, interval } = buildLabels(start, end);
   const len = labels.length;
   const result: CdnStatisticsResult = { labels };

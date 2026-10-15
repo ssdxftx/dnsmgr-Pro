@@ -46,6 +46,8 @@ export default {
     statusActive: 'Active',
     statusPending: 'Pending',
     statusOffline: 'Offline',
-    statusConfigured: 'Configured',
+    statusMoved: 'Moved',
+    statusDeactivated: 'Deactivated',
+    statusInitializing: 'Initializing',
   },
 };

@@ -46,6 +46,8 @@ export default {
     statusActive: '已启用',
     statusPending: '配置中',
     statusOffline: '已下线',
-    statusConfigured: '已配置',
+    statusMoved: '已迁走',
+    statusDeactivated: '已停用',
+    statusInitializing: '待绑定套餐',
   },
 };
