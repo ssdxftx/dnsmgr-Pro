@@ -414,6 +414,117 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '站点已删除' };
   });
 
+  // ===== 源站组 =====
+  app.get('/api/cdn/accounts/:aid/origin-groups', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listOriginGroups !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
+    const r = await provider.listOriginGroups(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取源站组失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/origin-groups', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !b.name) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createOriginGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
+    const id = await provider.createOriginGroup(zoneId, { name: b.name, type: b.type, records: b.records, hostHeader: b.hostHeader });
+    if (id === false) return { code: -1, msg: '创建源站组失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { groupId: id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/origin-groups/:groupId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const groupId = String((req.params as any).groupId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateOriginGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
+    if (!(await provider.updateOriginGroup(zoneId, groupId, { name: b.name, type: b.type, records: b.records, hostHeader: b.hostHeader }))) {
+      return { code: -1, msg: '更新失败，' + provider.getError() };
+    }
+    return { code: 0, msg: '更新成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/origin-groups/:groupId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const groupId = String((req.params as any).groupId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteOriginGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
+    if (!(await provider.deleteOriginGroup(zoneId, groupId))) return { code: -1, msg: '删除失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 负载均衡 =====
+  app.get('/api/cdn/accounts/:aid/load-balancers', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listLoadBalancers !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
+    const r = await provider.listLoadBalancers(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取负载均衡失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/load-balancers', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !b.name) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createLoadBalancer !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
+    const id = await provider.createLoadBalancer(zoneId, {
+      name: b.name,
+      type: b.type,
+      originGroups: b.originGroups,
+      healthChecker: b.healthChecker,
+      steeringPolicy: b.steeringPolicy,
+      failoverPolicy: b.failoverPolicy,
+    });
+    if (id === false) return { code: -1, msg: '创建负载均衡失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { instanceId: id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/load-balancers/:instanceId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const instanceId = String((req.params as any).instanceId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !instanceId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateLoadBalancer !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
+    if (!(await provider.updateLoadBalancer(zoneId, instanceId, {
+      name: b.name,
+      originGroups: b.originGroups,
+      healthChecker: b.healthChecker,
+      steeringPolicy: b.steeringPolicy,
+      failoverPolicy: b.failoverPolicy,
+    }))) {
+      return { code: -1, msg: '更新失败，' + provider.getError() };
+    }
+    return { code: 0, msg: '更新成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/load-balancers/:instanceId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const instanceId = String((req.params as any).instanceId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !instanceId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteLoadBalancer !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
+    if (!(await provider.deleteLoadBalancer(zoneId, instanceId))) return { code: -1, msg: '删除失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
   // 详情（域名级配置）
   app.get('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;

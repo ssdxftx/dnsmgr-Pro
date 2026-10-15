@@ -86,6 +86,38 @@
         <n-data-table :columns="siteColumns" :data="siteList" :loading="siteLoading" :bordered="false" size="small" :row-key="(r:any) => String(r.zoneId)" />
       </n-space>
     </n-modal>
+
+    <n-modal v-model:show="showOrigin" preset="card" :title="t('cdnOrigin.title', { name: originAcct?.name || '' })" style="max-width:880px" :mask-closable="false">
+      <n-space vertical :size="14">
+        <n-form-item :label="t('cdnOrigin.site')" :show-feedback="false">
+          <n-select v-model:value="originZone" :options="originSiteOptions" :placeholder="t('cdnOrigin.selectSite')" @update:value="loadOriginData" />
+        </n-form-item>
+        <n-tabs type="line" animated>
+          <n-tab-pane name="og" :tab="t('cdnOrigin.originGroups')">
+            <n-space vertical :size="10">
+              <n-space :size="8">
+                <n-input v-model:value="ogForm.name" :placeholder="t('cdnOrigin.name')" style="width:180px" />
+                <n-input v-model:value="ogForm.hostHeader" :placeholder="t('cdnOrigin.hostHeader')" style="width:180px" />
+                <n-button type="primary" size="small" :loading="ogSaving" @click="createOriginGroup">{{ t('cdnOrigin.create') }}</n-button>
+              </n-space>
+              <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" />
+              <n-data-table :columns="ogColumns" :data="originGroups" :loading="originLoading" size="small" :bordered="false" />
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane name="lb" :tab="t('cdnOrigin.loadBalancers')">
+            <n-space vertical :size="10">
+              <n-space :size="8">
+                <n-input v-model:value="lbForm.name" :placeholder="t('cdnOrigin.name')" style="width:180px" />
+                <n-select v-model:value="lbForm.type" :options="lbTypeOptions" style="width:160px" />
+                <n-button type="primary" size="small" :loading="lbSaving" @click="createLoadBalancer">{{ t('cdnOrigin.create') }}</n-button>
+              </n-space>
+              <n-select v-model:value="lbForm.originGroups" multiple :options="ogOptions" :placeholder="t('cdnOrigin.originGroupsPick')" />
+              <n-data-table :columns="lbColumns" :data="loadBalancers" :loading="originLoading" size="small" :bordered="false" />
+            </n-space>
+          </n-tab-pane>
+        </n-tabs>
+      </n-space>
+    </n-modal>
   </div>
 </template>
 
@@ -170,6 +202,43 @@ const siteColumns = computed(() => [
   },
 ]);
 
+// ===== 源站与负载均衡 =====
+const showOrigin = ref(false);
+const originAcct = ref<any>(null);
+const originSites = ref<any[]>([]);
+const originZone = ref<string>('');
+const originGroups = ref<any[]>([]);
+const loadBalancers = ref<any[]>([]);
+const originLoading = ref(false);
+const ogSaving = ref(false);
+const lbSaving = ref(false);
+const ogForm = reactive<any>({ name: '', hostHeader: '', records: '' });
+const lbForm = reactive<any>({ name: '', type: 'HTTP', originGroups: [] });
+
+const originSiteOptions = computed(() => originSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
+const ogOptions = computed(() => originGroups.value.map((g: any) => ({ label: g.name || String(g.groupId), value: String(g.groupId) })));
+const lbTypeOptions = computed(() => [
+  { label: 'HTTP', value: 'HTTP' },
+  { label: 'HTTP_V2', value: 'HTTP_V2' },
+  { label: 'GENERAL', value: 'GENERAL' },
+]);
+const ogColumns = computed(() => [
+  { title: t('cdnOrigin.colName'), key: 'name', minWidth: 140 },
+  { title: t('cdnOrigin.colType'), key: 'type', width: 100 },
+  {
+    title: t('cdnOrigin.colRecords'),
+    key: 'records',
+    minWidth: 200,
+    render: (r: any) => (Array.isArray(r.records) ? r.records.map((x: any) => (typeof x === 'string' ? x : x.Record || x.record || x.Address || '')).join(', ') : ''),
+  },
+  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => delOriginGroup(r) }, { default: () => t('cdnOrigin.delete') }) },
+]);
+const lbColumns = computed(() => [
+  { title: t('cdnOrigin.colName'), key: 'name', minWidth: 140 },
+  { title: t('cdnOrigin.colType'), key: 'type', width: 120 },
+  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => delLoadBalancer(r) }, { default: () => t('cdnOrigin.delete') }) },
+]);
+
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   { title: t('cdnAccount.providerCol'), key: 'typename', width: 140 },
@@ -193,11 +262,15 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 260,
+    width: 360,
     render(row: any) {
+      const caps = providers.value[row.type]?.capabilities || {};
       const btns: any[] = [];
-      if (providers.value[row.type]?.capabilities?.zoneManage) {
+      if (caps.zoneManage) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openSites(row) }, { default: () => t('cdnSite.manage') }));
+      }
+      if (caps.originGroup || caps.loadBalancer) {
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openOrigin(row) }, { default: () => t('cdnOrigin.manage') }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
@@ -369,6 +442,123 @@ function deleteSite(row: any) {
       if (res.code === 0) {
         message.success(res.msg);
         loadSites();
+      } else message.error(res.msg);
+    },
+  });
+}
+
+// ===== 源站与负载均衡 =====
+async function openOrigin(row: any) {
+  originAcct.value = row;
+  originZone.value = '';
+  originGroups.value = [];
+  loadBalancers.value = [];
+  ogForm.name = '';
+  ogForm.hostHeader = '';
+  ogForm.records = '';
+  lbForm.name = '';
+  lbForm.type = 'HTTP';
+  lbForm.originGroups = [];
+  showOrigin.value = true;
+  const res = await api<any>('GET', `/cdn/accounts/${row.id}/sites`);
+  originSites.value = res.code === 0 ? res.data : [];
+}
+
+async function loadOriginData() {
+  if (!originZone.value || !originAcct.value) return;
+  originLoading.value = true;
+  const aid = originAcct.value.id;
+  const [og, lb] = await Promise.all([
+    api<any>('GET', `/cdn/accounts/${aid}/origin-groups`, { zoneId: originZone.value, page: 1, size: 100 }),
+    api<any>('GET', `/cdn/accounts/${aid}/load-balancers`, { zoneId: originZone.value, page: 1, size: 100 }),
+  ]);
+  originGroups.value = og.code === 0 ? og.data?.list || [] : [];
+  loadBalancers.value = lb.code === 0 ? lb.data?.list || [] : [];
+  originLoading.value = false;
+}
+
+function parseRecords(text: string) {
+  return String(text || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [rec, w] = line.split(',').map((x) => x.trim());
+      const o: any = { Record: rec };
+      if (w) o.Weight = Number(w);
+      return o;
+    });
+}
+
+async function createOriginGroup() {
+  if (!originZone.value) return message.warning(t('cdnOrigin.needSite'));
+  if (!ogForm.name) return message.warning(t('cdnOrigin.needName'));
+  const records = parseRecords(ogForm.records);
+  if (!records.length) return message.warning(t('cdnOrigin.needRecords'));
+  ogSaving.value = true;
+  const res = await api<any>('POST', `/cdn/accounts/${originAcct.value.id}/origin-groups`, {
+    zoneId: originZone.value,
+    name: ogForm.name,
+    records,
+    hostHeader: ogForm.hostHeader || undefined,
+  });
+  ogSaving.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    ogForm.name = '';
+    ogForm.records = '';
+    ogForm.hostHeader = '';
+    loadOriginData();
+  } else message.error(res.msg);
+}
+
+function delOriginGroup(r: any) {
+  dialog.warning({
+    title: t('cdnOrigin.delete'),
+    content: t('cdnOrigin.confirmDelete', { name: r.name || r.groupId }),
+    positiveText: t('cdnOrigin.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('DELETE', `/cdn/accounts/${originAcct.value.id}/origin-groups/${encodeURIComponent(r.groupId)}`, { zoneId: originZone.value });
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadOriginData();
+      } else message.error(res.msg);
+    },
+  });
+}
+
+async function createLoadBalancer() {
+  if (!originZone.value) return message.warning(t('cdnOrigin.needSite'));
+  if (!lbForm.name) return message.warning(t('cdnOrigin.needName'));
+  lbSaving.value = true;
+  const originGroupsPayload = (lbForm.originGroups || []).map((gid: string, i: number) => ({ Priority: String(i + 1), OriginGroupId: String(gid) }));
+  const res = await api<any>('POST', `/cdn/accounts/${originAcct.value.id}/load-balancers`, {
+    zoneId: originZone.value,
+    name: lbForm.name,
+    type: lbForm.type,
+    originGroups: originGroupsPayload,
+  });
+  lbSaving.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    lbForm.name = '';
+    lbForm.originGroups = [];
+    loadOriginData();
+  } else message.error(res.msg);
+}
+
+function delLoadBalancer(r: any) {
+  dialog.warning({
+    title: t('cdnOrigin.delete'),
+    content: t('cdnOrigin.confirmDelete', { name: r.name || r.instanceId }),
+    positiveText: t('cdnOrigin.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('DELETE', `/cdn/accounts/${originAcct.value.id}/load-balancers/${encodeURIComponent(r.instanceId)}`, { zoneId: originZone.value });
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadOriginData();
       } else message.error(res.msg);
     },
   });

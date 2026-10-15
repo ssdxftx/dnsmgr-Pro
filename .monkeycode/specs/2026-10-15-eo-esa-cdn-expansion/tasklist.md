@@ -38,17 +38,17 @@ Updated: 2026-10-15
 
 ## Phase 2 源站组 / 负载均衡
 
-- [ ] 2.1 EO 源站组 CRUD（design §3.2/§3.3）
+- [x] 2.1 EO 源站组 CRUD（design §3.2/§3.3）
   - `createOriginGroup`/`updateOriginGroup`/`deleteOriginGroup`/`listOriginGroups`（`DescribeOriginGroup` 分页，`Records:OriginRecord[]`，`HostHeader`）
-- [ ] 2.2 EO 负载均衡 CRUD
-  - `createLoadBalancer`（`Type:HTTP|HTTP_V2|GENERAL`、`OriginGroups:OriginGroupInLoadBalancer[]`、`HealthChecker`、`SteeringPolicy`、`FailoverPolicy`）/`updateLoadBalancer`/`deleteLoadBalancer`/`listLoadBalancers`
-- [ ] 2.3 ESA 源站池 / 负载均衡（design §4.1）
-  - `createOriginPool`/`listOriginPools`/`updateOriginPool?`/`deleteOriginPool?`、`createLoadBalancer`/`listLoadBalancers`/`listLoadBalancerOriginStatus`
-- [ ] 2.4 路由：源站组/负载均衡端点（能力门控，管理员）
+- [x] 2.2 EO 负载均衡 CRUD
+  - `createLoadBalancer`（`Type:HTTP|HTTP_V2|GENERAL`、`OriginGroups`、`HealthChecker`、`SteeringPolicy`、`FailoverPolicy`）/`updateLoadBalancer`/`deleteLoadBalancer`/`listLoadBalancers`
+- [x] 2.3 ESA 源站池 / 负载均衡（design §4.1）
+  - `CreateOriginPool`/`ListOriginPools`/`UpdateOriginPool`/`DeleteOriginPool`、`CreateLoadBalancer`/`ListLoadBalancers`/`UpdateLoadBalancer`/`DeleteLoadBalancer`（数组/对象参数 JSON 化）
+- [x] 2.4 路由：源站组/负载均衡端点（能力门控，管理员）
   - `GET/POST/PUT/DELETE /api/cdn/accounts/:aid/origin-groups`、`.../load-balancers`
-- [ ] 2.5 前端：源站组/负载均衡管理 UI
-  - 站点维度列表 + 表单（源站记录、权重、健康检查、调度/容灾策略），i18n 文案
-- [ ] 2.6 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
+- [x] 2.5 前端：源站组/负载均衡管理 UI
+  - `CdnAccount.vue` 增加「源站与负载均衡」弹窗（站点选择 + 双 Tab 列表/创建/删除）；i18n `cdnOrigin`（zh/en）
+- [x] 2.6 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
 
 ## Phase 3 规则引擎
 
