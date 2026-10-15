@@ -586,9 +586,9 @@ async function openRuleEditor(row: any) {
   ruleEditingId.value = row ? String(row.ruleId || row.configId || '') : '';
   if (row) {
     if (isEsa.value) ruleInitial.value = Array.isArray(row.rules) && row.rules.length ? row.rules[0] : row;
-    else ruleInitial.value = { RuleName: row.ruleName, Status: row.status, Rules: row.rules || [] };
+    else ruleInitial.value = { RuleName: row.ruleName, Status: row.status, Branches: row.branches || [] };
   } else {
-    ruleInitial.value = isEsa.value ? { RuleEnable: 'on' } : { Status: 'enable', Rules: [] };
+    ruleInitial.value = isEsa.value ? { RuleEnable: 'on' } : { Status: 'enable', Branches: [] };
   }
   showRuleEditor.value = true;
 }
@@ -611,15 +611,15 @@ async function saveRule(payload: any) {
     res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(ruleEditingId.value)}`, {
       zoneId,
       ruleName: payload.RuleName,
-      enabled: payload.Status === 'enable',
-      rules: payload.Rules,
+      status: payload.Status,
+      branches: payload.Branches,
     });
   } else {
     res = await api('POST', `/cdn/accounts/${aid}/rules`, {
       zoneId,
       ruleName: payload.RuleName,
-      enabled: payload.Status === 'enable',
-      rules: payload.Rules,
+      status: payload.Status,
+      branches: payload.Branches,
     });
   }
   ruleSaving.value = false;
@@ -644,8 +644,8 @@ async function toggleRuleEnabled(row: any) {
     res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(String(row.ruleId))}`, {
       zoneId,
       ruleName: row.ruleName,
-      enabled: next,
-      rules: row.rules || [],
+      status: next ? 'enable' : 'disable',
+      branches: row.branches || [],
     });
   }
   if (res.code === 0) loadRules();

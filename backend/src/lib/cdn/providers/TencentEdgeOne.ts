@@ -826,17 +826,36 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('DeleteLoadBalancer', { ZoneId: zoneId, InstanceId: instanceId })) !== false;
   }
 
-  // ===== Phase 3：L7 规则引擎 =====
+  // ===== Phase 3：L7 规则引擎（官方 L7Acc 接口，与控制台「规则引擎」完全一致）=====
+  // 旧版 CreateRule/DescribeRules/ModifyRule/DeleteRules 已被腾讯云标记为「旧」，
+  // 控制台实际使用 CreateL7AccRules/DescribeL7AccRules/ModifyL7AccRule/DeleteL7AccRules，
+  // 规则以 { RuleName, Branches:[{ Condition, Actions:[{Name,<Name>Parameters}] }] } 结构表达。
 
+  // 旧版规则元数据接口（保留以兼容 /rules/setting）
   async getRulesSetting(): Promise<Record<string, any> | false> {
     const d = await this.send('DescribeRulesSetting', {});
     return d || false;
   }
 
+  // DescribeL7AccRules 单页上限 200，站点规则较多时必须翻页，否则列表截断
+  private async listAllL7Rules(zoneId: string): Promise<any[] | false> {
+    const limit = 200;
+    const all: any[] = [];
+    for (let offset = 0; offset < limit * 100; offset += limit) {
+      const data = await this.send('DescribeL7AccRules', { ZoneId: zoneId, Offset: offset, Limit: limit });
+      if (!data) return false;
+      const rules: any[] = data.Rules || [];
+      all.push(...rules);
+      if (rules.length < limit) break;
+      if (data.TotalCount != null && offset + rules.length >= data.TotalCount) break;
+    }
+    return all;
+  }
+
   async listRules(zoneId: string): Promise<RuleItem[] | false> {
-    const data = await this.send('DescribeRules', { ZoneId: zoneId });
-    if (!data) return false;
-    return (data.RuleItems || []).map((r: any) => ({
+    const rules = await this.listAllL7Rules(zoneId);
+    if (rules === false) return false;
+    return rules.map((r: any) => ({
       ...r,
       ruleId: String(r.RuleId || ''),
       ruleName: r.RuleName || '',
@@ -844,38 +863,36 @@ export class TencentEdgeOne implements CdnProvider {
       enabled: toEnabled(r.Status),
       status: r.Status,
       priority: Number(r.RulePriority || 0),
-      rules: r.Rules || [],
+      branches: r.Branches || [],
+      description: r.Description || [],
     }));
   }
 
-  async createRule(zoneId: string, params: Record<string, any>): Promise<string | false> {
+  // 组装 CreateL7AccRules/ModifyL7AccRule 的 RuleEngineItem（RuleId 由调用方按需追加）
+  private buildL7RuleItem(params: Record<string, any>): Record<string, any> {
     const enabled = params?.enabled !== undefined ? toEnabled(params.enabled) : toEnabled(params?.status ?? 'enable');
-    const param: Record<string, any> = {
-      ZoneId: zoneId,
+    const item: Record<string, any> = {
       RuleName: params.ruleName,
       Status: fromEnabled(enabled, 'eo'),
-      Rules: params.rules || [],
+      Branches: params.branches || [],
     };
-    if (params.tags) param.Tags = params.tags;
-    const d = await this.send('CreateRule', param);
-    return d && d.RuleId ? String(d.RuleId) : false;
+    if (Array.isArray(params.description) && params.description.length) item.Description = params.description;
+    return item;
+  }
+
+  async createRule(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateL7AccRules', { ZoneId: zoneId, Rules: [this.buildL7RuleItem(params)] });
+    if (!d) return false;
+    return String(d.RuleIds?.[0] || 'ok');
   }
 
   async updateRule(zoneId: string, ruleId: string, params: Record<string, any>): Promise<boolean> {
-    const enabled = params?.enabled !== undefined ? toEnabled(params.enabled) : toEnabled(params?.status ?? 'enable');
-    const param: Record<string, any> = {
-      ZoneId: zoneId,
-      RuleId: ruleId,
-      RuleName: params.ruleName,
-      Status: fromEnabled(enabled, 'eo'),
-      Rules: params.rules || [],
-    };
-    if (params.tags) param.Tags = params.tags;
-    return (await this.send('ModifyRule', param)) !== false;
+    const rule = { ...this.buildL7RuleItem(params), RuleId: ruleId };
+    return (await this.send('ModifyL7AccRule', { ZoneId: zoneId, Rule: rule })) !== false;
   }
 
   async deleteRules(zoneId: string, ruleIds: string[]): Promise<boolean> {
-    return (await this.send('DeleteRules', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
+    return (await this.send('DeleteL7AccRules', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
   }
 
   async setRulePriority(zoneId: string, ruleIds: string[]): Promise<boolean> {

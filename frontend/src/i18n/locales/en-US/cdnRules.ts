@@ -64,10 +64,15 @@ export default {
     condNoValue: 'No value needed for this operator',
     condParamName: 'Parameter name',
     condIgnoreCase: 'Ignore case',
+    condVisual: 'Visual',
+    condExprMode: 'Expression',
+    condExprHintEo: "Official syntax example: ${http.request.host} in ['example.com']; expressions that cannot be structured are kept as-is",
 
     branchAddElseIf: 'Add ELSE IF',
     branchAddElse: 'Add ELSE',
     branchRemove: 'Remove branch',
+    branchComment: 'Comment',
+    branchCommentPlaceholder: 'Optional note for this branch',
     branchElseHint: 'Executed when none of the branches above match',
     branchHint: 'Conditions are evaluated top-down; when a branch matches, its actions run and the rest are skipped (official IF / ELSE IF / ELSE semantics)',
 

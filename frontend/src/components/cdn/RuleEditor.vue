@@ -95,6 +95,10 @@
                 {{ branchLabel(br, bi) }}
               </span>
               <span v-if="br.type === 'else'" class="hint-text">{{ t('cdnRules.branchElseHint') }}</span>
+              <n-radio-group v-if="br.type !== 'else'" v-model:value="br.condMode" size="small">
+                <n-radio-button value="visual">{{ t('cdnRules.condVisual') }}</n-radio-button>
+                <n-radio-button value="expr">{{ t('cdnRules.condExprMode') }}</n-radio-button>
+              </n-radio-group>
               <n-button
                 v-if="bi > 0"
                 size="tiny"
@@ -107,74 +111,89 @@
               </n-button>
             </div>
 
-            <!-- 匹配条件：Or 条件组 × 组内 And -->
+            <!-- 注释（官方：IF 注释） -->
+            <n-form label-placement="left" label-width="132" style="margin-bottom: 10px">
+              <n-form-item :label="t('cdnRules.branchComment')">
+                <n-input v-model:value="br.comment" size="small" clearable :placeholder="t('cdnRules.branchCommentPlaceholder')" />
+              </n-form-item>
+            </n-form>
+
+            <!-- 匹配条件 -->
             <template v-if="br.type !== 'else'">
-              <div v-for="(grp, gi) in br.orGroups" :key="gi">
-                <div v-if="gi > 0" class="rule-editor__or-divider">Or</div>
-                <div class="rule-editor__group">
-                  <div class="rule-editor__group-head">
-                    <span v-if="br.orGroups.length > 1" class="rule-editor__group-title">
-                      {{ t('cdnRules.condGroupTitle', { index: gi + 1 }) }}
-                      <span class="hint-text">{{ t('cdnRules.condGroupHint') }}</span>
-                    </span>
-                    <n-space :size="6" style="margin-left: auto">
-                      <n-button size="tiny" @click="addEoCondition(bi, gi)">{{ t('cdnRules.condAddItem') }}</n-button>
-                      <n-button v-if="br.orGroups.length > 1" size="tiny" type="error" quaternary @click="br.orGroups.splice(gi, 1)">
-                        {{ t('cdnRules.condRemoveGroup') }}
-                      </n-button>
-                    </n-space>
-                  </div>
-                  <div class="rule-editor__cond-list">
-                    <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
-                      <n-select
-                        v-model:value="it.target"
-                        :options="targetSelectOptions"
-                        :placeholder="t('cdnRules.condTarget')"
-                        size="small"
-                        class="rule-editor__cond-target"
-                        @update:value="onTargetChange(it)"
-                      />
-                      <n-select
-                        v-if="!isAllTarget(it.target)"
-                        v-model:value="it.operator"
-                        :options="operatorOptionsOf(it.target)"
-                        size="small"
-                        class="rule-editor__cond-op"
-                      />
-                      <n-input
-                        v-if="needName(it.target)"
-                        v-model:value="it.name"
-                        :placeholder="t('cdnRules.condParamName')"
-                        size="small"
-                        class="rule-editor__cond-name"
-                      />
-                      <n-dynamic-tags
-                        v-if="needValues(it)"
-                        v-model:value="it.values"
-                        size="small"
-                        class="rule-editor__cond-values"
-                      />
-                      <n-tag v-else-if="!isAllTarget(it.target)" size="small" :bordered="false">
-                        {{ t('cdnRules.condNoValue') }}
-                      </n-tag>
-                      <n-popover v-if="ignoreCaseAble(it.target)" trigger="hover">
-                        <template #trigger>
-                          <span class="rule-editor__cond-case" @click="it.ignoreCase = !it.ignoreCase">
-                            Aa
-                          </span>
-                        </template>
-                        {{ t('cdnRules.condIgnoreCase') }}：{{ it.ignoreCase ? t('common.enabled') : t('common.disabled') }}
-                      </n-popover>
-                      <n-button size="tiny" type="error" quaternary circle @click="removeEoCondition(bi, gi, ii)">
-                        <template #icon><n-icon :component="CloseOutline" /></template>
-                      </n-button>
+              <n-input
+                v-if="br.condMode === 'expr'"
+                v-model:value="br.condExpr"
+                type="textarea"
+                :rows="2"
+                :placeholder="t('cdnRules.condExprHintEo')"
+                class="mono-input"
+                spellcheck="false"
+              />
+              <template v-else>
+                <div v-for="(grp, gi) in br.orGroups" :key="gi">
+                  <div v-if="gi > 0" class="rule-editor__or-divider">Or</div>
+                  <div class="rule-editor__group">
+                    <div class="rule-editor__group-head">
+                      <span v-if="br.orGroups.length > 1" class="rule-editor__group-title">
+                        {{ t('cdnRules.condGroupTitle', { index: gi + 1 }) }}
+                        <span class="hint-text">{{ t('cdnRules.condGroupHint') }}</span>
+                      </span>
+                      <n-space :size="6" style="margin-left: auto">
+                        <n-button size="tiny" @click="addEoCondition(bi, gi)">{{ t('cdnRules.condAddItem') }}</n-button>
+                        <n-button v-if="br.orGroups.length > 1" size="tiny" type="error" quaternary @click="br.orGroups.splice(gi, 1)">
+                          {{ t('cdnRules.condRemoveGroup') }}
+                        </n-button>
+                      </n-space>
+                    </div>
+                    <div class="rule-editor__cond-list">
+                      <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
+                        <n-select
+                          v-model:value="it.target"
+                          :options="targetSelectOptions"
+                          :placeholder="t('cdnRules.condTarget')"
+                          size="small"
+                          class="rule-editor__cond-target"
+                          @update:value="onTargetChange(it)"
+                        />
+                        <n-select
+                          v-model:value="it.operator"
+                          :options="operatorOptionsOf(it.target)"
+                          size="small"
+                          class="rule-editor__cond-op"
+                        />
+                        <n-input
+                          v-if="needName(it.target)"
+                          v-model:value="it.name"
+                          :placeholder="t('cdnRules.condParamName')"
+                          size="small"
+                          class="rule-editor__cond-name"
+                        />
+                        <n-dynamic-tags
+                          v-if="needValues(it)"
+                          v-model:value="it.values"
+                          size="small"
+                          class="rule-editor__cond-values"
+                        />
+                        <n-tag v-else size="small" :bordered="false">{{ t('cdnRules.condNoValue') }}</n-tag>
+                        <n-popover v-if="ignoreCaseAble(it.target)" trigger="hover">
+                          <template #trigger>
+                            <span class="rule-editor__cond-case" @click="it.ignoreCase = !it.ignoreCase">
+                              Aa
+                            </span>
+                          </template>
+                          {{ t('cdnRules.condIgnoreCase') }}：{{ it.ignoreCase ? t('common.enabled') : t('common.disabled') }}
+                        </n-popover>
+                        <n-button size="tiny" type="error" quaternary circle @click="removeEoCondition(bi, gi, ii)">
+                          <template #icon><n-icon :component="CloseOutline" /></template>
+                        </n-button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-              <n-button size="small" dashed block style="margin-top: 6px" @click="addEoOrGroup(bi)">
-                {{ t('cdnRules.condAddGroup') }}
-              </n-button>
+                <n-button size="small" dashed block style="margin-top: 6px" @click="addEoOrGroup(bi)">
+                  {{ t('cdnRules.condAddGroup') }}
+                </n-button>
+              </template>
             </template>
 
             <!-- 分支操作列表 -->
@@ -182,7 +201,7 @@
               <div v-for="(a, ai) in br.actions" :key="ai" class="rule-editor__group">
                 <div class="rule-editor__group-head">
                   <n-select
-                    v-model:value="a.action"
+                    v-model:value="a.name"
                     :options="actionSelectOptions"
                     :placeholder="t('cdnRules.actionPick')"
                     size="small"
@@ -194,70 +213,8 @@
                     {{ t('cdnRules.actionRemove') }}
                   </n-button>
                 </div>
-                <div v-if="hasParams(a)" class="rule-editor__params">
-                  <n-form label-placement="left" label-width="132">
-                    <n-form-item
-                      v-for="p in propertiesOf(a.action)"
-                      :key="p.Name"
-                      :label="eoParamLabel(p.Name, localeKey)"
-                      :label-props="p.Description ? { title: p.Description } : undefined"
-                    >
-                      <n-select
-                        v-if="p.Type === 'CHOICE'"
-                        :value="choiceValueOf(a, p)"
-                        :options="choiceOptionsOf(p)"
-                        size="small"
-                        clearable
-                        @update:value="(v: any) => setParamValue(a, p, v)"
-                      />
-                      <n-switch
-                        v-else-if="p.Type === 'TOGGLE'"
-                        :value="toEnabled(paramRawValue(a, p))"
-                        size="small"
-                        @update:value="(v: boolean) => setParamValue(a, p, pickToggle(p, v))"
-                      />
-                      <n-input-number
-                        v-else-if="p.Type === 'CUSTOM_NUM'"
-                        :value="numOrNull(paramRawValue(a, p))"
-                        :min="p.Min || undefined"
-                        :max="p.Max || undefined"
-                        size="small"
-                        clearable
-                        style="width: 100%"
-                        @update:value="(v: any) => setParamValue(a, p, v)"
-                      />
-                      <n-dynamic-tags
-                        v-else-if="p.IsMultiple"
-                        :value="Array.isArray(paramRawValue(a, p)) ? paramRawValue(a, p) : []"
-                        size="small"
-                        @update:value="(v: any) => setParamValue(a, p, v)"
-                      />
-                      <n-input
-                        v-else
-                        :value="paramStrValue(a, p)"
-                        size="small"
-                        @update:value="(v: string) => setParamValue(a, p, v)"
-                      />
-                    </n-form-item>
-                    <n-form-item
-                      v-for="name in extraParamsOf(a)"
-                      :key="'x-' + name"
-                      :label="eoParamLabel(name, localeKey)"
-                    >
-                      <n-dynamic-tags
-                        v-if="Array.isArray(a.params[name])"
-                        :value="a.params[name]"
-                        size="small"
-                        @update:value="(v: any) => setParamByName(a, name, v)"
-                      />
-                      <n-input
-                        v-else
-                        :value="paramStrValueByName(a, name)"
-                        size="small"
-                        @update:value="(v: string) => setParamByName(a, name, v)"
-                      />
-                    </n-form-item>
-                  </n-form>
+                <div v-if="eoActionFields(a.name).length" class="rule-editor__params">
+                  <EoParamFields :fields="eoActionFields(a.name)" :model="a.params" :locale="localeKey" />
                 </div>
               </div>
               <n-button size="small" dashed block style="margin-top: 6px" @click="addEoAction(bi)">
@@ -279,7 +236,7 @@
     <!-- ============ JSON 源码模式 ============ -->
     <template v-else>
       <n-alert type="info" :show-icon="false" style="margin-bottom: 10px">{{ t('cdnRules.modeJsonHint') }}</n-alert>
-      <n-input v-model:value="jsonText" type="textarea" :rows="16" spellcheck="false" class="mono-input" />
+      <n-input v-model:value="jsonText" type="textarea" :rows="18" spellcheck="false" class="mono-input" />
       <n-space justify="end" style="margin-top: 10px">
         <n-button size="small" @click="syncFromJson">{{ t('cdnRules.modeVisual') }}</n-button>
       </n-space>
@@ -296,15 +253,18 @@ import {
 } from 'naive-ui';
 import { CloseOutline } from '@vicons/ionicons5';
 import RuleFieldControl from './RuleFieldControl.vue';
+import EoParamFields from './EoParamFields.vue';
 import { toEnabled } from '../../lib/cdnSwitch';
 import {
   EO_ACTION_GROUPS, EO_OPERATORS, EO_TARGETS,
-  eoActionInfo, eoParamLabel, eoValueLabel, type EoLocale,
+  eoActionInfo, type EoLocale,
 } from '../../lib/eoRuleMeta';
+import { EO_ACTION_SCHEMAS, eoActionFields, eoParamKey, type EoField } from '../../lib/eoRuleSchema';
+import { buildCondition, parseCondition, type EoCondItem, type EoOrGroup } from '../../lib/eoRuleExpr';
 
 const props = defineProps<{
   vendor: 'esa' | 'eo';
-  /** ESA：规则字段表；EO：{ actions } */
+  /** ESA：规则字段表；EO：保留占位 */
   schema: any;
   /** 编辑既有规则时的初始数据 */
   initial?: any;
@@ -324,13 +284,24 @@ const localeKey = computed<EoLocale>(() => (isZh.value ? 'zh' : 'en'));
 const mode = ref<'visual' | 'json'>('visual');
 const jsonText = ref('');
 
-interface EoCondItem { target: string; operator: string; name?: string; values: string[]; ignoreCase?: boolean }
-interface EoOrGroup { items: EoCondItem[] }
-interface EoActionItem { action: string; params: Record<string, any>; kind?: string }
-interface EoBranch { type: 'if' | 'elseif' | 'else'; orGroups: EoOrGroup[]; actions: EoActionItem[] }
+interface EoActionItem { name: string; params: Record<string, any> }
+interface EoBranch { type: 'if' | 'elseif' | 'else'; comment: string; condMode: 'visual' | 'expr'; condExpr: string; orGroups: EoOrGroup[]; actions: EoActionItem[] }
 
 function newCondItem(): EoCondItem {
   return { target: 'host', operator: 'equal', values: [], ignoreCase: false };
+}
+function newAction(): EoActionItem {
+  return { name: '', params: {} };
+}
+function newBranch(type: EoBranch['type']): EoBranch {
+  return {
+    type,
+    comment: '',
+    condMode: 'visual',
+    condExpr: '',
+    orGroups: type === 'else' ? [] : [{ items: [newCondItem()] }],
+    actions: [newAction()],
+  };
 }
 
 const form = reactive<any>({
@@ -339,9 +310,7 @@ const form = reactive<any>({
   ruleExpr: '',
   sequence: null,
   data: {} as Record<string, any>,
-  eoBranches: [
-    { type: 'if', orGroups: [{ items: [newCondItem()] }], actions: [{ action: '', params: {} }] },
-  ] as EoBranch[],
+  eoBranches: [newBranch('if')] as EoBranch[],
 });
 const esaCondMode = ref<'all' | 'custom'>('custom');
 
@@ -370,11 +339,9 @@ function insertSnippet(tpl: string) {
 }
 
 // ---------- EO 官方元数据 ----------
-const eoActions = computed<any[]>(() => (Array.isArray(props.schema?.actions) ? props.schema.actions : []));
-
-/** 匹配类型下拉（官方中文） */
+/** 匹配类型下拉（官方中文，去掉「全部」——全部请求即 ELSE 分支） */
 const targetSelectOptions = computed(() =>
-  EO_TARGETS.map((x) => ({ label: isZh.value ? x.label.zh : x.label.en, value: x.value })),
+  EO_TARGETS.filter((x) => x.value !== 'all').map((x) => ({ label: isZh.value ? x.label.zh : x.label.en, value: x.value })),
 );
 
 /** 运算符下拉：官方仅查询字符串 / HTTP 请求头支持「存在/不存在」 */
@@ -387,12 +354,10 @@ function operatorOptionsOf(target: string) {
 /** 操作下拉：按官方分组（缓存配置 / 网络优化 / HTTPS 优化 / 修改 HTTP 头 / 高级配置），中文显示 */
 const actionSelectOptions = computed(() => {
   const byGroup = new Map<string, { label: string; value: string }[]>();
-  for (const a of eoActions.value) {
-    const name = String(a?.Action || '');
-    if (!name) continue;
-    const info = eoActionInfo(name, localeKey.value);
+  for (const s of EO_ACTION_SCHEMAS) {
+    const info = eoActionInfo(s.name, localeKey.value);
     if (!byGroup.has(info.group)) byGroup.set(info.group, []);
-    byGroup.get(info.group)!.push({ label: info.label, value: name });
+    byGroup.get(info.group)!.push({ label: info.label, value: s.name });
   }
   return EO_ACTION_GROUPS
     .filter((g) => byGroup.has(g.key))
@@ -404,17 +369,13 @@ const actionSelectOptions = computed(() => {
     }));
 });
 
-function isAllTarget(target: string) {
-  return target === 'all';
-}
 function needName(target: string) {
-  return !!EO_TARGETS.find((x) => x.value === target)?.needName && !isAllTarget(target);
+  return !!EO_TARGETS.find((x) => x.value === target)?.needName;
 }
 function ignoreCaseAble(target: string) {
-  return !!EO_TARGETS.find((x) => x.value === target)?.ignoreCase && !isAllTarget(target);
+  return !!EO_TARGETS.find((x) => x.value === target)?.ignoreCase;
 }
 function needValues(it: EoCondItem) {
-  if (isAllTarget(it.target)) return false;
   return it.operator !== 'exist' && it.operator !== 'notexist';
 }
 function onTargetChange(it: EoCondItem) {
@@ -422,12 +383,6 @@ function onTargetChange(it: EoCondItem) {
   const meta = EO_TARGETS.find((x) => x.value === it.target);
   if (!meta?.existable && (it.operator === 'exist' || it.operator === 'notexist')) it.operator = 'equal';
   if (!meta?.needName) it.name = undefined;
-  if (isAllTarget(it.target)) {
-    it.operator = 'equal';
-    it.values = ['all'];
-  } else if (it.values[0] === 'all') {
-    it.values = [];
-  }
 }
 
 // ---------- EO 分支/条件/操作 ----------
@@ -442,13 +397,9 @@ function addEoBranch(type: 'elseif' | 'else') {
     const branches = form.eoBranches as EoBranch[];
     const last = branches[branches.length - 1];
     if (last?.type === 'else') return;
-    branches.push({ type: 'else', orGroups: [], actions: [{ action: '', params: {} }] });
+    branches.push(newBranch('else'));
   } else {
-    (form.eoBranches as EoBranch[]).push({
-      type: 'elseif',
-      orGroups: [{ items: [newCondItem()] }],
-      actions: [{ action: '', params: {} }],
-    });
+    (form.eoBranches as EoBranch[]).push(newBranch('elseif'));
   }
 }
 function addEoOrGroup(bi: number) {
@@ -463,59 +414,38 @@ function removeEoCondition(bi: number, gi: number, ii: number) {
   if (!br.orGroups[gi].items.length) br.orGroups.splice(gi, 1);
 }
 function addEoAction(bi: number) {
-  (form.eoBranches as EoBranch[])[bi].actions.push({ action: '', params: {} });
-}
-
-function propertiesOf(action: string): any[] {
-  const hit = eoActions.value.find((a: any) => a.Action === action);
-  return Array.isArray(hit?.Properties) ? hit.Properties : [];
-}
-/** schema 未定义的参数名：多为官方元数据不全时规则里携带的额外参数，必须原样保留 */
-function extraParamsOf(a: EoActionItem): string[] {
-  const known = new Set(propertiesOf(a.action).map((p: any) => p.Name));
-  return Object.keys(a.params).filter((k) => !known.has(k));
-}
-function hasParams(a: EoActionItem): boolean {
-  return propertiesOf(a.action).length > 0 || extraParamsOf(a).length > 0;
-}
-function paramStrValueByName(a: EoActionItem, name: string): string {
-  const v = a.params[name];
-  return v === undefined || v === null ? '' : String(v);
-}
-function setParamByName(a: EoActionItem, name: string, v: any) {
-  a.params[name] = v;
-}
-function numOrNull(v: any) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
-function pickToggle(p: any, on: boolean) {
-  const choices: string[] = Array.isArray(p.ChoicesValue) ? p.ChoicesValue : ['on', 'off'];
-  const onVal = choices.find((c) => toEnabled(c)) ?? choices[0] ?? 'on';
-  const offVal = choices.find((c) => !toEnabled(c)) ?? choices[1] ?? 'off';
-  return on ? onVal : offVal;
+  (form.eoBranches as EoBranch[])[bi].actions.push(newAction());
 }
 function onActionChange(a: EoActionItem) {
   a.params = {};
-  a.kind = undefined;
+  const fields = eoActionFields(a.name);
+  // 新增操作时，顶层开关默认开启（与官方新增操作一致）
+  for (const f of fields) if (f.type === 'switch' && a.params[f.name] === undefined) a.params[f.name] = 'on';
+  ensureStructure(fields, a.params);
 }
-function paramRawValue(a: EoActionItem, p: any) {
-  return a.params[p.Name];
-}
-function choiceValueOf(a: EoActionItem, p: any) {
-  const v = a.params[p.Name];
-  return v === undefined || v === null || v === '' ? null : String(v);
-}
-function paramStrValue(a: EoActionItem, p: any) {
-  const v = a.params[p.Name];
-  return v === undefined || v === null ? '' : String(v);
-}
-/** CHOICE 取值选项：官方中文（未收录回退原值） */
-function choiceOptionsOf(p: any) {
-  return (p.ChoicesValue || []).map((c: any) => ({ label: eoValueLabel(String(c), localeKey.value), value: String(c) }));
-}
-function setParamValue(a: EoActionItem, p: any, v: any) {
-  a.params[p.Name] = v;
+
+/** 保证操作参数结构完整（分组对象 / 列表数组 / oneof 生效分支存在），避免渲染期补建 */
+function ensureStructure(fields: EoField[], params: Record<string, any>) {
+  for (const f of fields) {
+    if (f.type === 'group') {
+      if (!params[f.name] || typeof params[f.name] !== 'object' || Array.isArray(params[f.name])) params[f.name] = {};
+      ensureStructure(f.fields || [], params[f.name]);
+    } else if (f.type === 'list') {
+      if (!Array.isArray(params[f.name])) params[f.name] = [];
+      for (const item of params[f.name]) ensureStructure(f.itemFields || [], item);
+    } else if (f.type === 'oneof') {
+      const variants = f.variants || [];
+      const key =
+        variants.find((v) => params[v.key] && params[v.key].Switch === 'on')?.key ||
+        variants.find((v) => params[v.key] && typeof params[v.key] === 'object')?.key ||
+        variants[0]?.key;
+      if (key) {
+        if (!params[key] || typeof params[key] !== 'object') params[key] = {};
+        if (params[key].Switch === undefined) params[key].Switch = 'on';
+        ensureStructure(variants.find((v) => v.key === key)?.fields || [], params[key]);
+      }
+    }
+  }
 }
 
 // ---------- 初始化 / payload 组装 ----------
@@ -535,82 +465,69 @@ function buildEsaPayload(): Record<string, any> {
   return out;
 }
 
-/** EO：条件行 → 官方 RuleCondition */
-function toEoCondition(it: EoCondItem): Record<string, any> {
-  const cond: Record<string, any> = {
-    Operator: it.operator || 'equal',
-    Target: it.target,
-    Values: isAllTarget(it.target) ? ['all'] : Array.isArray(it.values) ? it.values.filter((v) => v !== '') : [],
-  };
-  if (ignoreCaseAble(it.target) && it.ignoreCase) cond.IgnoreCase = true;
-  if (needName(it.target) && String(it.name || '').trim()) cond.Name = String(it.name).trim();
-  return cond;
-}
-
-/** 参数值 → 官方 Values 数组（数组原样透传，标量包成单元素数组，空值给空数组） */
-function toParamValues(raw: any): any[] {
-  if (raw === undefined || raw === null || raw === '') return [];
-  return Array.isArray(raw) ? raw : [raw];
-}
-
-/** EO：操作 → 官方 Action（依据 ExtraParameter.Id 判定 NormalAction/RewriteAction/CodeAction） */
-function toEoAction(a: EoActionItem): Record<string, any> {
-  const props_ = propertiesOf(a.action);
-  const known = new Set(props_.map((p: any) => p.Name));
-  const params = props_.map((p: any) => {
-    const raw = a.params[p.Name];
-    const extraId = p.ExtraParameter?.Id;
-    const item: Record<string, any> = {};
-    if (extraId === 'Action') item.Action = String(raw ?? '');
-    if (extraId === 'StatusCode') item.StatusCode = Number(raw ?? 0);
-    item.Name = p.Name;
-    item.Values = toParamValues(raw);
-    return item;
-  });
-  // 保留 schema 未覆盖的参数：官方 DescribeRulesSetting 元数据不全时，规则里携带的额外参数
-  // （如 HTTPUpstreamTimeout.ResponseTimeout、WebSocket.Timeout 等）不得在保存时被丢弃
-  for (const [name, raw] of Object.entries(a.params)) {
-    if (known.has(name)) continue;
-    params.push({ Name: name, Values: toParamValues(raw) });
+/** 递归剔除空值（空串 / null / undefined / 空对象），保留 off / 0 / 空数组等有效取值 */
+function pruneParams(obj: Record<string, any>): Record<string, any> {
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(obj || {})) {
+    if (v === undefined || v === null || v === '') continue;
+    if (Array.isArray(v)) {
+      out[k] = v;
+      continue;
+    }
+    if (typeof v === 'object') {
+      const c = pruneParams(v);
+      if (Object.keys(c).length) out[k] = c;
+      continue;
+    }
+    out[k] = v;
   }
-  const extraId = props_.find((p: any) => p.ExtraParameter?.Id)?.ExtraParameter?.Id;
-  const kind = a.kind || (extraId === 'Action' ? 'RewriteAction' : extraId === 'StatusCode' ? 'CodeAction' : 'NormalAction');
-  return { [kind]: { Action: a.action, Parameters: params } };
+  return out;
 }
 
-/** EO：分支 → { Conditions: RuleAndConditions[], Actions }（官方：组间 Or、组内 And；ELSE 无条件） */
-function toEoBranchRule(br: EoBranch): { Conditions: any[]; Actions: any[] } {
-  const groups = br.type === 'else'
-    ? []
-    : br.orGroups
-        .map((g) => ({
-          Conditions: g.items
-            .filter((it) => it && it.target && it.operator)
-            .map(toEoCondition),
-        }))
-        .filter((g) => g.Conditions.length);
-  return {
-    Conditions: groups,
-    Actions: br.actions.filter((a) => a.action).map(toEoAction),
-  };
+/** EO：操作 → 官方 RuleEngineAction（Name + <Name>Parameters） */
+function toEoAction(a: EoActionItem): Record<string, any> {
+  return { Name: a.name, [eoParamKey(a.name)]: pruneParams(a.params) };
 }
 
-/** EO payload：{ RuleName, Status, Rules:[{Conditions,Actions,SubRules}] }（官方 IF/ELSE IF/ELSE 结构） */
-function buildEoPayload(): Record<string, any> {
+/** 分支条件 → 表达式字符串（ELSE 无条件） */
+function branchCondition(br: EoBranch): string {
+  if (br.type === 'else') return '';
+  if (br.condMode === 'expr') return String(br.condExpr || '').trim();
+  return buildCondition(br.orGroups);
+}
+
+function branchActions(br: EoBranch): Record<string, any>[] {
+  return br.actions.filter((a) => a.name).map(toEoAction);
+}
+
+/** EO payload：官方 RuleEngineItem { RuleName, Status, Branches }（IF 为主分支，其余为 SubRules） */
+function buildEoRuleItem(): Record<string, any> {
   const branches = form.eoBranches as EoBranch[];
-  const main = toEoBranchRule(branches[0] || { type: 'if', orGroups: [], actions: [] });
-  const subRules = branches.slice(1).map((b) => ({ Rules: [toEoBranchRule(b)] }));
-  const rule: Record<string, any> = { Conditions: main.Conditions, Actions: main.Actions };
-  if (subRules.length) rule.SubRules = subRules;
+  const first = branches[0] || newBranch('if');
+  const root: Record<string, any> = {};
+  const c0 = branchCondition(first);
+  if (c0) root.Condition = c0;
+  const a0 = branchActions(first);
+  if (a0.length) root.Actions = a0;
+  const subs = branches.slice(1).map((b) => {
+    const br: Record<string, any> = {};
+    const c = branchCondition(b);
+    if (c) br.Condition = c;
+    const acts = branchActions(b);
+    if (acts.length) br.Actions = acts;
+    return { Branches: [br], Description: b.comment ? [b.comment] : [] };
+  });
+  if (subs.length) root.SubRules = subs;
   return {
     RuleName: form.ruleName,
     Status: form.enabled ? 'enable' : 'disable',
-    Rules: [rule],
+    Branches: [root],
+    Description: first.comment ? [first.comment] : [],
   };
 }
 
 function payload() {
-  return isEsa.value ? buildEsaPayload() : buildEoPayload();
+  return isEsa.value ? buildEsaPayload() : buildEoRuleItem();
 }
 
 function save() {
@@ -628,48 +545,49 @@ function syncFromJson() {
   }
 }
 
-/** 官方 Conditions → 可视化 Or 条件组 */
-function parseEoGroups(conditions: any[]): EoOrGroup[] {
-  const groups = Array.isArray(conditions) ? conditions : [];
-  return groups
-    .map((g) => ({
-      items: (g?.Conditions || []).map((c: any) => ({
-        target: String(c.Target || ''),
-        operator: String(c.Operator || 'equal'),
-        name: c.Name ? String(c.Name) : undefined,
-        values: Array.isArray(c.Values) ? c.Values.map(String) : [],
-        ignoreCase: c.IgnoreCase === true,
-      })),
-    }))
-    .filter((g) => g.items.length);
-}
-
-/** 官方 Actions → 可视化操作项 */
+/** 官方 RuleEngineAction[] → 可视化操作项 */
 function parseEoActions(actions: any[]): EoActionItem[] {
   const list = Array.isArray(actions) ? actions : [];
   const parsed = list
     .map((a: any) => {
-      const kind = a.NormalAction ? 'NormalAction' : a.RewriteAction ? 'RewriteAction' : a.CodeAction ? 'CodeAction' : 'NormalAction';
-      const body = a.NormalAction || a.RewriteAction || a.CodeAction || {};
-      const params: Record<string, any> = {};
-      for (const it of body.Parameters || []) {
-        const extraId = propertiesOf(body.Action).find((p: any) => p.ExtraParameter?.Id)?.ExtraParameter?.Id;
-        if (extraId === 'Action') params[it.Name] = it.Action;
-        else if (extraId === 'StatusCode') params[it.Name] = it.StatusCode;
-        else params[it.Name] = (it.Values || []).length === 1 ? it.Values[0] : it.Values || [];
-      }
-      return { action: body.Action || '', params, kind };
+      const name = String(a?.Name || '');
+      if (!name) return null;
+      const key = eoParamKey(name);
+      const params = a?.[key] && typeof a[key] === 'object' ? JSON.parse(JSON.stringify(a[key])) : {};
+      ensureStructure(eoActionFields(name), params);
+      return { name, params };
     })
-    .filter((a) => a.action);
-  return parsed.length ? parsed : [{ action: '', params: {} }];
+    .filter(Boolean) as EoActionItem[];
+  return parsed.length ? parsed : [newAction()];
+}
+
+/** 官方 RuleBranch → 可视化分支 */
+function parseEoBranch(b: any, type: EoBranch['type'], comment = ''): EoBranch {
+  const cond = b?.Condition ? String(b.Condition) : '';
+  const parsed = cond ? parseCondition(cond) : [];
+  const condMode: EoBranch['condMode'] = cond && parsed === null ? 'expr' : 'visual';
+  return {
+    type: cond ? type : 'else',
+    comment,
+    condMode,
+    condExpr: cond,
+    orGroups: condMode === 'visual' ? parsed || [] : [],
+    actions: parseEoActions(b?.Actions),
+  };
+}
+
+function descriptionText(desc: any): string {
+  return Array.isArray(desc) && desc.length ? String(desc[0] ?? '') : '';
 }
 
 function loadFrom(raw: any) {
   const src = raw && typeof raw === 'object' ? raw : {};
-  form.ruleName = src.RuleName || src.ruleName || '';
-  form.enabled = toEnabled(src.RuleEnable ?? src.Status ?? src.enabled);
-  const isDefaultOn = src.RuleEnable === undefined && src.Status === undefined && src.enabled === undefined;
-  if (isDefaultOn) form.enabled = true;
+  // 兼容 { FormatVersion, Rules:[item] } 包裹
+  const item = Array.isArray(src.Rules) && src.Rules.length ? src.Rules[0] : src;
+  form.ruleName = item.RuleName || src.RuleName || src.ruleName || '';
+  // 官方控制台 JSON 视图不含 Status（启用状态由独立开关控制）；仅当来源带状态时才覆盖
+  const hasStatus = item.Status !== undefined || src.Status !== undefined || src.enabled !== undefined;
+  if (hasStatus) form.enabled = toEnabled(item.Status ?? src.Status ?? src.enabled);
 
   if (isEsa.value) {
     const expr = src.Rule ?? '';
@@ -685,33 +603,29 @@ function loadFrom(raw: any) {
     for (const f of esaActionFields.value) if (src[f.name] !== undefined) data[f.name] = src[f.name];
     form.data = data;
   } else {
-    // IF 1 = Rules[0]；ELSE IF / ELSE = SubRules[n].Rules[0]（无 Conditions 即 ELSE）
-    const r = Array.isArray(src.Rules) ? src.Rules[0] : null;
-    const branches: EoBranch[] = [
-      {
-        type: 'if',
-        orGroups: parseEoGroups(r?.Conditions),
-        actions: parseEoActions(r?.Actions),
-      },
-    ];
-    if (Array.isArray(r?.SubRules)) {
-      for (const sub of r.SubRules) {
-        const sr = (sub?.Rules || [])[0] || {};
-        const hasCond = (sr.Conditions || []).some((g: any) => (g?.Conditions || []).length);
-        branches.push({
-          type: hasCond ? 'elseif' : 'else',
-          orGroups: parseEoGroups(sr.Conditions),
-          actions: parseEoActions(sr.Actions),
-        });
+    const list: EoBranch[] = [];
+    const top = Array.isArray(item.Branches) ? item.Branches : [];
+    top.forEach((b: any, i: number) => {
+      list.push(parseEoBranch(b, i === 0 ? 'if' : 'elseif', i === 0 ? descriptionText(item.Description) : ''));
+      for (const sub of b?.SubRules || []) {
+        for (const sb of sub?.Branches || []) list.push(parseEoBranch(sb, 'elseif', descriptionText(sub?.Description)));
       }
-    }
-    form.eoBranches = branches.length ? branches : [{ type: 'if', orGroups: [], actions: [] }];
+    });
+    form.eoBranches = list.length ? list : [newBranch('if')];
   }
-  jsonText.value = JSON.stringify(payload(), null, 2);
+  jsonText.value = JSON.stringify(jsonDocument(), null, 2);
+}
+
+/** JSON 视图：EO 采用官方控制台格式（FormatVersion + Rules，不含 Status） */
+function jsonDocument(): any {
+  if (isEsa.value) return buildEsaPayload();
+  const rule = buildEoRuleItem();
+  delete rule.Status;
+  return { FormatVersion: '1.0', Rules: [rule] };
 }
 
 async function refreshJson() {
-  jsonText.value = JSON.stringify(payload(), null, 2);
+  jsonText.value = JSON.stringify(jsonDocument(), null, 2);
 }
 
 watch(mode, async (m) => {
