@@ -240,7 +240,7 @@ CDN 厂商 type：`tencent_cdn`、`tencent_edgeone`、`aliyun_cdn`、`aliyun_esa
 > 源站组 / 负载均衡 / 四层代理的 POST/PUT 请求体可选带 `params`（对象），用于透传厂商原生字段（PascalCase），补充通用参数无法表达的必填项：
 > - ESA 负载均衡：`DefaultPools`（由所选源站组的 `OriginGroupId` 自动映射）、`FallbackPool`、`SteeringPolicy`、`Monitor`；
 > - ESA 四层代理：`RecordName`（由 `name` 映射）、`Rules`（必填）、`Ipv6`、`StaticIp`；
-> - ESA 源站池：`Origins[].Address`（由 `records[].Record` 映射，回源 Host 经 `Origins[].Header` 表达）。
+> - ESA 源站池：`Origins[].Address`（由 `records[].Record` 映射）；回源 Host 经 `Origins[].Header` 表达，格式为对象 `{ Host: ["example.com"] }`（传字符串时后端自动包装）。
 > EO 侧同名方法仅使用显式映射字段，忽略 `params`。
 
 ## 证书与部署

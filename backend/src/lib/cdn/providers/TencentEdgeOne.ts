@@ -677,8 +677,8 @@ export class TencentEdgeOne implements CdnProvider {
       type,
       area,
       ownershipVerification: ov,
-      verifyCode: ov.Content || ov.Subdomain || '',
-      nameServers: ov.NameServers || [],
+      verifyCode: ov.DnsVerification?.RecordValue ?? ov.FileVerification?.Content ?? '',
+      nameServers: ov.NsVerification?.NameServers ?? [],
     };
   }
 
@@ -690,10 +690,22 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('ModifyZoneStatus', { ZoneId: zoneId, Paused: paused })) !== false;
   }
 
+  // 分页遍历站点，规避 DescribeZones 单页 100 条上限
+  private async findZoneById(zoneId: string): Promise<any | null> {
+    const limit = 100;
+    for (let offset = 0; offset < limit * 50; offset += limit) {
+      const data = await this.send('DescribeZones', { Offset: offset, Limit: limit });
+      if (!data) return null;
+      const zones = data.Zones || [];
+      const z = zones.find((x: any) => String(x.ZoneId) === String(zoneId));
+      if (z) return z;
+      if (zones.length < limit) break;
+    }
+    return null;
+  }
+
   async getZonePaused(zoneId: string): Promise<boolean | false> {
-    const data = await this.send('DescribeZones', { Limit: 100 });
-    if (!data) return false;
-    const z = (data.Zones || []).find((x: any) => String(x.ZoneId) === String(zoneId));
+    const z = await this.findZoneById(zoneId);
     if (!z) return false;
     return z.Paused === true || String(z.Status || '').toLowerCase() === 'paused';
   }
@@ -705,9 +717,7 @@ export class TencentEdgeOne implements CdnProvider {
   async verifyOwnership(zoneId: string, domain?: string): Promise<Record<string, any> | false> {
     let target = domain;
     if (!target) {
-      const data = await this.send('DescribeZones', { Limit: 100 });
-      if (!data) return false;
-      const z = (data.Zones || []).find((x: any) => String(x.ZoneId) === String(zoneId));
+      const z = await this.findZoneById(zoneId);
       target = z?.ZoneName;
     }
     if (!target) {
@@ -766,7 +776,7 @@ export class TencentEdgeOne implements CdnProvider {
       instanceId: String(l.InstanceId || ''),
       name: l.Name || '',
       type: l.Type,
-      originGroups: l.OriginGroups || [],
+      originGroups: l.References || [],
       ...l,
     }));
     return { total: Number(data.TotalCount || list.length), list };

@@ -598,7 +598,7 @@ export class AliyunESA implements CdnProvider {
       const w = r?.Weight ?? r?.weight;
       if (w !== undefined && w !== null && w !== '') o.Weight = Number(w);
       const h = r?.Header ?? r?.header ?? hostHeader;
-      if (h) o.Header = h;
+      if (h) o.Header = typeof h === 'string' ? { Host: [h] } : h;
       return o;
     });
   }
@@ -652,10 +652,10 @@ export class AliyunESA implements CdnProvider {
     if (!d) return false;
     const arr = d.LoadBalancers || d.Balancers || [];
     const list: LoadBalancerItem[] = arr.map((l: any) => ({
-      instanceId: String(l.Id ?? l.LoadBalancerId ?? ''),
+      instanceId: String(l.Id ?? ''),
       name: l.Name || '',
       type: l.Type,
-      originGroups: l.OriginPools || l.Origins || [],
+      originGroups: l.DefaultPools || [],
       ...l,
     }));
     return { total: Number(d.TotalCount || list.length), list };
@@ -753,7 +753,7 @@ export class AliyunESA implements CdnProvider {
   async getOriginProtection(zoneId: string): Promise<Record<string, any> | false> {
     const d = await this.call({ Action: 'GetOriginProtection', SiteId: Number(zoneId) });
     if (!d) return false;
-    return d.OriginProtection || d;
+    return d;
   }
 
   async setOriginProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
@@ -776,7 +776,7 @@ export class AliyunESA implements CdnProvider {
     const d = await this.call({ Action: 'ListTransportLayerApplications', SiteId: Number(zoneId), PageNumber: page, PageSize: size });
     if (!d) return false;
     const arr = d.Applications || d.TransportLayerApplications || [];
-    const list: L4ProxyItem[] = arr.map((p: any) => ({ proxyId: String(p.Id ?? p.ApplicationId ?? ''), name: p.Name || '', area: p.Area, ...p }));
+    const list: L4ProxyItem[] = arr.map((p: any) => ({ proxyId: String(p.Id ?? p.ApplicationId ?? ''), name: p.RecordName || p.Name || '', area: p.Area, ...p }));
     return { total: Number(d.TotalCount || list.length), list };
   }
 

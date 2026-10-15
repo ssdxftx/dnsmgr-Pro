@@ -28,6 +28,24 @@ import { checkLevel } from '../auth.js';
 import { decryptConfig } from '../lib/secret.js';
 
 // 所有 CDN 管理接口仅管理员可用
+// ESA 规则引擎允许的 kind 白名单（与前端 ruleKindOptions 保持一致）
+const ESA_RULE_KINDS = new Set([
+  'RedirectRule',
+  'RewriteUrlRule',
+  'HttpRequestHeaderModificationRule',
+  'HttpResponseHeaderModificationRule',
+  'HttpIncomingRequestHeaderModificationRule',
+  'HttpIncomingResponseHeaderModificationRule',
+  'CustomResponseCodeRule',
+  'NetworkOptimization',
+  'CompressionRule',
+  'ImageTransform',
+  'VideoProcessing',
+  'OriginRule',
+  'CacheRule',
+  'HttpsBasicConfiguration',
+  'HttpsApplicationConfiguration',
+]);
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
     await (app as any).authenticate(req, reply);
@@ -604,6 +622,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String(req.query.zoneId || '').trim();
     const kind = String(req.query.kind || '').trim();
     if (!zoneId || !kind) return { code: -1, msg: '参数不完整' };
+    if (!ESA_RULE_KINDS.has(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listRuleConfigs !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     const r = await provider.listRuleConfigs(zoneId, kind, Number(req.query.page || 1), Number(req.query.size || 100));
@@ -617,6 +636,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String(b.zoneId || '').trim();
     const kind = String(b.kind || '').trim();
     if (!zoneId || !kind) return { code: -1, msg: '参数不完整' };
+    if (!ESA_RULE_KINDS.has(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.upsertRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     const params = b.params && typeof b.params === 'object' ? b.params : {};
@@ -630,6 +650,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
     const kind = String((req.body || {}).kind || req.query.kind || '').trim();
     if (!zoneId || !kind || !configId) return { code: -1, msg: '参数不完整' };
+    if (!ESA_RULE_KINDS.has(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     if (!(await provider.deleteRuleConfig(zoneId, kind, configId))) return { code: -1, msg: '删除规则失败，' + provider.getError() };
