@@ -138,6 +138,7 @@ encodeURIComponent(str).replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%
 - TS 接口精简：`getSubDomainRecords`、`getDomainRecordLog`、`getDomainInfo`、`getMinTTL`、`getDomainPurview`、权重相关方法等未迁移；`certDns.ts` 改用 `getDomainRecords(subdomain)` 替代
 - 解析记录分组：DNSPod 已迁移（`DescribeRecordGroupList` / `ModifyRecordToGroup`）；阿里云 ALIDNS 官方无「记录分组」能力（不存在 `DescribeRecordGroups`/`ChangeRecordGroup`），故 `dns/providers/aliyun.ts` 不实现 `getRecordGroups`/`changeRecordGroup`，路由门控返回「该DNS类型不支持分组」
 - 记录状态取值厂商差异：DNSPod 用 `ENABLE`/`DISABLE`（全大写），阿里云 ALIDNS 用 `Enable`/`Disable`（驼峰）；读取判断按厂商区分大小写（阿里云侧采用 `toLowerCase()` 兼容）
+- ESA 加速域名：`cdn/providers/AliyunESA.ts` 的 `createDomain`/`setDomainStatus` 依赖 `CreateRecord` 的必填 `Ttl` 与 `UpdateRecord` 的必填 `Data`（官方 required），重构时勿删；`dns/providers/aliyunesa.ts` 为同类接口的参考实现
 - 硬编码线路：`dns/providers/{jdcloud,huoshan}.ts` 与 `huawei.ts` 返回固定线路，原项目按套餐动态获取
 - 阿里云优选记录筛选：`optimize/optimizeService.ts:195` 用通用 `getDomainRecords(...,SubDomain)`，阿里云实现走 `DescribeDomainRecords + SearchMode=ADVANCED/RRKeyWord`（`dns/providers/aliyun.ts:53-59`）；原项目用 `DescribeSubDomainRecords` 精确子域，存在模糊匹配风险
 - QingCloud：原 `qingcloud.php` 透传 `mode`（1/2/3），当前 `qingcloud.ts:192-200` 固定 mode=1，仅 Weight>0 时用 3
