@@ -1,4 +1,4 @@
-import { safeFetchDeploy } from '../../netGuard.js';
+import { safeFetchDeploy, assertSafeHostname } from '../../netGuard.js';
 import { createHash, createHmac } from 'node:crypto';
 import { HuaweiCloud } from '../../clients/HuaweiCloud.js';
 import { parseCertPem } from '../../cert/utils.js';
@@ -80,7 +80,7 @@ export class HuaweiDeploy implements DeployProvider {
     if (!config.project_id) throw new Error('项目ID不能为空');
     if (!config.region_id) throw new Error('区域ID不能为空');
     if (!config.cert_id) throw new Error('证书ID不能为空');
-    const endpoint = 'elb.' + config.region_id + '.myhuaweicloud.com';
+    const endpoint = assertSafeHostname('elb.' + config.region_id + '.myhuaweicloud.com', '接口地址');
     const client = new HuaweiCloud(this.AccessKeyId, this.SecretAccessKey, endpoint);
     let data: any;
     try {
@@ -107,7 +107,7 @@ export class HuaweiDeploy implements DeployProvider {
     if (!config.project_id) throw new Error('项目ID不能为空');
     if (!config.region_id) throw new Error('区域ID不能为空');
     if (!config.cert_id) throw new Error('证书ID不能为空');
-    const endpoint = 'waf.' + config.region_id + '.myhuaweicloud.com';
+    const endpoint = assertSafeHostname('waf.' + config.region_id + '.myhuaweicloud.com', '接口地址');
     const client = new HuaweiCloud(this.AccessKeyId, this.SecretAccessKey, endpoint);
     let data: any;
     try {

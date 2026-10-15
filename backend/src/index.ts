@@ -36,6 +36,7 @@ import { expireNoticeTask } from './lib/expire/expireNoticeService.js';
 import { executePreheatTasks } from './lib/cdn/preheatService.js';
 import { executeCheckTasks } from './lib/dns/checkService.js';
 import { certTaskRun } from './lib/cert/certTaskService.js';
+import { runGuarded } from './lib/scheduler/guards.js';
 import { refreshAllStatCache, getStatCacheIntervalMs, isStatCacheEnabled } from './lib/cdn/statistics/cacheService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
 
@@ -243,11 +244,9 @@ try {
 
     startMonitorScheduler();
     console.log('[dnsmgr-backend] 容灾监控调度器已启动');
-    const gOptimize = guarded(runOptimizeAll, '[optimize] 优选IP调度异常:');
-    const gSchedule = guarded(runScheduleAll, '[schedule] 定时切换解析异常:');
     setInterval(() => {
-      gOptimize();
-      gSchedule();
+      runGuarded('optimize', runOptimizeAll, '[optimize] 优选IP调度异常:');
+      runGuarded('schedule', runScheduleAll, '[schedule] 定时切换解析异常:');
     }, 60 * 1000);
     console.log('[dnsmgr-backend] 优选IP调度器已启动');
     console.log('[dnsmgr-backend] 定时切换解析调度器已启动');

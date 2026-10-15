@@ -154,7 +154,9 @@ const CellRender = (p: any) => renderCell(p.col, p.row, p.index);
 const mobilePagination = computed(() => {
   const p = props.pagination;
   if (!isMobile.value || !p || typeof p !== 'object') return null;
-  const pageCount = Number(p.pageCount ?? 0);
+  // 调用方通常只传 itemCount/pageSize（naive-ui 风格），此处按需推导总页数
+  const pageSize = Number(p.pageSize || 10);
+  const pageCount = Number(p.pageCount ?? 0) || Math.ceil(Number(p.itemCount ?? 0) / (pageSize > 0 ? pageSize : 10));
   if (!pageCount || pageCount <= 1) return null;
   return {
     page: Number(p.page ?? 1),

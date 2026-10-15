@@ -1,4 +1,5 @@
 import { BaiduCloud } from '../../clients/BaiduCloud.js';
+import { assertSafeHostname } from '../../netGuard.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
 
@@ -83,7 +84,7 @@ export class BaiduDeploy implements DeployProvider {
   private async deployBlb(certId: string, config: Record<string, any>): Promise<void> {
     if (!config.blb_id) throw new Error('负载均衡实例ID不能为空');
     if (!config.blb_port) throw new Error('HTTPS监听端口不能为空');
-    const client = new BaiduCloud(this.AccessKeyId, this.SecretAccessKey, 'blb.' + config.region + '.baidubce.com');
+    const client = new BaiduCloud(this.AccessKeyId, this.SecretAccessKey, assertSafeHostname('blb.' + config.region + '.baidubce.com', '接口地址'));
     const query = { listenerPort: config.blb_port };
     const param = { certIds: [certId] };
     await client.request('PUT', '/v1/blb/' + config.blb_id + '/HTTPSlistener', query, param);
@@ -93,7 +94,7 @@ export class BaiduDeploy implements DeployProvider {
   private async deployAppblb(certId: string, config: Record<string, any>): Promise<void> {
     if (!config.blb_id) throw new Error('负载均衡实例ID不能为空');
     if (!config.blb_port) throw new Error('HTTPS监听端口不能为空');
-    const client = new BaiduCloud(this.AccessKeyId, this.SecretAccessKey, 'blb.' + config.region + '.baidubce.com');
+    const client = new BaiduCloud(this.AccessKeyId, this.SecretAccessKey, assertSafeHostname('blb.' + config.region + '.baidubce.com', '接口地址'));
     const query = { listenerPort: config.blb_port };
     const param = { certIds: [certId] };
     await client.request('PUT', '/v1/appblb/' + config.blb_id + '/HTTPSlistener', query, param);

@@ -137,8 +137,9 @@ export class SshDeploy implements DeployProvider {
     });
   }
 
-  private exec(conn: Client, cmd: string): Promise<string> {
-    this.log('执行命令：' + cmd);
+  private exec(conn: Client, cmd: string, display?: string): Promise<string> {
+    // display 用于在命令含敏感信息（如 PFX 口令）时输出脱敏后的日志
+    this.log('执行命令：' + (display ?? cmd));
     return new Promise((resolve, reject) => {
       conn.exec(cmd, (err, stream) => {
         if (err) return reject(new Error('执行命令失败：' + err.message));
@@ -235,7 +236,7 @@ export class SshDeploy implements DeployProvider {
     const safePass = SshDeploy.safeIisPass(pfxPass);
     const p = safePass ? '-p ' + safePass : '-p ""';
     const file = SshDeploy.safeIisPath(pfxFile);
-    await this.exec(conn, 'certutil ' + p + ' -importPFX ' + file);
+    await this.exec(conn, 'certutil ' + p + ' -importPFX ' + file, 'certutil -p *** -importPFX ' + file);
     await this.exec(conn, 'netsh http delete sslcert hostnameport=' + domain);
     await this.exec(conn, 'netsh http add sslcert hostnameport=' + domain + ' certhash=' + certHash + ' certstorename=MY appid=\'{' + this.uuid() + '}\'');
     this.log('IIS域名 ' + domain + ' 证书已更新');

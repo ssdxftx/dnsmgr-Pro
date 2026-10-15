@@ -2,6 +2,7 @@ import { X509Certificate } from 'node:crypto';
 import { Aliyun } from '../../clients/Aliyun.js';
 import { AliyunNew } from '../../clients/AliyunNew.js';
 import { AliyunOSS } from '../../clients/AliyunOSS.js';
+import { assertSafeHostname } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -36,7 +37,8 @@ export class AliyunDeploy implements DeployProvider {
   }
 
   private makeClient(endpoint: string, version: string): Aliyun {
-    return new Aliyun(this.AccessKeyId, this.AccessKeySecret, endpoint, version);
+    // endpoint 由 region/regionid 拼接而来，白名单校验避免经 '@' '/' 注入 host
+    return new Aliyun(this.AccessKeyId, this.AccessKeySecret, assertSafeHostname(endpoint, '接口地址'), version);
   }
 
   async check(): Promise<void> {

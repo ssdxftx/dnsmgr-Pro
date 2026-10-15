@@ -69,24 +69,41 @@ export function isSecretKey(key: string): boolean {
   return ['SecretId', 'AccessKeyId', 'api_password', 'skey', 'passphrase'].includes(k);
 }
 
-// 返回给前端的配置：敏感字段以掩码替换，避免明文回显
-export function maskConfig(config: Record<string, any> | null): Record<string, any> | null {
-  if (!config) return config;
-  const out: Record<string, any> = {};
-  for (const [k, v] of Object.entries(config)) out[k] = isSecretKey(k) && v ? SECRET_MASK : v;
-  return out;
+// 返回给前端的配置：敏感字段以掩码替换，避免明文回显（递归处理嵌套对象/数组）
+export function maskConfig(config: any): any {
+  if (config === null || config === undefined) return config;
+  if (Array.isArray(config)) return config.map((v) => maskConfig(v));
+  if (typeof config === 'object') {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(config)) {
+      if (isSecretKey(k) && v) out[k] = SECRET_MASK;
+      else if (v && typeof v === 'object') out[k] = maskConfig(v);
+      else out[k] = v;
+    }
+    return out;
+  }
+  return config;
 }
 
-// 更新配置时，敏感字段为掩码/空值时沿用原值，避免前端未改密钥却把它覆盖为空
-export function mergeMaskedConfig(input: Record<string, any> | null, existing: Record<string, any> | null): Record<string, any> {
-  const next: Record<string, any> = { ...(input || {}) };
-  if (!existing) return next;
-  for (const k of Object.keys(next)) {
-    if (!isSecretKey(k)) continue;
-    const v = next[k];
-    if (v === SECRET_MASK || v === '' || v === null || v === undefined) {
-      if (existing[k] !== undefined) next[k] = existing[k];
-    }
+// 更新配置时，敏感字段为掩码/空值时沿用原值，避免前端未改密钥却把它覆盖为空（递归处理嵌套对象）
+export function mergeMaskedConfig(input: any, existing: any): any {
+  if (input === null || input === undefined) return input;
+  if (Array.isArray(input)) {
+    const ex = Array.isArray(existing) ? existing : [];
+    return input.map((v, i) => mergeMaskedConfig(v, ex[i]));
   }
-  return next;
+  if (typeof input === 'object') {
+    const next: Record<string, any> = { ...input };
+    const ex = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
+    for (const k of Object.keys(next)) {
+      const v = next[k];
+      if (isSecretKey(k) && (v === SECRET_MASK || v === '' || v === null || v === undefined)) {
+        if (ex[k] !== undefined) next[k] = ex[k];
+      } else if (v && typeof v === 'object') {
+        next[k] = mergeMaskedConfig(v, ex[k]);
+      }
+    }
+    return next;
+  }
+  return input;
 }

@@ -73,8 +73,9 @@ export class CloudflareDns implements DnsProvider {
   private extractRow(row: any): RecordInfo {
     let name = this.extractName(row.name || '');
     const status = name.endsWith('_pause') ? '0' : '1';
-    if (name === '__root__') name = '@';
+    // 先剥离 _pause 再还原根记录：暂停的根记录存为 __root___pause，剥离后应为 @
     if (status === '0') name = name.slice(0, -6);
+    if (name === '__root__') name = '@';
     let value = row.content || '';
     if (row.type === 'SRV' && row.priority !== undefined && row.priority !== null) {
       value = row.priority + ' ' + value;

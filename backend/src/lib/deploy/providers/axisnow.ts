@@ -74,7 +74,10 @@ export class AxisnowDeploy implements DeployProvider {
       headers,
       signal: AbortSignal.timeout(15000),
     });
-    if (res.status === 200) return;
+    if (res.status === 200) {
+      await res.text().catch(() => undefined);
+      return;
+    }
     const text = await res.text();
     let result: any;
     try {

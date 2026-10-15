@@ -9,6 +9,8 @@ export async function migrate(): Promise<void> {
   await ensureColumn('user', 'is_super', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'readonly', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'expiretime', 'datetime DEFAULT NULL');
+  // 用户名唯一约束：防止并发注册/建号绕过「先查后插」判重产生重复账号
+  await ensureUniqueIndex('user', 'username', 'uniq_username');
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('reg_code')} (
@@ -175,6 +177,20 @@ async function ensureIndex(tableName: string, indexName: string, columns: string
   );
   if (rows.length === 0) {
     await query(`ALTER TABLE ${table(tableName)} ADD INDEX ${indexName} ${columns}`);
+  }
+}
+
+// 为单列补唯一索引：已存在唯一索引则跳过；存在重复数据导致失败时记录并继续，避免启动中断
+async function ensureUniqueIndex(tableName: string, column: string, indexName: string): Promise<void> {
+  const rows = await query<any>(
+    `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? AND NON_UNIQUE = 0 LIMIT 1`,
+    [table(tableName), column]
+  );
+  if (rows.length > 0) return;
+  try {
+    await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${column})`);
+  } catch (e: any) {
+    console.log(`[migrate] 为 ${tableName}.${column} 添加唯一索引失败（可能存在重复数据）：${e?.message || e}`);
   }
 }
 

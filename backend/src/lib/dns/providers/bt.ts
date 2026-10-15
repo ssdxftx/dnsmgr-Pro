@@ -126,9 +126,10 @@ export class BtDns implements DnsProvider {
       Value: row.value,
       Line: row.viewID,
       TTL: row.TTL,
-      MX: row.MX,
+      // bt 的 mx 字段：MX 记录为优先级，其余类型为权重，读取时需按类型区分
+      MX: String(row.type).toUpperCase() === 'MX' ? row.MX : null,
       Status: row.state === 1 ? '0' : '1',
-      Weight: row.MX,
+      Weight: String(row.type).toUpperCase() === 'MX' ? null : row.MX,
       Remark: row.remark ?? null,
       UpdateTime: formatTime(row.created_at),
     }));

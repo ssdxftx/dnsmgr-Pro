@@ -582,7 +582,7 @@ export { normalizeHostname };
 export function checkDomainFormat(domain: string): boolean {
   if (!domain) return false;
   if (domain.length < 4 || domain.length > 512) return false;
-  if (!/^[-$a-z0-9_*.]{2,512}$/i.test(domain)) return false;
+  if (!/^[-a-z0-9_*.]{2,512}$/i.test(domain)) return false;
   if (!domain.includes('.')) return false;
   if (domain.endsWith('.') || domain.startsWith('.')) return false;
   if (domain.startsWith('*') && domain[1] !== '.') return false;

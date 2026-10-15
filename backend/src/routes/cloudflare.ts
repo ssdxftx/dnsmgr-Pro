@@ -467,6 +467,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
 
       const hostnames = hostnamesText.split('\n').map((s: string) => s.trim()).filter(Boolean);
       if (!hostnames.length) throw new EnhanceError('主机名列表为空');
+      if (hostnames.length > 100) throw new EnhanceError('单次最多添加 100 个主机名');
 
       let addedCount = 0;
       const failedHostnames: string[] = [];

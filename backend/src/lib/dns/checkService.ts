@@ -111,7 +111,7 @@ export async function checkDomainRecords(
     if (value === undefined || value === null || value === '') continue;
     const fullDomain = (r.Name === '@' ? d.name : `${r.Name}.${d.name}`).toLowerCase();
     // 校验层级：管理员未选子域名→整个域名；否则目标域名的严格子域名（比目标多至少一层）
-    if (!wholeDomain && !targets.some((t) => fullDomain.endsWith('.' + t))) continue;
+    if (!wholeDomain && !targets.some((t) => fullDomain === t || fullDomain.endsWith('.' + t))) continue;
     targetsToCheck.push({ name: r.Name, type: r.Type, value, fullDomain });
   }
 

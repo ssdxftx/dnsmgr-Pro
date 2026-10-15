@@ -94,6 +94,7 @@ export default {
   record: {
     title: 'DNS Records · {title}',
     subtitle: 'View and maintain DNS records for the current domain',
+    nameCol: 'Subdomain',
     customHostnames: 'Custom Hostnames',
     rulesEngine: 'Rules Engine',
     addRecord: 'Add Record',
