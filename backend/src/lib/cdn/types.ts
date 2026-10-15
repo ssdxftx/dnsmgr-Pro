@@ -104,7 +104,7 @@ export interface RuleItem {
   configId?: string;
   ruleName: string;
   status?: string;
-  enabled?: string;
+  enabled?: boolean;
   rules?: any[];
   [k: string]: any;
 }

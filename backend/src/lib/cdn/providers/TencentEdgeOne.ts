@@ -829,7 +829,7 @@ export class TencentEdgeOne implements CdnProvider {
       ruleId: String(r.RuleId || ''),
       ruleName: r.RuleName || '',
       status: r.Status,
-      enabled: r.Status,
+      enabled: String(r.Status ?? '').toLowerCase() === 'enable',
       rules: r.Rules || [],
       ...r,
     }));

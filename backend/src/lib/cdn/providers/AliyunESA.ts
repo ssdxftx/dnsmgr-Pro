@@ -729,7 +729,7 @@ export class AliyunESA implements CdnProvider {
     const list: RuleItem[] = arr.map((c: any) => ({
       configId: String(c.ConfigId ?? c.Id ?? ''),
       ruleName: c.RuleName || '',
-      enabled: c.RuleEnable,
+      enabled: String(c.RuleEnable ?? '').toLowerCase() === 'on',
       status: c.RuleEnable,
       rules: [c],
       ...c,

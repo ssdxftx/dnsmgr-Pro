@@ -10,6 +10,8 @@ export default {
     status: 'Status',
     enable: 'Enabled',
     disable: 'Disabled',
+    enabled: 'Enabled',
+    disabled: 'Disabled',
     rulesJson: 'Rule content (JSON, per provider rule schema)',
     colName: 'Rule Name',
     colStatus: 'Status',

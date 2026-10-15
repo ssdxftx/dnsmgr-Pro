@@ -10,6 +10,8 @@ export default {
     status: '状态',
     enable: '启用',
     disable: '停用',
+    enabled: '已启用',
+    disabled: '已停用',
     rulesJson: '规则内容（JSON，遵循对应厂商规则结构）',
     colName: '规则名称',
     colStatus: '状态',
