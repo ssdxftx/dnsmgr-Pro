@@ -38,6 +38,54 @@
         </n-space>
       </template>
     </n-modal>
+
+    <n-modal v-model:show="showSites" preset="card" :title="t('cdnSite.title', { name: siteAcct?.name || '' })" style="max-width:820px" :mask-closable="false">
+      <n-space vertical :size="14">
+        <n-card size="small" :title="t('cdnSite.create')">
+          <n-grid cols="1 s:2" responsive="screen" :x-gap="12" :y-gap="4">
+            <n-grid-item>
+              <n-form-item :label="t('cdnSite.siteName')" :show-feedback="false">
+                <n-input v-model:value="createForm.name" :placeholder="t('cdnSite.siteNamePlaceholder')" />
+              </n-form-item>
+            </n-grid-item>
+            <template v-if="siteIsEsa">
+              <n-grid-item>
+                <n-form-item :label="t('cdnSite.coverage')" :show-feedback="false">
+                  <n-select v-model:value="createForm.coverage" :options="coverageOptions" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item :label="t('cdnSite.accessType')" :show-feedback="false">
+                  <n-select v-model:value="createForm.accessType" :options="accessTypeOptions" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item :label="t('cdnSite.instance')" :show-feedback="false">
+                  <n-select v-model:value="createForm.instanceId" :options="instanceOptions" />
+                </n-form-item>
+              </n-grid-item>
+            </template>
+            <template v-else>
+              <n-grid-item>
+                <n-form-item :label="t('cdnSite.type')" :show-feedback="false">
+                  <n-select v-model:value="createForm.type" :options="typeOptions" />
+                </n-form-item>
+              </n-grid-item>
+              <n-grid-item>
+                <n-form-item :label="t('cdnSite.area')" :show-feedback="false">
+                  <n-select v-model:value="createForm.area" :options="areaOptions" />
+                </n-form-item>
+              </n-grid-item>
+            </template>
+          </n-grid>
+          <n-space justify="end" style="margin-top:8px">
+            <n-button size="small" @click="checkSiteName">{{ t('cdnSite.checkName') }}</n-button>
+            <n-button size="small" type="primary" :loading="siteSaving" @click="createSite">{{ t('cdnSite.create') }}</n-button>
+          </n-space>
+        </n-card>
+        <n-data-table :columns="siteColumns" :data="siteList" :loading="siteLoading" :bordered="false" size="small" :row-key="(r:any) => String(r.zoneId)" />
+      </n-space>
+    </n-modal>
   </div>
 </template>
 
@@ -68,6 +116,60 @@ const saving = ref(false);
 const form = reactive<any>({ type: '', name: '', config: {} });
 const currentProvider = ref<any>(null);
 
+// ===== 站点管理 =====
+const showSites = ref(false);
+const siteAcct = ref<any>(null);
+const siteList = ref<any[]>([]);
+const siteLoading = ref(false);
+const siteSaving = ref(false);
+const instanceList = ref<any[]>([]);
+const createForm = reactive<any>({ name: '', coverage: 'domestic', accessType: 'CNAME', instanceId: '', type: 'partial', area: 'overseas' });
+const siteIsEsa = computed(() => siteAcct.value?.type === 'aliyun_esa');
+
+const coverageOptions = computed(() => [
+  { label: t('cdnSite.coverageDomestic'), value: 'domestic' },
+  { label: t('cdnSite.coverageGlobal'), value: 'global' },
+  { label: t('cdnSite.coverageOverseas'), value: 'overseas' },
+]);
+const accessTypeOptions = computed(() => [
+  { label: t('cdnSite.accessNS'), value: 'NS' },
+  { label: t('cdnSite.accessCNAME'), value: 'CNAME' },
+]);
+const typeOptions = computed(() => [
+  { label: t('cdnSite.typePartial'), value: 'partial' },
+  { label: t('cdnSite.typeFull'), value: 'full' },
+]);
+const areaOptions = computed(() => [
+  { label: t('cdnSite.areaGlobal'), value: 'global' },
+  { label: t('cdnSite.areaMainland'), value: 'mainland' },
+  { label: t('cdnSite.areaOverseas'), value: 'overseas' },
+]);
+const instanceOptions = computed(() =>
+  instanceList.value.map((it: any) => ({
+    label: it.InstanceName || it.Name || it.Remark || String(it.InstanceId || it.Id || ''),
+    value: String(it.InstanceId || it.Id || ''),
+  })),
+);
+const siteColumns = computed(() => [
+  { title: t('cdnSite.colName'), key: 'zoneName', minWidth: 160 },
+  { title: t('cdnSite.colStatus'), key: 'status', width: 110, render: (row: any) => (row.paused ? t('cdnSite.pausedOk') : row.status || '') },
+  { title: t('cdnSite.colArea'), key: 'area', width: 130 },
+  {
+    title: t('cdnSite.colActions'),
+    key: 'actions',
+    width: 320,
+    render: (row: any) => {
+      const btns: any[] = [
+        h(NButton, { size: 'tiny', onClick: () => toggleSitePause(row) }, { default: () => (row.paused ? t('cdnSite.resume') : t('cdnSite.pause')) }),
+        h(NButton, { size: 'tiny', onClick: () => verifySite(row) }, { default: () => t('cdnSite.verify') }),
+      ];
+      if (siteIsEsa.value) btns.push(h(NButton, { size: 'tiny', onClick: () => showNs(row) }, { default: () => t('cdnSite.ns') }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteSite(row) }, { default: () => t('cdnSite.delete') }));
+      return h(NSpace, null, { default: () => btns });
+    },
+  },
+]);
+
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   { title: t('cdnAccount.providerCol'), key: 'typename', width: 140 },
@@ -91,14 +193,15 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 160,
+    width: 260,
     render(row: any) {
-      return h(NSpace, null, {
-        default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
-        ],
-      });
+      const btns: any[] = [];
+      if (providers.value[row.type]?.capabilities?.zoneManage) {
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openSites(row) }, { default: () => t('cdnSite.manage') }));
+      }
+      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
+      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      return h(NSpace, null, { default: () => btns });
     },
   },
 ]);
@@ -177,6 +280,95 @@ function del(row: any) {
       if (res.code === 0) {
         message.success(t('cdnAccount.deleteSuccess'));
         loadAccounts();
+      } else message.error(res.msg);
+    },
+  });
+}
+
+async function openSites(row: any) {
+  siteAcct.value = row;
+  createForm.name = '';
+  instanceList.value = [];
+  showSites.value = true;
+  await loadSites();
+  if (row.type === 'aliyun_esa') await loadInstances();
+}
+
+async function loadSites() {
+  if (!siteAcct.value) return;
+  siteLoading.value = true;
+  const res = await api<any>('GET', `/cdn/accounts/${siteAcct.value.id}/sites`);
+  siteList.value = res.code === 0 ? res.data : [];
+  siteLoading.value = false;
+}
+
+async function loadInstances() {
+  const res = await api<any>('GET', `/cdn/accounts/${siteAcct.value.id}/plan-instances`);
+  instanceList.value = res.code === 0 && Array.isArray(res.data) ? res.data : [];
+}
+
+async function checkSiteName() {
+  if (!createForm.name) return message.warning(t('cdnSite.needName'));
+  const res = await api<any>('POST', `/cdn/accounts/${siteAcct.value.id}/sites/check`, { siteName: createForm.name });
+  if (res.code !== 0) return message.error(res.msg);
+  if (res.data?.passed === false) message.warning(t('cdnSite.nameBad'));
+  else message.success(t('cdnSite.nameOk'));
+}
+
+async function createSite() {
+  if (!createForm.name) return message.warning(t('cdnSite.needName'));
+  siteSaving.value = true;
+  const body: any = { name: createForm.name };
+  if (siteIsEsa.value) {
+    body.area = createForm.coverage;
+    body.accessType = createForm.accessType;
+    body.instanceId = createForm.instanceId;
+  } else {
+    body.type = createForm.type;
+    body.area = createForm.area;
+  }
+  const res = await api<any>('POST', `/cdn/accounts/${siteAcct.value.id}/sites`, body);
+  siteSaving.value = false;
+  if (res.code === 0) {
+    message.success(res.msg || t('cdnSite.created'));
+    if (res.data?.nameServers?.length) message.info(t('cdnSite.nsTitle') + ': ' + res.data.nameServers.join(', '), { duration: 8000 });
+    createForm.name = '';
+    loadSites();
+  } else message.error(res.msg);
+}
+
+async function toggleSitePause(row: any) {
+  const res = await api<any>('POST', `/cdn/accounts/${siteAcct.value.id}/sites/pause`, { zoneId: row.zoneId, paused: !row.paused });
+  if (res.code === 0) {
+    message.success(res.msg);
+    loadSites();
+  } else message.error(res.msg);
+}
+
+async function verifySite(row: any) {
+  const res = await api<any>('POST', `/cdn/accounts/${siteAcct.value.id}/sites/verify`, { zoneId: row.zoneId, domain: row.zoneName });
+  if (res.code === 0) message.success(t('cdnSite.verifiedOk'));
+  else message.error(res.msg);
+}
+
+async function showNs(row: any) {
+  const res = await api<any>('GET', `/cdn/accounts/${siteAcct.value.id}/sites/${encodeURIComponent(row.zoneId)}/ns`);
+  if (res.code === 0) {
+    dialog.info({ title: t('cdnSite.nsTitle'), content: () => h('div', { style: 'white-space:pre-wrap' }, (res.data || []).join('\n') || '-') });
+  } else message.error(res.msg);
+}
+
+function deleteSite(row: any) {
+  dialog.warning({
+    title: t('common.delete'),
+    content: t('cdnSite.confirmDelete', { name: row.zoneName || row.zoneId }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('DELETE', `/cdn/accounts/${siteAcct.value.id}/sites/${encodeURIComponent(row.zoneId)}`);
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadSites();
       } else message.error(res.msg);
     },
   });

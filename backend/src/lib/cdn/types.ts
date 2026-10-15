@@ -163,8 +163,8 @@ export interface CdnProvider {
   getZonePaused?(zoneId: string): Promise<boolean | false>;
   // 归属识别（EO IdentifyZone）：返回 Ascription 等
   identifyZone?(zoneName: string): Promise<Record<string, any> | false>;
-  // 归属/所有权验证（EO VerifyOwnership / ESA VerifySite）
-  verifyOwnership?(zoneId: string): Promise<Record<string, any> | false>;
+  // 归属/所有权验证（EO VerifyOwnership 用域名 / ESA VerifySite 用 SiteId）
+  verifyOwnership?(zoneId: string, domain?: string): Promise<Record<string, any> | false>;
   // 校验 CNAME 生效状态（EO CheckCnameStatus）
   checkCnameStatus?(zoneId: string, recordNames: string[]): Promise<any[] | false>;
   // 站点 NS 列表（ESA GetSiteCurrentNS）
