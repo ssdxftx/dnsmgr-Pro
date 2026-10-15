@@ -238,6 +238,7 @@ import { useI18n } from 'vue-i18n';
 import { AddOutline, CloudOutline, PeopleOutline, GlobeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { isSecretField } from '../lib/safe';
+import { toEnabled, fromEnabled } from '../lib/normalize';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
@@ -399,7 +400,7 @@ const ruleStatusOptions = computed(() => [
 ]);
 const ruleColumns = computed(() => [
   { title: t('cdnRules.colName'), key: 'ruleName', minWidth: 200 },
-  { title: t('cdnRules.colStatus'), key: 'status', width: 110 },
+  { title: t('cdnRules.colStatus'), key: 'status', width: 110, render: (r: any) => t(toEnabled(r.status) ? 'cdnRules.enabled' : 'cdnRules.disabled') },
   {
     title: t('cdnRules.colActions'),
     key: 'actions',
@@ -855,7 +856,7 @@ async function loadRules() {
 function editRule(r: any) {
   ruleEditingId.value = String(r.ruleId || r.configId || '');
   ruleForm.ruleName = r.ruleName || '';
-  ruleForm.status = r.status || 'enable';
+  ruleForm.status = toEnabled(r.status) ? 'enable' : 'disable';
   const body = ruleIsEsa.value ? (Array.isArray(r.rules) && r.rules.length ? r.rules[0] : r) : r.rules || [];
   ruleForm.json = JSON.stringify(body, null, 2);
 }
@@ -876,12 +877,12 @@ async function saveRule() {
     res = await api('POST', `/cdn/accounts/${aid}/rule-configs`, {
       zoneId: ruleZone.value,
       kind: ruleKind.value,
-      params: { ...parsed, RuleName: ruleForm.ruleName, RuleEnable: ruleForm.status === 'enable' ? 'on' : 'off' },
+      params: { ...parsed, RuleName: ruleForm.ruleName, RuleEnable: fromEnabled(ruleForm.status === 'enable', 'esa') },
     });
   } else if (ruleEditingId.value) {
-    res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(ruleEditingId.value)}`, { zoneId: ruleZone.value, ruleName: ruleForm.ruleName, status: ruleForm.status, rules: parsed });
+    res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(ruleEditingId.value)}`, { zoneId: ruleZone.value, ruleName: ruleForm.ruleName, status: fromEnabled(ruleForm.status === 'enable', 'eo'), rules: parsed });
   } else {
-    res = await api('POST', `/cdn/accounts/${aid}/rules`, { zoneId: ruleZone.value, ruleName: ruleForm.ruleName, status: ruleForm.status, rules: parsed });
+    res = await api('POST', `/cdn/accounts/${aid}/rules`, { zoneId: ruleZone.value, ruleName: ruleForm.ruleName, status: fromEnabled(ruleForm.status === 'enable', 'eo'), rules: parsed });
   }
   ruleSaving.value = false;
   if (res.code === 0) {
