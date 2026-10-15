@@ -6,7 +6,8 @@ import { alignSeries, buildLabels, max, sum } from './util.js';
 const ACCESS_FLUX = 'l7Flow_flux';
 const ACCESS_BANDWIDTH = 'l7Flow_bandwidth';
 const ACCESS_REQUEST = 'l7Flow_request';
-const HIT_FLUX = 'l7Flow_hit_outFlux';
+// 缓存命中流量：需走 DescribeTimingL7CacheData + cacheType=hit（l7Flow_hit_outFlux 不属于 DescribeTimingL7AnalysisData）
+const HIT_CACHE_FLUX = 'l7Cache_outFlux';
 // 回源：源站至 EdgeOne 节点方向的响应（与控制台「回源流量/带宽」一致）
 const ORIGIN_FLUX = 'l7Flow_inFlux_hy';
 const ORIGIN_BANDWIDTH = 'l7Flow_inBandwidth_hy';
@@ -96,6 +97,26 @@ export async function queryTencentEdgeOneStatistics(
     }
   }
 
+  async function cacheHit(zoneId: string): Promise<any[]> {
+    reqTotal++;
+    try {
+      const resp = await client.request('DescribeTimingL7CacheData', {
+        ZoneIds: [zoneId],
+        MetricNames: [HIT_CACHE_FLUX],
+        Filters: [{ Key: 'cacheType', Operator: 'equals', Value: ['hit'] }],
+        StartTime: formatTime(start),
+        EndTime: formatTime(end),
+        Interval: interval,
+      });
+      reqOk++;
+      // DescribeTimingL7CacheData 的时序数据在 Data 字段
+      return resp?.Data || [];
+    } catch (e) {
+      lastError = e;
+      return [];
+    }
+  }
+
   const bw = new Array(len).fill(0);
   const bsBw = new Array(len).fill(0);
   const flux = new Array(len).fill(0);
@@ -121,9 +142,10 @@ export async function queryTencentEdgeOneStatistics(
       add(bsBw, extractSeries(originRecords, ORIGIN_BANDWIDTH));
     }
     if (type === 'Visits' || type === 'All') {
-      const accessRecords = await access(zoneId, [ACCESS_REQUEST, HIT_FLUX]);
+      const accessRecords = await access(zoneId, [ACCESS_REQUEST]);
       add(reqNum, extractSeries(accessRecords, ACCESS_REQUEST));
-      add(hitFlux, extractSeries(accessRecords, HIT_FLUX));
+      const hitRecords = await cacheHit(zoneId);
+      add(hitFlux, extractSeries(hitRecords, HIT_CACHE_FLUX));
       const originRecords = await origin(zoneId, [ORIGIN_REQUEST]);
       add(bsNum, extractSeries(originRecords, ORIGIN_REQUEST));
     }

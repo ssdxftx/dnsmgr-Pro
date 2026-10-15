@@ -39,14 +39,18 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   async getZones() {
-    const data = await this.send('DescribeZones', { Limit: 100 });
-    if (!data) return [];
-    return (data.Zones || []).map((z: any) => ({
-      zoneId: z.ZoneId,
-      zoneName: z.ZoneName,
-      status: z.Status,
-      area: z.Area,
-    }));
+    const list: any[] = [];
+    const limit = 100;
+    for (let offset = 0; offset < limit * 50; offset += limit) {
+      const data = await this.send('DescribeZones', { Offset: offset, Limit: limit });
+      if (!data) break;
+      const zones = data.Zones || [];
+      for (const z of zones) {
+        list.push({ zoneId: z.ZoneId, zoneName: z.ZoneName, status: z.Status, area: z.Area });
+      }
+      if (zones.length < limit) break;
+    }
+    return list;
   }
 
   async check() {
@@ -61,10 +65,15 @@ export class TencentEdgeOne implements CdnProvider {
   private async findZone(domain: string): Promise<string | false> {
     if (this.zoneId) return this.zoneId;
     const root = this.getRootDomain(domain);
-    const data = await this.send('DescribeZones', { Limit: 100 });
-    if (!data) return false;
-    for (const zone of data.Zones || []) {
-      if (zone.ZoneName === root && zone.ZoneId) return zone.ZoneId;
+    const limit = 100;
+    for (let offset = 0; offset < limit * 50; offset += limit) {
+      const data = await this.send('DescribeZones', { Offset: offset, Limit: limit });
+      if (!data) return false;
+      const zones = data.Zones || [];
+      for (const zone of zones) {
+        if (zone.ZoneName === root && zone.ZoneId) return zone.ZoneId;
+      }
+      if (zones.length < limit) break;
     }
     return false;
   }
@@ -587,6 +596,7 @@ export class TencentEdgeOne implements CdnProvider {
     const ok = await this.send('ModifySecurityPolicy', {
       ZoneId: zoneId,
       Entity: 'ZoneDefaultPolicy',
+      SecurityConfig: {},
       SecurityPolicy: { CustomRules: { Rules: [...keep, ...additions] } },
     });
     return ok !== false;
@@ -903,9 +913,9 @@ export class TencentEdgeOne implements CdnProvider {
   async setWafInfo(zoneId: string, config: Record<string, any>): Promise<boolean> {
     if (config && config.TemplateId) {
       const { TemplateId, ...rest } = config;
-      return (await this.send('ModifyWebSecurityTemplate', { ZoneId: zoneId, TemplateId, ...rest })) !== false;
+      return (await this.send('ModifyWebSecurityTemplate', { ...rest, ZoneId: zoneId, TemplateId })) !== false;
     }
-    return (await this.send('CreateWebSecurityTemplate', { ZoneId: zoneId, ...config })) !== false;
+    return (await this.send('CreateWebSecurityTemplate', { ...config, ZoneId: zoneId })) !== false;
   }
 
   // ===== Phase 5：四层代理 =====

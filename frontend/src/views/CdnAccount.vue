@@ -298,7 +298,9 @@ function siteStatusLabel(row: any) {
     active: t('cdnSite.statusActive'),
     pending: t('cdnSite.statusPending'),
     offline: t('cdnSite.statusOffline'),
-    configured: t('cdnSite.statusConfigured'),
+    moved: t('cdnSite.statusMoved'),
+    deactivated: t('cdnSite.statusDeactivated'),
+    initializing: t('cdnSite.statusInitializing'),
   };
   return map[String(row.status || '').toLowerCase()] || (row.status || '');
 }
