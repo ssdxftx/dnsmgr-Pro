@@ -29,5 +29,7 @@ export default {
     purgeQuota: '刷新配额',
     topAnalysis: 'Top 统计',
     areaOptions: '区域',
+    extraParams: '额外参数 (JSON)',
+    extraParamsHint: '额外参数（JSON，选填；ESA 四层代理需提供必填 Rules，如 {"Rules":[{"Protocol":"TCP","SourcePort":8080,"EdgePort":80,"SourceType":"ip","Source":"1.2.3.4"}]}）',
   },
 };

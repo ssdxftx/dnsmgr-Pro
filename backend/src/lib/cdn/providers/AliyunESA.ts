@@ -563,7 +563,7 @@ export class AliyunESA implements CdnProvider {
   async listPlanInstances(): Promise<any[] | false> {
     const d = await this.call({ Action: 'ListUserRatePlanInstances' });
     if (!d) return false;
-    return d.Instances || d.InstanceList || d.Data || [];
+    return d.InstanceInfo || [];
   }
 
   // ===== Phase 2：源站池 / 负载均衡 =====
@@ -575,6 +575,32 @@ export class AliyunESA implements CdnProvider {
       out[k] = v !== null && typeof v === 'object' ? JSON.stringify(v) : v;
     }
     return out;
+  }
+
+  // 合并调用方提供的 ESA 原生字段（PascalCase），用于传入通用参数无法表达的必填项
+  private applyRaw(body: Record<string, any>, params: Record<string, any>): Record<string, any> {
+    const raw = params?.params;
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) Object.assign(body, raw);
+    return body;
+  }
+
+  // 源站组/负载均衡选中的源站池 ID → ESA DefaultPools
+  private poolIds(originGroups: any): number[] {
+    return (Array.isArray(originGroups) ? originGroups : [])
+      .map((g: any) => Number(g?.OriginGroupId ?? g?.groupId ?? g?.Id ?? g?.id ?? g))
+      .filter((n: number) => Number.isFinite(n));
+  }
+
+  // 通用记录 [{Record,Weight}] → ESA Origins[{Address,Weight,Header}]
+  private esaOrigins(records: any, hostHeader?: string): any[] {
+    return (Array.isArray(records) ? records : []).map((r: any) => {
+      const o: Record<string, any> = { Address: r?.Record ?? r?.record ?? r?.Address ?? r?.address ?? r };
+      const w = r?.Weight ?? r?.weight;
+      if (w !== undefined && w !== null && w !== '') o.Weight = Number(w);
+      const h = r?.Header ?? r?.header ?? hostHeader;
+      if (h) o.Header = h;
+      return o;
+    });
   }
 
   async listOriginGroups(zoneId: string, page = 1, size = 20): Promise<PagedResult<OriginGroupItem> | false> {
@@ -592,22 +618,28 @@ export class AliyunESA implements CdnProvider {
   }
 
   async createOriginGroup(zoneId: string, params: Record<string, any>): Promise<string | false> {
-    const d = await this.call(this.withJson({
+    const name = String(params?.name || '').trim();
+    if (!name) {
+      this.error = '源站组名称不能为空';
+      return false;
+    }
+    const body: Record<string, any> = {
       Action: 'CreateOriginPool',
       SiteId: Number(zoneId),
-      Name: params.name,
-      Origins: params.records,
-      HostHeader: params.hostHeader,
-    }));
+      Name: name,
+      Origins: this.esaOrigins(params?.records, params?.hostHeader),
+    };
+    this.applyRaw(body, params);
+    const d = await this.call(this.withJson(body));
     if (!d) return false;
-    return String(d.Id ?? d.PoolId ?? '') || 'ok';
+    return String(d.Id ?? '') || 'ok';
   }
 
   async updateOriginGroup(zoneId: string, groupId: string, params: Record<string, any>): Promise<boolean> {
     const body: Record<string, any> = { Action: 'UpdateOriginPool', SiteId: Number(zoneId), Id: /^\d+$/.test(groupId) ? Number(groupId) : groupId };
     if (params.name !== undefined) body.Name = params.name;
-    if (params.records !== undefined) body.Origins = params.records;
-    if (params.hostHeader !== undefined) body.HostHeader = params.hostHeader;
+    if (params.records !== undefined) body.Origins = this.esaOrigins(params.records, params.hostHeader);
+    this.applyRaw(body, params);
     return (await this.call(this.withJson(body))) !== false;
   }
 
@@ -630,16 +662,27 @@ export class AliyunESA implements CdnProvider {
   }
 
   async createLoadBalancer(zoneId: string, params: Record<string, any>): Promise<string | false> {
-    const body: Record<string, any> = { Action: 'CreateLoadBalancer', SiteId: Number(zoneId) };
-    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    const name = String(params?.name || '').trim();
+    if (!name) {
+      this.error = '负载均衡名称不能为空';
+      return false;
+    }
+    const body: Record<string, any> = { Action: 'CreateLoadBalancer', SiteId: Number(zoneId), Name: name };
+    const pools = this.poolIds(params?.originGroups);
+    if (pools.length) body.DefaultPools = pools;
+    if (params?.steeringPolicy !== undefined) body.SteeringPolicy = params.steeringPolicy;
+    this.applyRaw(body, params);
     const d = await this.call(this.withJson(body));
     if (!d) return false;
-    return String(d.Id ?? d.LoadBalancerId ?? '') || 'ok';
+    return String(d.Id ?? '') || 'ok';
   }
 
   async updateLoadBalancer(zoneId: string, instanceId: string, params: Record<string, any>): Promise<boolean> {
     const body: Record<string, any> = { Action: 'UpdateLoadBalancer', SiteId: Number(zoneId), Id: /^\d+$/.test(instanceId) ? Number(instanceId) : instanceId };
-    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    const pools = this.poolIds(params?.originGroups);
+    if (pools.length) body.DefaultPools = pools;
+    if (params?.steeringPolicy !== undefined) body.SteeringPolicy = params.steeringPolicy;
+    this.applyRaw(body, params);
     return (await this.call(this.withJson(body))) !== false;
   }
 
@@ -738,21 +781,32 @@ export class AliyunESA implements CdnProvider {
   }
 
   async createL4Proxy(zoneId: string, params: Record<string, any>): Promise<string | false> {
-    const body: Record<string, any> = { Action: 'CreateTransportLayerApplication', SiteId: Number(zoneId) };
-    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    const recordName = String(params?.name || '').trim();
+    if (!recordName) {
+      this.error = '四层代理名称不能为空';
+      return false;
+    }
+    const body: Record<string, any> = { Action: 'CreateTransportLayerApplication', SiteId: Number(zoneId), RecordName: recordName };
+    if (params?.ipv6 !== undefined) body.Ipv6 = String(params.ipv6);
+    if (params?.staticIp !== undefined) body.StaticIp = String(params.staticIp);
+    if (params?.rules !== undefined) body.Rules = params.rules;
+    this.applyRaw(body, params);
     const d = await this.call(this.withJson(body));
     if (!d) return false;
-    return String(d.Id ?? d.ApplicationId ?? '') || 'ok';
+    return String(d.ApplicationId ?? '') || 'ok';
   }
 
   async updateL4Proxy(zoneId: string, proxyId: string, params: Record<string, any>): Promise<boolean> {
-    const body: Record<string, any> = { Action: 'UpdateTransportLayerApplication', SiteId: Number(zoneId), Id: /^\d+$/.test(proxyId) ? Number(proxyId) : proxyId };
-    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    const body: Record<string, any> = { Action: 'UpdateTransportLayerApplication', SiteId: Number(zoneId), ApplicationId: /^\d+$/.test(proxyId) ? Number(proxyId) : proxyId };
+    if (params?.ipv6 !== undefined) body.Ipv6 = String(params.ipv6);
+    if (params?.staticIp !== undefined) body.StaticIp = String(params.staticIp);
+    if (params?.rules !== undefined) body.Rules = params.rules;
+    this.applyRaw(body, params);
     return (await this.call(this.withJson(body))) !== false;
   }
 
   async deleteL4Proxy(zoneId: string, proxyId: string): Promise<boolean> {
-    return (await this.call({ Action: 'DeleteTransportLayerApplication', SiteId: Number(zoneId), Id: /^\d+$/.test(proxyId) ? Number(proxyId) : proxyId })) !== false;
+    return (await this.call({ Action: 'DeleteTransportLayerApplication', SiteId: Number(zoneId), ApplicationId: /^\d+$/.test(proxyId) ? Number(proxyId) : proxyId })) !== false;
   }
 
   // ===== Phase 5：任务 / 配额 / 缓存增强 =====

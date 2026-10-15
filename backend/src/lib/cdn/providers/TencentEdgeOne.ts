@@ -762,7 +762,7 @@ export class TencentEdgeOne implements CdnProvider {
   async listLoadBalancers(zoneId: string, page = 1, size = 20): Promise<PagedResult<LoadBalancerItem> | false> {
     const data = await this.send('DescribeLoadBalancerList', { ZoneId: zoneId, Offset: (page - 1) * size, Limit: size });
     if (!data) return false;
-    const list: LoadBalancerItem[] = (data.LoadBalancers || []).map((l: any) => ({
+    const list: LoadBalancerItem[] = (data.LoadBalancerList || []).map((l: any) => ({
       instanceId: String(l.InstanceId || ''),
       name: l.Name || '',
       type: l.Type,
@@ -805,7 +805,7 @@ export class TencentEdgeOne implements CdnProvider {
   async listRules(zoneId: string): Promise<RuleItem[] | false> {
     const data = await this.send('DescribeRules', { ZoneId: zoneId });
     if (!data) return false;
-    return (data.Rules || []).map((r: any) => ({
+    return (data.RuleItems || []).map((r: any) => ({
       ruleId: String(r.RuleId || ''),
       ruleName: r.RuleName || '',
       status: r.Status,
@@ -871,7 +871,7 @@ export class TencentEdgeOne implements CdnProvider {
   async getSecurityIpGroupContent(zoneId: string, groupId: number): Promise<string[] | false> {
     const d = await this.send('DescribeSecurityIPGroupContent', { ZoneId: zoneId, GroupId: groupId, Limit: 1000, Offset: 0 });
     if (!d) return false;
-    return d.IPs || d.Content || d.IPList || [];
+    return d.IPList || [];
   }
 
   async getDdosProtection(zoneId: string): Promise<Record<string, any> | false> {
@@ -887,7 +887,7 @@ export class TencentEdgeOne implements CdnProvider {
   async getWafInfo(zoneId: string): Promise<Record<string, any> | false> {
     const d = await this.send('DescribeWebSecurityTemplates', { ZoneId: zoneId });
     if (!d) return false;
-    return { templates: d.SecurityTemplates || d.Templates || [] };
+    return { templates: d.SecurityPolicyTemplates || [] };
   }
 
   async setWafInfo(zoneId: string, config: Record<string, any>): Promise<boolean> {
@@ -948,14 +948,14 @@ export class TencentEdgeOne implements CdnProvider {
   async listPurgeTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
     const data = await this.send('DescribePurgeTasks', { ZoneId: zoneId || undefined, Offset: (page - 1) * size, Limit: size });
     if (!data) return false;
-    const list = data.PurgeTasks || data.Tasks || [];
+    const list = data.Tasks || [];
     return { total: Number(data.TotalCount || list.length), list };
   }
 
   async listPrefetchTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
     const data = await this.send('DescribePrefetchTasks', { ZoneId: zoneId || undefined, Offset: (page - 1) * size, Limit: size });
     if (!data) return false;
-    const list = data.PrefetchTasks || data.Tasks || [];
+    const list = data.Tasks || [];
     return { total: Number(data.TotalCount || list.length), list };
   }
 
