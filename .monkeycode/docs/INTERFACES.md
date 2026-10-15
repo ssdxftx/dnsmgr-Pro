@@ -244,6 +244,7 @@ CDN 厂商 type：`tencent_cdn`、`tencent_edgeone`、`aliyun_cdn`、`aliyun_esa
 > EO 侧同名方法仅使用显式映射字段，忽略 `params`。
 > `params` 中形如 `Action`、`SiteId`、`Id`、`ApplicationId`、`ConfigId`、`SiteVersion` 的保留键由服务端控制，会被忽略，不可覆盖。其中 `SiteVersion`（配置版本）当前 ESA 全 provider 屏蔽，规则类接口亦不接收用户指定版本（写入默认版本）。
 > ESA 规则表达式（`Rule`）为单层括号包裹的完整表达式：`file_extension`/`full_path` 用操作符（`matches`/`eq`，路径段自行闭合 host 外层括号），`catalog` 用 `starts_with()` 函数（多一个函数括号）。
+> EO 命名陷阱：`DescribeWebSecurityTemplates` 的唯一必填参数为 `ZoneIds`（数组 `[zoneId]`），与同族安全接口的 `ZoneId`（单数）不同；WAF 的写接口 `CreateWebSecurityTemplate`/`ModifyWebSecurityTemplate` 仍用 `ZoneId`。
 
 ## 证书与部署
 
