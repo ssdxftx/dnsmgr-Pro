@@ -11,7 +11,7 @@ export class Ucloud {
   }
 
   async request(action: string, params: Record<string, any>): Promise<any> {
-    const param: Record<string, any> = { Action: action, PublicKey: this.publicKey, ...params };
+    const param: Record<string, any> = { ...params, Action: action, PublicKey: this.publicKey };
     param.Signature = this.ucloudSignature(param);
     const res = await fetch(this.apiUrl, {
       method: 'POST',

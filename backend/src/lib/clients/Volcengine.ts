@@ -40,7 +40,7 @@ export class Volcengine {
     const filtered: Record<string, any> = {};
     for (const [k, v] of Object.entries(params)) if (v !== null && v !== undefined) filtered[k] = v;
 
-    const query: Record<string, string> = { Action: action, Version: this.version };
+    const query: Record<string, string> = {};
     let body = '';
     if (method === 'GET') {
       for (const [k, v] of Object.entries(filtered)) query[k] = String(v);
@@ -48,6 +48,9 @@ export class Volcengine {
       body = Object.keys(filtered).length ? JSON.stringify(filtered) : '';
       for (const [k, v] of Object.entries(querys)) query[k] = String(v);
     }
+    // 公共参数后置，避免被业务参数覆盖
+    query.Action = action;
+    query.Version = this.version;
 
     const time = Math.floor(Date.now() / 1000);
     const date = new Date(time * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z').replace(/[-:]/g, '');

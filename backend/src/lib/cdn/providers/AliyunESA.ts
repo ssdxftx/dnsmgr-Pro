@@ -270,9 +270,9 @@ export class AliyunESA implements CdnProvider {
     // full_path
     const v = normalizeValue(parsed.value);
     if (v.includes('*') || v.includes('?')) {
-      return ' and http.request.uri.path matches "' + this.esaEscape(wildcardToRegex(v)) + '"))';
+      return ' and http.request.uri.path matches "' + this.esaEscape(wildcardToRegex(v)) + '")';
     }
-    return ' and http.request.uri.path eq "' + this.esaEscape(v) + '"))';
+    return ' and http.request.uri.path eq "' + this.esaEscape(v) + '")';
   }
 
   private async findEsaRule(action: string, siteId: number, ruleName: string): Promise<any | null> {
