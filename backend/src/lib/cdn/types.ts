@@ -196,6 +196,8 @@ export interface CdnProvider {
   createRule?(zoneId: string, params: Record<string, any>): Promise<string | false>;
   updateRule?(zoneId: string, ruleId: string, params: Record<string, any>): Promise<boolean>;
   deleteRules?(zoneId: string, ruleIds: string[]): Promise<boolean>;
+  // EO：调整 L7 加速规则优先级（ModifyL7AccRulePriority，按数组顺序重排）
+  setRulePriority?(zoneId: string, ruleIds: string[]): Promise<boolean>;
   // ESA：按规则类型（kind，如 RedirectRule）统一 List/Update/Create/Delete
   listRuleConfigs?(zoneId: string, kind: string, page?: number, size?: number): Promise<PagedResult<RuleItem> | false>;
   upsertRuleConfig?(zoneId: string, kind: string, params: Record<string, any>): Promise<boolean>;

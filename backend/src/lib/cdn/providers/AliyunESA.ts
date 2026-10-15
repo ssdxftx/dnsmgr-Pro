@@ -1,5 +1,5 @@
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -645,5 +645,47 @@ export class AliyunESA implements CdnProvider {
 
   async deleteLoadBalancer(zoneId: string, instanceId: string): Promise<boolean> {
     return (await this.call({ Action: 'DeleteLoadBalancer', SiteId: Number(zoneId), Id: /^\d+$/.test(instanceId) ? Number(instanceId) : instanceId })) !== false;
+  }
+
+  // ===== Phase 3：规则引擎（12 类统一 upsert；kind 形如 RedirectRule / CacheRule / HttpsBasicConfiguration）=====
+
+  async listRuleConfigs(zoneId: string, kind: string, page = 1, size = 20): Promise<PagedResult<RuleItem> | false> {
+    const sid = Number(zoneId);
+    const data = await this.call({ Action: `List${kind}s`, SiteId: sid, PageNumber: page, PageSize: size });
+    if (!data) return false;
+    const arr = data.Configs || data.Rules || [];
+    const list: RuleItem[] = arr.map((c: any) => ({
+      configId: String(c.ConfigId ?? c.Id ?? ''),
+      ruleName: c.RuleName || '',
+      enabled: c.RuleEnable,
+      status: c.RuleEnable,
+      rules: [c],
+      ...c,
+    }));
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  // 按 RuleName upsert：命中则 Update（带 ConfigId），否则 Create
+  async upsertRuleConfig(zoneId: string, kind: string, params: Record<string, any>): Promise<boolean> {
+    const sid = Number(zoneId);
+    const ruleName = String(params?.RuleName || params?.ruleName || '').trim();
+    if (!ruleName) {
+      this.error = '规则名称不能为空';
+      return false;
+    }
+    const body: Record<string, any> = { ...params };
+    delete body.ruleName;
+    body.RuleName = ruleName;
+    const existing = await this.findEsaRule(`List${kind}s`, sid, ruleName);
+    if (existing === undefined) return false;
+    if (existing?.ConfigId) {
+      return (await this.call(this.withJson({ Action: `Update${kind}`, SiteId: sid, ConfigId: existing.ConfigId, ...body }))) !== false;
+    }
+    return (await this.call(this.withJson({ Action: `Create${kind}`, SiteId: sid, ...body }))) !== false;
+  }
+
+  async deleteRuleConfig(zoneId: string, kind: string, configId: string): Promise<boolean> {
+    const sid = Number(zoneId);
+    return (await this.call({ Action: `Delete${kind}`, SiteId: sid, ConfigId: /^\d+$/.test(configId) ? Number(configId) : configId })) !== false;
   }
 }

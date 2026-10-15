@@ -52,18 +52,16 @@ Updated: 2026-10-15
 
 ## Phase 3 规则引擎
 
-- [ ] 3.1 EO L7 规则引擎（design §3.2/§3.4）
-  - `getRulesSetting`（`DescribeRulesSetting`）、`listRules`（`DescribeRules`+`Filters`）、`createRule`/`updateRule`（`RuleId`+`Rules`+`Status`）/`deleteRules`、`ModifyL7AccRulePriority`（优先级调整）
-  - 复用既有 `findEdgeOneL7Rule` 模式做写后复核
-- [ ] 3.2 ESA 12 类规则 upsert（design §4.1）
-  - 统一 upsert（List→命中 Update 否则 Create）：重定向/URL 重写/请求头/响应头/入站请求头/入站响应头/自定义响应码/网络优化/压缩/图片转换/视频处理/源站规则/缓存规则/HTTPS 基础与应用配置
-  - `RuleName`/`RuleEnable`/`Rule`（表达式）/`Sequence` 通用字段；数组/对象参数 `JSON.stringify`
-- [ ] 3.3 路由：规则引擎端点（能力门控，管理员）
-  - EO：`GET /api/cdn/accounts/:aid/zones/:zoneId/rules`、`POST/PUT/DELETE .../rules`、`GET .../rules/setting`
-  - ESA：`GET /api/cdn/accounts/:aid/sites/:siteId/rules/:kind`、`POST/PUT/DELETE .../rules/:kind`
-- [ ] 3.4 前端：规则编辑器
-  - 结构化表单 + 高级 JSON（沿用 Cloudflare 规则页 `CfRules.vue` 形态），表达式预览、启用开关、排序
-- [ ] 3.5 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
+- [x] 3.1 EO L7 规则引擎（design §3.2/§3.4）
+  - `getRulesSetting`（`DescribeRulesSetting`）、`listRules`（`DescribeRules`）、`createRule`/`updateRule`（`ModifyRule`）/`deleteRules`、`setRulePriority`（`ModifyL7AccRulePriority`）
+- [x] 3.2 ESA 12+ 类规则 upsert（design §4.1）
+  - `listRuleConfigs`（`List${kind}s`）、`upsertRuleConfig`（List→命中 Update 否则 Create）、`deleteRuleConfig`（`Delete${kind}`）；kind 覆盖重定向/重写/请求头/响应头/入站请求头/入站响应头/自定义响应码/网络优化/压缩/图片/视频/源站/缓存/HTTPS 基础与应用配置；数组/对象参数 `JSON.stringify`
+- [x] 3.3 路由：规则引擎端点（能力门控，管理员）
+  - EO：`GET .../rules/setting`、`GET/POST/DELETE .../rules`、`PUT .../rules/:ruleId`、`POST .../rules/priority`
+  - ESA：`GET/POST .../rule-configs`、`DELETE .../rule-configs/:configId`
+- [x] 3.4 前端：规则编辑器
+  - `CdnAccount.vue` 增加「规则引擎」弹窗（站点/规则类型选择、列表、JSON 规则内容编辑、新建/编辑/删除）；i18n `cdnRules`（zh/en）
+- [x] 3.5 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
 
 ## Phase 4 安全能力
 
