@@ -62,6 +62,20 @@ function statusLabel(row: any) {
   return map[String(row.status || '').toLowerCase()] || row.status || '-';
 }
 
+type TagType = 'success' | 'warning' | 'error' | 'info' | 'default';
+function statusTagType(row: any): TagType {
+  if (row.paused) return 'warning';
+  const map: Record<string, TagType> = {
+    active: 'success',
+    pending: 'info',
+    initializing: 'info',
+    offline: 'default',
+    moved: 'error',
+    deactivated: 'error',
+  };
+  return map[String(row.status || '').toLowerCase()] || 'default';
+}
+
 const columns = computed(() => [
   { title: t('cdnZone.colType'), key: 'routename', width: 150 },
   {
@@ -77,7 +91,7 @@ const columns = computed(() => [
     render: (row: any) =>
       h(NSpace, { size: 4, align: 'center' }, {
         default: () => [
-          h('span', null, String(row.zone_id || '')),
+          h('span', { style: 'font-family: var(--app-font-mono); font-size: 12px' }, String(row.zone_id || '')),
           h(NTag, { size: 'tiny', type: row.cloud ? 'info' : 'default' }, {
             default: () => (row.cloud ? t('cdnZone.cloudBadge') : t('cdnZone.localBadge')),
           }),
@@ -88,7 +102,7 @@ const columns = computed(() => [
     title: t('cdnZone.colStatus'),
     key: 'status',
     width: 120,
-    render: (row: any) => h(NTag, { size: 'small', type: row.paused ? 'warning' : 'success' }, { default: () => statusLabel(row) }),
+    render: (row: any) => h(NTag, { size: 'small', type: statusTagType(row) }, { default: () => statusLabel(row) }),
   },
   { title: t('cdnZone.colDomains'), key: 'domain_count', width: 110 },
   {
@@ -111,7 +125,7 @@ async function loadAccounts() {
 
 async function loadZones() {
   loading.value = true;
-  // 选定账户时以云端站点为准（含尚未接入域名的站点）；未选定时展示本地已接入站点的聚合
+  // 选定账户时以云端站点为准（含尚未接入域名的站点）；未选定时展示本地已接入站点的聚�?
   const res = await api<any>('GET', '/cdn/zones', accountId.value ? { aid: accountId.value } : undefined);
   loading.value = false;
   if (res.code === 0) {

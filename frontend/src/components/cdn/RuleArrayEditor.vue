@@ -3,6 +3,7 @@
     <div v-if="!rows.length" class="rule-array__empty">{{ t('cdnRules.arrayEmpty') }}</div>
     <div v-for="(row, idx) in rows" :key="idx" class="rule-array__row">
       <n-space :size="6" align="center" style="width: 100%">
+        <span class="rule-array__index">{{ idx + 1 }}</span>
         <template v-for="f in fields" :key="f.name">
           <n-select
             v-if="f.type === 'enum'"
@@ -86,11 +87,40 @@ function removeRow(idx: number) {
 
 <style scoped>
 .rule-array__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
   margin-bottom: 6px;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+  background: var(--app-bg-soft);
+  transition: border-color 0.15s ease;
+}
+.rule-array__row:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
+}
+.rule-array__row :deep(.n-space) {
+  flex-wrap: wrap;
+}
+.rule-array__index {
+  flex-shrink: 0;
+  min-width: 22px;
+  text-align: center;
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  color: var(--app-primary);
+  background: var(--app-primary-weak);
+  border-radius: 4px;
+  padding: 1px 4px;
 }
 .rule-array__empty {
-  color: var(--app-muted, #999);
+  color: var(--app-text-3);
   font-size: 12px;
-  padding: 4px 0;
+  padding: 10px 0;
+  text-align: center;
+  border: 1px dashed var(--app-divider);
+  border-radius: var(--app-radius);
+  margin-bottom: 6px;
 }
 </style>

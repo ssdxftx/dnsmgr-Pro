@@ -1,11 +1,9 @@
 <template>
-  <n-card size="small" :bordered="false">
-    <template #header>
-      <span>{{ t('cdnZoneSetting.globalTitle') }}</span>
-    </template>
-    <template #header-extra>
-      <span style="color: var(--app-warning); font-size: 12px">{{ t('cdnZone.globalHint') }}</span>
-    </template>
+  <div class="zone-panel">
+    <div class="zone-panel__head">
+      <span class="zone-panel__title">{{ t('cdnZoneSetting.globalTitle') }}</span>
+      <span class="zone-panel__extra hint-text">{{ t('cdnZone.globalHint') }}</span>
+    </div>
 
     <n-alert v-if="unsupported" type="warning" :show-icon="false">
       <div>{{ t('cdnZoneSetting.globalEsaUnsupported') }}</div>
@@ -16,7 +14,7 @@
 
     <n-spin v-else :show="loading">
       <n-form label-placement="left" label-width="110">
-        <n-divider title-placement="left">HTTPS / TLS</n-divider>
+        <n-divider class="section" title-placement="left">HTTPS / TLS</n-divider>
         <n-form-item :label="t('cdnZone.forceHttpsLabel')">
           <n-switch v-model:value="zone.forceSwitch" />
           <n-select
@@ -42,7 +40,7 @@
           </n-space>
         </n-form-item>
 
-        <n-divider title-placement="left">{{ t('cdnZone.networkDivider') }}</n-divider>
+        <n-divider class="section" title-placement="left">{{ t('cdnZone.networkDivider') }}</n-divider>
         <n-form-item label="HTTP/3（QUIC）"><n-switch v-model:value="zone.quic" /></n-form-item>
         <n-form-item :label="t('cdnZone.upstreamHttp2Label')"><n-switch v-model:value="zone.upstreamHttp2" /></n-form-item>
         <n-form-item label="gRPC"><n-switch v-model:value="zone.grpc" /></n-form-item>
@@ -54,7 +52,7 @@
           </n-space>
         </n-form-item>
 
-        <n-divider title-placement="left">{{ t('cdnZone.cacheDivider') }}</n-divider>
+        <n-divider class="section" title-placement="left">{{ t('cdnZone.cacheDivider') }}</n-divider>
         <n-form-item :label="t('cdnZone.cacheModeLabel')">
           <n-space>
             <n-radio-group v-model:value="zone.cacheMode">
@@ -68,7 +66,7 @@
         <n-form-item :label="t('cdnZone.cachePrefreshLabel')"><n-switch v-model:value="zone.cachePrefresh" /></n-form-item>
         <n-form-item :label="t('cdnZone.offlineCacheLabel')"><n-switch v-model:value="zone.offlineCache" /></n-form-item>
 
-        <n-divider title-placement="left">{{ t('cdnZone.perfDivider') }}</n-divider>
+        <n-divider class="section" title-placement="left">{{ t('cdnZone.perfDivider') }}</n-divider>
         <n-form-item :label="t('cdnZone.smartRoutingLabel')"><n-switch v-model:value="zone.smartRouting" /></n-form-item>
         <n-form-item :label="t('cdnZone.compressionLabel')">
           <n-space>
@@ -78,7 +76,7 @@
           </n-space>
         </n-form-item>
 
-        <n-divider title-placement="left">{{ t('cdnZone.otherDivider') }}</n-divider>
+        <n-divider class="section" title-placement="left">{{ t('cdnZone.otherDivider') }}</n-divider>
         <n-form-item :label="t('cdnZone.ipv6Label')"><n-switch v-model:value="zone.ipv6" /></n-form-item>
         <n-form-item :label="t('cdnZone.clientIpHeaderLabel')">
           <n-space>
@@ -95,17 +93,19 @@
         </n-form-item>
         <n-form-item :label="t('cdnZone.mainlandLabel')"><n-switch v-model:value="zone.accelerateMainland" /></n-form-item>
 
-        <n-button type="primary" size="small" :loading="saving" @click="save">{{ t('cdnZone.saveZone') }}</n-button>
+        <div class="global-setting__actions">
+          <n-button type="primary" size="small" :loading="saving" @click="save">{{ t('cdnZone.saveZone') }}</n-button>
+        </div>
       </n-form>
     </n-spin>
-  </n-card>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
-  NAlert, NButton, NCard, NCheckbox, NDivider, NForm, NFormItem, NInput,
+  NAlert, NButton, NCheckbox, NDivider, NForm, NFormItem, NInput,
   NInputNumber, NRadio, NRadioGroup, NSelect, NSpace, NSpin, NSwitch, useMessage,
 } from 'naive-ui';
 import { api } from '../../api';
@@ -238,3 +238,13 @@ async function save() {
 
 watch(() => [props.aid, props.zoneId], load, { immediate: true });
 </script>
+
+<style scoped>
+.global-setting__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 12px;
+  margin-top: 4px;
+  border-top: 1px solid var(--app-divider);
+}
+</style>

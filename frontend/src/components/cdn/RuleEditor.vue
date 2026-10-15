@@ -1,6 +1,7 @@
 <template>
   <div class="rule-editor">
-    <n-space justify="space-between" align="center" style="margin-bottom: 12px">
+    <!-- 模式切换 + 操作条 -->
+    <div class="rule-editor__bar">
       <n-radio-group v-model:value="mode" size="small">
         <n-radio-button value="visual">{{ t('cdnRules.modeVisual') }}</n-radio-button>
         <n-radio-button value="json">{{ t('cdnRules.modeJson') }}</n-radio-button>
@@ -9,11 +10,14 @@
         <n-button v-if="editing" size="small" @click="emit('cancel')">{{ t('common.cancel') }}</n-button>
         <n-button size="small" type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
       </n-space>
-    </n-space>
+    </div>
 
     <!-- ============ 可视化模式 ============ -->
     <template v-if="mode === 'visual'">
-      <n-card size="small" :title="t('cdnRules.groupCommon')" style="margin-bottom: 12px">
+      <div class="zone-panel">
+        <div class="zone-panel__head">
+          <h3 class="zone-panel__title">{{ t('cdnRules.groupCommon') }}</h3>
+        </div>
         <n-form label-placement="left" label-width="132">
           <n-form-item :label="t('cdnRules.ruleName')" required>
             <n-input v-model:value="form.ruleName" :placeholder="t('cdnRules.ruleName')" />
@@ -31,7 +35,7 @@
               </n-radio-group>
             </n-form-item>
             <n-form-item v-if="esaCondMode === 'all'" :label="' '">
-              <span class="rule-editor__hint">{{ t('cdnRules.condAllHint') }}</span>
+              <span class="hint-text">{{ t('cdnRules.condAllHint') }}</span>
             </n-form-item>
             <template v-else>
               <n-form-item :label="t('cdnRules.condExpression')">
@@ -40,6 +44,8 @@
                   type="textarea"
                   :rows="2"
                   :placeholder="t('cdnRules.condExpressionHint')"
+                  class="mono-input"
+                  spellcheck="false"
                 />
               </n-form-item>
               <n-form-item :label="t('cdnRules.condSnippet')">
@@ -55,10 +61,13 @@
             </n-form-item>
           </template>
         </n-form>
-      </n-card>
+      </div>
 
       <!-- ESA：行为字段（由官方字段表驱动） -->
-      <n-card v-if="isEsa" size="small" :title="t('cdnRules.groupAction')" style="margin-bottom: 12px">
+      <div v-if="isEsa" class="zone-panel">
+        <div class="zone-panel__head">
+          <h3 class="zone-panel__title">{{ t('cdnRules.groupAction') }}</h3>
+        </div>
         <n-form label-placement="left" label-width="132">
           <n-form-item
             v-for="f in esaActionFields"
@@ -69,69 +78,80 @@
           >
             <RuleFieldControl :field="f" v-model="form.data[f.name]" />
           </n-form-item>
-          <div v-if="!esaActionFields.length" class="rule-editor__hint">{{ t('cdnRules.empty') }}</div>
+          <div v-if="!esaActionFields.length" class="hint-text">{{ t('cdnRules.empty') }}</div>
         </n-form>
-      </n-card>
+      </div>
 
       <!-- EO：条件树 + 动作列表（由 DescribeRulesSetting 驱动） -->
       <template v-else>
-        <n-card size="small" :title="t('cdnRules.condTitle')" style="margin-bottom: 12px">
+        <div class="zone-panel">
+          <div class="zone-panel__head">
+            <h3 class="zone-panel__title">{{ t('cdnRules.condTitle') }}</h3>
+          </div>
           <div v-for="(grp, gi) in form.eoConditions" :key="gi" class="rule-editor__group">
-            <n-space justify="space-between" align="center">
+            <div class="rule-editor__group-head">
+              <span class="rule-editor__group-badge tnum">{{ gi + 1 }}</span>
               <span class="rule-editor__group-title">{{ t('cdnRules.condGroupTitle', { index: gi + 1 }) }}</span>
-              <n-space :size="6">
+              <span class="hint-text">{{ t('cdnRules.condGroupHint') }}</span>
+              <n-space :size="6" style="margin-left: auto">
                 <n-button size="tiny" @click="addEoCondition(gi)">{{ t('cdnRules.condAddItem') }}</n-button>
                 <n-button v-if="form.eoConditions.length > 1" size="tiny" type="error" quaternary @click="removeEoGroup(gi)">
                   {{ t('cdnRules.condRemoveGroup') }}
                 </n-button>
               </n-space>
-            </n-space>
-            <div class="rule-editor__hint" style="margin: 2px 0 6px">{{ t('cdnRules.condGroupHint') }}</div>
-            <n-space v-for="(it, ii) in grp.items" :key="ii" :size="6" align="center" style="margin-bottom: 6px">
-              <n-select
-                v-model:value="it.target"
-                :options="targetOptions"
-                :placeholder="t('cdnRules.condTarget')"
-                size="small"
-                style="width: 170px"
-              />
-              <n-select
-                v-model:value="it.operator"
-                :options="operatorOptions"
-                size="small"
-                style="width: 130px"
-              />
-              <n-dynamic-tags
-                v-if="!noValueOperator(it.operator)"
-                v-model:value="it.values"
-                size="small"
-                style="min-width: 220px"
-              />
-              <n-tag v-else size="small">{{ t('cdnRules.condNoValue') }}</n-tag>
-              <n-button size="tiny" type="error" quaternary @click="removeEoCondition(gi, ii)">×</n-button>
-            </n-space>
+            </div>
+            <div class="rule-editor__cond-list">
+              <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
+                <n-select
+                  v-model:value="it.target"
+                  :options="targetOptions"
+                  :placeholder="t('cdnRules.condTarget')"
+                  size="small"
+                  class="rule-editor__cond-target"
+                />
+                <n-select
+                  v-model:value="it.operator"
+                  :options="operatorOptions"
+                  size="small"
+                  class="rule-editor__cond-op"
+                />
+                <n-dynamic-tags
+                  v-if="!noValueOperator(it.operator)"
+                  v-model:value="it.values"
+                  size="small"
+                  class="rule-editor__cond-values"
+                />
+                <n-tag v-else size="small" :bordered="false">{{ t('cdnRules.condNoValue') }}</n-tag>
+                <n-button size="tiny" type="error" quaternary circle @click="removeEoCondition(gi, ii)">
+                  <template #icon><n-icon :component="CloseOutline" /></template>
+                </n-button>
+              </div>
+            </div>
           </div>
-          <n-button size="small" dashed block style="margin-top: 6px" @click="addEoGroup">
+          <n-button size="small" dashed block style="margin-top: 8px" @click="addEoGroup">
             {{ t('cdnRules.condAddGroup') }}
           </n-button>
-        </n-card>
+        </div>
 
-        <n-card size="small" :title="t('cdnRules.actionTitle')">
+        <div class="zone-panel">
+          <div class="zone-panel__head">
+            <h3 class="zone-panel__title">{{ t('cdnRules.actionTitle') }}</h3>
+          </div>
           <div v-for="(a, ai) in form.eoActions" :key="ai" class="rule-editor__group">
-            <n-space justify="space-between" align="center">
+            <div class="rule-editor__group-head">
               <n-select
                 v-model:value="a.action"
                 :options="actionOptions"
                 :placeholder="t('cdnRules.actionPick')"
                 size="small"
                 filterable
-                style="min-width: 320px"
+                style="min-width: 300px"
                 @update:value="() => onActionChange(a)"
               />
-              <n-button size="tiny" type="error" quaternary @click="form.eoActions.splice(ai, 1)">
+              <n-button size="tiny" type="error" quaternary style="margin-left: auto" @click="form.eoActions.splice(ai, 1)">
                 {{ t('cdnRules.actionRemove') }}
               </n-button>
-            </n-space>
+            </div>
             <div v-if="propertiesOf(a.action).length" class="rule-editor__params">
               <n-form label-placement="left" label-width="132">
                 <n-form-item
@@ -180,18 +200,18 @@
               </n-form>
             </div>
           </div>
-          <n-button size="small" dashed block style="margin-top: 6px" @click="addEoAction">
+          <n-button size="small" dashed block style="margin-top: 8px" @click="addEoAction">
             {{ t('cdnRules.actionAdd') }}
           </n-button>
-        </n-card>
+        </div>
       </template>
     </template>
 
     <!-- ============ JSON 源码模式 ============ -->
     <template v-else>
-      <n-alert type="info" :show-icon="false" style="margin-bottom: 8px">{{ t('cdnRules.modeJsonHint') }}</n-alert>
-      <n-input v-model:value="jsonText" type="textarea" :rows="16" spellcheck="false" />
-      <n-space justify="end" style="margin-top: 8px">
+      <n-alert type="info" :show-icon="false" style="margin-bottom: 10px">{{ t('cdnRules.modeJsonHint') }}</n-alert>
+      <n-input v-model:value="jsonText" type="textarea" :rows="16" spellcheck="false" class="mono-input" />
+      <n-space justify="end" style="margin-top: 10px">
         <n-button size="small" @click="syncFromJson">{{ t('cdnRules.modeVisual') }}</n-button>
       </n-space>
     </template>
@@ -202,9 +222,10 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
-  NAlert, NButton, NCard, NDynamicTags, NForm, NFormItem, NInput, NInputNumber,
+  NAlert, NButton, NDynamicTags, NForm, NFormItem, NIcon, NInput, NInputNumber,
   NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag,
 } from 'naive-ui';
+import { CloseOutline } from '@vicons/ionicons5';
 import RuleFieldControl from './RuleFieldControl.vue';
 import { toEnabled } from '../../lib/cdnSwitch';
 
@@ -467,24 +488,83 @@ watch(
 </script>
 
 <style scoped>
-.rule-editor__hint {
-  color: var(--app-muted, #8b949e);
-  font-size: 12px;
+.rule-editor__bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
 }
+
+/* 条件组 / 动作组：左侧信号条 + 编号徽章，呼应全站信号语义 */
 .rule-editor__group {
-  border: 1px solid var(--app-border, rgba(127, 127, 127, 0.25));
-  border-radius: 8px;
-  padding: 10px;
+  border: 1px solid var(--app-divider);
+  border-left: 3px solid color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
+  border-radius: var(--app-radius);
+  background: var(--app-surface);
+  padding: 10px 12px;
   margin-bottom: 10px;
+  transition: border-color 0.2s var(--app-ease);
+}
+.rule-editor__group:hover {
+  border-left-color: var(--app-primary);
+}
+.rule-editor__group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.rule-editor__group-badge {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  background: var(--app-primary-weak);
+  color: var(--app-primary);
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  font-weight: 700;
 }
 .rule-editor__group-title {
   font-size: 12px;
-  font-weight: 600;
-  color: var(--app-muted, #8b949e);
+  font-weight: 700;
+  color: var(--app-text-2);
 }
+
+/* 条件行：浅色底条 + 控件网格，密集但有序 */
+.rule-editor__cond-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.rule-editor__cond-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: var(--app-bg-soft);
+}
+.rule-editor__cond-target {
+  width: 160px;
+}
+.rule-editor__cond-op {
+  width: 130px;
+}
+.rule-editor__cond-values {
+  flex: 1;
+  min-width: 200px;
+}
+
 .rule-editor__params {
   margin-top: 8px;
-  border-top: 1px dashed var(--app-border, rgba(127, 127, 127, 0.25));
-  padding-top: 8px;
+  border-top: 1px dashed var(--app-divider);
+  padding-top: 10px;
 }
 </style>

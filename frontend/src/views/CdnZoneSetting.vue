@@ -2,157 +2,242 @@
   <div class="app-stack">
     <PageHeader :title="zoneTitle" :subtitle="t('cdnZoneSetting.subtitle')" back="/cdn-zones">
       <template #actions>
-        <n-space :size="8">
-          <n-button size="small" @click="reloadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
+        <n-space :size="8" align="center">
+          <n-tag size="small" :bordered="false">{{ isEsa ? t('cdnRules.vendEsa') : t('cdnRules.vendEo') }}</n-tag>
+          <n-button size="small" :loading="loading" @click="reloadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
         </n-space>
       </template>
     </PageHeader>
 
     <n-alert v-if="!aid || !zoneId" type="warning" :show-icon="false">{{ t('cdnZoneSetting.accountMissing') }}</n-alert>
 
-    <template v-else>
+    <n-card v-else :bordered="false" class="zone-card">
       <n-tabs v-model:value="tab" type="line" animated>
         <!-- ============ 概览 ============ -->
         <n-tab-pane name="overview" :tab="t('cdnZoneSetting.tabOverview')">
-          <n-card size="small" :bordered="false">
-            <n-descriptions :column="2" label-placement="left" size="small">
-              <n-descriptions-item :label="t('cdnZoneSetting.ovZoneId')">
-                <n-tag size="small">{{ zoneId }}</n-tag>
-              </n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovZoneName')">{{ zoneInfo.zone_name || zoneInfo.name || '-' }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovStatus')">
-                <n-tag size="small" :type="zoneInfo.paused ? 'warning' : 'success'">{{ statusLabel }}</n-tag>
-              </n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovArea')">{{ zoneInfo.area || '-' }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovAccess')">{{ accessTypeLabel }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovDomains')">{{ zoneInfo.domain_count ?? 0 }}</n-descriptions-item>
-            </n-descriptions>
-
-            <n-divider title-placement="left">{{ t('cdnZoneSetting.ovNs') }}</n-divider>
-            <n-space v-if="nsList.length" :size="6">
-              <n-tag v-for="ns in nsList" :key="ns" size="small">{{ ns }}</n-tag>
-            </n-space>
-            <span v-else class="muted">{{ t('cdnZoneSetting.ovNsEmpty') }}</span>
-
-            <n-divider />
-            <n-space :size="8">
+          <div class="zone-status-strip">
+            <n-tag size="medium" :type="zoneInfo.paused ? 'warning' : 'success'" :bordered="false">{{ statusLabel }}</n-tag>
+            <div class="zone-status-strip__id">
+              <span class="zone-status-strip__name">{{ zoneInfo.zone_name || zoneInfo.name || zoneId }}</span>
+              <span class="zone-status-strip__sub">{{ zoneId }}</span>
+            </div>
+            <div class="zone-status-strip__actions">
               <n-button size="small" @click="verifyOwnership">{{ t('cdnZoneSetting.ovVerify') }}</n-button>
-              <n-button size="small" @click="togglePause">
+              <n-button size="small" :type="zoneInfo.paused ? 'primary' : 'warning'" @click="togglePause">
                 {{ zoneInfo.paused ? t('cdnZoneSetting.ovResume') : t('cdnZoneSetting.ovPause') }}
               </n-button>
-              <n-button size="small" type="error" @click="deleteZone">{{ t('cdnZoneSetting.ovDelete') }}</n-button>
+              <n-button size="small" type="error" quaternary @click="deleteZone">{{ t('cdnZoneSetting.ovDelete') }}</n-button>
+            </div>
+          </div>
+
+          <div class="zone-panel" style="margin-top: 12px">
+            <n-descriptions :column="2" label-placement="left" size="small">
+              <n-descriptions-item :label="t('cdnZoneSetting.ovZoneId')">
+                <span class="app-mono">{{ zoneId }}</span>
+              </n-descriptions-item>
+              <n-descriptions-item :label="t('cdnZoneSetting.ovZoneName')">{{ zoneInfo.zone_name || zoneInfo.name || '-' }}</n-descriptions-item>
+              <n-descriptions-item :label="t('cdnZoneSetting.ovStatus')">{{ statusLabel }}</n-descriptions-item>
+              <n-descriptions-item :label="t('cdnZoneSetting.ovArea')">{{ zoneInfo.area || '-' }}</n-descriptions-item>
+              <n-descriptions-item :label="t('cdnZoneSetting.ovAccess')">{{ accessTypeLabel }}</n-descriptions-item>
+              <n-descriptions-item :label="t('cdnZoneSetting.ovDomains')">
+                <span class="tnum">{{ zoneInfo.domain_count ?? 0 }}</span>
+              </n-descriptions-item>
+            </n-descriptions>
+          </div>
+
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnZoneSetting.ovNs') }}</h3>
+            </div>
+            <n-space v-if="nsList.length" :size="6">
+              <n-tag v-for="ns in nsList" :key="ns" size="small" :bordered="false" class="app-mono">{{ ns }}</n-tag>
             </n-space>
-          </n-card>
+            <span v-else class="hint-text">{{ t('cdnZoneSetting.ovNsEmpty') }}</span>
+          </div>
         </n-tab-pane>
 
         <!-- ============ 域名 ============ -->
         <n-tab-pane name="domains" :tab="t('cdnZoneSetting.tabDomains')">
-          <n-card size="small" :bordered="false" :title="t('cdnZoneSetting.domTitle')">
-            <n-data-table :columns="domainColumns" :data="domains" size="small" :bordered="false" :loading="loading" />
-          </n-card>
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnZoneSetting.domTitle') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ domains.length }}</n-tag>
+              </div>
+            </div>
+            <ResponsiveDataTable
+              :columns="domainColumns"
+              :data="domains"
+              size="small"
+              :loading="loading"
+              :empty-text="t('cdnZoneSetting.domEmpty')"
+            />
+          </div>
         </n-tab-pane>
 
         <!-- ============ 源站与负载均衡 ============ -->
         <n-tab-pane name="origin" :tab="t('cdnZoneSetting.tabOrigin')">
-          <n-card size="small" :bordered="false" :title="t('cdnOrigin.originGroups')" style="margin-bottom: 12px">
-            <n-space :size="8" style="margin-bottom: 8px">
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnOrigin.originGroups') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ originGroups.length }}</n-tag>
+              </div>
+            </div>
+            <div class="zone-form-strip">
               <n-input v-model:value="ogForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
               <n-input v-model:value="ogForm.hostHeader" :placeholder="t('cdnOrigin.hostHeader')" style="width: 180px" size="small" />
               <n-button size="small" type="primary" :loading="ogSaving" @click="createOriginGroup">{{ t('cdnZoneSetting.create') }}</n-button>
-            </n-space>
-            <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" style="margin-bottom: 8px" />
-            <n-input v-if="isEsa" v-model:value="ogForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" style="margin-bottom: 8px" />
-            <n-data-table :columns="ogColumns" :data="originGroups" size="small" :bordered="false" :loading="loading" />
-          </n-card>
+              <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" class="zone-form-strip__wide mono-input" />
+              <n-input v-if="isEsa" v-model:value="ogForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
+            </div>
+            <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loading" />
+          </div>
 
-          <n-card size="small" :bordered="false" :title="t('cdnOrigin.loadBalancers')">
-            <n-space :size="8" style="margin-bottom: 8px">
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnOrigin.loadBalancers') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ loadBalancers.length }}</n-tag>
+              </div>
+            </div>
+            <div class="zone-form-strip">
               <n-input v-model:value="lbForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
               <n-select v-model:value="lbForm.type" :options="lbTypeOptions" style="width: 160px" size="small" />
               <n-button size="small" type="primary" :loading="lbSaving" @click="createLoadBalancer">{{ t('cdnZoneSetting.create') }}</n-button>
-            </n-space>
-            <n-select v-model:value="lbForm.originGroups" multiple :options="ogOptions" :placeholder="t('cdnOrigin.originGroupsPick')" size="small" style="margin-bottom: 8px" />
-            <n-input v-if="isEsa" v-model:value="lbForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" style="margin-bottom: 8px" />
-            <n-data-table :columns="lbColumns" :data="loadBalancers" size="small" :bordered="false" :loading="loading" />
-          </n-card>
+              <n-select v-model:value="lbForm.originGroups" multiple :options="ogOptions" :placeholder="t('cdnOrigin.originGroupsPick')" size="small" class="zone-form-strip__wide" />
+              <n-input v-if="isEsa" v-model:value="lbForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
+            </div>
+            <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loading" />
+          </div>
         </n-tab-pane>
 
         <!-- ============ 规则引擎 ============ -->
         <n-tab-pane name="rules" :tab="t('cdnZoneSetting.tabRules')">
-          <n-card size="small" :bordered="false">
-            <n-space :size="8" align="center" style="margin-bottom: 10px">
-              <n-select
-                v-if="isEsa"
-                v-model:value="ruleKind"
-                :options="ruleKindOptions"
-                size="small"
-                style="width: 260px"
-                @update:value="loadRules"
-              />
-              <n-button size="small" type="primary" @click="openRuleEditor(null)">
-                {{ t('cdnRules.createRule') }}
-              </n-button>
-              <n-button size="small" @click="loadRules">{{ t('cdnZoneSetting.refresh') }}</n-button>
-            </n-space>
-            <n-data-table :columns="ruleColumns" :data="ruleList" size="small" :bordered="false" :loading="ruleLoading" />
-          </n-card>
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnRules.manage') }}</h3>
+              <n-tag v-if="isEsa" size="tiny" :bordered="false">{{ kindLabel(ruleKind) }}</n-tag>
+              <div class="zone-panel__extra">
+                <n-select
+                  v-if="isEsa"
+                  v-model:value="ruleKind"
+                  :options="ruleKindOptions"
+                  size="small"
+                  style="width: 240px"
+                  @update:value="loadRules"
+                />
+                <n-button size="small" @click="loadRules">{{ t('cdnZoneSetting.refresh') }}</n-button>
+                <n-button size="small" type="primary" @click="openRuleEditor(null)">
+                  {{ t('cdnRules.createRule') }}
+                </n-button>
+              </div>
+            </div>
+            <ResponsiveDataTable
+              :columns="ruleColumns"
+              :data="ruleList"
+              size="small"
+              :loading="ruleLoading"
+              :empty-text="t('cdnRules.empty')"
+            />
+          </div>
         </n-tab-pane>
 
         <!-- ============ 安全 ============ -->
         <n-tab-pane name="security" :tab="t('cdnZoneSetting.tabSecurity')">
-          <n-card v-if="caps.securityIpGroup" size="small" :bordered="false" :title="t('cdnSecurity.ipGroups')" style="margin-bottom: 12px">
-            <n-space :size="8" style="margin-bottom: 8px">
-              <n-input v-model:value="ipForm.name" :placeholder="t('cdnSecurity.name')" style="width: 180px" size="small" />
+          <div v-if="caps.securityIpGroup" class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnSecurity.ipGroups') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ ipGroups.length }}</n-tag>
+              </div>
+            </div>
+            <div class="zone-form-strip">
+              <n-input v-model:value="ipForm.name" :placeholder="t('cdnSecurity.name')" style="width: 200px" size="small" />
               <n-button size="small" type="primary" :loading="ipSaving" @click="createIpGroup">{{ t('cdnZoneSetting.create') }}</n-button>
-            </n-space>
-            <n-input v-model:value="ipForm.content" type="textarea" :rows="3" :placeholder="t('cdnSecurity.contentHint')" style="margin-bottom: 8px" />
-            <n-data-table :columns="ipColumns" :data="ipGroups" size="small" :bordered="false" :loading="loading" />
-          </n-card>
+              <n-input v-model:value="ipForm.content" type="textarea" :rows="3" :placeholder="t('cdnSecurity.contentHint')" class="zone-form-strip__wide mono-input" />
+            </div>
+            <ResponsiveDataTable :columns="ipColumns" :data="ipGroups" size="small" :loading="loading" />
+          </div>
 
-          <n-card v-for="cfg in securityCfgs.filter((c) => caps[c.cap])" :key="cfg.key" size="small" :bordered="false" :title="cfg.title" style="margin-bottom: 12px">
-            <n-space vertical :size="8">
-              <n-space :size="8">
+          <div v-for="cfg in securityCfgs.filter((c) => caps[c.cap])" :key="cfg.key" class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ cfg.title }}</h3>
+              <div class="zone-panel__extra">
                 <n-button size="small" @click="loadSecurityConfig(cfg.key)">{{ t('cdnSecurity.load') }}</n-button>
                 <n-button size="small" type="primary" @click="saveSecurityConfig(cfg.key)">{{ t('cdnZoneSetting.save') }}</n-button>
-              </n-space>
-              <n-input v-model:value="secJson[cfg.key]" type="textarea" :rows="8" :placeholder="t('cdnSecurity.configJson')" />
-            </n-space>
-          </n-card>
+              </div>
+            </div>
+            <n-input
+              v-model:value="secJson[cfg.key]"
+              type="textarea"
+              :rows="8"
+              :placeholder="t('cdnSecurity.configJson')"
+              class="mono-input"
+              spellcheck="false"
+            />
+          </div>
         </n-tab-pane>
 
         <!-- ============ 四层代理 ============ -->
         <n-tab-pane v-if="caps.l4" name="l4" :tab="t('cdnZoneSetting.tabL4')">
-          <n-card size="small" :bordered="false">
-            <n-space :size="8" style="margin-bottom: 8px">
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnZoneSetting.tabL4') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ l4Proxies.length }}</n-tag>
+              </div>
+            </div>
+            <div class="zone-form-strip">
               <n-input v-model:value="l4Form.name" :placeholder="t('cdnAdvanced.name')" style="width: 180px" size="small" />
               <n-input v-model:value="l4Form.area" :placeholder="t('cdnAdvanced.area')" style="width: 140px" size="small" />
               <n-button size="small" type="primary" :loading="l4Saving" @click="createL4Proxy">{{ t('cdnZoneSetting.create') }}</n-button>
-            </n-space>
-            <n-input v-if="isEsa" v-model:value="l4Form.params" type="textarea" :rows="2" :placeholder="t('cdnAdvanced.extraParamsHint')" style="margin-bottom: 8px" />
-            <n-data-table :columns="l4Columns" :data="l4Proxies" size="small" :bordered="false" :loading="loading" />
-          </n-card>
+              <n-input v-if="isEsa" v-model:value="l4Form.params" type="textarea" :rows="2" :placeholder="t('cdnAdvanced.extraParamsHint')" class="zone-form-strip__wide mono-input" />
+            </div>
+            <ResponsiveDataTable :columns="l4Columns" :data="l4Proxies" size="small" :loading="loading" />
+          </div>
         </n-tab-pane>
 
         <!-- ============ 任务与统计 ============ -->
         <n-tab-pane v-if="caps.tasks" name="tasks" :tab="t('cdnZoneSetting.tabTasks')">
-          <n-card size="small" :bordered="false" :title="t('cdnAdvanced.purge')" style="margin-bottom: 12px">
-            <n-data-table :columns="taskColumns" :data="purgeTasks" size="small" :bordered="false" :loading="loading" />
-          </n-card>
-          <n-card size="small" :bordered="false" :title="t('cdnAdvanced.prefetch')" style="margin-bottom: 12px">
-            <n-data-table :columns="taskColumns" :data="prefetchTasks" size="small" :bordered="false" :loading="loading" />
-          </n-card>
-          <n-card size="small" :bordered="false" :title="t('cdnAdvanced.quota')" style="margin-bottom: 12px">
-            <n-space vertical :size="8">
-              <n-button size="small" @click="loadQuota">{{ t('cdnAdvanced.load') }}</n-button>
-              <n-input v-model:value="quotaText" type="textarea" :rows="8" readonly />
-            </n-space>
-          </n-card>
-          <n-card v-if="caps.analysis" size="small" :bordered="false" :title="t('cdnAdvanced.analysis')">
-            <n-space vertical :size="8">
-              <n-button size="small" @click="loadTopAnalysis">{{ t('cdnAdvanced.load') }}</n-button>
-              <n-input v-model:value="analysisText" type="textarea" :rows="8" readonly />
-            </n-space>
-          </n-card>
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnAdvanced.purge') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ purgeTasks.length }}</n-tag>
+              </div>
+            </div>
+            <ResponsiveDataTable :columns="taskColumns" :data="purgeTasks" size="small" :loading="loading" />
+          </div>
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnAdvanced.prefetch') }}</h3>
+              <div class="zone-panel__extra">
+                <n-tag size="tiny" :bordered="false" class="tnum">{{ prefetchTasks.length }}</n-tag>
+              </div>
+            </div>
+            <ResponsiveDataTable :columns="taskColumns" :data="prefetchTasks" size="small" :loading="loading" />
+          </div>
+          <div class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnAdvanced.quota') }}</h3>
+              <div class="zone-panel__extra">
+                <n-button size="small" @click="loadQuota">{{ t('cdnAdvanced.load') }}</n-button>
+              </div>
+            </div>
+            <pre v-if="quotaText" class="code-view">{{ quotaText }}</pre>
+            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
+          </div>
+          <div v-if="caps.analysis" class="zone-panel">
+            <div class="zone-panel__head">
+              <h3 class="zone-panel__title">{{ t('cdnAdvanced.analysis') }}</h3>
+              <div class="zone-panel__extra">
+                <n-button size="small" @click="loadTopAnalysis">{{ t('cdnAdvanced.load') }}</n-button>
+              </div>
+            </div>
+            <pre v-if="analysisText" class="code-view">{{ analysisText }}</pre>
+            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
+          </div>
         </n-tab-pane>
 
         <!-- ============ 全局配置 ============ -->
@@ -160,7 +245,7 @@
           <CdnZoneGlobalSetting :aid="aid" :zone-id="zoneId" @go-rules="tab = 'rules'" />
         </n-tab-pane>
       </n-tabs>
-    </template>
+    </n-card>
 
     <!-- 规则编辑器 -->
     <n-modal
@@ -191,6 +276,7 @@ import { useDialog, useMessage, NButton, NSpace, NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import RuleEditor from '../components/cdn/RuleEditor.vue';
 import CdnZoneGlobalSetting from '../components/cdn/CdnZoneGlobalSetting.vue';
 import { ruleEnabled } from '../lib/cdnSwitch';
@@ -292,7 +378,7 @@ const domainColumns = computed(() => [
     key: 'actions',
     width: 140,
     render: (r: any) =>
-      h(NButton, { size: 'tiny', onClick: () => (window.location.href = `/cdn-domains/${r.id}/setting`) }, { default: () => t('cdnZoneSetting.domOpen') }),
+      h(NButton, { size: 'tiny', onClick: () => router.push(`/cdn-domains/${r.id}/setting`) }, { default: () => t('cdnZoneSetting.domOpen') }),
   },
 ]);
 
@@ -655,7 +741,7 @@ async function createIpGroup() {
 async function loadIpContent(r: any) {
   const res = await api<any>('GET', `/cdn/accounts/${aid}/security/ip-groups/${r.groupId}/content`, { zoneId });
   if (res.code === 0) {
-    dialog.info({ title: t('cdnSecurity.content'), content: () => h('div', { style: 'white-space:pre-wrap' }, (res.data || []).join('\n') || '-') });
+    dialog.info({ title: t('cdnSecurity.content'), content: () => h('pre', { class: 'code-view', style: 'max-height:400px' }, (res.data || []).join('\n') || '-') });
   } else message.error(res.msg);
 }
 function delIpGroup(r: any) {
@@ -791,10 +877,3 @@ onMounted(async () => {
   loading.value = false;
 });
 </script>
-
-<style scoped>
-.muted {
-  color: var(--app-muted, #8b949e);
-  font-size: 12px;
-}
-</style>
