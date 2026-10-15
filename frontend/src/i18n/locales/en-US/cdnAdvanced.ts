@@ -30,6 +30,6 @@ export default {
     topAnalysis: 'Top Analytics',
     areaOptions: 'Area',
     extraParams: 'Extra Params (JSON)',
-    extraParamsHint: 'Extra params (JSON, optional; for ESA L4 the required Rules must be provided, e.g. {"Rules":[{"Protocol":"TCP","SourcePort":8080,"EdgePort":80,"SourceType":"ip","Source":"1.2.3.4"}]})',
+    extraParamsHint: 'Extra params (JSON, optional). For ESA L4, Rules is required; use official names such as Rules, Ipv6, StaticIp, CrossBorderOptimization.',
   },
 };

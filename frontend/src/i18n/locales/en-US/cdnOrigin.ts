@@ -26,6 +26,6 @@ export default {
     needRecords: 'Please enter at least one origin',
     needSite: 'Please select a site first',
     extraParams: 'Extra Params (JSON)',
-    extraParamsHint: 'Extra params (JSON, optional; for ESA use official field names, e.g. {"FallbackPool":123,"SteeringPolicy":"order","Monitor":{...}})',
+    extraParamsHint: 'Extra params (JSON, optional). For ESA use official field names, e.g. FallbackPool, SteeringPolicy, Monitor, SessionAffinity.',
   },
 };

@@ -30,6 +30,6 @@ export default {
     topAnalysis: 'Top 统计',
     areaOptions: '区域',
     extraParams: '额外参数 (JSON)',
-    extraParamsHint: '额外参数（JSON，选填；ESA 四层代理需提供必填 Rules，如 {"Rules":[{"Protocol":"TCP","SourcePort":8080,"EdgePort":80,"SourceType":"ip","Source":"1.2.3.4"}]}）',
+    extraParamsHint: '额外参数（JSON，选填）。ESA 四层代理必须提供 Rules，请按官方字段名填写 Rules、Ipv6、StaticIp、CrossBorderOptimization 等。',
   },
 };
