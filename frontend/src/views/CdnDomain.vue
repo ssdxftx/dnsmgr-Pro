@@ -437,6 +437,7 @@
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
+import { useRouter } from 'vue-router';
 import { AddOutline, CloudDownloadOutline, GlobeOutline, CloudOutline, CheckmarkCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -444,6 +445,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 
 const { t } = useI18n();
+const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const loading = ref(false);
@@ -954,7 +956,7 @@ function onZoneChange(zoneId: string) {
 }
 
 function goZones() {
-  window.location.href = '/cdn-zones';
+  router.push('/cdn-zones');
 }
 
 function openAdd() {
