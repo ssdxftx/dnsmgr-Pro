@@ -110,6 +110,8 @@ export const EO_PARAM_LABELS: Record<string, Bi> = {
   CacheTimePercent: { zh: '预刷新时间（TTL 的百分比）', en: 'Prefresh Time (percent of TTL)' },
   StatusCode: { zh: '状态码', en: 'Status Code' },
   Timeout: { zh: '超时时间', en: 'Timeout' },
+  ResponseTimeout: { zh: '回源响应超时时间', en: 'Origin Response Timeout' },
+  IgnoreCacheControl: { zh: '忽略源站 Cache-Control', en: 'Ignore Origin Cache-Control' },
   MaxAge: { zh: '最大时长', en: 'Max Age' },
   MaxAgeType: { zh: '时长类型', en: 'Max Age Type' },
   IncludeSubDomains: { zh: '包含子域名', en: 'Include Subdomains' },

@@ -194,7 +194,7 @@
                     {{ t('cdnRules.actionRemove') }}
                   </n-button>
                 </div>
-                <div v-if="propertiesOf(a.action).length" class="rule-editor__params">
+                <div v-if="hasParams(a)" class="rule-editor__params">
                   <n-form label-placement="left" label-width="132">
                     <n-form-item
                       v-for="p in propertiesOf(a.action)"
@@ -237,6 +237,24 @@
                         :value="paramStrValue(a, p)"
                         size="small"
                         @update:value="(v: string) => setParamValue(a, p, v)"
+                      />
+                    </n-form-item>
+                    <n-form-item
+                      v-for="name in extraParamsOf(a)"
+                      :key="'x-' + name"
+                      :label="eoParamLabel(name, localeKey)"
+                    >
+                      <n-dynamic-tags
+                        v-if="Array.isArray(a.params[name])"
+                        :value="a.params[name]"
+                        size="small"
+                        @update:value="(v: any) => setParamByName(a, name, v)"
+                      />
+                      <n-input
+                        v-else
+                        :value="paramStrValueByName(a, name)"
+                        size="small"
+                        @update:value="(v: string) => setParamByName(a, name, v)"
                       />
                     </n-form-item>
                   </n-form>
@@ -308,7 +326,7 @@ const jsonText = ref('');
 
 interface EoCondItem { target: string; operator: string; name?: string; values: string[]; ignoreCase?: boolean }
 interface EoOrGroup { items: EoCondItem[] }
-interface EoActionItem { action: string; params: Record<string, any> }
+interface EoActionItem { action: string; params: Record<string, any>; kind?: string }
 interface EoBranch { type: 'if' | 'elseif' | 'else'; orGroups: EoOrGroup[]; actions: EoActionItem[] }
 
 function newCondItem(): EoCondItem {
@@ -452,6 +470,21 @@ function propertiesOf(action: string): any[] {
   const hit = eoActions.value.find((a: any) => a.Action === action);
   return Array.isArray(hit?.Properties) ? hit.Properties : [];
 }
+/** schema 未定义的参数名：多为官方元数据不全时规则里携带的额外参数，必须原样保留 */
+function extraParamsOf(a: EoActionItem): string[] {
+  const known = new Set(propertiesOf(a.action).map((p: any) => p.Name));
+  return Object.keys(a.params).filter((k) => !known.has(k));
+}
+function hasParams(a: EoActionItem): boolean {
+  return propertiesOf(a.action).length > 0 || extraParamsOf(a).length > 0;
+}
+function paramStrValueByName(a: EoActionItem, name: string): string {
+  const v = a.params[name];
+  return v === undefined || v === null ? '' : String(v);
+}
+function setParamByName(a: EoActionItem, name: string, v: any) {
+  a.params[name] = v;
+}
 function numOrNull(v: any) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
@@ -464,6 +497,7 @@ function pickToggle(p: any, on: boolean) {
 }
 function onActionChange(a: EoActionItem) {
   a.params = {};
+  a.kind = undefined;
 }
 function paramRawValue(a: EoActionItem, p: any) {
   return a.params[p.Name];
@@ -513,24 +547,35 @@ function toEoCondition(it: EoCondItem): Record<string, any> {
   return cond;
 }
 
+/** 参数值 → 官方 Values 数组（数组原样透传，标量包成单元素数组，空值给空数组） */
+function toParamValues(raw: any): any[] {
+  if (raw === undefined || raw === null || raw === '') return [];
+  return Array.isArray(raw) ? raw : [raw];
+}
+
 /** EO：操作 → 官方 Action（依据 ExtraParameter.Id 判定 NormalAction/RewriteAction/CodeAction） */
 function toEoAction(a: EoActionItem): Record<string, any> {
   const props_ = propertiesOf(a.action);
+  const known = new Set(props_.map((p: any) => p.Name));
   const params = props_.map((p: any) => {
     const raw = a.params[p.Name];
     const extraId = p.ExtraParameter?.Id;
-    const values = Array.isArray(raw) ? raw : raw === undefined || raw === null || raw === '' ? [] : [raw];
     const item: Record<string, any> = {};
     if (extraId === 'Action') item.Action = String(raw ?? '');
     if (extraId === 'StatusCode') item.StatusCode = Number(raw ?? 0);
     item.Name = p.Name;
-    item.Values = values;
+    item.Values = toParamValues(raw);
     return item;
   });
-  const kindOf = props_.find((p: any) => p.ExtraParameter?.Id)?.ExtraParameter?.Id;
-  if (kindOf === 'Action') return { RewriteAction: { Action: a.action, Parameters: params } };
-  if (kindOf === 'StatusCode') return { CodeAction: { Action: a.action, Parameters: params } };
-  return { NormalAction: { Action: a.action, Parameters: params } };
+  // 保留 schema 未覆盖的参数：官方 DescribeRulesSetting 元数据不全时，规则里携带的额外参数
+  // （如 HTTPUpstreamTimeout.ResponseTimeout、WebSocket.Timeout 等）不得在保存时被丢弃
+  for (const [name, raw] of Object.entries(a.params)) {
+    if (known.has(name)) continue;
+    params.push({ Name: name, Values: toParamValues(raw) });
+  }
+  const extraId = props_.find((p: any) => p.ExtraParameter?.Id)?.ExtraParameter?.Id;
+  const kind = a.kind || (extraId === 'Action' ? 'RewriteAction' : extraId === 'StatusCode' ? 'CodeAction' : 'NormalAction');
+  return { [kind]: { Action: a.action, Parameters: params } };
 }
 
 /** EO：分支 → { Conditions: RuleAndConditions[], Actions }（官方：组间 Or、组内 And；ELSE 无条件） */
@@ -604,6 +649,7 @@ function parseEoActions(actions: any[]): EoActionItem[] {
   const list = Array.isArray(actions) ? actions : [];
   const parsed = list
     .map((a: any) => {
+      const kind = a.NormalAction ? 'NormalAction' : a.RewriteAction ? 'RewriteAction' : a.CodeAction ? 'CodeAction' : 'NormalAction';
       const body = a.NormalAction || a.RewriteAction || a.CodeAction || {};
       const params: Record<string, any> = {};
       for (const it of body.Parameters || []) {
@@ -612,7 +658,7 @@ function parseEoActions(actions: any[]): EoActionItem[] {
         else if (extraId === 'StatusCode') params[it.Name] = it.StatusCode;
         else params[it.Name] = (it.Values || []).length === 1 ? it.Values[0] : it.Values || [];
       }
-      return { action: body.Action || '', params };
+      return { action: body.Action || '', params, kind };
     })
     .filter((a) => a.action);
   return parsed.length ? parsed : [{ action: '', params: {} }];
