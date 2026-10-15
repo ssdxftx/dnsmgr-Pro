@@ -79,7 +79,7 @@ export class AliyunDns implements DnsProvider {
       Line: row.Line,
       TTL: row.TTL,
       MX: row.Priority ?? null,
-      Status: row.Status === 'ENABLE' ? '1' : '0',
+      Status: String(row.Status || '').toLowerCase() === 'enable' ? '1' : '0',
       Weight: row.Weight ?? null,
       Remark: row.Remark ?? null,
       UpdateTime: row.UpdateTimestamp ? new Date(Number(row.UpdateTimestamp)).toISOString().slice(0, 19).replace('T', ' ') : null,
@@ -103,7 +103,7 @@ export class AliyunDns implements DnsProvider {
       Line: row.Line,
       TTL: row.TTL,
       MX: row.Priority ?? null,
-      Status: row.Status === 'ENABLE' ? '1' : '0',
+      Status: String(row.Status || '').toLowerCase() === 'enable' ? '1' : '0',
       Weight: row.Weight ?? null,
       Remark: row.Remark ?? null,
       UpdateTime: row.UpdateTimestamp ? new Date(Number(row.UpdateTimestamp)).toISOString().slice(0, 19).replace('T', ' ') : null,
@@ -150,10 +150,11 @@ export class AliyunDns implements DnsProvider {
       Line: data.Line,
       TTL: data.TTL,
       MX: data.Priority ?? null,
-      Status: data.Status === 'ENABLE' ? '1' : '0',
-      Weight: data.Weight ?? null,
+      Status: String(data.Status || '').toLowerCase() === 'enable' ? '1' : '0',
+      // DescribeDomainRecordInfo 详情接口不返回 Weight / UpdateTimestamp（仅列表接口返回），显式置空
+      Weight: null,
       Remark: data.Remark ?? null,
-      UpdateTime: data.UpdateTimestamp ? new Date(Number(data.UpdateTimestamp)).toISOString().slice(0, 19).replace('T', ' ') : null,
+      UpdateTime: null,
     };
   }
 
