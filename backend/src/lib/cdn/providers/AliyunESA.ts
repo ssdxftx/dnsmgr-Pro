@@ -13,7 +13,10 @@ export class AliyunESA implements CdnProvider {
   constructor(config: Record<string, any>) {
     this.accessKeyId = config.AccessKeyId || '';
     this.accessKeySecret = config.AccessKeySecret || '';
-    this.client = new Aliyun(this.accessKeyId, this.accessKeySecret, 'esa.aliyuncs.com', '2024-09-10');
+    // ESA 端点必须带 Region（如 esa.cn-hangzhou.aliyuncs.com）；region 拼入主机名，做白名单校验避免注入
+    const region = String(config.region || '').trim();
+    const validRegion = /^[a-z0-9-]+$/i.test(region) ? region : 'cn-hangzhou';
+    this.client = new Aliyun(this.accessKeyId, this.accessKeySecret, `esa.${validRegion}.aliyuncs.com`, '2024-09-10');
   }
 
   getError() {

@@ -108,9 +108,9 @@ export class TencentEoDns implements DnsProvider {
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = 'Default', TTL = 600, MX = 1, Weight: number | null = null, _Remark: string | null = null) {
     const name = Name === '@' ? this.domain : Name + '.' + this.domain;
-    const param: Record<string, any> = {
-      ZoneId: this.domainid,
-      DnsRecordId: RecordId,
+    // 官方 SDK 的更新接口为复数 ModifyDnsRecords（请求体 DnsRecords 数组）
+    const record: Record<string, any> = {
+      RecordId,
       Name: name,
       Type,
       Content: Value,
@@ -118,8 +118,8 @@ export class TencentEoDns implements DnsProvider {
       TTL: Number(TTL),
       Weight: Weight ? Number(Weight) : -1,
     };
-    if (Type === 'MX') param.Priority = Number(MX);
-    return (await this.send('ModifyDnsRecord', param)) !== false;
+    if (Type === 'MX') record.Priority = Number(MX);
+    return (await this.send('ModifyDnsRecords', { ZoneId: this.domainid, DnsRecords: [record] })) !== false;
   }
 
   async deleteDomainRecord(RecordId: string) {
