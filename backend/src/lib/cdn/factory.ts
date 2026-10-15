@@ -230,6 +230,7 @@ export function providerCapabilities(type: string): Record<string, boolean> {
     ddos: has('getDdosProtection'),
     l4: has('createL4Proxy') || has('createTransportLayerApplication'),
     tasks: has('listPurgeTasks') || has('getPurgeQuota'),
+    analysis: has('topAnalysis') || has('timingCacheData'),
   };
 }
 

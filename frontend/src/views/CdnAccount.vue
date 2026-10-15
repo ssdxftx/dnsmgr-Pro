@@ -182,6 +182,49 @@
         </n-tabs>
       </n-space>
     </n-modal>
+
+    <n-modal v-model:show="showAdvanced" preset="card" :title="t('cdnAdvanced.title', { name: advAcct?.name || '' })" style="max-width:920px" :mask-closable="false">
+      <n-space vertical :size="14">
+        <n-form-item :label="t('cdnAdvanced.site')" :show-feedback="false">
+          <n-select v-model:value="advZone" :options="advSiteOptions" :placeholder="t('cdnAdvanced.selectSite')" @update:value="loadAdvanced" />
+        </n-form-item>
+        <n-tabs type="line" animated>
+          <n-tab-pane v-if="advCaps.l4" name="l4" :tab="t('cdnAdvanced.l4')">
+            <n-space vertical :size="10">
+              <n-space :size="8">
+                <n-input v-model:value="l4Form.name" :placeholder="t('cdnAdvanced.name')" style="width:180px" />
+                <n-input v-model:value="l4Form.area" :placeholder="t('cdnAdvanced.area')" style="width:140px" />
+                <n-button type="primary" size="small" :loading="l4Saving" @click="createL4Proxy">{{ t('cdnAdvanced.create') }}</n-button>
+              </n-space>
+              <n-data-table :columns="l4Columns" :data="l4Proxies" :loading="advLoading" size="small" :bordered="false" />
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane v-if="advCaps.tasks" name="tasks" :tab="t('cdnAdvanced.tasks')">
+            <n-space vertical :size="12">
+              <n-button size="small" @click="loadAdvanced">{{ t('cdnAdvanced.refresh') }}</n-button>
+              <n-card size="small" :title="t('cdnAdvanced.purge')">
+                <n-data-table :columns="taskColumns" :data="purgeTasks" :loading="advLoading" size="small" :bordered="false" />
+              </n-card>
+              <n-card size="small" :title="t('cdnAdvanced.prefetch')">
+                <n-data-table :columns="taskColumns" :data="prefetchTasks" :loading="advLoading" size="small" :bordered="false" />
+              </n-card>
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane v-if="advCaps.tasks" name="quota" :tab="t('cdnAdvanced.quota')">
+            <n-space vertical :size="8">
+              <n-button size="small" @click="loadQuota">{{ t('cdnAdvanced.load') }}</n-button>
+              <n-input v-model:value="advJson.quota" type="textarea" :rows="8" readonly />
+            </n-space>
+          </n-tab-pane>
+          <n-tab-pane v-if="advCaps.analysis" name="analysis" :tab="t('cdnAdvanced.analysis')">
+            <n-space vertical :size="8">
+              <n-button size="small" @click="loadTopAnalysis">{{ t('cdnAdvanced.load') }}</n-button>
+              <n-input v-model:value="advJson.analysis" type="textarea" :rows="10" readonly />
+            </n-space>
+          </n-tab-pane>
+        </n-tabs>
+      </n-space>
+    </n-modal>
   </div>
 </template>
 
@@ -383,6 +426,31 @@ const ipColumns = computed(() => [
   },
 ]);
 
+// ===== 高级功能（L4 / 任务 / 配额 / 统计）=====
+const showAdvanced = ref(false);
+const advAcct = ref<any>(null);
+const advSites = ref<any[]>([]);
+const advZone = ref<string>('');
+const advLoading = ref(false);
+const l4Proxies = ref<any[]>([]);
+const l4Form = reactive<any>({ name: '', area: '' });
+const l4Saving = ref(false);
+const purgeTasks = ref<any[]>([]);
+const prefetchTasks = ref<any[]>([]);
+const advJson = reactive<any>({ quota: '', analysis: '' });
+const advCaps = computed(() => providers.value[advAcct.value?.type]?.capabilities || {});
+const advSiteOptions = computed(() => advSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
+const l4Columns = computed(() => [
+  { title: t('cdnAdvanced.colName'), key: 'name', minWidth: 160 },
+  { title: t('cdnAdvanced.colArea'), key: 'area', width: 120 },
+  { title: t('cdnAdvanced.colActions'), key: 'actions', width: 100, render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => delL4Proxy(r) }, { default: () => t('cdnAdvanced.delete') }) },
+]);
+const taskColumns = computed(() => [
+  { title: 'ID', key: 'TaskId', width: 140, render: (r: any) => String(r.TaskId ?? r.Id ?? r.JobId ?? '') },
+  { title: t('cdnAdvanced.colName'), key: 'Target', minWidth: 240, render: (r: any) => String(r.Target ?? r.Url ?? r.Content ?? '') },
+  { title: 'Status', key: 'Status', width: 140, render: (r: any) => String(r.Status ?? r.TaskStatus ?? '') },
+]);
+
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   { title: t('cdnAccount.providerCol'), key: 'typename', width: 140 },
@@ -421,6 +489,9 @@ const columns = computed(() => [
       }
       if (caps.security) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openSecurity(row) }, { default: () => t('cdnSecurity.manage') }));
+      }
+      if (caps.l4 || caps.tasks) {
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openAdvanced(row) }, { default: () => t('cdnAdvanced.manage') }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
@@ -897,6 +968,90 @@ function delIpGroup(r: any) {
       } else message.error(res.msg);
     },
   });
+}
+
+// ===== 高级功能 =====
+async function openAdvanced(row: any) {
+  advAcct.value = row;
+  advZone.value = '';
+  l4Proxies.value = [];
+  purgeTasks.value = [];
+  prefetchTasks.value = [];
+  advJson.quota = '';
+  advJson.analysis = '';
+  l4Form.name = '';
+  l4Form.area = '';
+  showAdvanced.value = true;
+  const res = await api<any>('GET', `/cdn/accounts/${row.id}/sites`);
+  advSites.value = res.code === 0 ? res.data : [];
+}
+
+async function loadAdvanced() {
+  if (!advZone.value || !advAcct.value) return;
+  advLoading.value = true;
+  const aid = advAcct.value.id;
+  if (advCaps.value.l4) {
+    const r = await api<any>('GET', `/cdn/accounts/${aid}/l4-proxies`, { zoneId: advZone.value, page: 1, size: 100 });
+    l4Proxies.value = r.code === 0 ? r.data?.list || [] : [];
+  }
+  if (advCaps.value.tasks) {
+    const [p, pf] = await Promise.all([
+      api<any>('GET', `/cdn/accounts/${aid}/tasks/purge`, { zoneId: advZone.value, page: 1, size: 50 }),
+      api<any>('GET', `/cdn/accounts/${aid}/tasks/prefetch`, { zoneId: advZone.value, page: 1, size: 50 }),
+    ]);
+    purgeTasks.value = p.code === 0 ? p.data?.list || [] : [];
+    prefetchTasks.value = pf.code === 0 ? pf.data?.list || [] : [];
+  }
+  advLoading.value = false;
+}
+
+async function createL4Proxy() {
+  if (!advZone.value) return message.warning(t('cdnAdvanced.needSite'));
+  if (!l4Form.name) return message.warning(t('cdnAdvanced.needName'));
+  l4Saving.value = true;
+  const res = await api<any>('POST', `/cdn/accounts/${advAcct.value.id}/l4-proxies`, { zoneId: advZone.value, name: l4Form.name, area: l4Form.area || undefined });
+  l4Saving.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    l4Form.name = '';
+    l4Form.area = '';
+    loadAdvanced();
+  } else message.error(res.msg);
+}
+
+function delL4Proxy(r: any) {
+  dialog.warning({
+    title: t('common.delete'),
+    content: t('cdnAdvanced.confirmDelete', { name: r.name || r.proxyId }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('DELETE', `/cdn/accounts/${advAcct.value.id}/l4-proxies/${encodeURIComponent(r.proxyId)}`, { zoneId: advZone.value });
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadAdvanced();
+      } else message.error(res.msg);
+    },
+  });
+}
+
+async function loadQuota() {
+  if (!advZone.value) return message.warning(t('cdnAdvanced.needSite'));
+  const aid = advAcct.value.id;
+  const isEsa = advAcct.value.type === 'aliyun_esa';
+  const res = await api<any>('GET', isEsa ? `/cdn/accounts/${aid}/quota/purge` : `/cdn/accounts/${aid}/quota/content`, { zoneId: advZone.value, type: 'file' });
+  if (res.code === 0) advJson.quota = JSON.stringify(res.data, null, 2);
+  else message.error(res.msg);
+}
+
+async function loadTopAnalysis() {
+  if (!advZone.value) return message.warning(t('cdnAdvanced.needSite'));
+  const now = new Date();
+  const start = new Date(now.getTime() - 24 * 3600 * 1000);
+  const fmt = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
+  const res = await api<any>('GET', `/cdn/accounts/${advAcct.value.id}/analysis/top`, { zoneIds: advZone.value, startTime: fmt(start), endTime: fmt(now), metricName: 'l7Flow_outFlux', limit: 10 });
+  if (res.code === 0) advJson.analysis = JSON.stringify(res.data, null, 2);
+  else message.error(res.msg);
 }
 
 onMounted(() => {

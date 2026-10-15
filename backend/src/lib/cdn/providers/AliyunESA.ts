@@ -1,5 +1,5 @@
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, L4ProxyItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -719,5 +719,84 @@ export class AliyunESA implements CdnProvider {
 
   async setDdosProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
     return (await this.call(this.withJson({ Action: 'SetHttpDDoSAttackProtection', SiteId: Number(zoneId), ...config }))) !== false;
+  }
+
+  // ===== Phase 5：四层代理（TransportLayerApplication）=====
+
+  async listL4Proxies(zoneId: string, page = 1, size = 20): Promise<PagedResult<L4ProxyItem> | false> {
+    const d = await this.call({ Action: 'ListTransportLayerApplications', SiteId: Number(zoneId), PageNumber: page, PageSize: size });
+    if (!d) return false;
+    const arr = d.Applications || d.TransportLayerApplications || [];
+    const list: L4ProxyItem[] = arr.map((p: any) => ({ proxyId: String(p.Id ?? p.ApplicationId ?? ''), name: p.Name || '', area: p.Area, ...p }));
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createL4Proxy(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const body: Record<string, any> = { Action: 'CreateTransportLayerApplication', SiteId: Number(zoneId) };
+    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    const d = await this.call(this.withJson(body));
+    if (!d) return false;
+    return String(d.Id ?? d.ApplicationId ?? '') || 'ok';
+  }
+
+  async updateL4Proxy(zoneId: string, proxyId: string, params: Record<string, any>): Promise<boolean> {
+    const body: Record<string, any> = { Action: 'UpdateTransportLayerApplication', SiteId: Number(zoneId), Id: /^\d+$/.test(proxyId) ? Number(proxyId) : proxyId };
+    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    return (await this.call(this.withJson(body))) !== false;
+  }
+
+  async deleteL4Proxy(zoneId: string, proxyId: string): Promise<boolean> {
+    return (await this.call({ Action: 'DeleteTransportLayerApplication', SiteId: Number(zoneId), Id: /^\d+$/.test(proxyId) ? Number(proxyId) : proxyId })) !== false;
+  }
+
+  // ===== Phase 5：任务 / 配额 / 缓存增强 =====
+
+  async listPurgeTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.call({ Action: 'DescribePurgeTasks', SiteId: zoneId ? Number(zoneId) : undefined, PageNumber: page, PageSize: size });
+    if (!d) return false;
+    const arr = d.Tasks || [];
+    return { total: Number(d.TotalCount || arr.length), list: arr };
+  }
+
+  async listPrefetchTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.call({ Action: 'DescribePreloadTasks', SiteId: zoneId ? Number(zoneId) : undefined, PageNumber: page, PageSize: size });
+    if (!d) return false;
+    const arr = d.Tasks || [];
+    return { total: Number(d.TotalCount || arr.length), list: arr };
+  }
+
+  async getPurgeQuota(zoneId: string, type: string): Promise<Record<string, any> | false> {
+    const d = await this.call({ Action: 'GetPurgeQuota', SiteId: Number(zoneId), Type: type });
+    return d || false;
+  }
+
+  async uploadFile(zoneId: string, url: string, type: string, taskName: string): Promise<string | false> {
+    const d = await this.call({ Action: 'UploadFile', SiteId: Number(zoneId), Url: url, Type: type, UploadTaskName: taskName });
+    return d && d.UploadId ? String(d.UploadId) : false;
+  }
+
+  async listUploadTasks(zoneId: string | null, type?: string): Promise<any[] | false> {
+    const d = await this.call({ Action: 'ListUploadTasks', SiteId: zoneId ? Number(zoneId) : undefined, Type: type });
+    if (!d) return false;
+    return d.Tasks || d.UploadTasks || [];
+  }
+
+  async updateDevelopmentMode(zoneId: string, enable: boolean): Promise<boolean> {
+    return (await this.call({ Action: 'UpdateDevelopmentMode', SiteId: Number(zoneId), Enable: enable ? 'on' : 'off' })) !== false;
+  }
+
+  async updateCacheTag(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.call(this.withJson({ Action: 'UpdateCacheTag', SiteId: Number(zoneId), ...params }))) !== false;
+  }
+
+  async blockObject(zoneId: string, type: string, content: string[], maxage?: number): Promise<string | false> {
+    const body: Record<string, any> = { Action: 'BlockObject', SiteId: Number(zoneId), Type: type, Content: content };
+    if (maxage !== undefined) body.Maxage = maxage;
+    const d = await this.call(this.withJson(body));
+    return d && d.TaskId ? String(d.TaskId) : false;
+  }
+
+  async updateTieredCache(zoneId: string, mode: string): Promise<boolean> {
+    return (await this.call({ Action: 'UpdateTieredCache', SiteId: Number(zoneId), CacheArchitectureMode: mode })) !== false;
   }
 }

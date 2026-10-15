@@ -203,6 +203,40 @@ CDN 厂商 type：`tencent_cdn`、`tencent_edgeone`、`aliyun_cdn`、`aliyun_esa
 | POST | `/api/cdn/preheat-tasks/:id/toggle` | 启停 |
 | POST | `/api/cdn/preheat-tasks/:id/run` | 立即执行 |
 
+### EO / ESA 扩展能力（v1.11.x）
+
+`GET /api/cdn/providers` 返回的每个厂商附带 `capabilities`（按 provider 原型方法动态探测，单一事实来源）：`zoneManage`、`originGroup`、`loadBalancer`、`rules`、`security`（细分 `securityIpGroup`/`waf`/`originProtection`/`ddos`）、`l4`、`tasks`、`analysis`。前端据 `capabilities` 显隐管理入口。以下端点均能力门控、仅管理员可用（`:aid` 为 CDN 账户 id，`zoneId` 为 EO ZoneId / ESA SiteId）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET/POST | `/api/cdn/accounts/:aid/sites` | 站点列表 / 创建（EO Zone、ESA Site） |
+| POST | `/api/cdn/accounts/:aid/sites/check` | 站点名校验 / 归属识别 |
+| POST | `/api/cdn/accounts/:aid/sites/verify` | 归属验证 |
+| POST | `/api/cdn/accounts/:aid/sites/pause` | 暂停 / 启用 |
+| GET | `/api/cdn/accounts/:aid/sites/:zoneId/ns` | 站点 NS（ESA） |
+| PUT/DELETE | `/api/cdn/accounts/:aid/sites/:zoneId` | 更新属性 / 删除站点 |
+| GET | `/api/cdn/accounts/:aid/plan-instances` | 套餐实例（ESA） |
+| GET/POST | `/api/cdn/accounts/:aid/origin-groups` | 源站组 / 源站池 |
+| PUT/DELETE | `/api/cdn/accounts/:aid/origin-groups/:groupId` | 更新 / 删除 |
+| GET/POST | `/api/cdn/accounts/:aid/load-balancers` | 负载均衡 |
+| PUT/DELETE | `/api/cdn/accounts/:aid/load-balancers/:instanceId` | 更新 / 删除 |
+| GET | `/api/cdn/accounts/:aid/rules/setting` | EO 规则元数据（DescribeRulesSetting） |
+| GET/POST/DELETE | `/api/cdn/accounts/:aid/rules` | EO L7 规则 |
+| PUT | `/api/cdn/accounts/:aid/rules/:ruleId` | EO 更新规则 |
+| POST | `/api/cdn/accounts/:aid/rules/priority` | EO 规则优先级 |
+| GET/POST | `/api/cdn/accounts/:aid/rule-configs` | ESA 规则配置（`kind`） |
+| DELETE | `/api/cdn/accounts/:aid/rule-configs/:configId` | ESA 删除规则 |
+| GET/POST/PUT/DELETE | `/api/cdn/accounts/:aid/security/ip-groups` | EO IP 组 |
+| GET | `/api/cdn/accounts/:aid/security/ip-groups/:groupId/content` | IP 组内容 |
+| GET/POST | `/api/cdn/accounts/:aid/security/{ddos,waf,origin-protection}` | DDoS / WAF / 源站防护配置 |
+| GET/POST | `/api/cdn/accounts/:aid/l4-proxies` | 四层代理（EO L4Proxy / ESA TransportLayerApplication） |
+| PUT/DELETE | `/api/cdn/accounts/:aid/l4-proxies/:proxyId` | 更新 / 删除 |
+| GET/POST/DELETE | `/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules` | EO 四层转发规则 |
+| GET | `/api/cdn/accounts/:aid/tasks/{purge,prefetch}` | 刷新 / 预热任务 |
+| GET | `/api/cdn/accounts/:aid/quota/{content,purge}` | 配额（EO 内容配额 / ESA 刷新配额） |
+| POST | `/api/cdn/accounts/:aid/cache/{development-mode,tag,block,tiered,upload-file}` | ESA 缓存增强 |
+| GET | `/api/cdn/accounts/:aid/analysis/{top,timing-cache}` | EO 统计 |
+
 ## 证书与部署
 
 实现：`backend/src/routes/cert.ts`
@@ -383,4 +417,4 @@ interface DnsProvider {
 
 部署：`DeployProvider`（`check` / `deploy(fullchain, privatekey, config, info)` / `setLogger`）。
 
-CDN：`CdnProvider`（接入、源站、缓存、HTTPS，以及可选的 zone / purge / preheat / access / 免费证书 / certlink）。
+CDN：`CdnProvider`（接入、源站、缓存、HTTPS，以及可选的 zone / purge / preheat / access / 免费证书 / certlink；v1.11.x 起扩展出站点生命周期、源站组/负载均衡、规则引擎、安全、四层代理、任务/配额/统计等大量可选方法，按 provider 原型方法动态探测为 `capabilities`）。
