@@ -16,19 +16,19 @@ export class Aliyun {
   ) {}
 
   async request(param: Record<string, any>, method: 'GET' | 'POST' = 'POST'): Promise<any> {
-    const data: Record<string, string> = {
-      Format: 'JSON',
-      Version: this.version,
-      AccessKeyId: this.accessKeyId,
-      SignatureMethod: 'HMAC-SHA1',
-      Timestamp: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-      SignatureVersion: '1.0',
-      SignatureNonce: Math.random().toString(36).slice(2, 18),
-    };
+    // 先并入业务参数，再写入公共参数，确保公共参数（含 AccessKeyId/Version/Format 等）不可被覆盖
+    const data: Record<string, string> = {};
     for (const [k, v] of Object.entries(param)) {
       if (v === null || v === undefined) continue;
       data[k] = String(v);
     }
+    data.Format = 'JSON';
+    data.Version = this.version;
+    data.AccessKeyId = this.accessKeyId;
+    data.SignatureMethod = 'HMAC-SHA1';
+    data.Timestamp = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    data.SignatureVersion = '1.0';
+    data.SignatureNonce = Math.random().toString(36).slice(2, 18);
     data.Signature = this.sign(data, method);
 
     const url = 'https://' + this.endpoint + '/';
