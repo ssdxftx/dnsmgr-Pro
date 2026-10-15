@@ -1,8 +1,10 @@
 // 腾讯云 EdgeOne 规则引擎官方元数据（中英双语）。
 // 名称与分组均取自官方控制台「规则引擎」编辑页及官方文档（API 2022-09-01）：
-//  - 匹配类型/运算符：RuleCondition 数据结构（CreateRule/ModifyRule）
-//  - 操作名称：DescribeRulesSetting 返回的 Action 名 + 官方控制台中文
+//  - 匹配类型/运算符：规则语言条件表达式
+//  - 操作名称：官方 L7Acc RuleEngineAction.Name + 官方控制台中文
 // 未收录的名称（如新套餐新增动作）运行时回退显示原始英文名，不影响功能。
+import { EO_ACTION_SCHEMAS } from './eoRuleSchema';
+
 export type EoLocale = 'zh' | 'en';
 
 interface Bi {
@@ -198,6 +200,14 @@ export function eoTargetLabel(target: string, locale: EoLocale): string {
 
 /** 依据运行时 schema 的 Action 名获取官方中文与分组；未收录回退英文名、归入「高级配置」 */
 export function eoActionInfo(action: string, locale: EoLocale): { label: string; group: string; groupLabel: string } {
+  const schema = EO_ACTION_SCHEMAS.find((s) => s.name === action);
+  if (schema) {
+    return {
+      label: bi(schema.label, locale, action),
+      group: schema.group,
+      groupLabel: bi(EO_ACTION_GROUPS.find((g) => g.key === schema.group)?.label, locale, schema.group),
+    };
+  }
   const hit = EO_ACTION_LABELS[action] || EO_ACTION_LABELS[Object.keys(EO_ACTION_LABELS).find((k) => k.toLowerCase() === action.toLowerCase()) || ''];
   const group = hit?.group || 'advanced';
   return {

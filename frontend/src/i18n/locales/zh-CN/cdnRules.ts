@@ -64,10 +64,15 @@ export default {
     condNoValue: '该运算符无需取值',
     condParamName: '参数名',
     condIgnoreCase: '忽略大小写',
+    condVisual: '可视化',
+    condExprMode: '表达式',
+    condExprHintEo: "官方语法示例：${http.request.host} in ['example.com']；无法结构化的表达式会原样保留",
 
     branchAddElseIf: '添加 ELSE IF',
     branchAddElse: '添加 ELSE',
     branchRemove: '删除分支',
+    branchComment: '注释',
+    branchCommentPlaceholder: '为该分支填写备注（可选）',
     branchElseHint: '以上分支均未命中时执行',
     branchHint: '条件自上而下依次判定；命中某分支后执行其操作，跳过其余分支（官方 IF / ELSE IF / ELSE 语义）',
 

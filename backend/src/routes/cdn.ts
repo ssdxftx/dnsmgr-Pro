@@ -596,7 +596,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !b.ruleName) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.createRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
-    const id = await provider.createRule(zoneId, { ruleName: b.ruleName, status: b.status, rules: b.rules, tags: b.tags });
+    const id = await provider.createRule(zoneId, { ruleName: b.ruleName, status: b.status, enabled: b.enabled, branches: b.branches, description: b.description });
     if (id === false) return { code: -1, msg: '创建规则失败，' + provider.getError() };
     return { code: 0, msg: '创建成功', data: { ruleId: id } };
   });
@@ -609,7 +609,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !ruleId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.updateRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
-    if (!(await provider.updateRule(zoneId, ruleId, { ruleName: b.ruleName, status: b.status, rules: b.rules, tags: b.tags }))) {
+    if (!(await provider.updateRule(zoneId, ruleId, { ruleName: b.ruleName, status: b.status, enabled: b.enabled, branches: b.branches, description: b.description }))) {
       return { code: -1, msg: '更新规则失败，' + provider.getError() };
     }
     return { code: 0, msg: '更新成功' };
@@ -705,11 +705,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
       return { code: 0, data: { vendor: 'esa', kind, fields: esaRuleFields(kind) } };
     }
 
-    if (typeof provider.getRulesSetting === 'function') {
-      const setting = await provider.getRulesSetting();
-      if (setting === false) return { code: -1, msg: '获取规则元数据失败，' + provider.getError() };
-      const actions = Array.isArray(setting?.Actions) ? setting.Actions : [];
-      return { code: 0, data: { vendor: 'eo', actions, condition: EO_CONDITION_SCHEMA } };
+    if (typeof provider.listRules === 'function') {
+      // EO：规则结构（Branches/Actions）由前端静态元数据驱动，无需透传旧版 DescribeRulesSetting
+      return { code: 0, data: { vendor: 'eo', condition: EO_CONDITION_SCHEMA } };
     }
 
     return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
