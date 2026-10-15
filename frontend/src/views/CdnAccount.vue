@@ -27,7 +27,8 @@
         </n-form-item>
         <n-alert v-if="currentProvider?.note" type="info" style="margin-bottom:12px">{{ currentProvider.note }}</n-alert>
         <n-form-item v-for="(field, key) in currentProvider?.config || {}" :key="key" :label="field.name">
-          <n-input v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
+          <n-select v-if="field.type === 'select'" v-model:value="form.config[key]" :options="field.options || []" :placeholder="field.placeholder || field.name" clearable />
+          <n-input v-else v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
         </n-form-item>
       </n-form>
       <template #footer>

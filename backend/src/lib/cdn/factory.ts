@@ -14,9 +14,10 @@ import type { CdnProvider } from './types.js';
 
 export interface CdnFieldConfig {
   name: string;
-  type: 'input';
+  type: 'input' | 'select';
   placeholder?: string;
   required?: boolean;
+  options?: { value: string; label: string }[];
 }
 
 // 接入向导能力：驱动前端分步弹窗的步骤与字段显隐
@@ -75,6 +76,15 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
     config: {
       AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
       AccessKeySecret: { name: 'AccessKeySecret', type: 'input', required: true },
+      region: {
+        name: 'Region',
+        type: 'select',
+        placeholder: '默认 cn-hangzhou',
+        options: [
+          { value: 'cn-hangzhou', label: '中国内地 (cn-hangzhou)' },
+          { value: 'ap-southeast-1', label: '非中国内地 (ap-southeast-1)' },
+        ],
+      },
     },
   },
   volcengine_cdn: {
@@ -202,6 +212,27 @@ export function getCdnProvider(type: string, config: Record<string, any>): CdnPr
   return new Ctor(config);
 }
 
+// 按 provider 原型方法探测能力（单一事实来源，避免与静态标记漂移），供前端按能力渲染
+export function providerCapabilities(type: string): Record<string, boolean> {
+  const Ctor = providerMap[type] as any;
+  if (!Ctor) return {};
+  const p = Ctor.prototype || {};
+  const has = (m: string) => typeof p[m] === 'function';
+  return {
+    zoneManage: has('createZone') || has('deleteZone') || has('createSite') || has('deleteSite'),
+    originGroup: has('createOriginGroup') || has('createOriginPool'),
+    loadBalancer: has('createLoadBalancer'),
+    rules: has('listRules') || has('listRuleConfigs'),
+    security: has('createSecurityIpGroup') || has('getWafInfo'),
+    l4: has('createL4Proxy') || has('createTransportLayerApplication'),
+    tasks: has('listPurgeTasks') || has('getPurgeQuota'),
+  };
+}
+
 export function getCdnConfigList() {
-  return cdnConfig;
+  const out: Record<string, CdnProviderMeta & { capabilities: Record<string, boolean> }> = {};
+  for (const [type, meta] of Object.entries(cdnConfig)) {
+    out[type] = { ...meta, capabilities: providerCapabilities(type) };
+  }
+  return out;
 }

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
-import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
+import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
 import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
@@ -71,7 +71,7 @@ export default async function accountRoutes(app: FastifyInstance) {
 
   // ============ CDN 账户 ============
   app.get('/api/cdn/providers', auth, async () => {
-    return { code: 0, data: cdnConfig };
+    return { code: 0, data: getCdnConfigList() };
   });
 
   app.get('/api/cdn/accounts', auth, async (req: any) => {
