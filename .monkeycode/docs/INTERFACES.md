@@ -242,6 +242,7 @@ CDN 厂商 type：`tencent_cdn`、`tencent_edgeone`、`aliyun_cdn`、`aliyun_esa
 > - ESA 四层代理：`RecordName`（由 `name` 映射）、`Rules`（必填）、`Ipv6`、`StaticIp`；
 > - ESA 源站池：`Origins[].Address`（由 `records[].Record` 映射）；回源 Host 经 `Origins[].Header` 表达，格式为对象 `{ Host: ["example.com"] }`（传字符串时后端自动包装）。
 > EO 侧同名方法仅使用显式映射字段，忽略 `params`。
+> `params` 中形如 `Action`、`SiteId`、`Id`、`ApplicationId`、`ConfigId`、`SiteVersion` 的保留键由服务端控制，会被忽略，不可覆盖。
 
 ## 证书与部署
 

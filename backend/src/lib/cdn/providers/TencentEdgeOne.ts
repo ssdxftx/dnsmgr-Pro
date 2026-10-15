@@ -776,7 +776,7 @@ export class TencentEdgeOne implements CdnProvider {
       instanceId: String(l.InstanceId || ''),
       name: l.Name || '',
       type: l.Type,
-      originGroups: l.References || [],
+      originGroups: (l.OriginGroupHealthStatus || []).map((g: any) => g.OriginGroupID ?? g.OriginGroupId ?? ''),
       ...l,
     }));
     return { total: Number(data.TotalCount || list.length), list };
