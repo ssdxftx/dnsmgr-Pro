@@ -657,7 +657,7 @@ export class AliyunESA implements CdnProvider {
 
   async updateOriginGroup(zoneId: string, groupId: string, params: Record<string, any>): Promise<boolean> {
     const body: Record<string, any> = { Action: 'UpdateOriginPool', SiteId: Number(zoneId), Id: /^\d+$/.test(groupId) ? Number(groupId) : groupId };
-    if (params.name !== undefined) body.Name = params.name;
+    // ESA UpdateOriginPool 不支持改名（req 无 Name），仅更新 Origins 等
     if (params.records !== undefined) body.Origins = this.esaOrigins(params.records, params.hostHeader);
     this.applyRaw(body, params);
     return (await this.call(this.withJson(body))) !== false;

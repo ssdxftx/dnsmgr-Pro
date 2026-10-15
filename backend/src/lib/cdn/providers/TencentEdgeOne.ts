@@ -895,7 +895,7 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   async getWafInfo(zoneId: string): Promise<Record<string, any> | false> {
-    const d = await this.send('DescribeWebSecurityTemplates', { ZoneId: zoneId });
+    const d = await this.send('DescribeWebSecurityTemplates', { ZoneIds: [zoneId] });
     if (!d) return false;
     return { templates: d.SecurityPolicyTemplates || [] };
   }
