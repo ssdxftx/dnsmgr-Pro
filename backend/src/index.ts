@@ -214,8 +214,13 @@ if (webDir) {
   await app.register(fastifyStatic, { root: webDir, prefix: '/' });
   const indexHtml = fs.readFileSync(path.join(webDir, 'index.html'));
   app.setNotFoundHandler((req: any, reply: any) => {
-    if (req.raw.url && req.raw.url.startsWith('/api/')) {
+    const u = String(req.raw.url || '').split('?')[0];
+    if (u === '/api' || u.startsWith('/api/')) {
       return reply.code(404).send({ code: -1, msg: '接口不存在', path: req.raw.url });
+    }
+    // 带扩展名的路径视为静态资源：未命中直接 404，避免把 SPA HTML 以 200 返回并被 CDN 长缓存
+    if (/\.[a-z0-9]{2,5}$/i.test(u)) {
+      return reply.code(404).type('text/plain').send('Not Found');
     }
     return reply.type('text/html').send(indexHtml);
   });

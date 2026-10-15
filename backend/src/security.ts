@@ -41,7 +41,7 @@ function isHashedAsset(url: string): boolean {
 }
 
 // 根目录下内容固定的静态文件（favicon / robots / manifest 等）：可强缓存
-const ROOT_STATIC_EXT = /\.(?:webp|avif|png|jpe?g|gif|svg|ico|bmp|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|map)$/i;
+const ROOT_STATIC_EXT = /\.(?:webp|avif|png|jpe?g|gif|svg|ico|bmp|js|mjs|css|wasm|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|map)$/i;
 
 function isDocument(url: string): boolean {
   return url === '/' || url.endsWith('.html') || !/\.[a-z0-9]{2,5}$/i.test(url);
@@ -69,8 +69,6 @@ function setCache(reply: FastifyReply, browser: string, cdn?: string) {
 
 export function applySecurityHeaders(app: FastifyInstance): void {
   const hsts = process.env.DNSMGR_HSTS !== '0';
-  // CDN 缓存优化总开关，排障时可经 DNSMGR_CDN_CACHE=0 回退为「浏览器与 CDN 同值」的旧行为
-  const cdnCacheEnabled = (process.env.DNSMGR_CDN_CACHE || '').trim() !== '0';
 
   app.addHook('onSend', async (req: FastifyRequest, reply: FastifyReply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');
@@ -87,7 +85,12 @@ export function applySecurityHeaders(app: FastifyInstance): void {
     const contentType = String(reply.getHeader('content-type') || '');
     const isHtml = contentType.includes('text/html');
 
-    if (url.startsWith('/api/')) {
+    // 错误响应一律不可缓存：避免 4xx/5xx（含未命中静态资源回退）被 CDN/浏览器缓存
+    if (reply.statusCode >= 400) {
+      reply.header('Cache-Control', NO_STORE);
+      reply.header('Pragma', 'no-cache');
+      reply.header('CDN-Cache-Control', CDN_NO_STORE);
+    } else if (url === '/api' || url.startsWith('/api/')) {
       const publicCache = req.method === 'GET' ? PUBLIC_API_CACHE[url] : undefined;
       if (publicCache) {
         setCache(reply, publicCache.browser, publicCache.cdn);
@@ -111,18 +114,6 @@ export function applySecurityHeaders(app: FastifyInstance): void {
       reply.header('Content-Security-Policy', HTML_CSP);
     }
     return payload;
-  });
-
-  // 协商缓存：对已长缓存的带哈希资源与根静态文件返回 304，减少回源流量
-  app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
-    if (!cdnCacheEnabled) return;
-    if (req.method !== 'GET' && req.method !== 'HEAD') return;
-    const url = String(req.raw.url || '').split('?')[0];
-    if (url.startsWith('/api/')) return;
-    if (!isHashedAsset(url) && !ROOT_STATIC_EXT.test(url)) return;
-    const etag = String(reply.getHeader('etag') || '');
-    const inm = String(req.headers['if-none-match'] || '');
-    if (etag && inm && inm === etag) reply.code(304).send();
   });
 }
 
