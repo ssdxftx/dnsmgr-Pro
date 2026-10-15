@@ -2,6 +2,7 @@ import { TencentCloud } from '../../clients/TencentCloud.js';
 import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, SecurityIpGroupItem, L4ProxyItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
+import { fromEnabled, toEnabled } from '../vendorSwitch.js';
 
 export class TencentEdgeOne implements CdnProvider {
   private client: TencentCloud;
@@ -39,18 +40,30 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   async getZones() {
-    const list: any[] = [];
+    const zones = await this.listAllZones();
+    if (zones === false) return [];
+    return zones.map((z: any) => ({
+      zoneId: z.ZoneId,
+      zoneName: z.ZoneName,
+      status: z.Status,
+      area: z.Area,
+      // DescribeZones 本身已返回 Paused，这里一并带出，避免调用方逐站再查一次（N+1）
+      paused: z.Paused === true,
+    }));
+  }
+
+  // DescribeZones 单页上限 100 条，站点数超过 100 时必须翻页，否则列表截断、按域名定位失败
+  private async listAllZones(): Promise<any[] | false> {
     const limit = 100;
-    for (let offset = 0; offset < limit * 50; offset += limit) {
+    const all: any[] = [];
+    for (let offset = 0; offset < limit * 100; offset += limit) {
       const data = await this.send('DescribeZones', { Offset: offset, Limit: limit });
-      if (!data) break;
-      const zones = data.Zones || [];
-      for (const z of zones) {
-        list.push({ zoneId: z.ZoneId, zoneName: z.ZoneName, status: z.Status, area: z.Area });
-      }
+      if (!data) return false;
+      const zones: any[] = data.Zones || [];
+      all.push(...zones);
       if (zones.length < limit) break;
     }
-    return list;
+    return all;
   }
 
   async check() {
@@ -65,15 +78,10 @@ export class TencentEdgeOne implements CdnProvider {
   private async findZone(domain: string): Promise<string | false> {
     if (this.zoneId) return this.zoneId;
     const root = this.getRootDomain(domain);
-    const limit = 100;
-    for (let offset = 0; offset < limit * 50; offset += limit) {
-      const data = await this.send('DescribeZones', { Offset: offset, Limit: limit });
-      if (!data) return false;
-      const zones = data.Zones || [];
-      for (const zone of zones) {
-        if (zone.ZoneName === root && zone.ZoneId) return zone.ZoneId;
-      }
-      if (zones.length < limit) break;
+    const zones = await this.listAllZones();
+    if (zones === false) return false;
+    for (const zone of zones) {
+      if (zone.ZoneName === root && zone.ZoneId) return zone.ZoneId;
     }
     return false;
   }
@@ -593,6 +601,9 @@ export class TencentEdgeOne implements CdnProvider {
       .filter((r: any) => !String(r?.Name || '').startsWith('dnsmgr_'))
       .map((r: any) => this.copyCustomRule(r));
     const additions = this.buildAccessRules(config);
+    // 注意：SecurityConfig 是 ModifySecurityPolicy 的必填参数（官方文档「必选=是」），
+    // 即使只用 SecurityPolicy 下发（SecurityConfig 内的 Acl/IpTable 会被忽略）也必须传空对象，
+    // 否则接口直接返回参数缺失错误。历史实现漏传导致 EO 访问控制保存必失败。
     const ok = await this.send('ModifySecurityPolicy', {
       ZoneId: zoneId,
       Entity: 'ZoneDefaultPolicy',
@@ -826,20 +837,23 @@ export class TencentEdgeOne implements CdnProvider {
     const data = await this.send('DescribeRules', { ZoneId: zoneId });
     if (!data) return false;
     return (data.RuleItems || []).map((r: any) => ({
+      ...r,
       ruleId: String(r.RuleId || ''),
       ruleName: r.RuleName || '',
+      // 统一布尔语义（EO 原生为 enable/disable），与 ESA 侧一致，前端只读该字段
+      enabled: toEnabled(r.Status),
       status: r.Status,
-      enabled: String(r.Status ?? '').toLowerCase() === 'enable',
+      priority: Number(r.RulePriority || 0),
       rules: r.Rules || [],
-      ...r,
     }));
   }
 
   async createRule(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const enabled = params?.enabled !== undefined ? toEnabled(params.enabled) : toEnabled(params?.status ?? 'enable');
     const param: Record<string, any> = {
       ZoneId: zoneId,
       RuleName: params.ruleName,
-      Status: params.status || 'enable',
+      Status: fromEnabled(enabled, 'eo'),
       Rules: params.rules || [],
     };
     if (params.tags) param.Tags = params.tags;
@@ -848,11 +862,12 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   async updateRule(zoneId: string, ruleId: string, params: Record<string, any>): Promise<boolean> {
+    const enabled = params?.enabled !== undefined ? toEnabled(params.enabled) : toEnabled(params?.status ?? 'enable');
     const param: Record<string, any> = {
       ZoneId: zoneId,
       RuleId: ruleId,
       RuleName: params.ruleName,
-      Status: params.status || 'enable',
+      Status: fromEnabled(enabled, 'eo'),
       Rules: params.rules || [],
     };
     if (params.tags) param.Tags = params.tags;
