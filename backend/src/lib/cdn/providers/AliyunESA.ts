@@ -1,5 +1,5 @@
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -564,5 +564,86 @@ export class AliyunESA implements CdnProvider {
     const d = await this.call({ Action: 'ListUserRatePlanInstances' });
     if (!d) return false;
     return d.Instances || d.InstanceList || d.Data || [];
+  }
+
+  // ===== Phase 2：源站池 / 负载均衡 =====
+
+  // 将对象/数组参数 JSON 化后拼入请求（ESA 数组/对象参数需 JSON.stringify）
+  private withJson(body: Record<string, any>): Record<string, any> {
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(body)) {
+      out[k] = v !== null && typeof v === 'object' ? JSON.stringify(v) : v;
+    }
+    return out;
+  }
+
+  async listOriginGroups(zoneId: string, page = 1, size = 20): Promise<PagedResult<OriginGroupItem> | false> {
+    const d = await this.call({ Action: 'ListOriginPools', SiteId: Number(zoneId), PageNumber: page, PageSize: size });
+    if (!d) return false;
+    const arr = d.OriginPools || d.Pools || [];
+    const list: OriginGroupItem[] = arr.map((p: any) => ({
+      groupId: String(p.Id ?? p.PoolId ?? p.OriginPoolId ?? ''),
+      name: p.Name || '',
+      type: p.Type,
+      records: p.Origins || p.OriginList || [],
+      ...p,
+    }));
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createOriginGroup(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.call(this.withJson({
+      Action: 'CreateOriginPool',
+      SiteId: Number(zoneId),
+      Name: params.name,
+      Origins: params.records,
+      HostHeader: params.hostHeader,
+    }));
+    if (!d) return false;
+    return String(d.Id ?? d.PoolId ?? '') || 'ok';
+  }
+
+  async updateOriginGroup(zoneId: string, groupId: string, params: Record<string, any>): Promise<boolean> {
+    const body: Record<string, any> = { Action: 'UpdateOriginPool', SiteId: Number(zoneId), Id: /^\d+$/.test(groupId) ? Number(groupId) : groupId };
+    if (params.name !== undefined) body.Name = params.name;
+    if (params.records !== undefined) body.Origins = params.records;
+    if (params.hostHeader !== undefined) body.HostHeader = params.hostHeader;
+    return (await this.call(this.withJson(body))) !== false;
+  }
+
+  async deleteOriginGroup(zoneId: string, groupId: string): Promise<boolean> {
+    return (await this.call({ Action: 'DeleteOriginPool', SiteId: Number(zoneId), Id: /^\d+$/.test(groupId) ? Number(groupId) : groupId })) !== false;
+  }
+
+  async listLoadBalancers(zoneId: string, page = 1, size = 20): Promise<PagedResult<LoadBalancerItem> | false> {
+    const d = await this.call({ Action: 'ListLoadBalancers', SiteId: Number(zoneId), PageNumber: page, PageSize: size });
+    if (!d) return false;
+    const arr = d.LoadBalancers || d.Balancers || [];
+    const list: LoadBalancerItem[] = arr.map((l: any) => ({
+      instanceId: String(l.Id ?? l.LoadBalancerId ?? ''),
+      name: l.Name || '',
+      type: l.Type,
+      originGroups: l.OriginPools || l.Origins || [],
+      ...l,
+    }));
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createLoadBalancer(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const body: Record<string, any> = { Action: 'CreateLoadBalancer', SiteId: Number(zoneId) };
+    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    const d = await this.call(this.withJson(body));
+    if (!d) return false;
+    return String(d.Id ?? d.LoadBalancerId ?? '') || 'ok';
+  }
+
+  async updateLoadBalancer(zoneId: string, instanceId: string, params: Record<string, any>): Promise<boolean> {
+    const body: Record<string, any> = { Action: 'UpdateLoadBalancer', SiteId: Number(zoneId), Id: /^\d+$/.test(instanceId) ? Number(instanceId) : instanceId };
+    for (const [k, v] of Object.entries(params || {})) body[k] = v;
+    return (await this.call(this.withJson(body))) !== false;
+  }
+
+  async deleteLoadBalancer(zoneId: string, instanceId: string): Promise<boolean> {
+    return (await this.call({ Action: 'DeleteLoadBalancer', SiteId: Number(zoneId), Id: /^\d+$/.test(instanceId) ? Number(instanceId) : instanceId })) !== false;
   }
 }

@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -721,5 +721,77 @@ export class TencentEdgeOne implements CdnProvider {
     const d = await this.send('CheckCnameStatus', { ZoneId: zoneId, RecordNames: recordNames });
     if (!d) return false;
     return d.CnameStatus || d.Records || d.Status || [];
+  }
+
+  // ===== Phase 2：源站组 / 负载均衡 =====
+
+  async listOriginGroups(zoneId: string, page = 1, size = 20): Promise<PagedResult<OriginGroupItem> | false> {
+    const data = await this.send('DescribeOriginGroup', { ZoneId: zoneId, Offset: (page - 1) * size, Limit: size });
+    if (!data) return false;
+    const list: OriginGroupItem[] = (data.OriginGroups || []).map((g: any) => ({
+      groupId: String(g.GroupId || ''),
+      name: g.Name || '',
+      type: g.Type,
+      records: g.Records || [],
+      hostHeader: g.HostHeader,
+      ...g,
+    }));
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async createOriginGroup(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const param: Record<string, any> = { ZoneId: zoneId, Name: params.name, Type: params.type, Records: params.records || [] };
+    if (params.hostHeader) param.HostHeader = params.hostHeader;
+    const d = await this.send('CreateOriginGroup', param);
+    return d && d.OriginGroupId ? String(d.OriginGroupId) : false;
+  }
+
+  async updateOriginGroup(zoneId: string, groupId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, GroupId: groupId };
+    if (params.name !== undefined) param.Name = params.name;
+    if (params.type !== undefined) param.Type = params.type;
+    if (params.records !== undefined) param.Records = params.records;
+    if (params.hostHeader !== undefined) param.HostHeader = params.hostHeader;
+    return (await this.send('ModifyOriginGroup', param)) !== false;
+  }
+
+  async deleteOriginGroup(zoneId: string, groupId: string): Promise<boolean> {
+    return (await this.send('DeleteOriginGroup', { ZoneId: zoneId, GroupId: groupId })) !== false;
+  }
+
+  async listLoadBalancers(zoneId: string, page = 1, size = 20): Promise<PagedResult<LoadBalancerItem> | false> {
+    const data = await this.send('DescribeLoadBalancerList', { ZoneId: zoneId, Offset: (page - 1) * size, Limit: size });
+    if (!data) return false;
+    const list: LoadBalancerItem[] = (data.LoadBalancers || []).map((l: any) => ({
+      instanceId: String(l.InstanceId || ''),
+      name: l.Name || '',
+      type: l.Type,
+      originGroups: l.OriginGroups || [],
+      ...l,
+    }));
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async createLoadBalancer(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const param: Record<string, any> = { ZoneId: zoneId, Name: params.name, Type: params.type, OriginGroups: params.originGroups || [] };
+    if (params.healthChecker) param.HealthChecker = params.healthChecker;
+    if (params.steeringPolicy) param.SteeringPolicy = params.steeringPolicy;
+    if (params.failoverPolicy) param.FailoverPolicy = params.failoverPolicy;
+    const d = await this.send('CreateLoadBalancer', param);
+    return d && d.InstanceId ? String(d.InstanceId) : false;
+  }
+
+  async updateLoadBalancer(zoneId: string, instanceId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, InstanceId: instanceId };
+    if (params.name !== undefined) param.Name = params.name;
+    if (params.originGroups !== undefined) param.OriginGroups = params.originGroups;
+    if (params.healthChecker !== undefined) param.HealthChecker = params.healthChecker;
+    if (params.steeringPolicy !== undefined) param.SteeringPolicy = params.steeringPolicy;
+    if (params.failoverPolicy !== undefined) param.FailoverPolicy = params.failoverPolicy;
+    return (await this.send('ModifyLoadBalancer', param)) !== false;
+  }
+
+  async deleteLoadBalancer(zoneId: string, instanceId: string): Promise<boolean> {
+    return (await this.send('DeleteLoadBalancer', { ZoneId: zoneId, InstanceId: instanceId })) !== false;
   }
 }
