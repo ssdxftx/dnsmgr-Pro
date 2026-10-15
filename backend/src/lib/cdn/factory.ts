@@ -224,6 +224,10 @@ export function providerCapabilities(type: string): Record<string, boolean> {
     loadBalancer: has('createLoadBalancer'),
     rules: has('listRules') || has('listRuleConfigs'),
     security: has('createSecurityIpGroup') || has('getWafInfo'),
+    securityIpGroup: has('createSecurityIpGroup'),
+    waf: has('getWafInfo'),
+    originProtection: has('getOriginProtection'),
+    ddos: has('getDdosProtection'),
     l4: has('createL4Proxy') || has('createTransportLayerApplication'),
     tasks: has('listPurgeTasks') || has('getPurgeQuota'),
   };

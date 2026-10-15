@@ -65,14 +65,16 @@ Updated: 2026-10-15
 
 ## Phase 4 安全能力
 
-- [ ] 4.1 EO 安全（design §3.2）
-  - `SecurityIPGroup` CRUD（`CreateSecurityIPGroup{IPGroup:{GroupId:0,Name,Content}}`、`DescribeSecurityIPGroup`（单数）/`Content`/`Info`、`ModifySecurityIPGroup{Mode}`、`DeleteSecurityIPGroup`）
-  - `DescribeDDoSProtection`/`ModifyDDoSProtection`
-  - `WebSecurityTemplate`（`Create/Modify/DescribeWebSecurityTemplates`）
-- [ ] 4.2 ESA 安全（design §4.1）
-  - WAF（`CreateWafRule{Phase}`/`BatchCreateWafRules`/`ListWafPhases`）、源站防护（`GetOriginProtection`/`UpdateOriginProtection`）、DDoS（`DescribeHttpDDoSAttackProtection`/`SetHttpDDoSAttackProtection`）
-- [ ] 4.3 路由 + 前端：安全配置页（IP 组、DDoS、WAF 模板/规则），i18n
-- [ ] 4.4 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
+- [x] 4.1 EO 安全（design §3.2）
+  - `listSecurityIpGroups`/`createSecurityIpGroup`（`IPGroup:{GroupId:0,Name,Content}`）/`updateSecurityIpGroup`（`Mode`）/`deleteSecurityIpGroup`/`getSecurityIpGroupContent`
+  - `getDdosProtection`/`setDdosProtection`（`Describe/ModifyDDoSProtection`）
+  - `getWafInfo`/`setWafInfo`（`Describe/Create/ModifyWebSecurityTemplate`）
+- [x] 4.2 ESA 安全（design §4.1）
+  - WAF（`getWafInfo`→`ListWafPhases`、`setWafInfo`→`CreateWafRule`）、源站防护（`getOriginProtection`/`setOriginProtection`）、DDoS（`getDdosProtection`/`setDdosProtection`）
+- [x] 4.3 路由 + 前端：安全配置页
+  - 路由：`GET/POST/PUT/DELETE .../security/ip-groups`、`.../ip-groups/:groupId/content`、`GET/POST .../security/{ddos,waf,origin-protection}`
+  - `CdnAccount.vue`「安全配置」弹窗（IP 组 / DDoS / WAF / 源站防护 Tab）；i18n `cdnSecurity`（zh/en）；能力细分 `securityIpGroup/waf/originProtection/ddos`
+- [x] 4.4 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
 
 ## Phase 5 四层代理、任务与统计增强
 

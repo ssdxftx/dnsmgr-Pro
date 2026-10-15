@@ -634,6 +634,101 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
+  // ===== 安全：IP 组 =====
+  app.get('/api/cdn/accounts/:aid/security/ip-groups', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listSecurityIpGroups !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 组' };
+    const list = await provider.listSecurityIpGroups(zoneId);
+    if (list === false) return { code: -1, msg: '获取 IP 组失败，' + provider.getError() };
+    return { code: 0, data: list };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/ip-groups', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const content: string[] = Array.isArray(b.content) ? b.content.map((x: any) => String(x)) : [];
+    if (!zoneId || !b.name) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createSecurityIpGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 组' };
+    const id = await provider.createSecurityIpGroup(zoneId, String(b.name), content);
+    if (id === false) return { code: -1, msg: '创建 IP 组失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { groupId: id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/security/ip-groups/:groupId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const groupId = Number((req.params as any).groupId);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const content: string[] = Array.isArray(b.content) ? b.content.map((x: any) => String(x)) : [];
+    if (!zoneId || !groupId || !b.name) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateSecurityIpGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 组' };
+    if (!(await provider.updateSecurityIpGroup(zoneId, groupId, String(b.name), content, b.mode))) {
+      return { code: -1, msg: '更新 IP 组失败，' + provider.getError() };
+    }
+    return { code: 0, msg: '更新成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/security/ip-groups/:groupId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const groupId = Number((req.params as any).groupId);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteSecurityIpGroup !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 组' };
+    if (!(await provider.deleteSecurityIpGroup(zoneId, groupId))) return { code: -1, msg: '删除 IP 组失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/security/ip-groups/:groupId/content', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const groupId = Number((req.params as any).groupId);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getSecurityIpGroupContent !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 组' };
+    const content = await provider.getSecurityIpGroupContent(zoneId, groupId);
+    if (content === false) return { code: -1, msg: '获取 IP 组内容失败，' + provider.getError() };
+    return { code: 0, data: content };
+  });
+
+  // ===== 安全：DDoS / WAF / 源站防护（配置型，JSON 透传）=====
+  const securityConfigRoute = (
+    name: string,
+    getter: string,
+    setter: string,
+  ) => {
+    app.get(`/api/cdn/accounts/:aid/security/${name}`, auth, async (req: any) => {
+      const aid = Number((req.params as any).aid);
+      const zoneId = String(req.query.zoneId || '').trim();
+      if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+      const provider: any = await cdnForZone(aid, zoneId);
+      if (!provider || typeof provider[getter] !== 'function') return { code: -1, msg: '该 CDN 类型不支持此安全配置' };
+      const r = await provider[getter](zoneId);
+      if (r === false) return { code: -1, msg: '获取配置失败，' + provider.getError() };
+      return { code: 0, data: r };
+    });
+    app.post(`/api/cdn/accounts/:aid/security/${name}`, auth, async (req: any) => {
+      const aid = Number((req.params as any).aid);
+      const b = req.body || {};
+      const zoneId = String(b.zoneId || '').trim();
+      if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+      const provider: any = await cdnForZone(aid, zoneId);
+      if (!provider || typeof provider[setter] !== 'function') return { code: -1, msg: '该 CDN 类型不支持此安全配置' };
+      const config = b.config && typeof b.config === 'object' ? b.config : {};
+      if (!(await provider[setter](zoneId, config))) return { code: -1, msg: '保存配置失败，' + provider.getError() };
+      return { code: 0, msg: '保存成功' };
+    });
+  };
+  securityConfigRoute('ddos', 'getDdosProtection', 'setDdosProtection');
+  securityConfigRoute('waf', 'getWafInfo', 'setWafInfo');
+  securityConfigRoute('origin-protection', 'getOriginProtection', 'setOriginProtection');
+
   // 详情（域名级配置）
   app.get('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;
