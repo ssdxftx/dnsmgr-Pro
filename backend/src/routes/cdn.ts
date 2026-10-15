@@ -729,6 +729,178 @@ export default async function cdnRoutes(app: FastifyInstance) {
   securityConfigRoute('waf', 'getWafInfo', 'setWafInfo');
   securityConfigRoute('origin-protection', 'getOriginProtection', 'setOriginProtection');
 
+  // ===== 四层代理 =====
+  app.get('/api/cdn/accounts/:aid/l4-proxies', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listL4Proxies !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
+    const r = await provider.listL4Proxies(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取四层代理失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/l4-proxies', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !b.name) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createL4Proxy !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
+    const id = await provider.createL4Proxy(zoneId, { name: b.name, area: b.area, ipv6: b.ipv6, staticIp: b.staticIp, accelerateMainland: b.accelerateMainland, ddosProtectionConfig: b.ddosProtectionConfig });
+    if (id === false) return { code: -1, msg: '创建四层代理失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { proxyId: id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/l4-proxies/:proxyId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !proxyId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateL4Proxy !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
+    if (!(await provider.updateL4Proxy(zoneId, proxyId, { ipv6: b.ipv6, accelerateMainland: b.accelerateMainland }))) {
+      return { code: -1, msg: '更新四层代理失败，' + provider.getError() };
+    }
+    return { code: 0, msg: '更新成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !proxyId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteL4Proxy !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
+    if (!(await provider.deleteL4Proxy(zoneId, proxyId))) return { code: -1, msg: '删除四层代理失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !proxyId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listL4ProxyRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层转发规则' };
+    const r = await provider.listL4ProxyRules(zoneId, proxyId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取四层转发规则失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const rules = Array.isArray(b.rules) ? b.rules : [];
+    if (!zoneId || !proxyId || !rules.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createL4ProxyRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层转发规则' };
+    if (!(await provider.createL4ProxyRules(zoneId, proxyId, rules))) return { code: -1, msg: '创建四层转发规则失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const ruleIds: string[] = Array.isArray(b.ruleIds) ? b.ruleIds.map((x: any) => String(x)) : [];
+    if (!zoneId || !proxyId || !ruleIds.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteL4ProxyRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层转发规则' };
+    if (!(await provider.deleteL4ProxyRules(zoneId, proxyId, ruleIds))) return { code: -1, msg: '删除四层转发规则失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 任务 / 配额 / 统计增强 =====
+  app.get('/api/cdn/accounts/:aid/tasks/purge', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const provider: any = await cdnForZone(aid, zoneId || null);
+    if (!provider || typeof provider.listPurgeTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持刷新任务查询' };
+    const r = await provider.listPurgeTasks(zoneId || null, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取刷新任务失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/tasks/prefetch', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const provider: any = await cdnForZone(aid, zoneId || null);
+    if (!provider || typeof provider.listPrefetchTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持预热任务查询' };
+    const r = await provider.listPrefetchTasks(zoneId || null, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取预热任务失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/quota/content', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getContentQuota !== 'function') return { code: -1, msg: '该 CDN 类型不支持配额查询' };
+    const r = await provider.getContentQuota(zoneId);
+    if (r === false) return { code: -1, msg: '获取配额失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/quota/purge', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const type = String(req.query.type || 'file');
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getPurgeQuota !== 'function') return { code: -1, msg: '该 CDN 类型不支持配额查询' };
+    const r = await provider.getPurgeQuota(zoneId, type);
+    if (r === false) return { code: -1, msg: '获取配额失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  // 缓存增强：开发模式 / 缓存标签 / 屏蔽 / 分层缓存 / 上传
+  const cacheAction = (name: string, method: string, argBuilder: (zoneId: string, b: any) => any[]) => {
+    app.post(`/api/cdn/accounts/:aid/cache/${name}`, auth, async (req: any) => {
+      const aid = Number((req.params as any).aid);
+      const b = req.body || {};
+      const zoneId = String(b.zoneId || '').trim();
+      if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+      const provider: any = await cdnForZone(aid, zoneId);
+      if (!provider || typeof provider[method] !== 'function') return { code: -1, msg: '该 CDN 类型不支持此操作' };
+      const ok = await provider[method](...argBuilder(zoneId, b));
+      if (!ok) return { code: -1, msg: '操作失败，' + provider.getError() };
+      return { code: 0, msg: '操作成功', data: ok };
+    });
+  };
+  cacheAction('development-mode', 'updateDevelopmentMode', (z, b) => [z, b.enable === true || b.enable === 'true' || b.enable === 'on']);
+  cacheAction('tag', 'updateCacheTag', (z, b) => [z, b.params && typeof b.params === 'object' ? b.params : {}]);
+  cacheAction('block', 'blockObject', (z, b) => [z, String(b.type || 'block'), Array.isArray(b.content) ? b.content.map((x: any) => String(x)) : [], b.maxage]);
+  cacheAction('tiered', 'updateTieredCache', (z, b) => [z, String(b.mode || 'edge')]);
+  cacheAction('upload-file', 'uploadFile', (z, b) => [z, String(b.url || ''), String(b.type || 'preload'), String(b.taskName || ('dnsmgr-' + Date.now()))]);
+
+  app.get('/api/cdn/accounts/:aid/analysis/top', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.topAnalysis !== 'function') return { code: -1, msg: '该 CDN 类型不支持统计' };
+    const r = await provider.topAnalysis(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), String(req.query.metricName || 'l7Flow_outFlux'), Number(req.query.limit || 10));
+    if (r === false) return { code: -1, msg: '获取统计失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/analysis/timing-cache', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const metricNames = String(req.query.metricNames || 'l7Cache_outFlux').split(',').map((s) => s.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.timingCacheData !== 'function') return { code: -1, msg: '该 CDN 类型不支持统计' };
+    const r = await provider.timingCacheData(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), metricNames);
+    if (r === false) return { code: -1, msg: '获取统计失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
   // 详情（域名级配置）
   app.get('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;

@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, SecurityIpGroupItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, SecurityIpGroupItem, L4ProxyItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -896,5 +896,83 @@ export class TencentEdgeOne implements CdnProvider {
       return (await this.send('ModifyWebSecurityTemplate', { ZoneId: zoneId, TemplateId, ...rest })) !== false;
     }
     return (await this.send('CreateWebSecurityTemplate', { ZoneId: zoneId, ...config })) !== false;
+  }
+
+  // ===== Phase 5：四层代理 =====
+
+  async listL4Proxies(zoneId: string, page = 1, size = 20): Promise<PagedResult<L4ProxyItem> | false> {
+    const data = await this.send('DescribeL4Proxy', { ZoneId: zoneId, Offset: (page - 1) * size, Limit: size });
+    if (!data) return false;
+    const list: L4ProxyItem[] = (data.L4Proxies || []).map((p: any) => ({ proxyId: String(p.ProxyId || ''), name: p.ProxyName || p.Name || '', area: p.Area, ...p }));
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async createL4Proxy(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const param: Record<string, any> = { ZoneId: zoneId, ProxyName: params.name, Area: params.area };
+    if (params.ipv6 !== undefined) param.Ipv6 = params.ipv6;
+    if (params.staticIp !== undefined) param.StaticIp = params.staticIp;
+    if (params.accelerateMainland !== undefined) param.AccelerateMainland = params.accelerateMainland;
+    if (params.ddosProtectionConfig) param.DDosProtectionConfig = params.ddosProtectionConfig;
+    const d = await this.send('CreateL4Proxy', param);
+    return d && d.ProxyId ? String(d.ProxyId) : false;
+  }
+
+  async updateL4Proxy(zoneId: string, proxyId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, ProxyId: proxyId };
+    if (params.ipv6 !== undefined) param.Ipv6 = params.ipv6;
+    if (params.accelerateMainland !== undefined) param.AccelerateMainland = params.accelerateMainland;
+    return (await this.send('ModifyL4Proxy', param)) !== false;
+  }
+
+  async deleteL4Proxy(zoneId: string, proxyId: string): Promise<boolean> {
+    return (await this.send('DeleteL4Proxy', { ZoneId: zoneId, ProxyId: proxyId })) !== false;
+  }
+
+  async listL4ProxyRules(zoneId: string, proxyId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const data = await this.send('DescribeL4ProxyRules', { ZoneId: zoneId, ProxyId: proxyId, Offset: (page - 1) * size, Limit: size });
+    if (!data) return false;
+    const list = data.L4ProxyRules || [];
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async createL4ProxyRules(zoneId: string, proxyId: string, rules: any[]): Promise<boolean> {
+    return (await this.send('CreateL4ProxyRules', { ZoneId: zoneId, ProxyId: proxyId, L4ProxyRules: rules })) !== false;
+  }
+
+  async deleteL4ProxyRules(zoneId: string, proxyId: string, ruleIds: string[]): Promise<boolean> {
+    return (await this.send('DeleteL4ProxyRules', { ZoneId: zoneId, ProxyId: proxyId, RuleIds: ruleIds })) !== false;
+  }
+
+  // ===== Phase 5：任务 / 配额 / 统计 =====
+
+  async listPurgeTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const data = await this.send('DescribePurgeTasks', { ZoneId: zoneId || undefined, Offset: (page - 1) * size, Limit: size });
+    if (!data) return false;
+    const list = data.PurgeTasks || data.Tasks || [];
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async listPrefetchTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const data = await this.send('DescribePrefetchTasks', { ZoneId: zoneId || undefined, Offset: (page - 1) * size, Limit: size });
+    if (!data) return false;
+    const list = data.PrefetchTasks || data.Tasks || [];
+    return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async getContentQuota(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeContentQuota', { ZoneId: zoneId });
+    return d || false;
+  }
+
+  async topAnalysis(zoneIds: string[], startTime: string, endTime: string, metricName: string, limit = 10): Promise<any[] | false> {
+    const d = await this.send('DescribeTopL7AnalysisData', { ZoneIds: zoneIds, StartTime: startTime, EndTime: endTime, MetricName: metricName, Limit: limit, Interval: 'hour' });
+    if (!d) return false;
+    return d.Data || d.TopData || [];
+  }
+
+  async timingCacheData(zoneIds: string[], startTime: string, endTime: string, metricNames: string[]): Promise<any[] | false> {
+    const d = await this.send('DescribeTimingL7CacheData', { ZoneIds: zoneIds, StartTime: startTime, EndTime: endTime, MetricNames: metricNames, Interval: 'hour' });
+    if (!d) return false;
+    return d.Data || [];
   }
 }

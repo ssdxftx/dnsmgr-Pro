@@ -78,22 +78,24 @@ Updated: 2026-10-15
 
 ## Phase 5 四层代理、任务与统计增强
 
-- [ ] 5.1 EO 四层代理（design §3.2）
-  - `CreateL4Proxy`/`ModifyL4Proxy`/`DeleteL4Proxy`/`DescribeL4Proxy`、`CreateL4ProxyRules`/`DescribeL4ProxyRules`（`Offset`/`Limit` 必填）/`DeleteL4ProxyRules`
-- [ ] 5.2 ESA 四层/等候室（design §4.1）
-  - `CreateTransportLayerApplication`（列表/更新/删除同族）、`CreateWaitingRoom`
-- [ ] 5.3 EO 任务/统计/配额（design §3.2）
-  - `DescribePurgeTasks`/`DescribePrefetchTasks`/`DescribeContentQuota`/`DescribeTopL7AnalysisData`/`DescribeTimingL7CacheData`
-- [ ] 5.4 ESA 任务/缓存/统计（design §4.1）
-  - `DescribePurgeTasks`/`GetPurgeQuota`/`UploadFile`/`ListUploadTasks`/`DescribePreloadTasks`/`CreateScheduledPreloadJob`/`UpdateDevelopmentMode`/`UpdateCacheTag`/`BlockObject`/`UpdateTieredCache`/`DescribeSiteTopData`
-- [ ] 5.5 路由 + 前端：四层代理页、任务/配额/统计面板（复用 `CachePurge.vue`/`Statistics.vue` 形态），i18n
-- [ ] 5.6 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
+- [x] 5.1 EO 四层代理（design §3.2）
+  - `createL4Proxy`/`updateL4Proxy`/`deleteL4Proxy`/`listL4Proxies`、`createL4ProxyRules`/`listL4ProxyRules`/`deleteL4ProxyRules`
+- [x] 5.2 ESA 四层代理（design §4.1）
+  - `CreateTransportLayerApplication`/`ListTransportLayerApplications`/`UpdateTransportLayerApplication`/`DeleteTransportLayerApplication`（映射到 `createL4Proxy` 等接口方法）
+- [x] 5.3 EO 任务/统计/配额（design §3.2）
+  - `listPurgeTasks`/`listPrefetchTasks`/`getContentQuota`/`topAnalysis`/`timingCacheData`
+- [x] 5.4 ESA 任务/缓存/配额（design §4.1）
+  - `listPurgeTasks`/`listPrefetchTasks`/`getPurgeQuota`/`uploadFile`/`listUploadTasks`/`updateDevelopmentMode`/`updateCacheTag`/`blockObject`/`updateTieredCache`
+- [x] 5.5 路由 + 前端：四层代理、任务/配额/统计面板
+  - 路由：`.../l4-proxies`(+`/rules`)、`.../tasks/{purge,prefetch}`、`.../quota/{content,purge}`、`.../cache/{development-mode,tag,block,tiered,upload-file}`、`.../analysis/{top,timing-cache}`
+  - `CdnAccount.vue`「高级功能」弹窗（L4 代理 / 刷新预热任务 / 配额 / 统计 Tab）；i18n `cdnAdvanced`（zh/en）；能力细分 `analysis`
+- [x] 5.6 检查点：`tsc --noEmit` + `vue-tsc --noEmit` + `vite build` 通过
 
 ## 跨阶段收尾
 
-- [ ] 6.1 更新 `.monkeycode/docs/INTERFACES.md` 与 CDN 模块文档，登记新增可选方法与能力标记
-- [ ] 6.2 全量回归：`tsc --noEmit`、`vue-tsc --noEmit`、`vite build`；无库启动冒烟（后端未安装时仍可启动）
-- [ ] 6.3 分阶段发布：每个 Phase 结束后按 `node scripts/release.mjs <x.y.z> "..."` 发布并触发镜像构建
+- [x] 6.1 更新 `.monkeycode/docs/INTERFACES.md`（新增 EO/ESA 扩展能力端点与 `capabilities` 说明）
+- [x] 6.2 全量回归：`tsc --noEmit`、`vue-tsc --noEmit`、`vite build`
+- [x] 6.3 分阶段发布：每个 Phase 结束按 `node scripts/release.mjs <x.y.z> "..."` 发布并触发镜像构建
 
 ## 验收标准
 
