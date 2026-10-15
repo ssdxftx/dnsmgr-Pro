@@ -587,3 +587,151 @@ h3,
   letter-spacing: 0.06em;
   font-size: 11px;
 }
+
+/* ===========================================================================
+   CDN 站点设置体系（CdnZoneSetting / RuleEditor / CdnZoneGlobalSetting）
+   Tab 面板内的分区与表单，与主卡片玻璃体系保持同一观感层级：
+   玻璃主卡片（app-stack > .n-card）→ 浅色分区面板（.zone-panel）→
+   虚线创建表单条（.zone-form-strip）
+   =========================================================================== */
+
+/* Tab 内分区面板：替代嵌套裸卡片，给出清晰的视觉分组边界 */
+.zone-panel {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  padding: 16px 18px;
+  transition: border-color 0.2s var(--app-ease);
+}
+.zone-panel + .zone-panel {
+  margin-top: 12px;
+}
+.zone-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.zone-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--app-text);
+}
+.zone-panel__title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 4px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--app-primary) 40%, transparent);
+}
+.zone-panel__extra {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 内联创建表单条：与下方列表分层，虚线边框呼应「新建」语义 */
+.zone-form-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--app-bg-soft);
+  border: 1px dashed var(--app-border);
+  border-radius: var(--app-radius);
+}
+.zone-form-strip .zone-form-strip__wide {
+  flex: 1 1 100%;
+}
+
+/* 只读 JSON / 配置视图：遥测等宽排版，替代裸 textarea */
+.code-view {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 340px;
+  overflow: auto;
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--app-bg-soft);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+  color: var(--app-text-2);
+}
+/* 可编辑 JSON 输入框统一等宽字体（配合 n-input 使用） */
+.mono-input .n-input__textarea-el,
+.mono-input .n-input__input-el,
+.mono-input textarea {
+  font-family: var(--app-font-mono) !important;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+/* 提示文字（此前多处误用不存在的 --app-muted 变量，统一收敛） */
+.hint-text {
+  color: var(--app-text-3);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+/* 概览页顶部状态条：状态徽章 + 站点标识 + 操作集合 */
+.zone-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+}
+.zone-status-strip__id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.zone-status-strip__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text);
+  word-break: break-all;
+}
+.zone-status-strip__sub {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  color: var(--app-text-3);
+  word-break: break-all;
+}
+.zone-status-strip__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 站点设置页主卡片：Tab 栏贴顶，pane 内容区内边距由面板自理 */
+.zone-card > .n-card__content {
+  padding-top: 4px !important;
+}
+.zone-card .n-tabs-nav {
+  padding: 0 2px;
+}
+.zone-card .n-tab-pane {
+  padding-top: 14px;
+}
