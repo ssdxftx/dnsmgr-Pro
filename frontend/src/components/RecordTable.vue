@@ -307,11 +307,17 @@ function onBatchMore(key: string) {
   batchForm.line = rows[0]?.Line || '';
   batchForm.remark = '';
   batchForm.groupid = null;
-  if (key === 'group' && did) {
+  if (key === 'group') {
+    if (!did) return;
     api<any>('GET', `/domains/${did}/groups`).then((res) => {
-      if (res.code === 0) groups.value = res.data || [];
-      else message.error(res.msg);
+      if (res.code === 0) {
+        groups.value = res.data || [];
+        showBatch.value = true;
+      } else {
+        message.error(res.msg);
+      }
     });
+    return;
   }
   showBatch.value = true;
 }

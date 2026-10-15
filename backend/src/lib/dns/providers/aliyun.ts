@@ -135,16 +135,8 @@ export class AliyunDns implements DnsProvider {
     return { total: data.TotalCount || 0, list };
   }
 
-  async getRecordGroups(): Promise<any[] | false> {
-    const data = await this.request({ Action: 'DescribeRecordGroups', DomainName: this.domain, PageSize: 100, Lang: 'zh' });
-    if (!data) return false;
-    return data.RecordGroups?.RecordGroup || [];
-  }
-
-  async changeRecordGroup(RecordIdList: string[], GroupId: string): Promise<boolean> {
-    const param = { Action: 'ChangeRecordGroup', DomainName: this.domain, RecordIdList: JSON.stringify(RecordIdList), GroupId };
-    return (await this.request(param)) !== false;
-  }
+  // 阿里云 ALIDNS 无「记录分组」能力（官方不存在 DescribeRecordGroups / ChangeRecordGroup 两个 Action），
+  // 故作意不实现 getRecordGroups / changeRecordGroup；路由的 typeof 门控将返回「该DNS类型不支持分组」。
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
     const data = await this.request({ Action: 'DescribeDomainRecordInfo', RecordId });
