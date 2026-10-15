@@ -525,6 +525,115 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
+  // ===== 规则引擎（EO L7 规则）=====
+  app.get('/api/cdn/accounts/:aid/rules/setting', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.getRulesSetting !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则元数据' };
+    const r = await provider.getRulesSetting();
+    if (r === false) return { code: -1, msg: '获取规则元数据失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/rules', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    const list = await provider.listRules(zoneId);
+    if (list === false) return { code: -1, msg: '获取规则失败，' + provider.getError() };
+    return { code: 0, data: list };
+  });
+
+  app.post('/api/cdn/accounts/:aid/rules', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !b.ruleName) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    const id = await provider.createRule(zoneId, { ruleName: b.ruleName, status: b.status, rules: b.rules, tags: b.tags });
+    if (id === false) return { code: -1, msg: '创建规则失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { ruleId: id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/rules/:ruleId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const ruleId = String((req.params as any).ruleId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !ruleId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    if (!(await provider.updateRule(zoneId, ruleId, { ruleName: b.ruleName, status: b.status, rules: b.rules, tags: b.tags }))) {
+      return { code: -1, msg: '更新规则失败，' + provider.getError() };
+    }
+    return { code: 0, msg: '更新成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/rules', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const ruleIds: string[] = Array.isArray(b.ruleIds) ? b.ruleIds.map((x: any) => String(x)) : [];
+    if (!zoneId || !ruleIds.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    if (!(await provider.deleteRules(zoneId, ruleIds))) return { code: -1, msg: '删除规则失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/rules/priority', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const ruleIds: string[] = Array.isArray(b.ruleIds) ? b.ruleIds.map((x: any) => String(x)) : [];
+    if (!zoneId || !ruleIds.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setRulePriority !== 'function') return { code: -1, msg: '该 CDN 类型不支持优先级调整' };
+    if (!(await provider.setRulePriority(zoneId, ruleIds))) return { code: -1, msg: '优先级调整失败，' + provider.getError() };
+    return { code: 0, msg: '优先级已更新' };
+  });
+
+  // ===== 规则引擎（ESA 12 类规则配置，kind 形如 RedirectRule）=====
+  app.get('/api/cdn/accounts/:aid/rule-configs', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const kind = String(req.query.kind || '').trim();
+    if (!zoneId || !kind) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listRuleConfigs !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    const r = await provider.listRuleConfigs(zoneId, kind, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取规则失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/rule-configs', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const kind = String(b.kind || '').trim();
+    if (!zoneId || !kind) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.upsertRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!(await provider.upsertRuleConfig(zoneId, kind, params))) return { code: -1, msg: '保存规则失败，' + provider.getError() };
+    return { code: 0, msg: '保存成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/rule-configs/:configId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const configId = String((req.params as any).configId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    const kind = String(req.query.kind || '').trim();
+    if (!zoneId || !kind || !configId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    if (!(await provider.deleteRuleConfig(zoneId, kind, configId))) return { code: -1, msg: '删除规则失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
   // 详情（域名级配置）
   app.get('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;

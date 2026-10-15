@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -793,5 +793,57 @@ export class TencentEdgeOne implements CdnProvider {
 
   async deleteLoadBalancer(zoneId: string, instanceId: string): Promise<boolean> {
     return (await this.send('DeleteLoadBalancer', { ZoneId: zoneId, InstanceId: instanceId })) !== false;
+  }
+
+  // ===== Phase 3：L7 规则引擎 =====
+
+  async getRulesSetting(): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeRulesSetting', {});
+    return d || false;
+  }
+
+  async listRules(zoneId: string): Promise<RuleItem[] | false> {
+    const data = await this.send('DescribeRules', { ZoneId: zoneId });
+    if (!data) return false;
+    return (data.Rules || []).map((r: any) => ({
+      ruleId: String(r.RuleId || ''),
+      ruleName: r.RuleName || '',
+      status: r.Status,
+      enabled: r.Status,
+      rules: r.Rules || [],
+      ...r,
+    }));
+  }
+
+  async createRule(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      RuleName: params.ruleName,
+      Status: params.status || 'enable',
+      Rules: params.rules || [],
+    };
+    if (params.tags) param.Tags = params.tags;
+    const d = await this.send('CreateRule', param);
+    return d && d.RuleId ? String(d.RuleId) : false;
+  }
+
+  async updateRule(zoneId: string, ruleId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      RuleId: ruleId,
+      RuleName: params.ruleName,
+      Status: params.status || 'enable',
+      Rules: params.rules || [],
+    };
+    if (params.tags) param.Tags = params.tags;
+    return (await this.send('ModifyRule', param)) !== false;
+  }
+
+  async deleteRules(zoneId: string, ruleIds: string[]): Promise<boolean> {
+    return (await this.send('DeleteRules', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
+  }
+
+  async setRulePriority(zoneId: string, ruleIds: string[]): Promise<boolean> {
+    return (await this.send('ModifyL7AccRulePriority', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
   }
 }

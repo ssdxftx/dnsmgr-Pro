@@ -118,6 +118,29 @@
         </n-tabs>
       </n-space>
     </n-modal>
+
+    <n-modal v-model:show="showRules" preset="card" :title="t('cdnRules.title', { name: ruleAcct?.name || '' })" style="max-width:920px" :mask-closable="false">
+      <n-space vertical :size="14">
+        <n-form-item :label="t('cdnRules.site')" :show-feedback="false">
+          <n-select v-model:value="ruleZone" :options="ruleSiteOptions" :placeholder="t('cdnRules.selectSite')" @update:value="loadRules" />
+        </n-form-item>
+        <n-form-item v-if="ruleIsEsa" :label="t('cdnRules.kind')" :show-feedback="false">
+          <n-select v-model:value="ruleKind" :options="ruleKindOptions" @update:value="loadRules" />
+        </n-form-item>
+        <n-card size="small" :title="ruleEditingId ? t('common.edit') : t('cdnRules.create')">
+          <n-space vertical :size="8">
+            <n-space :size="8">
+              <n-input v-model:value="ruleForm.ruleName" :placeholder="t('cdnRules.ruleName')" style="width:240px" />
+              <n-select v-model:value="ruleForm.status" :options="ruleStatusOptions" style="width:140px" />
+              <n-button size="small" type="primary" :loading="ruleSaving" @click="saveRule">{{ t('common.save') }}</n-button>
+              <n-button v-if="ruleEditingId" size="small" @click="resetRuleForm">{{ t('common.cancel') }}</n-button>
+            </n-space>
+            <n-input v-model:value="ruleForm.json" type="textarea" :rows="8" :placeholder="t('cdnRules.rulesJson')" />
+          </n-space>
+        </n-card>
+        <n-data-table :columns="ruleColumns" :data="ruleList" :loading="ruleLoading" size="small" :bordered="false" :row-key="(r:any) => String(r.ruleId || r.configId)" />
+      </n-space>
+    </n-modal>
   </div>
 </template>
 
@@ -239,6 +262,57 @@ const lbColumns = computed(() => [
   { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => delLoadBalancer(r) }, { default: () => t('cdnOrigin.delete') }) },
 ]);
 
+// ===== 规则引擎 =====
+const showRules = ref(false);
+const ruleAcct = ref<any>(null);
+const ruleSites = ref<any[]>([]);
+const ruleZone = ref<string>('');
+const ruleKind = ref<string>('RedirectRule');
+const ruleList = ref<any[]>([]);
+const ruleLoading = ref(false);
+const ruleSaving = ref(false);
+const ruleEditingId = ref<string>('');
+const ruleForm = reactive<any>({ ruleName: '', status: 'enable', json: '' });
+const ruleIsEsa = computed(() => ruleAcct.value?.type === 'aliyun_esa');
+const ruleSiteOptions = computed(() => ruleSites.value.map((z: any) => ({ label: z.zoneName || String(z.zoneId), value: String(z.zoneId) })));
+const ruleKindOptions = [
+  'RedirectRule',
+  'RewriteUrlRule',
+  'HttpRequestHeaderModificationRule',
+  'HttpResponseHeaderModificationRule',
+  'HttpIncomingRequestHeaderModificationRule',
+  'HttpIncomingResponseHeaderModificationRule',
+  'CustomResponseCodeRule',
+  'NetworkOptimization',
+  'CompressionRule',
+  'ImageTransform',
+  'VideoProcessing',
+  'OriginRule',
+  'CacheRule',
+  'HttpsBasicConfiguration',
+  'HttpsApplicationConfiguration',
+].map((k) => ({ label: k, value: k }));
+const ruleStatusOptions = computed(() => [
+  { label: t('cdnRules.enable'), value: 'enable' },
+  { label: t('cdnRules.disable'), value: 'disable' },
+]);
+const ruleColumns = computed(() => [
+  { title: t('cdnRules.colName'), key: 'ruleName', minWidth: 200 },
+  { title: t('cdnRules.colStatus'), key: 'status', width: 110 },
+  {
+    title: t('cdnRules.colActions'),
+    key: 'actions',
+    width: 160,
+    render: (r: any) =>
+      h(NSpace, null, {
+        default: () => [
+          h(NButton, { size: 'tiny', onClick: () => editRule(r) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', type: 'error', onClick: () => delRule(r) }, { default: () => t('common.delete') }),
+        ],
+      }),
+  },
+]);
+
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
   { title: t('cdnAccount.providerCol'), key: 'typename', width: 140 },
@@ -262,7 +336,7 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 360,
+    width: 520,
     render(row: any) {
       const caps = providers.value[row.type]?.capabilities || {};
       const btns: any[] = [];
@@ -271,6 +345,9 @@ const columns = computed(() => [
       }
       if (caps.originGroup || caps.loadBalancer) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openOrigin(row) }, { default: () => t('cdnOrigin.manage') }));
+      }
+      if (caps.rules) {
+        btns.push(h(NButton, { size: 'tiny', onClick: () => openRules(row) }, { default: () => t('cdnRules.manage') }));
       }
       btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
       btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
@@ -559,6 +636,99 @@ function delLoadBalancer(r: any) {
       if (res.code === 0) {
         message.success(res.msg);
         loadOriginData();
+      } else message.error(res.msg);
+    },
+  });
+}
+
+// ===== 规则引擎 =====
+async function openRules(row: any) {
+  ruleAcct.value = row;
+  ruleZone.value = '';
+  ruleList.value = [];
+  resetRuleForm();
+  showRules.value = true;
+  const res = await api<any>('GET', `/cdn/accounts/${row.id}/sites`);
+  ruleSites.value = res.code === 0 ? res.data : [];
+}
+
+function resetRuleForm() {
+  ruleEditingId.value = '';
+  ruleForm.ruleName = '';
+  ruleForm.status = 'enable';
+  ruleForm.json = '';
+}
+
+async function loadRules() {
+  if (!ruleZone.value || !ruleAcct.value) return;
+  ruleLoading.value = true;
+  const aid = ruleAcct.value.id;
+  if (ruleIsEsa.value) {
+    const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, { zoneId: ruleZone.value, kind: ruleKind.value, page: 1, size: 100 });
+    ruleList.value = res.code === 0 ? res.data?.list || [] : [];
+  } else {
+    const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, { zoneId: ruleZone.value });
+    ruleList.value = res.code === 0 ? res.data || [] : [];
+  }
+  ruleLoading.value = false;
+}
+
+function editRule(r: any) {
+  ruleEditingId.value = String(r.ruleId || r.configId || '');
+  ruleForm.ruleName = r.ruleName || '';
+  ruleForm.status = r.status || 'enable';
+  const body = ruleIsEsa.value ? (Array.isArray(r.rules) && r.rules.length ? r.rules[0] : r) : r.rules || [];
+  ruleForm.json = JSON.stringify(body, null, 2);
+}
+
+async function saveRule() {
+  if (!ruleZone.value) return message.warning(t('cdnRules.needSite'));
+  if (!ruleForm.ruleName) return message.warning(t('cdnRules.needName'));
+  let parsed: any;
+  try {
+    parsed = ruleForm.json ? JSON.parse(ruleForm.json) : ruleIsEsa.value ? {} : [];
+  } catch {
+    return message.error(t('cdnRules.invalidJson'));
+  }
+  ruleSaving.value = true;
+  const aid = ruleAcct.value.id;
+  let res: any;
+  if (ruleIsEsa.value) {
+    res = await api('POST', `/cdn/accounts/${aid}/rule-configs`, {
+      zoneId: ruleZone.value,
+      kind: ruleKind.value,
+      params: { ...parsed, RuleName: ruleForm.ruleName, RuleEnable: ruleForm.status === 'enable' ? 'on' : 'off' },
+    });
+  } else if (ruleEditingId.value) {
+    res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(ruleEditingId.value)}`, { zoneId: ruleZone.value, ruleName: ruleForm.ruleName, status: ruleForm.status, rules: parsed });
+  } else {
+    res = await api('POST', `/cdn/accounts/${aid}/rules`, { zoneId: ruleZone.value, ruleName: ruleForm.ruleName, status: ruleForm.status, rules: parsed });
+  }
+  ruleSaving.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    resetRuleForm();
+    loadRules();
+  } else message.error(res.msg);
+}
+
+function delRule(r: any) {
+  dialog.warning({
+    title: t('common.delete'),
+    content: t('cdnRules.confirmDelete', { name: r.ruleName || '' }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const aid = ruleAcct.value.id;
+      let res: any;
+      if (ruleIsEsa.value) {
+        res = await api('DELETE', `/cdn/accounts/${aid}/rule-configs/${encodeURIComponent(r.configId)}`, { zoneId: ruleZone.value, kind: ruleKind.value });
+      } else {
+        res = await api('DELETE', `/cdn/accounts/${aid}/rules`, { zoneId: ruleZone.value, ruleIds: [String(r.ruleId)] });
+      }
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadRules();
       } else message.error(res.msg);
     },
   });
