@@ -674,7 +674,13 @@ export class AliyunESA implements CdnProvider {
       return false;
     }
     const body: Record<string, any> = { ...params };
+    // 清除回显/透传字段，避免旧 ConfigId/SiteId/Action 覆盖本次请求的关键参数
     delete body.ruleName;
+    delete body.RuleName;
+    delete body.ConfigId;
+    delete body.Id;
+    delete body.SiteId;
+    delete body.Action;
     body.RuleName = ruleName;
     const existing = await this.findEsaRule(`List${kind}s`, sid, ruleName);
     if (existing === undefined) return false;
