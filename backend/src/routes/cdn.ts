@@ -268,6 +268,152 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '站点配置更新成功' };
   });
 
+  // ===== 站点生命周期（EO Zone / ESA Site）=====
+
+  // 云上站点列表
+  app.get('/api/cdn/accounts/:aid/sites', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点管理' };
+    const zones = await provider.getZones();
+    if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
+    // 尽力补齐暂停状态，供前端展示与暂停/启用按钮
+    if (typeof provider.getZonePaused === 'function') {
+      for (const z of zones as any[]) {
+        if (!z.zoneId) continue;
+        try {
+          const p = await provider.getZonePaused(String(z.zoneId));
+          z.paused = p === true;
+        } catch {
+          z.paused = false;
+        }
+      }
+    }
+    return { code: 0, data: zones };
+  });
+
+  // 套餐实例列表（ESA 创建站点需要）
+  app.get('/api/cdn/accounts/:aid/plan-instances', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.listPlanInstances !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐实例查询' };
+    const list = await provider.listPlanInstances();
+    if (list === false) return { code: -1, msg: '获取套餐实例失败，' + provider.getError() };
+    return { code: 0, data: list };
+  });
+
+  // 站点名校验 / 归属识别
+  app.post('/api/cdn/accounts/:aid/sites/check', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const name = String((req.body || {}).siteName || '').trim();
+    if (!name) return { code: -1, msg: '站点名称不能为空' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider) return { code: -1, msg: '账户不存在' };
+    if (typeof provider.checkSiteName === 'function') {
+      const r = await provider.checkSiteName(name);
+      if (r === false) return { code: -1, msg: '站点名校验失败，' + provider.getError() };
+      return { code: 0, data: r };
+    }
+    if (typeof provider.identifyZone === 'function') {
+      const r = await provider.identifyZone(name);
+      if (r === false) return { code: -1, msg: '站点识别失败，' + provider.getError() };
+      return { code: 0, data: r };
+    }
+    return { code: -1, msg: '该 CDN 类型不支持站点校验' };
+  });
+
+  // 创建站点
+  app.post('/api/cdn/accounts/:aid/sites', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.createZone !== 'function') return { code: -1, msg: '该 CDN 类型不支持创建站点' };
+    const b = req.body || {};
+    const name = String(b.name || b.siteName || '').trim();
+    if (!name) return { code: -1, msg: '站点名称不能为空' };
+    const zone = await provider.createZone({
+      name,
+      type: b.type,
+      area: b.area || b.coverage,
+      planId: b.planId,
+      accessType: b.accessType,
+      instanceId: b.instanceId,
+    });
+    if (zone === false) return { code: -1, msg: '创建站点失败，' + provider.getError() };
+    return { code: 0, msg: '站点创建成功', data: zone };
+  });
+
+  // 验证归属
+  app.post('/api/cdn/accounts/:aid/sites/verify', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.verifyOwnership !== 'function') return { code: -1, msg: '该 CDN 类型不支持归属验证' };
+    const r = await provider.verifyOwnership(zoneId, b.domain ? String(b.domain) : undefined);
+    if (r === false) return { code: -1, msg: '验证失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  // 暂停 / 启用站点
+  app.post('/api/cdn/accounts/:aid/sites/pause', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setZonePaused !== 'function') return { code: -1, msg: '该 CDN 类型不支持暂停/启用' };
+    const paused = b.paused === true || b.paused === 'true' || b.paused === 1;
+    if (!(await provider.setZonePaused(zoneId, paused))) return { code: -1, msg: '操作失败，' + provider.getError() };
+    return { code: 0, msg: paused ? '站点已暂停' : '站点已启用' };
+  });
+
+  // 站点 NS 列表
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/ns', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getSiteNs !== 'function') return { code: -1, msg: '该 CDN 类型不支持 NS 查询' };
+    const ns = await provider.getSiteNs(zoneId);
+    if (ns === false) return { code: -1, msg: '获取 NS 失败，' + provider.getError() };
+    return { code: 0, data: ns };
+  });
+
+  // 更新站点属性（接入类型 / 覆盖范围 / 站点名独占）
+  app.put('/api/cdn/accounts/:aid/sites/:zoneId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const b = req.body || {};
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider) return { code: -1, msg: '账户不存在' };
+    let changed = false;
+    if (b.accessType && typeof provider.updateSiteAccessType === 'function') {
+      if (!(await provider.updateSiteAccessType(zoneId, String(b.accessType)))) return { code: -1, msg: '接入类型更新失败，' + provider.getError() };
+      changed = true;
+    }
+    if (b.coverage && typeof provider.updateSiteCoverage === 'function') {
+      if (!(await provider.updateSiteCoverage(zoneId, String(b.coverage)))) return { code: -1, msg: '覆盖范围更新失败，' + provider.getError() };
+      changed = true;
+    }
+    if (b.nameExclusive !== undefined && typeof provider.updateSiteNameExclusive === 'function') {
+      const enable = b.nameExclusive === true || b.nameExclusive === 'true' || b.nameExclusive === 1 || b.nameExclusive === 'on';
+      if (!(await provider.updateSiteNameExclusive(zoneId, enable))) return { code: -1, msg: '站点名独占更新失败，' + provider.getError() };
+      changed = true;
+    }
+    if (!changed) return { code: -1, msg: '无可更新项或该 CDN 类型不支持' };
+    return { code: 0, msg: '更新成功' };
+  });
+
+  // 删除站点
+  app.delete('/api/cdn/accounts/:aid/sites/:zoneId', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteZone !== 'function') return { code: -1, msg: '该 CDN 类型不支持删除站点' };
+    if (!(await provider.deleteZone(zoneId))) return { code: -1, msg: '删除失败，' + provider.getError() };
+    return { code: 0, msg: '站点已删除' };
+  });
+
   // 详情（域名级配置）
   app.get('/api/cdn/domains/:id', auth, async (req: any) => {
     const { id } = req.params as any;

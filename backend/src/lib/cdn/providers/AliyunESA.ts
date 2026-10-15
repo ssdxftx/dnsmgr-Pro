@@ -1,5 +1,5 @@
 import { Aliyun } from '../../clients/Aliyun.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -481,5 +481,88 @@ export class AliyunESA implements CdnProvider {
     const data = await this.call({ Action: 'PreloadCaches', SiteId: this.siteId, Content: urls.join('\n') });
     if (!data) return false;
     return 'ok';
+  }
+
+  // ===== Phase 1：站点（Site）生命周期（注意 SiteId 为 integer）=====
+
+  async checkSiteName(siteName: string): Promise<{ passed: boolean; reason?: string } | false> {
+    const d = await this.call({ Action: 'CheckSiteName', SiteName: siteName });
+    if (!d) return false;
+    return { passed: d.Passed === true };
+  }
+
+  async createZone(params: Record<string, any>): Promise<ZoneSummary | false> {
+    const name = String(params?.name || '').trim();
+    if (!name) {
+      this.error = '站点名称不能为空';
+      return false;
+    }
+    const coverage = String(params?.area || params?.coverage || 'domestic');
+    const accessType = String(params?.accessType || 'CNAME');
+    const instanceId = String(params?.instanceId || '');
+    if (!instanceId) {
+      this.error = '缺少套餐实例 ID（可从 ListUserRatePlanInstances 获取）';
+      return false;
+    }
+    const d = await this.call({ Action: 'CreateSite', SiteName: name, Coverage: coverage, AccessType: accessType, InstanceId: instanceId });
+    if (!d) return false;
+    return {
+      zoneId: String(d.SiteId || ''),
+      zoneName: name,
+      area: coverage,
+      type: accessType,
+      nameServers: d.NameServerList || [],
+      verifyCode: d.VerifyCode || '',
+    };
+  }
+
+  async verifyOwnership(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.call({ Action: 'VerifySite', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return { passed: d.Passed === true };
+  }
+
+  async getSiteNs(zoneId: string): Promise<string[] | false> {
+    const d = await this.call({ Action: 'GetSiteCurrentNS', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return d.NSList || [];
+  }
+
+  async deleteZone(zoneId: string): Promise<boolean> {
+    return (await this.call({ Action: 'DeleteSite', SiteId: Number(zoneId) })) !== false;
+  }
+
+  async updateSiteAccessType(zoneId: string, accessType: string): Promise<boolean> {
+    return (await this.call({ Action: 'UpdateSiteAccessType', SiteId: Number(zoneId), AccessType: accessType })) !== false;
+  }
+
+  async updateSiteCoverage(zoneId: string, coverage: string): Promise<boolean> {
+    return (await this.call({ Action: 'UpdateSiteCoverage', SiteId: Number(zoneId), Coverage: coverage })) !== false;
+  }
+
+  async setZonePaused(zoneId: string, paused: boolean): Promise<boolean> {
+    return (await this.call({ Action: 'UpdateSitePause', SiteId: Number(zoneId), Paused: paused })) !== false;
+  }
+
+  async getZonePaused(zoneId: string): Promise<boolean | false> {
+    const d = await this.call({ Action: 'GetSitePause', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return d.Paused === true;
+  }
+
+  async updateSiteNameExclusive(zoneId: string, enable: boolean): Promise<boolean> {
+    return (await this.call({ Action: 'UpdateSiteNameExclusive', SiteId: Number(zoneId), Enable: enable ? 'on' : 'off' })) !== false;
+  }
+
+  async getSiteNameExclusive(zoneId: string): Promise<boolean | false> {
+    const d = await this.call({ Action: 'GetSiteNameExclusive', SiteId: Number(zoneId) });
+    if (!d) return false;
+    return d.Enable === 'on';
+  }
+
+  async listPlanInstances(): Promise<any[] | false> {
+    const d = await this.call({ Action: 'ListUserRatePlanInstances' });
+    if (!d) return false;
+    return d.Instances || d.InstanceList || d.Data || [];
   }
 }

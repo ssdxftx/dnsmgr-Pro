@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../clients/TencentCloud.js';
-import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo } from '../types.js';
+import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 
@@ -654,5 +654,72 @@ export class TencentEdgeOne implements CdnProvider {
       .split(',')
       .map((s) => s.trim().replace(/^'|'$/g, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\'))
       .filter(Boolean);
+  }
+
+  // ===== Phase 1：站点（Zone）生命周期 =====
+
+  async createZone(params: Record<string, any>): Promise<ZoneSummary | false> {
+    const name = String(params?.name || '').trim();
+    if (!name) {
+      this.error = '站点名称不能为空';
+      return false;
+    }
+    const type = String(params?.type || 'partial');
+    const area = String(params?.area || 'overseas');
+    const param: Record<string, any> = { ZoneName: name, Type: type, Area: area };
+    if (params?.planId) param.PlanId = String(params.planId);
+    const d = await this.send('CreateZone', param);
+    if (!d) return false;
+    const ov = d.OwnershipVerification || {};
+    return {
+      zoneId: String(d.ZoneId || ''),
+      zoneName: name,
+      type,
+      area,
+      ownershipVerification: ov,
+      verifyCode: ov.Content || ov.Subdomain || '',
+      nameServers: ov.NameServers || [],
+    };
+  }
+
+  async deleteZone(zoneId: string): Promise<boolean> {
+    return (await this.send('DeleteZone', { ZoneId: zoneId })) !== false;
+  }
+
+  async setZonePaused(zoneId: string, paused: boolean): Promise<boolean> {
+    return (await this.send('ModifyZoneStatus', { ZoneId: zoneId, Paused: paused })) !== false;
+  }
+
+  async getZonePaused(zoneId: string): Promise<boolean | false> {
+    const data = await this.send('DescribeZones', { Limit: 100 });
+    if (!data) return false;
+    const z = (data.Zones || []).find((x: any) => String(x.ZoneId) === String(zoneId));
+    if (!z) return false;
+    return z.Paused === true || String(z.Status || '').toLowerCase() === 'paused';
+  }
+
+  async identifyZone(zoneName: string): Promise<Record<string, any> | false> {
+    return this.send('IdentifyZone', { ZoneName: zoneName });
+  }
+
+  async verifyOwnership(zoneId: string, domain?: string): Promise<Record<string, any> | false> {
+    let target = domain;
+    if (!target) {
+      const data = await this.send('DescribeZones', { Limit: 100 });
+      if (!data) return false;
+      const z = (data.Zones || []).find((x: any) => String(x.ZoneId) === String(zoneId));
+      target = z?.ZoneName;
+    }
+    if (!target) {
+      this.error = '未找到站点名称，无法验证归属';
+      return false;
+    }
+    return this.send('VerifyOwnership', { Domain: target });
+  }
+
+  async checkCnameStatus(zoneId: string, recordNames: string[]): Promise<any[] | false> {
+    const d = await this.send('CheckCnameStatus', { ZoneId: zoneId, RecordNames: recordNames });
+    if (!d) return false;
+    return d.CnameStatus || d.Records || d.Status || [];
   }
 }

@@ -26,22 +26,15 @@ Updated: 2026-10-15
 
 ## Phase 1 站点生命周期（EO Zone / ESA Site）
 
-- [ ] 1.1 TencentEdgeOne 站点管理方法（design §3.2）
-  - `createZone`（`ZoneName`/`Type`/`Area`/`PlanId`，返回 `ZoneId`）、`setZonePaused`（`ModifyZoneStatus{Paused}`）、`deleteZone`
-  - `identifyZone`（`Ascription`）、`verifyOwnership`、`checkCnameStatus`（`RecordNames`）
-  - 新增 `getZoneDetail`（`DescribeZones` 按 `ZoneId` 过滤，返回单站点信息）
-- [ ] 1.2 AliyunESA 站点管理方法（design §4.1）
-  - `checkSiteName`、`createSite`（`SiteName`/`Coverage`/`AccessType`/`InstanceId`，返回 `SiteId`+`NameServerList`+`VerifyCode`）
-  - `verifySite`、`getSiteNs`（`GetSiteCurrentNS`）、`deleteSite`
-  - `updateSiteAccessType`、`updateSiteCoverage`、`setZonePaused`/`getZonePaused`（`UpdateSitePause`/`GetSitePause`）、`updateSiteNameExclusive`（`UpdateSiteNameExclusive`/`GetSiteNameExclusive`）
-  - `listPlanInstances`（`ListUserRatePlanInstances`，供创建站点选择套餐）
-- [ ] 1.3 路由：站点生命周期端点
-  - `backend/src/routes/cdn.ts` 新增（能力门控）：`GET /api/cdn/accounts/:aid/sites`、`POST /api/cdn/accounts/:aid/sites`（创建/校验站点名）、`POST /api/cdn/accounts/:aid/sites/verify`、`POST /api/cdn/accounts/:aid/sites/pause`、`DELETE /api/cdn/accounts/:aid/sites/:siteId`、`GET /api/cdn/accounts/:aid/plan-instances`
-  - 站点名/覆盖范围/接入类型/套餐 参数校验；仅管理员可用
-- [ ] 1.4 前端：站点管理 UI
-  - `frontend/src/views/CdnAccount.vue` 或 `CdnZone.vue` 增加「站点管理」：列出云上站点、创建站点向导（站点名→校验→覆盖范围→接入类型→套餐）、暂停/启用、删除、验证归属、展示 NS 列表
-  - 按 `cdnConfig` 能力标记显隐；新增 i18n 命名空间（zh-CN/en-US 各一个模块文件）
-- [ ] 1.5 检查点：后端 `tsc --noEmit`、前端 `vue-tsc --noEmit` + `vite build` 通过
+- [x] 1.1 TencentEdgeOne 站点管理方法（design §3.2）
+  - `createZone`、`setZonePaused`、`deleteZone`、`identifyZone`、`verifyOwnership`、`checkCnameStatus`、`getZonePaused`
+- [x] 1.2 AliyunESA 站点管理方法（design §4.1）
+  - `checkSiteName`、`createZone`（CreateSite）、`verifyOwnership`（VerifySite）、`getSiteNs`、`deleteZone`、`updateSiteAccessType`、`updateSiteCoverage`、`setZonePaused`/`getZonePaused`、`updateSiteNameExclusive`/`getSiteNameExclusive`、`listPlanInstances`
+- [x] 1.3 路由：站点生命周期端点
+  - `backend/src/routes/cdn.ts`：`GET/POST /api/cdn/accounts/:aid/sites`、`.../sites/check`、`.../sites/verify`、`.../sites/pause`、`GET .../sites/:zoneId/ns`、`PUT/DELETE .../sites/:zoneId`、`GET .../plan-instances`（能力门控、管理员）
+- [x] 1.4 前端：站点管理 UI
+  - `frontend/src/views/CdnAccount.vue` 增加「站点管理」入口与弹窗（列表/创建/校验/暂停/验证/NS/删除）；i18n `cdnSite`（zh/en）
+- [x] 1.5 检查点：后端 `tsc --noEmit`、前端 `vue-tsc --noEmit` + `vite build` 通过
 
 ## Phase 2 源站组 / 负载均衡
 
