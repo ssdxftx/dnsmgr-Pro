@@ -130,6 +130,7 @@ export class AliyunESA implements CdnProvider {
       SiteId: siteId,
       RecordName: domain,
       Type: type,
+      Ttl: 600,
       Data: JSON.stringify({ value: originVal }),
       Proxied: true,
     };
@@ -217,7 +218,15 @@ export class AliyunESA implements CdnProvider {
       return false;
     }
     const proxied = status !== 'offline';
-    return (await this.call({ Action: 'UpdateRecord', RecordId: found.record.RecordId, Proxied: proxied })) !== false;
+    // UpdateRecord 必填 Data（RecordId 亦必填）；回填原有 Type/Data，避免类型被重置
+    const rec = found.record;
+    return (await this.call({
+      Action: 'UpdateRecord',
+      RecordId: rec.RecordId,
+      Type: rec.RecordType ?? rec.Type,
+      Data: typeof rec.Data === 'string' ? rec.Data : JSON.stringify(rec.Data ?? {}),
+      Proxied: proxied,
+    })) !== false;
   }
 
   async updateOrigin(domain: string, origin: string, originType: string, originHost: string, originProtocol: string, httpPort: number, httpsPort: number) {
