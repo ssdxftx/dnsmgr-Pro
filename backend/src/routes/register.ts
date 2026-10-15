@@ -148,10 +148,15 @@ export default async function registerRoutes(app: FastifyInstance) {
     }
 
     const hash = await bcrypt.hash(password, 10);
-    await query(
-      `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, regtime, status, email) VALUES (?, ?, 0, '', 1, NOW(), 1, ?)`,
-      [username, hash, email || null]
-    );
+    try {
+      await query(
+        `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, regtime, status, email) VALUES (?, ?, 0, '', 1, NOW(), 1, ?)`,
+        [username, hash, email || null]
+      );
+    } catch (e: any) {
+      if (e?.code === 'ER_DUP_ENTRY') return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
+      throw e;
+    }
     await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES ((SELECT id FROM ${table('user')} WHERE username = ?), '用户注册', ?, NOW())`, [username, 'IP:' + (req.ip || '')]);
 
     return { code: 0, msg: '注册成功，请登录' };

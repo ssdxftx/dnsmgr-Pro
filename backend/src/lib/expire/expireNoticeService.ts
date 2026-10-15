@@ -164,9 +164,14 @@ async function noticeExpiringDomainList(maxDay: number, days: number[]): Promise
   }
   for (const [day, list] of Object.entries(noticeMap)) {
     const ids = list.map((x) => x.id);
-    await query(`UPDATE ${table('domain')} SET noticetime = ? WHERE id IN (${ids.map(() => '?').join(',')})`, [fmtDateTime(), ...ids]);
-    await sendExpireNotice(Number(day), list);
-    console.log(`[expire] 域名到期提醒: ${day}天内到期的${ids.length}个域名已发送`);
+    // 先发送、成功后再写 noticetime：发送失败则不写，下一轮（20h 内不受限）会重试，避免通知永久丢失
+    try {
+      await sendExpireNotice(Number(day), list);
+      await query(`UPDATE ${table('domain')} SET noticetime = ? WHERE id IN (${ids.map(() => '?').join(',')})`, [fmtDateTime(), ...ids]);
+      console.log(`[expire] 域名到期提醒: ${day}天内到期的${ids.length}个域名已发送`);
+    } catch (e: any) {
+      console.log(`[expire] 域名到期提醒发送失败（${day}天内 ${ids.length} 个域名），将在下次重试：${e?.message || e}`);
+    }
   }
 }
 

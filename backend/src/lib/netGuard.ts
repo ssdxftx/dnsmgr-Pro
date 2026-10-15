@@ -71,6 +71,14 @@ export function isMetadataIp(ip: string): boolean {
   return false;
 }
 
+// 校验将拼入主机名的字段（如云厂商 region）：仅允许字母/数字/连字符/点。
+// 防止经 '@' '/' ':' 等字符把请求重定向到任意主机（云元数据 SSRF / 凭据外泄）。
+export function assertSafeHostname(host: string, label = '主机名'): string {
+  const h = String(host || '').trim();
+  if (!/^[a-z0-9.-]+$/i.test(h)) throw new Error(label + '不合法：' + h);
+  return h;
+}
+
 // 部署商目标地址防护：允许内网/局域网面板（自建与内网部署是核心功能），
 // 但禁止指向链路本地/云元数据地址，避免凭据被诱导窃取。
 export async function assertDeployTargetAllowed(raw: string): Promise<void> {

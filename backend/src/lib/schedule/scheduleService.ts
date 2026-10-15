@@ -35,11 +35,19 @@ export async function executeAll(): Promise<boolean> {
   if (list.length === 0) return false;
   console.log('开始执行定时切换解析任务，共获取到' + list.length + '个待执行任务');
   for (const row of list) {
+    // 原子认领：仅当任务仍到期时才置 nexttime=0，避免并发/多实例重复执行同一任务
+    const claim: any = await query(
+      `UPDATE ${table('sctask')} SET nexttime = 0 WHERE id = ? AND nexttime > 0 AND nexttime <= ? AND active = 1`,
+      [row.id, now]
+    );
+    if (!claim || !claim.affectedRows) continue;
     try {
       await executeOne(row);
       console.log('定时切换任务' + row.id + '执行成功');
     } catch (e: any) {
       console.log('定时切换任务' + row.id + '执行失败,' + e.message);
+      // 失败后恢复为立即到期，下一轮重试
+      await query(`UPDATE ${table('sctask')} SET nexttime = ? WHERE id = ?`, [now, row.id]).catch(() => undefined);
     }
   }
   await configSet('schedule_time', fmtDateTime());

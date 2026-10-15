@@ -94,6 +94,7 @@ export default {
   record: {
     title: '解析记录 · {title}',
     subtitle: '查看并维护当前域名的 DNS 解析记录',
+    nameCol: '子域名',
     customHostnames: '自定义主机名',
     rulesEngine: '规则引擎',
     addRecord: '添加记录',

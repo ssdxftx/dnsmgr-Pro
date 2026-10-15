@@ -71,6 +71,14 @@ function writeErr(acc: { admin: boolean; perms: SubPermission[] }, domainName: s
   return null;
 }
 
+/** 校验记录实际归属：provider 仅凭 RecordId 定位记录，需确认其属于当前域名，避免跨域名越权改/删 */
+function recordOwnedByDomain(cur: any, domainName: string): boolean {
+  const d = cur && cur.Domain;
+  if (!d) return true; // 部分厂商不返回 Domain，交由子域名权限校验兜底
+  const norm = (s: any) => String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
+  return norm(d) === norm(domainName);
+}
+
 /** 普通用户记录列表过滤：只保留授权子域名树内的记录 */
 function filterRecords(acc: { admin: boolean; perms: SubPermission[] }, domainName: string, list: any[]): any[] {
   if (acc.admin) return list;
@@ -453,6 +461,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         const cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         let e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
         e = writeErr(acc, info.domain.name, name);
@@ -475,6 +484,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         const cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }
@@ -497,6 +507,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         const cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }
@@ -525,6 +536,7 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持批量操作' };
         const cur = await fn.call(provider, r.RecordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
         // 修改记录值/线路时会改写记录名，需同时对目标名判权

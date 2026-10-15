@@ -129,6 +129,20 @@ export async function findOrderByDomains(aid: number, domains: string[], q: Quer
   return null;
 }
 
+// 按「账户 + 域名集合」串行化订单创建：避免并发（CDN 联动/连点）下 findOrderByDomains
+// 先查后建竞态生成同域名多张订单，导致重复消耗 CA 配额与 TXT 记录互相删除
+const orderLocks = new Map<string, Promise<unknown>>();
+function withOrderLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = orderLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  const tail = run.then(() => undefined, () => undefined);
+  orderLocks.set(key, tail);
+  tail.then(() => {
+    if (orderLocks.get(key) === tail) orderLocks.delete(key);
+  });
+  return run;
+}
+
 // 新建证书订单并绑定域名（可指定 link 联动信息）
 export async function createOrder(aid: number, domains: string[], link: string | null = null, q: QueryFn = query): Promise<any> {
   const res: any = await q(`INSERT INTO ${table('cert_order')} SET ?`, [
@@ -145,23 +159,29 @@ export async function createOrder(aid: number, domains: string[], link: string |
 
 // 站点级通配符订单：存在即复用，不存在则创建，交由证书调度器完成签发
 export async function ensureWildcardOrder(aid: number, domains: string[], q: QueryFn = query): Promise<any> {
-  const existing = await findOrderByDomains(aid, domains, q);
-  if (existing) return existing;
-  return await createOrder(aid, domains, null, q);
+  const key = aid + '|' + [...domains].sort().join(',');
+  return withOrderLock(key, async () => {
+    const existing = await findOrderByDomains(aid, domains, q);
+    if (existing) return existing;
+    return await createOrder(aid, domains, null, q);
+  });
 }
 
 // 精确子域名订单：只绑定目标子域名，不含根域/通配符/额外 SAN
 export async function ensureExactOrder(aid: number, domain: string, link: string | null = null, q: QueryFn = query): Promise<any> {
-  const existing = await findOrderByDomains(aid, [domain], q);
-  if (existing) {
-    // 复用已有订单时也要补写联动信息，否则签发成功后不会创建部署任务
-    if (link && existing.link !== link) {
-      await q(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [link, existing.id]);
-      existing.link = link;
+  const key = aid + '|' + domain;
+  return withOrderLock(key, async () => {
+    const existing = await findOrderByDomains(aid, [domain], q);
+    if (existing) {
+      // 复用已有订单时也要补写联动信息，否则签发成功后不会创建部署任务
+      if (link && existing.link !== link) {
+        await q(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [link, existing.id]);
+        existing.link = link;
+      }
+      return existing;
     }
-    return existing;
-  }
-  return await createOrder(aid, [domain], link, q);
+    return await createOrder(aid, [domain], link, q);
+  });
 }
 
 // 复用 CDN 账户密钥：按（类型 + 配置）查找或创建自动部署账户

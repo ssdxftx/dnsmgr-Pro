@@ -42,7 +42,8 @@ export interface SemverParts {
 
 export function parseSemver(input: unknown): SemverParts | null {
   const raw = String(input ?? '').trim();
-  const m = raw.match(/^[vV]?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+  // 仅接受正式版（忽略 -beta 等预发布后缀），避免把预发布标签当作正式更新提示
+  const m = raw.match(/^[vV]?(\d+)\.(\d+)\.(\d+)(?:\+.*)?$/);
   if (!m) return null;
   const parts: [number, number, number] = [Number(m[1]), Number(m[2]), Number(m[3])];
   return { raw, version: `${parts[0]}.${parts[1]}.${parts[2]}`, parts };

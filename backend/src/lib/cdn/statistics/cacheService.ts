@@ -210,16 +210,35 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
     }
   }
 
-  let tsList = [...map.keys()].sort();
-  if (tsList.length > labels.length) tsList = tsList.slice(tsList.length - labels.length);
-  const offset = labels.length - tsList.length;
-  const series = (pick: (b: BucketData) => number): number[] => {
-    const arr = new Array(labels.length).fill(0);
-    tsList.forEach((k, idx) => {
-      arr[offset + idx] = pick(map.get(k)!);
-    });
-    return arr;
-  };
+  // 按绝对时间戳把缓存桶对齐到标签：避免「缺右端」（最近时段尚未刷新）时整体右移错配
+  const stepMs = granularity === 'day' ? 86400000 : 3600000;
+  const idxByTs = new Map<string, number>();
+  for (let i = 0; i < labels.length; i++) idxByTs.set(fmt(new Date(start.getTime() + i * stepMs)), i);
+  const aligned = new Array<BucketData | null>(labels.length).fill(null);
+  let matched = 0;
+  for (const [k, b] of map) {
+    const i = idxByTs.get(k);
+    if (i !== undefined) {
+      aligned[i] = b;
+      matched++;
+    }
+  }
+  let series: (pick: (b: BucketData) => number) => number[];
+  if (matched > 0) {
+    series = (pick) => aligned.map((b) => (b ? pick(b) : 0));
+  } else {
+    // 时间戳无法对齐时回退为右对齐（旧行为），避免图表全空
+    let tsList = [...map.keys()].sort();
+    if (tsList.length > labels.length) tsList = tsList.slice(tsList.length - labels.length);
+    const offset = labels.length - tsList.length;
+    series = (pick) => {
+      const arr = new Array(labels.length).fill(0);
+      tsList.forEach((k, idx) => {
+        arr[offset + idx] = pick(map.get(k)!);
+      });
+      return arr;
+    };
+  }
 
   const result: any = { labels };
   if (type === 'Resource' || type === 'All') {

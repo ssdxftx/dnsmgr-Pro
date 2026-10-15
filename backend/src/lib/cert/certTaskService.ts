@@ -16,7 +16,7 @@ const DEPLOY_LIMIT = 10;
 // 与 CertDeployService.process() 的重试上限保持一致
 const DEPLOY_MAX_RETRY = 6;
 
-const FAIL_STATUSES = [-2, -3, -4, -5, -6, -7];
+const FAIL_STATUSES = [-1, -2, -3, -4, -5, -6, -7];
 // 调度器会推进的订单状态：0 已排队、1/2 进行中、负数失败待重试
 const ACTIVE_STATUSES = [0, 1, 2, ...FAIL_STATUSES];
 

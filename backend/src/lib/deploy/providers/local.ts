@@ -118,7 +118,8 @@ export class LocalDeploy implements DeployProvider {
       const dir = dirname(pfxFile);
       if (!existsSync(dir)) throw new Error(dir + ' 目录不存在');
       const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
-      writeFileSync(pfxFile, pfx);
+      // PFX 内含私钥，显式以 0600 写入，避免按进程 umask 落盘为全局可读
+      writeFileSync(pfxFile, pfx, { mode: 0o600 });
       this.log('PFX证书已保存到：' + pfxFile);
     }
     if (config.cmd) {

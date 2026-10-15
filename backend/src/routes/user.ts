@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 
@@ -39,13 +39,15 @@ function normalizePermission(input: any[]): PermItem[] {
 }
 
 async function savePermissions(uid: number, input: any[]) {
-  await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [uid]);
-  for (const p of normalizePermission(input)) {
-    await query(
-      `INSERT INTO ${table('permission')} (uid, domain, sub, readonly, expiretime) VALUES (?, ?, ?, ?, ?)`,
-      [uid, p.domain, p.sub, p.readonly, p.expiretime],
-    );
-  }
+  await withTransaction(async (q) => {
+    await q(`DELETE FROM ${table('permission')} WHERE uid = ?`, [uid]);
+    for (const p of normalizePermission(input)) {
+      await q(
+        `INSERT INTO ${table('permission')} (uid, domain, sub, readonly, expiretime) VALUES (?, ?, ?, ?, ?)`,
+        [uid, p.domain, p.sub, p.readonly, p.expiretime],
+      );
+    }
+  });
 }
 
 // 超级管理员（安装服务时创建）受保护：任何其他管理员都不得修改其任何资料；
@@ -146,10 +148,16 @@ export default async function userRoutes(app: FastifyInstance) {
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ?`, [username]);
     if (exists) return { code: -1, msg: '用户名已存在' };
 
-    const uid = await insertAndGetId(
-      `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, check_whole, regtime, status) VALUES (?, ?, ?, ?, ?, ?, NOW(), 1)`,
-      [username, await bcrypt.hash(password, 10), isApi, apikey, level, checkWhole]
-    );
+    let uid: number;
+    try {
+      uid = await insertAndGetId(
+        `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, check_whole, regtime, status) VALUES (?, ?, ?, ?, ?, ?, NOW(), 1)`,
+        [username, await bcrypt.hash(password, 10), isApi, apikey, level, checkWhole]
+      );
+    } catch (e: any) {
+      if (e?.code === 'ER_DUP_ENTRY') return { code: -1, msg: '用户名已存在' };
+      throw e;
+    }
     if (level === 1) {
       await savePermissions(uid, permission);
     }

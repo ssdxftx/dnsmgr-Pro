@@ -59,10 +59,13 @@ export abstract class AcmeCertBase implements CertProvider {
     if (!domainList.length) throw new Error('域名列表不能为空');
 
     let privateKey: string;
+    // 白名单兜底：避免超大/非法 keysize 触发同步密钥生成阻塞事件循环
     if (keytype === 'ECC') {
-      privateKey = this.ac.generateECKey(keysize || '384');
+      const curves = ['256', '384', '521'];
+      privateKey = this.ac.generateECKey(curves.includes(String(keysize)) ? String(keysize) : '384');
     } else {
-      privateKey = this.ac.generateRSAKey(Number(keysize) || 2048);
+      const bits = Number(keysize);
+      privateKey = this.ac.generateRSAKey([2048, 3072, 4096].includes(bits) ? bits : 2048);
     }
     const fullchain = await this.ac.finalizeOrder(domainList, order, privateKey);
     const certInfo = parseCertPem(fullchain);

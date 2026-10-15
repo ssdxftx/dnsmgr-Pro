@@ -7,6 +7,7 @@ import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook, sendQqbot } fro
 import { refreshAllStatCache, clearStatCache } from '../lib/cdn/statistics/cacheService.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
+import { runGuarded } from '../lib/scheduler/guards.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
 
@@ -191,11 +192,8 @@ export default async function systemRoutes(app: FastifyInstance) {
     if (!safeEqual(key, cronKey)) {
       return { code: -1, msg: '访问密钥错误' };
     }
-    await runScheduleAll();
-    const res = await runOptimizeAll();
-    if (!res) {
-      // 证书续签 + 到期提醒由内嵌调度器处理，这里仅兜底
-    }
+    await runGuarded('schedule', runScheduleAll, '[schedule] 定时切换解析异常:');
+    await runGuarded('optimize', runOptimizeAll, '[optimize] 优选IP调度异常:');
     return { code: 0, data: 'success!' };
   });
 

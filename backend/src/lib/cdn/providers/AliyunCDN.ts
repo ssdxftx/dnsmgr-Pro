@@ -4,6 +4,11 @@ import { fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 
 const scopeMap: Record<string, string> = { mainland_china: 'domestic', overseas: 'overseas', global: 'global' };
 
+// 换行分隔的 URL 列表：剔除元素内的换行符，避免注入额外刷新/预热目标
+function sanitizeUrlList(urls: string[]): string {
+  return (urls || []).map((u) => String(u).replace(/[\r\n]+/g, '').trim()).filter(Boolean).join('\n');
+}
+
 export class AliyunCDN implements CdnProvider {
   private client: Aliyun;
   private error = '';
@@ -232,7 +237,7 @@ export class AliyunCDN implements CdnProvider {
   async purge(urls: string[], type: 'url' | 'dir'): Promise<string | false> {
     const data = await this.call({
       Action: 'RefreshObjectCaches',
-      ObjectPath: urls.join('\n'),
+      ObjectPath: sanitizeUrlList(urls),
       ObjectType: type === 'dir' ? 'Directory' : 'File',
     });
     if (!data) return false;
@@ -240,7 +245,7 @@ export class AliyunCDN implements CdnProvider {
   }
 
   async preheat(urls: string[]): Promise<string | false> {
-    const data = await this.call({ Action: 'PushObjectCache', ObjectPath: urls.join('\n') });
+    const data = await this.call({ Action: 'PushObjectCache', ObjectPath: sanitizeUrlList(urls) });
     if (!data) return false;
     return data.PushTaskId || 'ok';
   }

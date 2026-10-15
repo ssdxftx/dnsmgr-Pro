@@ -11,6 +11,11 @@ const regionMap: Record<string, string> = {
 };
 const instanceTypeMap: Record<string, string> = { ip: 'ipaddr', domain: 'domain' };
 
+// 换行分隔的 URL 列表：剔除元素内的换行符，避免注入额外刷新/预热目标
+function sanitizeUrlList(urls: string[]): string {
+  return (urls || []).map((u) => String(u).replace(/[\r\n]+/g, '').trim()).filter(Boolean).join('\n');
+}
+
 export class VolcengineCDN implements CdnProvider {
   private client: Volcengine;
   private error = '';
@@ -201,13 +206,13 @@ export class VolcengineCDN implements CdnProvider {
   }
 
   async purge(urls: string[], type: 'url' | 'dir'): Promise<string | false> {
-    const data = await this.send('SubmitRefreshTask', { Type: type === 'dir' ? 'dir' : 'file', Urls: urls.join('\n') });
+    const data = await this.send('SubmitRefreshTask', { Type: type === 'dir' ? 'dir' : 'file', Urls: sanitizeUrlList(urls) });
     if (!data) return false;
     return data.TaskID ? String(data.TaskID) : 'ok';
   }
 
   async preheat(urls: string[]): Promise<string | false> {
-    const data = await this.send('SubmitPreloadTask', { Urls: urls.join('\n') });
+    const data = await this.send('SubmitPreloadTask', { Urls: sanitizeUrlList(urls) });
     if (!data) return false;
     return data.TaskID ? String(data.TaskID) : 'ok';
   }

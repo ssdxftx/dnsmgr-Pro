@@ -73,7 +73,8 @@ export class CertDeployService {
   }
 
   private async unlockTask() {
-    await query(`UPDATE ${table('cert_deploy')} SET islock = 0 WHERE id = ?`, [this.tid]);
+    // 仅释放自己持有的锁：锁超时被他人抢占后，避免误释放他人的锁导致重复部署
+    await query(`UPDATE ${table('cert_deploy')} SET islock = 0 WHERE id = ? AND processid = ?`, [this.tid, this.task.processid]);
   }
 
   async process(isManual = false): Promise<void> {

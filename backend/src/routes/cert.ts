@@ -4,7 +4,7 @@ import { domainToASCII } from 'node:url';
 import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { certConfig, certClassConfig } from '../lib/cert/factory.js';
 import { getCertProvider } from '../lib/cert/factory.js';
@@ -22,6 +22,16 @@ import { localResolve } from '../lib/dns/localResolve.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
+
+// 密钥类型/长度白名单：防止超大 keysize 同步生成 RSA 密钥阻塞事件循环（DoS）
+const VALID_KEY_SIZES: Record<string, string[]> = { RSA: ['2048', '3072', '4096'], ECC: ['256', '384', '521'] };
+function keySpecError(keytype: any, keysize: any): string | null {
+  const kt = String(keytype || '');
+  const ks = String(keysize ?? '');
+  if (!VALID_KEY_SIZES[kt]) return '密钥类型不合法';
+  if (!VALID_KEY_SIZES[kt].includes(ks)) return '密钥长度不合法';
+  return null;
+}
 
 import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig, encryptText, decryptText } from '../lib/secret.js';
 
@@ -290,7 +300,7 @@ export default async function certRoutes(app: FastifyInstance) {
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where}`, params))?.c || 0;
     const rows = await query(
       `SELECT A.*, B.type, B.remark AS aremark FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
-      [...params, Number(limit), Number(offset)],
+      [...params, clampLimit(limit, 20), clampOffset(offset)],
     );
     const list = [];
     const oidDomains = await fetchDomainMap(rows.map((r: any) => r.id));
@@ -350,6 +360,8 @@ export default async function certRoutes(app: FastifyInstance) {
       };
     } else {
       order = { aid, keytype, keysize, addtime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date() };
+      const ke = keySpecError(keytype, keysize);
+      if (ke) return { code: -1, msg: ke };
       domList = (domains || []).map((d: string) => d.trim()).filter(Boolean);
       domList = [...new Set(domList)];
       if (!domList.length) return { code: -1, msg: '绑定域名不能为空' };
@@ -394,6 +406,8 @@ export default async function certRoutes(app: FastifyInstance) {
         privatekey: encryptText(privatekey),
       };
     } else {
+      const ke = keySpecError(keytype, keysize);
+      if (ke) return { code: -1, msg: ke };
       domList = (domains || []).map((d: string) => d.trim()).filter(Boolean);
       domList = [...new Set(domList)];
       if (!domList.length) return { code: -1, msg: '绑定域名不能为空' };
@@ -402,12 +416,14 @@ export default async function certRoutes(app: FastifyInstance) {
       if (typeof res === 'object') return res;
     }
 
-    await query(`UPDATE ${table('cert_order')} SET ? WHERE id = ?`, [order, id]);
-    await query(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
-    let i = 1;
-    for (const domain of domList) {
-      await query(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
-    }
+    await withTransaction(async (q) => {
+      await q(`UPDATE ${table('cert_order')} SET ? WHERE id = ?`, [order, id]);
+      await q(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
+      let i = 1;
+      for (const domain of domList) {
+        await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
+      }
+    });
     return { code: 0, msg: '修改证书订单成功！' };
   });
 
@@ -583,7 +599,7 @@ export default async function certRoutes(app: FastifyInstance) {
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A WHERE ${where}`, params))?.c || 0;
     const rows = await query(
       `SELECT A.*, B.type, B.name AS aname, C.aid AS certaid FROM ${table('cert_deploy')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id LEFT JOIN ${table('cert_order')} C ON A.oid = C.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
-      [...params, Number(limit), Number(offset)],
+      [...params, clampLimit(limit, 20), clampOffset(offset)],
     );
     const list = [];
     const oidDomains = await fetchDomainMap(rows.map((r: any) => r.oid));

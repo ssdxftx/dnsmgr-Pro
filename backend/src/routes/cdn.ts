@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { domainToASCII } from 'node:url';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, withTransaction } from '../db.js';
 import { configGet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
@@ -136,7 +136,7 @@ function parseIds(raw: any): number[] {
         .map((x: any) => Number(x))
         .filter((n: number) => Number.isInteger(n) && n > 0),
     ),
-  ] as number[];
+  ].slice(0, 200) as number[]; // 上限 200，避免单请求扇出大量上游调用
 }
 
 function summarizeResults(list: any[], pendingLabel: string): string {
@@ -443,12 +443,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider = await cdnForRow(row);
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
     if (!(await provider.setCacheRules(row.name, ruleList))) return { code: -1, msg: '缓存规则更新失败，' + provider.getError() };
-    await query(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
-    for (const r of ruleList) {
-      const path = (r.path || '').trim();
-      if (!path) continue;
-      await query(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, path, Number(r.ttl || 0)]);
-    }
+    await withTransaction(async (q) => {
+      await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
+      for (const r of ruleList) {
+        const path = (r.path || '').trim();
+        if (!path) continue;
+        await q(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, path, Number(r.ttl || 0)]);
+      }
+    });
     return { code: 0, msg: '缓存规则更新成功' };
   });
 

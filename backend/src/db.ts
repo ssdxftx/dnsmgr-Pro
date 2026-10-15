@@ -56,3 +56,26 @@ export async function queryOne<T = any>(sql: string, params: any[] = []): Promis
   const rows = await query<T>(sql, params);
   return rows[0];
 }
+
+// 事务执行：将「先删后插」等需要原子性的多步操作包在同一连接的事务里，
+// 中途失败整体回滚，避免数据半更新（权限/域名/规则部分丢失）。
+export async function withTransaction<T>(
+  fn: (q: <R = any>(sql: string, params?: any[]) => Promise<R[]>) => Promise<T>,
+): Promise<T> {
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+    const q = async <R = any>(sql: string, params: any[] = []): Promise<R[]> => {
+      const [rows] = await conn.query(sql, params);
+      return rows as R[];
+    };
+    const result = await fn(q);
+    await conn.commit();
+    return result;
+  } catch (e) {
+    await conn.rollback().catch(() => undefined);
+    throw e;
+  } finally {
+    conn.release();
+  }
+}

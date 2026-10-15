@@ -115,7 +115,8 @@ export class HuaweiDns implements DnsProvider {
     const name = this.getHost(Name);
     let value = Value;
     if (Type === 'TXT' && !value.startsWith('"')) value = '"' + value + '"';
-    const records = value.split(',').reverse();
+    // TXT 值可能自带逗号（如 DKIM/SPF），不可按逗号拆分；仅多值类型按逗号拆分为多条记录
+    const records = Type === 'TXT' ? [value] : value.split(',').reverse();
     const params: Record<string, any> = { name, type: Type, records, line: Line, ttl: Number(TTL), description: Remark ?? undefined };
     if (Weight && Weight > 0) params.weight = Number(Weight);
     const data = await this.send('POST', '/v2.1/zones/' + this.domainid + '/recordsets', null, params);
@@ -126,7 +127,8 @@ export class HuaweiDns implements DnsProvider {
     const name = this.getHost(Name);
     let value = Value;
     if (Type === 'TXT' && !value.startsWith('"')) value = '"' + value + '"';
-    const records = value.split(',').reverse();
+    // TXT 值可能自带逗号（如 DKIM/SPF），不可按逗号拆分；仅多值类型按逗号拆分为多条记录
+    const records = Type === 'TXT' ? [value] : value.split(',').reverse();
     const params: Record<string, any> = { name, type: Type, records, line: Line, ttl: Number(TTL), description: Remark ?? undefined };
     if (Weight && Weight > 0) params.weight = Number(Weight);
     return (await this.send('PUT', '/v2.1/zones/' + this.domainid + '/recordsets/' + RecordId, null, params)) !== false;

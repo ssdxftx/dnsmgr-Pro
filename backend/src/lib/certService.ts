@@ -118,7 +118,8 @@ export class CertOrderService {
   }
 
   private async unlockOrder() {
-    await query(`UPDATE ${table('cert_order')} SET islock = 0 WHERE id = ?`, [this.oid]);
+    // 仅释放自己持有的锁：锁超时被他人抢占后，避免误释放他人的锁导致重复处理
+    await query(`UPDATE ${table('cert_order')} SET islock = 0 WHERE id = ? AND processid = ?`, [this.oid, this.order.processid]);
   }
 
   private async checkDomains() {

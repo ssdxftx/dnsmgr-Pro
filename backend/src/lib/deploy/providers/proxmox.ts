@@ -62,6 +62,7 @@ export class ProxmoxDeploy implements DeployProvider {
 
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {
     if (!config.node) throw new Error('节点名称不能为空');
+    const node = encodeURIComponent(String(config.node));
     let certHash: string;
     try {
       const x = new X509Certificate(fullchain);
@@ -70,7 +71,7 @@ export class ProxmoxDeploy implements DeployProvider {
       throw new Error('证书解析失败');
     }
 
-    const list = await this.sendRequest('/api2/json/nodes/' + config.node + '/certificates/info');
+    const list = await this.sendRequest('/api2/json/nodes/' + node + '/certificates/info');
     for (const item of list || []) {
       const fingerprint = String(item.fingerprint || '').split(':').join('').toLowerCase();
       if (fingerprint === certHash) {
@@ -79,7 +80,7 @@ export class ProxmoxDeploy implements DeployProvider {
       }
     }
 
-    await this.sendRequest('/api2/json/nodes/' + config.node + '/certificates/custom', {
+    await this.sendRequest('/api2/json/nodes/' + node + '/certificates/custom', {
       certificates: fullchain,
       key: privatekey,
       force: 1,
