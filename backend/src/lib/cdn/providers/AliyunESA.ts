@@ -2,6 +2,7 @@ import { Aliyun } from '../../clients/Aliyun.js';
 import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, L4ProxyItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
+import { toEnabled, fromEnabled } from '../vendorSwitch.js';
 
 // params 透传时禁止覆盖的服务端控制键（由 provider 依业务语义设定）
 const ESA_RESERVED_PARAM_KEYS = new Set(['Action', 'SiteId', 'Id', 'ApplicationId', 'ConfigId', 'SiteVersion']);
@@ -237,17 +238,47 @@ export class AliyunESA implements CdnProvider {
     }
     const originVal = origin.split(';')[0].trim();
     const type = originType === 'ipaddr' ? 'A/AAAA' : 'CNAME';
+    // 记录级：改写解析目标（Type/Data）；SourceType / HostPolicy 亦为 UpdateRecord 的合法参数
     const param: Record<string, any> = {
       Action: 'UpdateRecord',
       RecordId: found.record.RecordId,
       Type: type,
       Data: JSON.stringify({ value: originVal }),
-      HttpPorts: String(httpPort),
-      HttpsPorts: String(httpsPort),
     };
     if (originType === 'domain') param.SourceType = 'Domain';
     if (originHost) param.HostPolicy = originHost;
-    return (await this.call(param)) !== false;
+    if ((await this.call(param)) === false) return false;
+
+    // 回源协议与端口不属于 UpdateRecord（官方该接口无 HttpPorts/HttpsPorts 参数，
+    // 历史实现传入后会被静默忽略），它们由站点级「回源规则 OriginRule」承载。
+    return this.upsertOriginRule(domain, { originProtocol, originHost, httpPort, httpsPort });
+  }
+
+  // 回源协议/端口通过回源规则（OriginRule）生效：按域名 upsert 一条 dnsmgr_origin_<domain> 规则
+  private async upsertOriginRule(
+    domain: string,
+    opts: { originProtocol?: string; originHost?: string; httpPort?: number; httpsPort?: number },
+  ): Promise<boolean> {
+    const siteId = await this.findSite(domain);
+    if (!siteId) return true; // 站点未定位到时仅跳过规则写入，不阻断已完成记录更新
+    const scheme = ['http', 'https', 'follow'].includes(String(opts.originProtocol))
+      ? String(opts.originProtocol)
+      : 'follow';
+    const params: Record<string, any> = {
+      RuleName: `dnsmgr_origin_${domain}`,
+      RuleEnable: 'on',
+      Rule: this.esaHostCondition(domain) + ')',
+      OriginScheme: scheme,
+    };
+    if (opts.httpPort) params.OriginHttpPort = String(opts.httpPort);
+    if (opts.httpsPort) params.OriginHttpsPort = String(opts.httpsPort);
+    if (opts.originHost) params.OriginHost = opts.originHost;
+    const before = this.error;
+    if (!(await this.upsertRuleConfig(String(siteId), 'OriginRule', params))) {
+      this.error = '回源规则写入失败：' + (this.error || before || '未知错误');
+      return false;
+    }
+    return true;
   }
 
   // ===== ESA 缓存规则 / HTTPS 规则（规则引擎式，参照 multi-cloud-cdn EdgeOne 规则引擎移植思路）=====
@@ -726,14 +757,21 @@ export class AliyunESA implements CdnProvider {
     const data = await this.call({ Action: `List${kind}s`, SiteId: sid, PageNumber: page, PageSize: size });
     if (!data) return false;
     const arr = data.Configs || data.Rules || [];
-    const list: RuleItem[] = arr.map((c: any) => ({
-      configId: String(c.ConfigId ?? c.Id ?? ''),
-      ruleName: c.RuleName || '',
-      enabled: String(c.RuleEnable ?? '').toLowerCase() === 'on',
-      status: c.RuleEnable,
-      rules: [c],
-      ...c,
-    }));
+    const list: RuleItem[] = arr.map((c: any) => {
+      const id = String(c.ConfigId ?? c.Id ?? '');
+      // 注意展开顺序：原始 API 字段在前、规范化字段在后，避免被 ...c 覆盖
+      return {
+        ...c,
+        configId: id,
+        ruleId: id,
+        ruleName: c.RuleName || '',
+        // ESA 原生为 on/off，这里统一归一化出布尔 enabled，前端一律只读该字段，
+        // 避免再出现 'on' 与 'enable' 混用导致的「编辑即关闭」问题
+        enabled: toEnabled(c.RuleEnable),
+        status: c.RuleEnable,
+        rules: [c],
+      };
+    });
     return { total: Number(data.TotalCount || list.length), list };
   }
 
@@ -746,15 +784,24 @@ export class AliyunESA implements CdnProvider {
       return false;
     }
     const body: Record<string, any> = { ...params };
-    // 清除回显/透传字段，避免旧 ConfigId/SiteId/Action 覆盖本次请求的关键参数
+    // 清除回显/透传字段，避免旧 ConfigId/SiteId/Action 覆盖本次请求的关键参数；
+    // 同时清理前端表单字段（enabled/status），它们不是官方参数
     delete body.ruleName;
     delete body.RuleName;
+    delete body.enabled;
+    delete body.status;
     delete body.ConfigId;
     delete body.Id;
     delete body.SiteId;
     delete body.Action;
     delete body.SiteVersion;
     body.RuleName = ruleName;
+    // 开关归一化：接受布尔 enabled，也接受字符串 status / RuleEnable，统一输出 on/off
+    const enabled =
+      params?.enabled !== undefined
+        ? toEnabled(params.enabled)
+        : toEnabled(params?.RuleEnable ?? params?.status ?? 'on');
+    body.RuleEnable = fromEnabled(enabled, 'esa');
     const existing = await this.findEsaRule(`List${kind}s`, sid, ruleName);
     if (existing === undefined) return false;
     if (existing?.ConfigId) {

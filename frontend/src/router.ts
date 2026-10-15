@@ -26,6 +26,7 @@ const routes = [
       { path: 'preheat-tasks', component: () => import('./views/PreheatTask.vue'), meta: { titleKey: 'route.preheatTasks' } },
       { path: 'dns-check', component: () => import('./views/DnsCheckTask.vue'), meta: { titleKey: 'route.dnsCheck' } },
       { path: 'cdn-zones', component: () => import('./views/CdnZone.vue'), meta: { titleKey: 'route.cdnZones' } },
+      { path: 'cdn-zones/:aid/:zoneId', component: () => import('./views/CdnZoneSetting.vue'), meta: { titleKey: 'route.cdnZones' } },
       { path: 'cf-rules', component: () => import('./views/CfRules.vue'), meta: { titleKey: 'route.cfRules' } },
       { path: 'cdn-domains/:id/setting', component: () => import('./views/CdnDomainSetting.vue'), meta: { titleKey: 'route.cdnSetting' } },
       { path: 'cloudflare/domains/:id/hostnames', component: () => import('./views/CfHostnames.vue'), meta: { titleKey: 'route.cfHostnames' } },

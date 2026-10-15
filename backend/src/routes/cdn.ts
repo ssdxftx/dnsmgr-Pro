@@ -26,26 +26,10 @@ import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
 import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS } from '../lib/cdn/statistics/cacheService.js';
 import { checkLevel } from '../auth.js';
 import { decryptConfig } from '../lib/secret.js';
+import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
+import { EO_CONDITION_SCHEMA } from '../lib/cdn/ruleCondition.js';
 
 // 所有 CDN 管理接口仅管理员可用
-// ESA 规则引擎允许的 kind 白名单（与前端 ruleKindOptions 保持一致）
-const ESA_RULE_KINDS = new Set([
-  'RedirectRule',
-  'RewriteUrlRule',
-  'HttpRequestHeaderModificationRule',
-  'HttpResponseHeaderModificationRule',
-  'HttpIncomingRequestHeaderModificationRule',
-  'HttpIncomingResponseHeaderModificationRule',
-  'CustomResponseCodeRule',
-  'NetworkOptimization',
-  'CompressionRule',
-  'ImageTransform',
-  'VideoProcessing',
-  'OriginRule',
-  'CacheRule',
-  'HttpsBasicConfiguration',
-  'HttpsApplicationConfiguration',
-]);
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
     await (app as any).authenticate(req, reply);
@@ -232,7 +216,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点列表（按账户 + 站点聚合）
-  app.get('/api/cdn/zones', auth, async () => {
+  app.get('/api/cdn/zones', auth, async (req: any) => {
+    const aid = Number(req.query?.aid || 0);
     const rows = await query(
       `SELECT aid, zone_id, MIN(route) AS route,
               MIN(name) AS primary_name,
@@ -244,16 +229,53 @@ export default async function cdnRoutes(app: FastifyInstance) {
        ORDER BY aid ASC, zone_id ASC`,
     );
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
-    const data = rows.map((r: any) => ({
+    const localItem = (r: any) => ({
       aid: r.aid,
       zone_id: r.zone_id,
       route: r.route,
       routename: typeNames[r.route] || r.route,
       name: r.primary_name,
+      zone_name: r.primary_name,
       domain_count: Number(r.domain_count),
       domains: String(r.domains || '').split(',').filter(Boolean),
-    }));
-    return { code: 0, data };
+      cloud: false,
+    });
+
+    // 不传 aid：保持既有行为（本地已接入域名的站点聚合）
+    if (!aid) {
+      return { code: 0, data: (rows as any[]).map(localItem) };
+    }
+
+    // 传 aid：以「云端站点」为准，含尚未接入任何域名的站点；本地数据仅用于补域名数与域名列表
+    const acct: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
+    if (!acct) return { code: -1, msg: 'CDN账户不存在' };
+    const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+    if (!provider || typeof provider.getZones !== 'function') {
+      // 该类型不支持站点枚举时回退到本地聚合，避免页面空白
+      return { code: 0, data: (rows as any[]).filter((r) => Number(r.aid) === aid).map(localItem), cloud: false };
+    }
+    const zones = await provider.getZones();
+    if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
+    const localByKey = new Map<string, any>();
+    for (const r of rows as any[]) localByKey.set(`${r.aid}::${r.zone_id}`, r);
+    const data = (zones as any[]).map((z: any) => {
+      const loc = localByKey.get(`${aid}::${String(z.zoneId)}`);
+      return {
+        aid,
+        zone_id: String(z.zoneId),
+        route: acct.type,
+        routename: typeNames[acct.type] || acct.type,
+        name: loc?.primary_name || z.zoneName || '',
+        zone_name: z.zoneName || '',
+        domain_count: loc ? Number(loc.domain_count) : 0,
+        domains: loc ? String(loc.domains || '').split(',').filter(Boolean) : [],
+        status: z.status,
+        area: z.area,
+        paused: z.paused === true,
+        cloud: true,
+      };
+    });
+    return { code: 0, data, cloud: true };
   });
 
   // 站点配置读取
@@ -295,10 +317,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点管理' };
     const zones = await provider.getZones();
     if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
-    // 尽力补齐暂停状态，供前端展示与暂停/启用按钮
+    // 尽力补齐暂停状态：provider 已在列表里返回布尔 paused 时直接沿用，避免逐站再查一次（N+1）
     if (typeof provider.getZonePaused === 'function') {
       for (const z of zones as any[]) {
         if (!z.zoneId) continue;
+        if (typeof z.paused === 'boolean') continue;
         try {
           const p = await provider.getZonePaused(String(z.zoneId));
           z.paused = p === true;
@@ -622,7 +645,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String(req.query.zoneId || '').trim();
     const kind = String(req.query.kind || '').trim();
     if (!zoneId || !kind) return { code: -1, msg: '参数不完整' };
-    if (!ESA_RULE_KINDS.has(kind)) return { code: -1, msg: '不支持的规则类型' };
+    if (!isEsaRuleKind(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listRuleConfigs !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     const r = await provider.listRuleConfigs(zoneId, kind, Number(req.query.page || 1), Number(req.query.size || 100));
@@ -636,7 +659,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String(b.zoneId || '').trim();
     const kind = String(b.kind || '').trim();
     if (!zoneId || !kind) return { code: -1, msg: '参数不完整' };
-    if (!ESA_RULE_KINDS.has(kind)) return { code: -1, msg: '不支持的规则类型' };
+    if (!isEsaRuleKind(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.upsertRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     const params = b.params && typeof b.params === 'object' ? b.params : {};
@@ -650,11 +673,46 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
     const kind = String((req.body || {}).kind || req.query.kind || '').trim();
     if (!zoneId || !kind || !configId) return { code: -1, msg: '参数不完整' };
-    if (!ESA_RULE_KINDS.has(kind)) return { code: -1, msg: '不支持的规则类型' };
+    if (!isEsaRuleKind(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteRuleConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     if (!(await provider.deleteRuleConfig(zoneId, kind, configId))) return { code: -1, msg: '删除规则失败，' + provider.getError() };
     return { code: 0, msg: '删除成功' };
+  });
+
+  // 规则字段元数据：驱动可视化规则编辑器
+  //   ESA：由官方 OpenAPI 元数据生成的静态字段表（15 类 × List/Create/Update/Delete 全支持）
+  //   EO ：透传 DescribeRulesSetting，返回可用动作及其属性定义（Type=CHOICE/TOGGLE/OBJECT/...）
+  app.get('/api/cdn/accounts/:aid/rule-schema', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const acct: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
+    if (!acct) return { code: -1, msg: '账户不存在' };
+    const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+    if (!provider) return { code: -1, msg: 'CDN模块不存在' };
+
+    if (typeof provider.listRuleConfigs === 'function') {
+      const kind = String(req.query.kind || '').trim();
+      if (!kind) {
+        return {
+          code: 0,
+          data: {
+            vendor: 'esa',
+            kinds: ESA_RULE_KINDS.map((k) => ({ kind: k, fields: esaRuleFields(k) })),
+          },
+        };
+      }
+      if (!isEsaRuleKind(kind)) return { code: -1, msg: '不支持的规则类型' };
+      return { code: 0, data: { vendor: 'esa', kind, fields: esaRuleFields(kind) } };
+    }
+
+    if (typeof provider.getRulesSetting === 'function') {
+      const setting = await provider.getRulesSetting();
+      if (setting === false) return { code: -1, msg: '获取规则元数据失败，' + provider.getError() };
+      const actions = Array.isArray(setting?.Actions) ? setting.Actions : [];
+      return { code: 0, data: { vendor: 'eo', actions, condition: EO_CONDITION_SCHEMA } };
+    }
+
+    return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
   });
 
   // ===== 安全：IP 组 =====

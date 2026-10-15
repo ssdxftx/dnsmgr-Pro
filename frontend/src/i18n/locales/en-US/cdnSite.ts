@@ -49,5 +49,8 @@ export default {
     statusMoved: 'Moved',
     statusDeactivated: 'Deactivated',
     statusInitializing: 'Initializing',
+    selectSite: 'Select site',
+    openSetting: 'Site settings',
+    goSites: 'Sites',
   },
 };

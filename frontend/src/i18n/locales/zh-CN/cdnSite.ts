@@ -46,8 +46,11 @@ export default {
     statusActive: '已启用',
     statusPending: '配置中',
     statusOffline: '已下线',
-    statusMoved: '已迁走',
-    statusDeactivated: '已停用',
+    statusMoved: '已被顶替',
+    statusDeactivated: '已封禁',
     statusInitializing: '待绑定套餐',
+    selectSite: '选择站点',
+    openSetting: '站点设置',
+    goSites: '站点',
   },
 };
