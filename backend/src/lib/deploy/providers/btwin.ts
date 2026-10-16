@@ -88,7 +88,7 @@ export class BtwinDeploy implements DeployProvider {
         const panelPath = result.paths.soft;
         const pfxDir = panelPath + '/temp/ssl/' + Date.now();
         pfxPath = pfxDir + '/cert.pfx';
-        const pfx = buildPfx(fullchain, privatekey, pfxPassword);
+        const pfx = await buildPfx(fullchain, privatekey, pfxPassword);
         const response2 = await this.request(
           '/files/upload',
           {

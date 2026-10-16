@@ -41,11 +41,12 @@ function normalizePermission(input: any[]): PermItem[] {
 async function savePermissions(uid: number, input: any[]) {
   await withTransaction(async (q) => {
     await q(`DELETE FROM ${table('permission')} WHERE uid = ?`, [uid]);
-    for (const p of normalizePermission(input)) {
-      await q(
-        `INSERT INTO ${table('permission')} (uid, domain, sub, readonly, expiretime) VALUES (?, ?, ?, ?, ?)`,
-        [uid, p.domain, p.sub, p.readonly, p.expiretime],
-      );
+    const list = normalizePermission(input);
+    if (list.length) {
+      // 多值 INSERT 替代逐条插入
+      const values = list.map(() => '(?, ?, ?, ?, ?)').join(', ');
+      const params = list.flatMap((p: any) => [uid, p.domain, p.sub, p.readonly, p.expiretime]);
+      await q(`INSERT INTO ${table('permission')} (uid, domain, sub, readonly, expiretime) VALUES ${values}`, params);
     }
   });
 }
@@ -82,7 +83,7 @@ export default async function userRoutes(app: FastifyInstance) {
   // 域名列表（供权限选择，仅管理员）
   app.get('/api/user/domains', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
-    const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC`);
+    const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC LIMIT 2000`);
     return { code: 0, data: rows.map((r: any) => r.name) };
   });
 
@@ -284,7 +285,8 @@ export default async function userRoutes(app: FastifyInstance) {
 
     const totalRow = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('log')}${where}`, params);
     const total = totalRow?.c ?? 0;
-    const rows = await query(`SELECT * FROM ${table('log')}${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
+    // 显式列替代 SELECT *，减少无用 IO
+    const rows = await query(`SELECT id, uid, action, domain, data, addtime FROM ${table('log')}${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, limit, offset]);
     return { code: 0, data: { total, list: rows } };
   });
 }

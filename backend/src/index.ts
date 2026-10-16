@@ -1,4 +1,5 @@
 import Fastify from 'fastify';
+import compress from '@fastify/compress';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
@@ -85,6 +86,14 @@ const app = Fastify({
 });
 
 applySecurityHeaders(app);
+
+// 响应压缩：统计数据集、证书详情（含 base64 PFX）等大 JSON 明文传输体积降 60–80%
+// 仅压缩 >= 1KB 的响应，避免小响应增加 CPU 开销
+await app.register(compress, {
+  global: true,
+  threshold: 1024,
+  encodings: ['br', 'gzip', 'deflate'],
+});
 
 // 保留原始请求体，供 QQ 机器人 Webhook 的 Ed25519 签名校验使用
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, body: string, done: any) => {

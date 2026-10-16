@@ -23,7 +23,9 @@ export function startMonitorScheduler(): void {
       .finally(() => {
         running = false;
       });
-  }, 1000);
+    // 轮询间隔由 1s 放宽到 3s：任务 frequency 最小为 60s，3s 精度足够，
+    // 可将每秒一次的查询/连接获取频率降低到 1/3
+  }, 3000);
 }
 
 function formatDay(d: Date): string {

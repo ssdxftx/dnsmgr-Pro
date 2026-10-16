@@ -326,9 +326,21 @@ async function findTxtRecordTargetDomains(currentDomain: any, hostname: string):
   return candidates;
 }
 
+// 同账户域名列表短时缓存：公网主机名列表逐条匹配时避免重复查询（N+1）
+const matchDomainCache = new Map<number, { at: number; rows: any[] }>();
+const MATCH_DOMAIN_TTL = 5000;
+
 async function findBestMatchingDomain(accountId: number, hostname: string): Promise<any | null> {
   hostname = normalizeHostname(hostname).replace(/^\*\./, '');
-  const domains: any[] = await query(`SELECT * FROM ${table('domain')} WHERE aid = ?`, [accountId]);
+  const cached = matchDomainCache.get(accountId);
+  let domains: any[];
+  if (cached && Date.now() - cached.at < MATCH_DOMAIN_TTL) {
+    domains = cached.rows;
+  } else {
+    domains = await query(`SELECT * FROM ${table('domain')} WHERE aid = ?`, [accountId]);
+    if (matchDomainCache.size > 200) matchDomainCache.clear();
+    matchDomainCache.set(accountId, { at: Date.now(), rows: domains });
+  }
   let best: any = null;
   let bestLength = -1;
   for (const domain of domains) {

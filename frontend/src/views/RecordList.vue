@@ -91,7 +91,7 @@ async function loadRecords() {
 }
 
 async function loadDomainInfo() {
-  const res = await api<any>('GET', '/domains');
+  const res = await api<any>('GET', '/domains', undefined, { cache: true });
   if (res.code === 0) {
     const list: any[] = res.data || [];
     // 管理员可跳转到独立纳管的子域名；普通用户可跳转到被授权的子域名范围（name 形如 user1.example.com）

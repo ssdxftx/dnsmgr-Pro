@@ -152,6 +152,11 @@ function getPinnedAgent(host: string, address: string, family: number): Agent {
 
 type PinResolver = (u: URL) => Promise<{ address: string; family: number } | null>;
 
+// 已校验地址的短时缓存：避免同一主机在短时间内被反复 DNS 解析。
+// 缓存键包含校验策略（blockMsg + 谓词名），避免用弱策略的结果跳过强策略校验。
+const dnsPinCache = new Map<string, { at: number; value: { address: string; family: number } | null }>();
+const DNS_PIN_TTL = 30_000;
+
 // 解析域名并校验其全部地址；返回首个地址用于 pin。IP 字面量直接校验后返回 null（无需 pin）
 async function resolveForPin(host: string, blocked: (ip: string) => boolean, blockMsg: string): Promise<{ address: string; family: number } | null> {
   const h = String(host || '').replace(/^\[|\]$/g, '');
@@ -160,13 +165,19 @@ async function resolveForPin(host: string, blocked: (ip: string) => boolean, blo
     if (blocked(h)) throw new Error(blockMsg);
     return null;
   }
+  const cacheKey = `${h}|${blockMsg}|${blocked.name || ''}`;
+  const cached = dnsPinCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < DNS_PIN_TTL) return cached.value;
   const addrs = await lookup(h, { all: true }).catch(() => []);
   if (!addrs.length) throw new Error('域名解析失败');
   for (const a of addrs) {
     if (blocked(a.address)) throw new Error(blockMsg);
   }
   const first = addrs[0];
-  return { address: first.address, family: first.family === 6 ? 6 : 4 };
+  const value = { address: first.address, family: first.family === 6 ? 6 : 4 };
+  if (dnsPinCache.size > 500) dnsPinCache.clear();
+  dnsPinCache.set(cacheKey, { at: Date.now(), value });
+  return value;
 }
 
 // 供非 safeFetch 路径复用：校验并返回 pin 到已解析 IP 的 dispatcher（无需 pin 或允许内网时返回 undefined）

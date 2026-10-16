@@ -351,8 +351,9 @@ async function loadZoneInfo() {
   zoneInfo.value = hit || { zone_id: zoneId, name: '', zone_name: '' };
 }
 async function loadDomains() {
-  const res = await api<any>('GET', '/cdn/domains');
-  if (res.code === 0) domains.value = (res.data || []).filter((d: any) => Number(d.aid) === aid && String(d.zone_id) === zoneId);
+  // 由后端按账户 + 站点过滤，替代拉全量后在本地筛选
+  const res = await api<any>('GET', '/cdn/domains', { aid, zone_id: zoneId });
+  if (res.code === 0) domains.value = res.data || [];
 }
 async function loadNs() {
   if (!zoneId) return;
@@ -763,11 +764,18 @@ function secRoute(key: string) {
   return key === 'originProtection' ? 'origin-protection' : key;
 }
 async function loadSecurity() {
+  // 各安全配置相互独立：并行拉取，替代 3 次串行等待
+  const tasks: Promise<any>[] = [];
   if (caps.value.securityIpGroup) {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/security/ip-groups`, { zoneId });
-    ipGroups.value = res.code === 0 ? res.data : [];
+    tasks.push(
+      (async () => {
+        const res = await api<any>('GET', `/cdn/accounts/${aid}/security/ip-groups`, { zoneId });
+        ipGroups.value = res.code === 0 ? res.data : [];
+      })(),
+    );
   }
-  for (const cfg of securityCfgs) if (caps.value[cfg.cap]) await loadSecurityConfig(cfg.key, true);
+  for (const cfg of securityCfgs) if (caps.value[cfg.cap]) tasks.push(loadSecurityConfig(cfg.key, true));
+  await Promise.all(tasks);
 }
 async function loadSecurityConfig(key: string, silent = false) {
   const res = await api<any>('GET', `/cdn/accounts/${aid}/security/${secRoute(key)}`, { zoneId });
@@ -917,18 +925,23 @@ async function loadTopAnalysis() {
 }
 
 // ===================== 汇总 =====================
-async function loadByTab(name: string) {
+// 记录已加载的 tab：来回切换时跳过重复请求（reloadAll 或主动刷新时强制重载）
+const loadedTabs = new Set<string>();
+async function loadByTab(name: string, force = false) {
+  if (!force && loadedTabs.has(name)) return;
   if (name === 'origin') await loadOriginData();
   else if (name === 'rules') await loadRules();
   else if (name === 'security') await loadSecurity();
   else if (name === 'l4') await loadL4Proxies();
   else if (name === 'tasks') await loadTasks();
+  loadedTabs.add(name);
 }
 async function reloadAll() {
+  loadedTabs.clear();
   loading.value = true;
   await Promise.all([loadZoneInfo(), loadDomains(), loadNs()]);
   loading.value = false;
-  await loadByTab(tab.value);
+  await loadByTab(tab.value, true);
 }
 watch(tab, (v) => loadByTab(v));
 

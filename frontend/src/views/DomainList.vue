@@ -53,6 +53,8 @@
         :loading="loading"
         :row-key="(row: any) => row._key || row.id"
         :empty-text="t('domain.empty')"
+        :virtual-scroll="domains.length > 200"
+        :max-height="620"
       />
     </n-card>
 
@@ -126,6 +128,15 @@ import RecordTable from '../components/RecordTable.vue';
 
 const router = useRouter();
 const { t } = useI18n();
+// 到期时间解析结果按原始字符串缓存：表格重渲染时避免每格重复 new Date() 解析
+const expireTsCache = new Map<string, number>();
+function expireTs(val: string): number {
+  const hit = expireTsCache.get(val);
+  if (hit !== undefined) return hit;
+  const ts = new Date(val).getTime();
+  expireTsCache.set(val, ts);
+  return ts;
+}
 const message = useMessage();
 const dialog = useDialog();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
@@ -160,6 +171,7 @@ const columns = computed(() => {
   cols.push({
     title: t('domain.nameCol'),
     key: 'name',
+    width: 260,
     render: (row: any) =>
       h(NSpace, { size: 6, align: 'center', wrap: false }, {
         default: () =>
@@ -183,7 +195,7 @@ const columns = computed(() => {
     width: 200,
     render(row: any) {
       const val = row.expiretime || '';
-      const expired = val && new Date(val) < new Date();
+      const expired = val && expireTs(val) < Date.now();
       const text = val ? String(val).slice(0, 19) : (row.checkstatus === 2 ? t('domain.queryFailed') : t('domain.notQueried'));
       const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
       const children: any[] = [h('span', { style: color ? { color } : undefined }, text || '-')];
@@ -218,21 +230,31 @@ const columns = computed(() => {
   return cols;
 });
 
+// 参数快速切换时中止上一次请求，避免旧响应覆盖新结果
+let loadAbort: AbortController | null = null;
 async function loadDomains() {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined);
-  let list: any[] = res.code === 0 ? res.data : [];
-  // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片
-  if (kw.value && list.length === 0) {
-    const rres = await api<any>('GET', '/records/search', { kw: kw.value });
-    recordResults.value = rres.code === 0 ? rres.data : [];
-    showRecords.value = recordResults.value.length > 0;
-  } else {
-    recordResults.value = [];
-    showRecords.value = false;
+  try {
+    const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined, { signal: ac.signal });
+    const list: any[] = res.code === 0 ? res.data : [];
+    // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片
+    if (kw.value && list.length === 0) {
+      const rres = await api<any>('GET', '/records/search', { kw: kw.value }, { signal: ac.signal });
+      recordResults.value = rres.code === 0 ? rres.data : [];
+      showRecords.value = recordResults.value.length > 0;
+    } else {
+      recordResults.value = [];
+      showRecords.value = false;
+    }
+    domains.value = list;
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') throw e;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
   }
-  domains.value = list;
-  loading.value = false;
 }
 
 function search() {
@@ -295,22 +317,45 @@ function gotoRecords(row: any) {
   window.open(`/domains/${row.id}/records${q}`, '_self');
 }
 
+const noticePending = new Set<number>();
 async function toggleNotice(row: any) {
-  const target = row.is_notice == 1 ? 0 : 1;
-  const res = await api('POST', '/domains/batch-notice', { ids: [row.id], is_notice: target });
-  if (res.code === 0) {
-    message.success(res.msg);
-    loadDomains();
-  } else message.error(res.msg);
+  const id = Number(row.id);
+  if (noticePending.has(id)) return; // 防双击重复提交
+  noticePending.add(id);
+  const prev = Number(row.is_notice) === 1 ? 1 : 0;
+  const target = prev === 1 ? 0 : 1;
+  row.is_notice = target; // 乐观更新：立即反馈，避免等待整表重拉
+  try {
+    const res = await api('POST', '/domains/batch-notice', { ids: [row.id], is_notice: target });
+    if (res.code === 0) message.success(res.msg);
+    else {
+      row.is_notice = prev; // 失败回滚
+      message.error(res.msg);
+    }
+  } finally {
+    noticePending.delete(id);
+  }
 }
 
 async function batchNotice(isNotice: number) {
   if (!checked.value.length) return message.warning(t('domain.selectDomain'));
-  const res = await api('POST', '/domains/batch-notice', { ids: checked.value.map(Number), is_notice: isNotice });
-  if (res.code === 0) {
-    message.success(res.msg);
-    loadDomains();
-  } else message.error(res.msg);
+  const ids = checked.value.map(Number);
+  const prev = new Map<number, number>();
+  for (const d of domains.value) {
+    if (ids.includes(Number(d.id))) {
+      prev.set(Number(d.id), Number(d.is_notice) === 1 ? 1 : 0);
+      d.is_notice = isNotice;
+    }
+  }
+  const res = await api('POST', '/domains/batch-notice', { ids, is_notice: isNotice });
+  if (res.code === 0) message.success(res.msg);
+  else {
+    for (const d of domains.value) {
+      const p = prev.get(Number(d.id));
+      if (p !== undefined) d.is_notice = p;
+    }
+    message.error(res.msg);
+  }
 }
 
 async function updateDate(row: any) {
@@ -342,18 +387,27 @@ function openEdit(row: any) {
 
 async function doEdit() {
   if (!editRow.value) return;
-  const res = await api('PUT', `/domains/${editRow.value.id}`, {
+  const row = editRow.value;
+  const payload = {
     remark: editForm.value.remark,
     cid: editForm.value.cid || 0,
     is_hide: editForm.value.is_hide ? 1 : 0,
     is_sso: editForm.value.is_sso ? 1 : 0,
     expiretime: editForm.value.expiretime || null,
+  };
+  const prev = { remark: row.remark, cid: row.cid, is_hide: row.is_hide, is_sso: row.is_sso, expiretime: row.expiretime, category_name: row.category_name };
+  Object.assign(row, {
+    ...payload,
+    category_name: categories.value.find((c: any) => Number(c.id) === Number(payload.cid))?.name || '',
   });
+  const res = await api('PUT', `/domains/${row.id}`, payload);
   if (res.code === 0) {
     message.success(t('domain.editSuccess'));
     showEdit.value = false;
-    loadDomains();
-  } else message.error(res.msg);
+  } else {
+    Object.assign(row, prev);
+    message.error(res.msg);
+  }
 }
 
 function batchDelete() {
@@ -364,12 +418,17 @@ function batchDelete() {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('POST', '/domains/batch-del', { ids: checked.value.map(Number) });
+      const ids = checked.value.map(Number);
+      const removed = domains.value.filter((d) => ids.includes(Number(d.id)));
+      domains.value = domains.value.filter((d) => !ids.includes(Number(d.id)));
+      const res = await api('POST', '/domains/batch-del', { ids });
       if (res.code === 0) {
         message.success(res.msg);
         checked.value = [];
-        loadDomains();
-      } else message.error(res.msg);
+      } else {
+        domains.value = [...domains.value, ...removed]; // 失败回滚
+        message.error(res.msg);
+      }
     },
   });
 }
@@ -381,11 +440,15 @@ function delDomain(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
+      const idx = domains.value.findIndex((d) => Number(d.id) === Number(row.id));
+      const removed = idx >= 0 ? domains.value[idx] : null;
+      if (idx >= 0) domains.value.splice(idx, 1);
       const res = await api('DELETE', `/domains/${row.id}`);
-      if (res.code === 0) {
-        message.success(t('domain.deleteSuccess'));
-        loadDomains();
-      } else message.error(res.msg);
+      if (res.code === 0) message.success(t('domain.deleteSuccess'));
+      else {
+        if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
+        message.error(res.msg);
+      }
     },
   });
 }

@@ -149,9 +149,11 @@ export async function createOrder(aid: number, domains: string[], link: string |
     { aid, keytype: 'RSA', keysize: 2048, addtime: new Date(), updatetime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date(), link },
   ]);
   const id = Number(res?.insertId || 0);
-  let sort = 1;
-  for (const d of domains) {
-    await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(d), sort++]);
+  if (domains.length) {
+    // 多值 INSERT 替代逐条插入
+    const values = domains.map(() => '(?, ?, ?)').join(', ');
+    const params = domains.flatMap((d, idx) => [id, domainToASCII(d), idx + 1]);
+    await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES ${values}`, params);
   }
   const rows: any = await q(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
   return rows[0];
@@ -348,14 +350,8 @@ export async function logDeployResult(taskId: number, status: number, error?: st
 export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number): Promise<{ orders: number; deployTasks: number }> {
   const did = Number(cdnDomainId || 0);
   if (!did) return { orders: 0, deployTasks: 0 };
-  const rows: any[] = await query(`SELECT id, status, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%cdnDomainId%']);
-  const targets = (rows as any[]).filter((r) => {
-    try {
-      return Number(JSON.parse(r.link)?.cdnDomainId) === did;
-    } catch {
-      return false;
-    }
-  });
+  // 走 cdn_domain_id 生成列索引精确匹配，替代 link LIKE 前缀通配全表扫描
+  const targets: any[] = await query(`SELECT id, status, link FROM ${table('cert_order')} WHERE cdn_domain_id = ?`, [did]);
 
   // 阶段一：先吊销所有已签发（status=3）的联动证书，任一失败则整体中止
   for (const o of targets) {

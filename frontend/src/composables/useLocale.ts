@@ -1,8 +1,9 @@
 import { computed } from 'vue';
 import { api, getToken } from '../api';
-import { i18n, isSupportedLocale, LOCALE_STORAGE_KEY, type AppLocale } from '../i18n';
+import { ensureLocale, i18n, isSupportedLocale, LOCALE_STORAGE_KEY, type AppLocale } from '../i18n';
 
-function applyToI18n(lang: AppLocale) {
+async function applyToI18n(lang: AppLocale) {
+  await ensureLocale(lang);
   (i18n.global as any).locale.value = lang;
   if (typeof document !== 'undefined') document.documentElement.lang = lang;
 }
@@ -21,7 +22,7 @@ export function useLocale() {
   // 用户主动切换：立即生效并持久化；已登录时同步到后端账号偏好
   const setLocale = async (lang: AppLocale, opts: { syncRemote?: boolean } = {}) => {
     if (!isSupportedLocale(lang)) return;
-    applyToI18n(lang);
+    await applyToI18n(lang);
     persist(lang);
     if (opts.syncRemote !== false && getToken()) {
       try {
@@ -33,9 +34,9 @@ export function useLocale() {
   };
 
   // 登录 / 拉取用户信息后应用账号保存的语言偏好（不回写后端）
-  const applyUserLocale = (lang: unknown) => {
+  const applyUserLocale = async (lang: unknown) => {
     if (!isSupportedLocale(lang)) return;
-    applyToI18n(lang);
+    await applyToI18n(lang);
     persist(lang);
   };
 

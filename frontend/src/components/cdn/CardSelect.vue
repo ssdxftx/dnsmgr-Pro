@@ -252,9 +252,7 @@ function pick(value: string) {
   align-items: center;
   gap: 8px;
   padding: 10px 12px 8px;
-  background: color-mix(in srgb, var(--app-bg-soft) 88%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: color-mix(in srgb, var(--app-bg-soft) 94%, transparent);
 }
 .re-pick__section-name {
   font-family: var(--app-font-mono);

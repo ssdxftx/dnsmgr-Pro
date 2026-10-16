@@ -156,8 +156,8 @@ async function submit() {
 }
 
 onMounted(async () => {
-  await loadSettings();
-  await loadDomains();
+  // 设置与域名选项相互独立，并行拉取
+  await Promise.all([loadSettings(), loadDomains()]);
   if (isEdit.value) await loadTask();
 });
 </script>

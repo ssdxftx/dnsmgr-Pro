@@ -15,7 +15,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const rows = isAdmin
       ? await query(`SELECT * FROM ${table('dns_check_task')} ORDER BY id DESC`)
       : await query(`SELECT * FROM ${table('dns_check_task')} WHERE uid = ? ORDER BY id DESC`, [req.user.uid]);
-    const domains: any[] = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC`);
+    const domains: any[] = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC LIMIT 2000`);
     const nameMap = Object.fromEntries(domains.map((d: any) => [d.id, d.name]));
     const data = rows.map((r: any) => ({ ...r, domain_name: nameMap[r.did] || '' }));
     return { code: 0, data };
@@ -24,7 +24,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
   // 普通用户可选的域名（其授权范围内的域名）
   app.get('/api/dns-check/domains', auth, async (req: any) => {
     if (checkLevel(req.user, 2)) {
-      const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC`);
+      const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC LIMIT 2000`);
       return { code: 0, data: rows };
     }
     const perms = await getUserPermissions(req.user.uid);

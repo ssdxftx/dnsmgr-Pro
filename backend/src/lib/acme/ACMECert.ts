@@ -1,5 +1,14 @@
 import { execFileSync } from 'node:child_process';
-import { createHash, createHmac, createPrivateKey, createPublicKey, generateKeyPairSync, sign, X509Certificate } from 'node:crypto';
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPair,
+  sign,
+  X509Certificate,
+  type KeyObject,
+} from 'node:crypto';
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -432,16 +441,25 @@ export class ACMECert extends ACMEv2 {
     }
   }
 
-  generateRSAKey(bits = 2048): string {
-    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: bits });
-    return privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+  // 异步生成密钥对：走 libuv 线程池，避免 RSA-4096（0.5–3s）同步阻塞整个事件循环
+  private generateKeyPairAsync(type: 'rsa' | 'ec', options: any): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const cb = (err: Error | null, _publicKey: KeyObject, privateKey: KeyObject) => {
+        if (err) reject(err);
+        else resolve(privateKey.export({ type: 'pkcs8', format: 'pem' }).toString());
+      };
+      (generateKeyPair as any)(type, options, cb);
+    });
   }
 
-  generateECKey(curveName = '384'): string {
+  generateRSAKey(bits = 2048): Promise<string> {
+    return this.generateKeyPairAsync('rsa', { modulusLength: bits });
+  }
+
+  generateECKey(curveName = '384'): Promise<string> {
     const map: Record<string, string> = { '256': 'prime256v1', '384': 'secp384r1', '521': 'secp521r1' };
     const curve = map[curveName] || curveName;
-    const { privateKey } = generateKeyPairSync('ec', { namedCurve: curveMap(curve) });
-    return privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    return this.generateKeyPairAsync('ec', { namedCurve: curveMap(curve) });
   }
 
   private isPrivateKey(pem: string): boolean {

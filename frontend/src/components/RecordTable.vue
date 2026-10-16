@@ -130,7 +130,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, h, reactive, ref } from 'vue';
+import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
@@ -186,15 +187,8 @@ const editingId = ref<string | null>(null);
 const editingDid = ref<number | null>(null);
 const form = reactive<any>({ name: '', type: 'A', value: '', line: 'default', ttl: 600, mx: 1, remark: '' });
 
-const isMobile = ref(false);
-function checkMobile() {
-  isMobile.value = window.innerWidth < 768;
-}
-onMounted(() => {
-  checkMobile();
-  window.addEventListener('resize', checkMobile);
-});
-onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+// 统一走 useResponsive（内部已用 passive 监听合并宽度更新），避免各处重复注册 resize 监听
+const { isMobile } = useResponsive();
 
 // 手机端标签置顶并把弹窗限制在视口内，避免主机记录等输入框被标签挤压
 const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));

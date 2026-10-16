@@ -295,7 +295,8 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where}`, params))?.c || 0;
     const rows = await query(
-      `SELECT A.*, B.type, B.remark AS aremark FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
+      // 显式列清单：排除 fullchain / privatekey / info / dns 等大字段，避免每页读回 1–3MB 无用 IO 并把私钥取出到应用内存
+      `SELECT A.id, A.aid, A.keytype, A.keysize, A.status, A.error, A.isauto, A.issuetime, A.expiretime, A.issuer, A.addtime, A.updatetime, B.type FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
       [...params, clampLimit(limit, 20), clampOffset(offset)],
     );
     const list = [];
@@ -367,9 +368,11 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!order.keytype || !order.keysize) return { code: -1, msg: '必填参数不能为空' };
 
     const id = await query(`INSERT INTO ${table('cert_order')} SET ?`, [order]).then((r: any) => r.insertId || 0);
-    let i = 1;
-    for (const domain of domList) {
-      await query(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
+    if (domList.length) {
+      // 多值 INSERT 替代逐条插入
+      const values = domList.map(() => '(?, ?, ?)').join(', ');
+      const params = domList.flatMap((domain, idx) => [id, domainToASCII(domain), idx + 1]);
+      await query(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES ${values}`, params);
     }
     // 待处理订单立即在后台开始申请，无需用户手动点「处理」
     if (Number(order.status) === 0) kickOrderProcessing(id);

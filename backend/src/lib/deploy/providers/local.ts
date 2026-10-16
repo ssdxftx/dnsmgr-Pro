@@ -119,7 +119,7 @@ export class LocalDeploy implements DeployProvider {
       const pfxFile = safeTargetPath(config.pfx_file);
       const dir = dirname(pfxFile);
       if (!existsSync(dir)) throw new Error(dir + ' 目录不存在');
-      const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
+      const pfx = await buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
       // PFX 内含私钥，显式以 0600 写入，避免按进程 umask 落盘为全局可读
       writeFileSync(pfxFile, pfx, { mode: 0o600 });
       try { chmodSync(pfxFile, 0o600); } catch { /* 忽略：部分文件系统不支持 */ }

@@ -96,11 +96,9 @@ onMounted(() => {
   flex-direction: column;
   gap: 6px;
   padding: 18px 20px;
-  background: var(--app-glass);
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-lg);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
   box-shadow: var(--app-shadow-sm);
   transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
 }

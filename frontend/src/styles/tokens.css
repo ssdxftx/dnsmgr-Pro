@@ -384,7 +384,7 @@ a {
    =========================================================================== */
 .fade-slide-enter-active,
 .fade-slide-leave-active {
-  transition: opacity 0.22s var(--app-ease), transform 0.22s var(--app-ease);
+  transition: opacity 0.14s var(--app-ease), transform 0.14s var(--app-ease);
 }
 .fade-slide-enter-from {
   opacity: 0;
@@ -438,6 +438,14 @@ body::after {
   opacity: 0.05;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   mix-blend-mode: overlay;
+}
+
+/* 固定全屏 mix-blend-mode 混合层在滚动时需整视口重绘，是低端设备/触屏掉帧的主因；
+   小屏与触屏设备直接隐藏，仅在大屏指针设备保留氛围层 */
+@media (max-width: 1023px), (hover: none) {
+  body::after {
+    display: none;
+  }
 }
 
 /* 展示字体：仅用于标题与大数字；中文自动回退 Noto Sans SC，不污染正文可读性 */
@@ -544,10 +552,9 @@ h3,
 .app-page > .n-card,
 .app-stack .n-grid-item > .n-card,
 .app-page .n-grid-item > .n-card {
-  background: var(--app-glass);
+  /* 用半透明近似替代每卡片实时 backdrop-filter：视觉差异极小，滚动合成开销降一个数量级 */
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   border: 1px solid var(--app-border);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
   position: relative;
   transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
 }

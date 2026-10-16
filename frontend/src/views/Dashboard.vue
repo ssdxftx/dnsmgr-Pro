@@ -100,7 +100,7 @@ const healthList = computed(() =>
 
 onMounted(async () => {
   const [d, a, c] = await Promise.all([
-    api<any>('GET', '/domains').catch(() => ({ code: -1 })),
+    api<any>('GET', '/domains', undefined, { cache: true }).catch(() => ({ code: -1 })),
     api<any>('GET', '/dns/accounts').catch(() => ({ code: -1 })),
     api<any>('GET', '/cdn/domains').catch(() => ({ code: -1 })),
   ]);
