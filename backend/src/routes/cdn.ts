@@ -1273,7 +1273,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       }
       const scope = await provider.getCertScope(row.name);
       if (!scope) {
-        results.push({ id, name: row.name, status: 'failed', message: '未找到该域名的 ESA 站点，请先在阿里云 ESA 控制台创建站点' });
+        results.push({ id, name: row.name, status: 'failed', message: '未找到该域名对应的加速站点，请先在对应云控制台创建站点' });
         continue;
       }
       if (!account) {
@@ -1712,7 +1712,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
         failed.push({ url, msg: 'CDN 账户不存在' });
         continue;
       }
-      const key = `${row.route}#${row.aid}`;
+      // 按「账户 + 站点(zone)」分组：同一账户下不同站点的 provider 实例（站点上下文）不同，
+      // 若仅按账户分组，会把 URL 提交到首个域名所属的站点，导致跨站点误刷
+      const key = `${row.route}#${row.aid}#${row.zone_id || ''}`;
       if (!grouped[key]) grouped[key] = { route: row.route, provider, urls: [] };
       grouped[key].urls.push(url);
     }

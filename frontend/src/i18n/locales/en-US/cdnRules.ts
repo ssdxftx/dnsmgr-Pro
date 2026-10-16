@@ -63,6 +63,7 @@ export default {
     condGroupHint: 'All conditions in a group must match (AND)',
     condNoValue: 'No value needed for this operator',
     condParamName: 'Parameter name',
+    condHostPick: 'Select or type a domain',
     condIgnoreCase: 'Ignore case',
     condVisual: 'Visual',
     condExprMode: 'Expression',

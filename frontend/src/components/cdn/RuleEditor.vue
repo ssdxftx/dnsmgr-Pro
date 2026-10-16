@@ -168,8 +168,19 @@
                           size="small"
                           class="rule-editor__cond-name"
                         />
+                        <n-select
+                          v-if="needValues(it) && isHostChoice(it)"
+                          v-model:value="it.values"
+                          :options="hostOptions"
+                          multiple
+                          filterable
+                          tag
+                          size="small"
+                          class="rule-editor__cond-values"
+                          :placeholder="t('cdnRules.condHostPick')"
+                        />
                         <n-dynamic-tags
-                          v-if="needValues(it)"
+                          v-else-if="needValues(it)"
                           v-model:value="it.values"
                           size="small"
                           class="rule-editor__cond-values"
@@ -272,6 +283,8 @@ const props = defineProps<{
   initial?: any;
   editing?: boolean;
   saving?: boolean;
+  /** 当前站点域名，用于 HOST 等于/不等于时直接选择 */
+  domains?: string[];
 }>();
 const emit = defineEmits<{
   (e: 'save', payload: Record<string, any>): void;
@@ -385,6 +398,13 @@ function ignoreCaseAble(target: string) {
 function needValues(it: EoCondItem) {
   return it.operator !== 'exist' && it.operator !== 'notexist';
 }
+/** HOST 的「等于/不等于」直接提供站点域名供选择 */
+function isHostChoice(it: EoCondItem) {
+  return it.target === 'host' && (it.operator === 'equal' || it.operator === 'notEquals');
+}
+const hostOptions = computed(() =>
+  (props.domains || []).filter((d) => !!d).map((d) => ({ label: d, value: d })),
+);
 function onTargetChange(it: EoCondItem) {
   // 切换匹配类型后收敛非法运算符 / 参数名 / 值
   const meta = EO_TARGETS.find((x) => x.value === it.target);

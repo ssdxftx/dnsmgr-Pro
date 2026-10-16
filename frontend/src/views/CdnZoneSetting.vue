@@ -265,6 +265,7 @@
         :initial="ruleInitial"
         :editing="!!ruleEditingId"
         :saving="ruleSaving"
+        :domains="siteDomains"
         @save="saveRule"
         @cancel="showRuleEditor = false"
       />
@@ -304,6 +305,17 @@ const nsList = ref<string[]>([]);
 
 const isEsa = computed(() => providers.value[zoneInfo.value.route]?.vendor === 'esa' || String(zoneInfo.value.route || '') === 'aliyun_esa');
 const caps = computed<Record<string, boolean>>(() => providers.value[zoneInfo.value.route]?.capabilities || {});
+/** 当前站点域名（用于规则 HOST 匹配直接选择） */
+const siteDomains = computed<string[]>(() => {
+  const set = new Set<string>();
+  for (const d of domains.value) {
+    const n = d?.name || d?.domain;
+    if (n) set.add(String(n));
+  }
+  const zn = zoneInfo.value.zone_name || zoneInfo.value.name;
+  if (zn) set.add(String(zn));
+  return [...set];
+});
 
 const zoneTitle = computed(() => `${t('cdnZoneSetting.title')} · ${zoneInfo.value.zone_name || zoneInfo.value.name || zoneId}`);
 const statusLabel = computed(() => {
@@ -554,8 +566,17 @@ async function loadRules() {
   ruleLoading.value = true;
   if (isEsa.value) await loadRuleSchemaForKind();
   if (isEsa.value) {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, page: 1, size: 100 });
-    ruleList.value = res.code === 0 ? res.data?.list || [] : [];
+    // ESA 规则按 kind 分页，单页 100；循环取全量，避免规则较多时列表被截断
+    const all: any[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, page, size: 100 });
+      if (res.code !== 0) break;
+      const l = res.data?.list || [];
+      all.push(...l);
+      const total = Number(res.data?.total || 0);
+      if (l.length < 100 || all.length >= total) break;
+    }
+    ruleList.value = all;
   } else {
     const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, { zoneId });
     ruleList.value = res.code === 0 ? res.data || [] : [];
@@ -592,7 +613,7 @@ async function openRuleEditor(row: any) {
   ruleEditingId.value = row ? String(row.ruleId || row.configId || '') : '';
   if (row) {
     if (isEsa.value) ruleInitial.value = Array.isArray(row.rules) && row.rules.length ? row.rules[0] : row;
-    else ruleInitial.value = { RuleName: row.ruleName, Status: row.status, Branches: row.branches || [] };
+    else ruleInitial.value = { RuleName: row.ruleName, Status: row.status, Branches: row.branches || [], Description: row.description || [] };
   } else {
     ruleInitial.value = isEsa.value ? { RuleEnable: 'on' } : { Status: 'enable', Branches: [] };
   }
@@ -643,6 +664,7 @@ async function saveRule(payload: any) {
       ruleName: payload.RuleName,
       status: payload.Status,
       branches: payload.Branches,
+      description: payload.Description,
     });
   } else {
     res = await api('POST', `/cdn/accounts/${aid}/rules`, {
@@ -650,6 +672,7 @@ async function saveRule(payload: any) {
       ruleName: payload.RuleName,
       status: payload.Status,
       branches: payload.Branches,
+      description: payload.Description,
     });
   }
   ruleSaving.value = false;
@@ -676,6 +699,7 @@ async function toggleRuleEnabled(row: any) {
       ruleName: row.ruleName,
       status: next ? 'enable' : 'disable',
       branches: row.branches || [],
+      description: row.description || [],
     });
   }
   if (res.code === 0) loadRules();

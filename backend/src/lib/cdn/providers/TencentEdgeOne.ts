@@ -70,20 +70,27 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('DescribeZones', { Limit: 1 })) !== false;
   }
 
-  private getRootDomain(domain: string): string {
-    const parts = domain.split('.');
-    return parts.length <= 2 ? domain : parts.slice(-2).join('.');
-  }
-
   private async findZone(domain: string): Promise<string | false> {
     if (this.zoneId) return this.zoneId;
-    const root = this.getRootDomain(domain);
     const zones = await this.listAllZones();
     if (zones === false) return false;
+    // 按域名后缀匹配 ZoneName（最长匹配优先），避免 example.com.cn / example.co.uk
+    // 这类多标签公共后缀被「取末两段」错误解析为 com.cn / co.uk
+    let bestId = '';
+    let bestLen = -1;
     for (const zone of zones) {
-      if (zone.ZoneName === root && zone.ZoneId) return zone.ZoneId;
+      const zn = String(zone?.ZoneName || '');
+      if (!zn || !zone?.ZoneId) continue;
+      if (domain === zn || domain.endsWith('.' + zn)) {
+        if (zn.length > bestLen) {
+          bestLen = zn.length;
+          bestId = String(zone.ZoneId);
+        }
+      }
     }
-    return false;
+    if (!bestId) return false;
+    this.zoneId = bestId;
+    return bestId;
   }
 
   async createDomain(domain: string, origin: string, originType: string, serviceArea: string, specifiedZoneId?: string | null): Promise<string | false> {
@@ -109,12 +116,27 @@ export class TencentEdgeOne implements CdnProvider {
     return false;
   }
 
+  // 站点内加速域名可能超过单页上限，统一翻页拉全量，避免列表/定位/CNAME 查询漏读
+  private async listAllAccelerationDomains(zoneId: string): Promise<any[] | false> {
+    const limit = 100;
+    const all: any[] = [];
+    for (let offset = 0; offset < limit * 200; offset += limit) {
+      const data = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Offset: offset, Limit: limit });
+      if (!data) return false;
+      const arr = data.AccelerationDomains || [];
+      all.push(...arr);
+      if (arr.length < limit) break;
+      if (data.TotalCount != null && offset + arr.length >= data.TotalCount) break;
+    }
+    return all;
+  }
+
   async getDomainCname(domain: string): Promise<string | false> {
     const zoneId = await this.findZone(domain);
     if (!zoneId) return false;
-    const data = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Limit: 100 });
-    if (!data) return false;
-    for (const d of data.AccelerationDomains || []) {
+    const list = await this.listAllAccelerationDomains(zoneId);
+    if (list === false) return false;
+    for (const d of list) {
       if (d.DomainName === domain && d.Cname) return d.Cname;
     }
     return false;
@@ -123,20 +145,20 @@ export class TencentEdgeOne implements CdnProvider {
   async listDomains(): Promise<CdnDomainItem[] | false> {
     const list: CdnDomainItem[] = [];
     this.zoneErrors = [];
-    const zonesData = await this.send('DescribeZones', { Limit: 100, Offset: 0 });
-    if (!zonesData) return false;
-    for (const z of zonesData.Zones || []) {
+    const zones = await this.listAllZones();
+    if (zones === false) return false;
+    for (const z of zones) {
       const zoneId = z.ZoneId || '';
       if (!zoneId) continue;
       let zoneForceRedirect = false;
       const zs = await this.send('DescribeL7AccSetting', { ZoneId: zoneId });
       if (zs) zoneForceRedirect = zs.ZoneSetting?.ZoneConfig?.ForceRedirectHTTPS?.Switch === 'on';
-      const dr = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Offset: 0, Limit: 100 });
-      if (!dr) {
+      const dr = await this.listAllAccelerationDomains(zoneId);
+      if (dr === false) {
         this.zoneErrors.push(z.ZoneName + ': ' + this.error);
         continue;
       }
-      for (const d of dr.AccelerationDomains || []) {
+      for (const d of dr) {
         const originDetail = d.OriginDetail || {};
         const originVal = originDetail.Origin || '';
         const originType = originVal && /^\d+\.\d+\.\d+\.\d+/.test(originVal) ? 'ipaddr' : 'domain';
@@ -170,9 +192,9 @@ export class TencentEdgeOne implements CdnProvider {
       return false;
     }
     // EdgeOne 要求域名处于停用状态才能删除：在线时先停用再删除
-    const list = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Offset: 0, Limit: 200 });
+    const list = await this.listAllAccelerationDomains(zoneId);
     if (list !== false) {
-      const cur = (list.AccelerationDomains || []).find((d: any) => d.DomainName === domain);
+      const cur = list.find((d: any) => d.DomainName === domain);
       if (cur && cur.DomainStatus === 'online') {
         const stopped = await this.send('ModifyAccelerationDomainStatuses', { ZoneId: zoneId, DomainNames: [domain], Status: 'offline' });
         if (stopped === false) return false;
@@ -224,30 +246,26 @@ export class TencentEdgeOne implements CdnProvider {
     }
     try {
       const list = Array.isArray(rules) ? rules : [];
-      // 全局规则（path 为 * 或空）：站点级全局缓存配置（移植自 saveCacheRules 的 globalRule 分支）
+      // 具体路径规则（优先级高）在前，全局规则（host 命中即生效）最后；
+      // 全部通过「域名级」L7 加速规则下发，避免改写站点级 ZoneConfig.Cache 而影响同一 Zone 下的其它域名。
+      const entries: { rule: { type: PathRuleType; value: string }; ttl: number; global?: boolean }[] = [];
       const globalRule = list.find((r) => parsePathRule(r?.path).type === 'global');
-      if (globalRule) {
-        const ttl = Math.max(0, Number(globalRule.ttl) || 0);
-        const followOrigin = { Switch: 'off', DefaultCache: 'off', DefaultCacheStrategy: 'off', DefaultCacheTime: 0 };
-        const cache =
-          ttl > 0
-            ? { FollowOrigin: followOrigin, CustomTime: { Switch: 'on', IgnoreCacheControl: 'on', CacheTime: ttl }, NoCache: { Switch: 'off' } }
-            : { FollowOrigin: followOrigin, CustomTime: { Switch: 'off' }, NoCache: { Switch: 'on' } };
-        await this.client.request('ModifyL7AccSetting', { ZoneId: zoneId, ZoneConfig: { Cache: cache } });
+      for (const r of list) {
+        const parsed = parsePathRule(r?.path);
+        if (parsed.type === 'global') continue;
+        entries.push({ rule: parsed, ttl: Math.max(0, Number(r?.ttl) || 0) });
       }
-      // 非全局规则：通过 L7 加速规则（规则引擎）下发（移植自 saveEdgeOneCacheRule）
-      const specific = list
-        .map((r) => ({ path: normalizeValue(r?.path), ttl: Math.max(0, Number(r?.ttl) || 0) }))
-        .filter((r) => r.path !== '' && r.path !== '*');
+      if (globalRule) entries.push({ rule: parsePathRule('*'), ttl: Math.max(0, Number(globalRule.ttl) || 0), global: true });
+
       const ruleName = this.edgeOneCacheRuleName(domain);
       const existing = await this.findEdgeOneL7Rule(zoneId, ruleName);
-      if (!specific.length) {
+      if (!entries.length) {
         if (existing?.RuleId) {
           await this.client.request('DeleteL7AccRules', { ZoneId: zoneId, RuleIds: [existing.RuleId] });
         }
         return true;
       }
-      const item = this.buildCacheRuleEngineItem(domain, specific);
+      const item = this.buildCacheRuleEngineItem(domain, entries);
       if (existing?.RuleId) {
         // RulePriority 由 DescribeL7AccRules 返回但对 ModifyL7AccRule 只读
         await this.client.request('ModifyL7AccRule', { ZoneId: zoneId, Rule: { ...item, RuleId: existing.RuleId } });
@@ -346,15 +364,17 @@ export class TencentEdgeOne implements CdnProvider {
     return { NoCache: { Switch: 'on' } };
   }
 
-  private buildCacheRuleEngineItem(domain: string, rules: { path: string; ttl: number }[]): Record<string, any> {
-    const subRules = rules.map((r) => ({
+  private buildCacheRuleEngineItem(domain: string, entries: { rule: { type: PathRuleType; value: string }; ttl: number; global?: boolean }[]): Record<string, any> {
+    const hostCondition = "${http.request.host} in ['" + this.escapeConditionValue(domain) + "']";
+    const subRules = entries.map((e) => ({
       Branches: [
         {
-          Condition: this.buildCacheRuleCondition(parsePathRule(r.path)),
-          Actions: [{ Name: 'Cache', CacheParameters: this.buildRuleCacheParameters(r.ttl) }],
+          // 全局规则同样以 host 条件表达（不额外限定路径），置于最后以避免覆盖具体路径规则
+          Condition: e.global ? hostCondition : this.buildCacheRuleCondition(e.rule),
+          Actions: [{ Name: 'Cache', CacheParameters: this.buildRuleCacheParameters(e.ttl) }],
         },
       ],
-      Description: [JSON.stringify({ path: normalizeValue(r.path), ttl: r.ttl })],
+      Description: [JSON.stringify({ path: e.global ? '*' : normalizeValue(e.rule.value), ttl: e.ttl })],
     }));
     return {
       Status: 'enable',
@@ -362,7 +382,7 @@ export class TencentEdgeOne implements CdnProvider {
       Description: ['dnsmgr cache rules for ' + domain],
       Branches: [
         {
-          Condition: "${http.request.host} in ['" + this.escapeConditionValue(domain) + "']",
+          Condition: hostCondition,
           SubRules: subRules,
         },
       ],
@@ -474,9 +494,9 @@ export class TencentEdgeOne implements CdnProvider {
   async getDomainCertInfo(domain: string): Promise<DomainCertInfo | false> {
     const zoneId = await this.findZone(domain);
     if (!zoneId) return false;
-    const data = await this.send('DescribeAccelerationDomains', { ZoneId: zoneId, Offset: 0, Limit: 200 });
-    if (!data) return false;
-    const item = (data.AccelerationDomains || []).find((d: any) => d.DomainName === domain);
+    const list = await this.listAllAccelerationDomains(zoneId);
+    if (list === false) return false;
+    const item = list.find((d: any) => d.DomainName === domain);
     if (!item) return false;
     const cert = item.Certificate || {};
     const mode = String(cert.Mode || 'disable');
@@ -614,6 +634,8 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   private copyCustomRule(r: any): any {
+    // 完整保留 Action（含各 <Name>Parameters），仅改访问控制时不得丢失用户已有规则的参数，
+    // 否则保存后其它自定义安全规则会失效（如 Deny 的响应页/跳转等）
     return {
       Id: r?.Id,
       Name: r?.Name,
@@ -621,7 +643,7 @@ export class TencentEdgeOne implements CdnProvider {
       Enabled: r?.Enabled ?? 'on',
       RuleType: r?.RuleType,
       Priority: r?.Priority,
-      Action: r?.Action ? { Name: r.Action.Name } : undefined,
+      Action: r?.Action ? JSON.parse(JSON.stringify(r.Action)) : undefined,
     };
   }
 

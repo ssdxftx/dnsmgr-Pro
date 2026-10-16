@@ -45,8 +45,10 @@ export async function queryAliyunEsaStatistics(
   let reqOk = 0;
   let lastError: unknown = null;
 
-  for (const d of domains) {
-    if (!d.zoneId) continue;
+  // 同一站点（SiteId）下可能有多个加速域名：ESA 的 DescribeSiteTimeSeriesData 按站点维度返回，
+  // 按域名逐个查询会重复累加同一站点数据，因此先去重站点，再逐站点查询
+  const siteIds = Array.from(new Set(domains.map((d) => d.zoneId).filter((z): z is string => !!z)));
+  for (const siteId of siteIds) {
     const fields: any[] = [
       { FieldName: 'Traffic', Dimension: ['ALL'] },
       { FieldName: 'Bandwidth', Dimension: ['ALL'] },
@@ -60,7 +62,7 @@ export async function queryAliyunEsaStatistics(
     try {
       const resp = await client.request({
         Action: 'DescribeSiteTimeSeriesData',
-        SiteId: d.zoneId,
+        SiteId: siteId,
         StartTime: formatIso(start),
         EndTime: formatIso(end),
         Interval: intervalSec,
