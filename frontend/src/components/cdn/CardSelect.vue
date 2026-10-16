@@ -4,7 +4,7 @@
     <button
       type="button"
       class="re-pick__trigger"
-      :class="{ 're-pick__trigger--empty': !current }"
+      :class="{ 're-pick__trigger--empty': !current, 're-pick__trigger--unlisted': isUnlisted }"
       aria-haspopup="dialog"
       :aria-expanded="show"
       @click="show = true"
@@ -91,13 +91,24 @@ const props = defineProps<{
   /** 分组定义（按给定顺序渲染并吸顶；未定义时输出为单一无标题分组） */
   groups?: { key: string; label: string }[];
   labels: { title: string; hint: string; search: string; empty: string; placeholder: string };
+  /** 当前值不在选项中时的标签（如「未收录」）；给出后触发器回显原始取值而不是空白占位 */
+  unlistedLabel?: string;
 }>();
 const emit = defineEmits<{ (e: 'select', value: string): void }>();
 
 const show = ref(false);
 const keyword = ref('');
 
-const current = computed(() => props.options.find((o) => o.value === props.modelValue));
+const matched = computed(() => props.options.find((o) => o.value === props.modelValue));
+/** 云端（控制台/API）创建的规则可能带有本项目尚未收录的取值，此时必须原样回显，避免看起来「没选中」 */
+const isUnlisted = computed(() => !!props.modelValue && !matched.value);
+const current = computed<CardSelectOption | undefined>(
+  () =>
+    matched.value ||
+    (isUnlisted.value && props.unlistedLabel
+      ? { value: props.modelValue, label: props.modelValue, tag: props.unlistedLabel }
+      : undefined),
+);
 
 const sections = computed(() => {
   const kw = keyword.value.trim().toLowerCase();
@@ -165,6 +176,19 @@ function pick(value: string) {
 }
 .re-pick__trigger--empty .re-pick__trigger-label {
   color: var(--app-text-3);
+}
+/* 未收录取值（云端规则）：原样回显 + 警示色标签，提示与本地选项集不一致 */
+.re-pick__trigger--unlisted {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--app-warning) 45%, var(--app-border));
+}
+.re-pick__trigger--unlisted .re-pick__trigger-label {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+}
+.re-pick__trigger--unlisted .re-pick__trigger-tag {
+  color: var(--app-warning);
+  background: var(--app-warning-weak);
 }
 .re-pick__trigger-main {
   flex: 1;

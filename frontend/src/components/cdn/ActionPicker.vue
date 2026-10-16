@@ -4,6 +4,7 @@
     :options="options"
     :groups="groups"
     :labels="labels"
+    :unlisted-label="t('cdnRules.actionUnlisted')"
     @select="(v: string) => emit('select', v)"
   />
 </template>
