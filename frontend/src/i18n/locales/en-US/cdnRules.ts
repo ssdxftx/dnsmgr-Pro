@@ -67,7 +67,10 @@ export default {
     condIgnoreCase: 'Ignore case',
     condVisual: 'Visual',
     condExprMode: 'Expression',
-    condExprHintEo: "Official syntax example: ${http.request.host} in ['example.com']; expressions that cannot be structured are kept as-is",
+    // Keep this key free of {…} (including ${…}): vue-i18n compiles braces as interpolation
+    // placeholders and throws a SyntaxError at render time, which breaks the whole rule
+    // editor for expression-mode rules. The official syntax sample is appended in the component.
+    condExprHintEo: 'Expressions that cannot be structured are kept as-is; official syntax example: ',
     timeUnitHint: 'The value is auto-converted to seconds in the config',
 
     tplTitle: 'Choose a Rule Template',
@@ -87,6 +90,8 @@ export default {
     actionAdd: 'Add action',
     actionType: 'Action',
     actionPick: 'Select an action',
+    actionUnlisted: 'Unlisted',
+    actionUnlistedHint: 'This action was created in the cloud and has no local parameter form yet: its parameters are kept as-is and written back unchanged on save. Switch to the JSON view to inspect or edit them.',
     actionRemove: 'Remove',
     actionParams: 'Action parameters',
     actionExpand: 'Expand',

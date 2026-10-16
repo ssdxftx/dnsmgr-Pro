@@ -67,7 +67,9 @@ export default {
     condIgnoreCase: '忽略大小写',
     condVisual: '可视化',
     condExprMode: '表达式',
-    condExprHintEo: "官方语法示例：${http.request.host} in ['example.com']；无法结构化的表达式会原样保留",
+    // 注意：本键不得包含 {…}（含 ${…}）——vue-i18n 会把大括号当插值占位符编译并在渲染时抛
+    // SyntaxError，导致表达式模式的规则编辑器整体打不开。官方语法示例由组件侧拼接常量。
+    condExprHintEo: '无法结构化的表达式会原样保留，官方语法示例：',
     timeUnitHint: '选择单位后自动换算为秒写入配置',
 
     tplTitle: '选择规则模板',
@@ -87,6 +89,8 @@ export default {
     actionAdd: '添加动作',
     actionType: '动作',
     actionPick: '请选择动作',
+    actionUnlisted: '未收录',
+    actionUnlistedHint: '该动作由云端创建、本项目尚未收录参数表单：参数会原样保留并在保存时原封回写，可切换到「JSON」模式查看或修改。',
     actionRemove: '移除',
     actionParams: '动作参数',
     actionExpand: '展开参数',

@@ -135,7 +135,7 @@
                   v-model:value="br.condExpr"
                   type="textarea"
                   :rows="2"
-                  :placeholder="t('cdnRules.condExprHintEo')"
+                  :placeholder="condExprHint"
                   class="mono-input"
                   spellcheck="false"
                 />
@@ -240,6 +240,10 @@
                   </div>
                   <div v-if="eoActionFields(a.name).length" class="rule-editor__params">
                     <EoParamFields :fields="eoActionFields(a.name)" :model="a.params" :locale="localeKey" :stacked="isMobile" />
+                  </div>
+                  <!-- 未收录动作（云端控制台/API 创建）：参数无法用表单呈现，但已原样保留 -->
+                  <div v-else-if="a.name" class="rule-editor__action-note">
+                    {{ t('cdnRules.actionUnlistedHint') }}
                   </div>
                 </div>
                 <n-button size="small" dashed block class="rule-editor__add" @click="addEoAction(bi)">
@@ -464,6 +468,11 @@ function onActionChange(a: EoActionItem) {
   for (const f of fields) if (f.type === 'switch' && a.params[f.name] === undefined) a.params[f.name] = 'on';
   ensureStructure(fields, a.params);
 }
+
+/** 官方规则语言示例：属技术字面量，必须留在代码中——写进 i18n 文案会被 vue-i18n
+ *  当作插值占位符编译并在渲染时抛 SyntaxError，导致「表达式模式」的规则编辑器整体无法打开。 */
+const EO_EXPR_SAMPLE = "${http.request.host} in ['example.com']";
+const condExprHint = computed(() => t('cdnRules.condExprHintEo') + EO_EXPR_SAMPLE);
 
 /** 动作大卡片选择：写入动作名后沿用既有 onActionChange 初始化参数（与原下拉选择行为一致） */
 function applyActionName(a: EoActionItem, name: string) {
@@ -1031,6 +1040,17 @@ watch(
   margin-top: 8px;
   border-top: 1px dashed var(--app-divider);
   padding-top: 10px;
+}
+/* 未收录动作提示：警示色发丝条，说明参数已保留而非丢失 */
+.rule-editor__action-note {
+  margin-top: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--app-text-2);
+  background: var(--app-warning-weak);
+  border-left: 3px solid var(--app-warning);
+  border-radius: var(--app-radius-sm);
 }
 
 /* ===========================================================================
