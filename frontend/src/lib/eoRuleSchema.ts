@@ -53,6 +53,8 @@ export interface EoActionSchema {
   /** 参数键，默认 `${name}Parameters` */
   paramKey: string;
   label: Bi;
+  /** 动作作用说明（选择动作时在弹出卡片中展示，中英双语） */
+  desc: Bi;
   /** 分组 key，见 EO_ACTION_GROUPS */
   group: string;
   fields: EoField[];
@@ -85,6 +87,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'Cache',
     paramKey: 'CacheParameters',
     label: { zh: '节点缓存 TTL', en: 'Node Cache TTL' },
+    desc: { zh: '设置边缘节点对源站响应的缓存时长与行为（遵循源站 Cache-Control、自定义时间或不缓存），是静态资源加速的核心配置。', en: 'Set how long edge nodes cache origin responses and how they behave (follow origin Cache-Control, custom TTL, or no cache); the core setting for content acceleration.' },
     group: 'cache',
     fields: [
       {
@@ -122,6 +125,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'CacheKey',
     paramKey: 'CacheKeyParameters',
     label: { zh: '自定义 Cache Key', en: 'Custom Cache Key' },
+    desc: { zh: '自定义缓存键规则：按查询字符串、请求头、Cookie 等维度区分缓存副本，并支持全路径缓存与忽略大小写。', en: 'Customize the cache key: distinguish cached copies by query string, request headers or cookies, with full-URL caching and case-insensitive matching.' },
     group: 'cache',
     fields: [
       { name: 'QueryString', label: { zh: '查询字符串', en: 'Query String' }, type: 'group', fields: [
@@ -147,6 +151,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'CachePrefresh',
     paramKey: 'CachePrefreshParameters',
     label: { zh: '缓存预刷新', en: 'Cache Prefresh' },
+    desc: { zh: '在缓存过期前按 TTL 百分比提前回源刷新，避免过期瞬间的回源尖峰与用户等待。', en: 'Refresh content from origin before the TTL expires (by percentage), avoiding origin spikes and user latency at expiry.' },
     group: 'cache',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -157,6 +162,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'MaxAge',
     paramKey: 'MaxAgeParameters',
     label: { zh: '浏览器缓存 TTL', en: 'Browser Cache TTL' },
+    desc: { zh: '设置响应给浏览器的 Cache-Control 缓存时长，决定客户端本地缓存多久。', en: 'Set the browser-facing Cache-Control max-age, deciding how long clients cache the response locally.' },
     group: 'cache',
     fields: [
       { name: 'FollowOrigin', label: { zh: '行为', en: 'Behavior' }, type: 'select', options: [
@@ -170,6 +176,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'StatusCodeCache',
     paramKey: 'StatusCodeCacheParameters',
     label: { zh: '状态码缓存 TTL', en: 'Status Code Cache TTL' },
+    desc: { zh: '为指定 HTTP 状态码（如 404、500）设置独立缓存时长，减少异常状态下的回源压力。', en: 'Set a separate cache TTL for specific status codes (e.g. 404, 500) to reduce origin load during errors.' },
     group: 'cache',
     fields: [
       {
@@ -188,6 +195,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'OfflineCache',
     paramKey: 'OfflineCacheParameters',
     label: { zh: '离线缓存', en: 'Offline Cache' },
+    desc: { zh: '源站不可用时由边缘节点继续用已缓存内容响应，提升源站故障期间的可用性。', en: 'Keep serving cached content from the edge when the origin is unavailable, improving availability during origin failures.' },
     group: 'cache',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -196,6 +204,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'QUIC',
     paramKey: 'QUICParameters',
     label: { zh: 'HTTP/3（QUIC）', en: 'HTTP/3 (QUIC)' },
+    desc: { zh: '为客户端开启 HTTP/3（QUIC）接入，基于 UDP 降低握手延迟、改善弱网体验（后付费能力，可能产生费用）。', en: 'Enable HTTP/3 (QUIC) access for clients; lower handshake latency over UDP and better weak-network performance (paid capability).' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -203,6 +212,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'WebSocket',
     paramKey: 'WebSocketParameters',
     label: { zh: 'WebSocket', en: 'WebSocket' },
+    desc: { zh: '开启 WebSocket 长连接支持并设置连接超时时间，用于即时通信、推送等实时业务。', en: 'Enable WebSocket long connections with a timeout, for real-time workloads such as messaging and push.' },
     group: 'network',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -213,6 +223,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'SmartRouting',
     paramKey: 'SmartRoutingParameters',
     label: { zh: '智能加速', en: 'Smart Acceleration' },
+    desc: { zh: '基于实时网络质量在边缘节点间选择更优回源路径，降低跨境、跨网回源延迟（后付费能力，可能产生费用）。', en: 'Pick better origin paths between edge nodes based on real-time network quality, cutting cross-region latency (paid capability).' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -220,6 +231,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'AdvancedOriginRouting',
     paramKey: 'AdvancedOriginRoutingParameters',
     label: { zh: '高级回源优化', en: 'Advanced Origin Routing' },
+    desc: { zh: '按指定方向优化回源链路，进一步精细化控制回源走向。', en: 'Optimize the origin-pull link in a specified direction for finer routing control.' },
     group: 'network',
     fields: [{ name: 'Direction', label: { zh: '方向', en: 'Direction' }, type: 'text' }],
   },
@@ -227,6 +239,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'RangeOriginPull',
     paramKey: 'RangeOriginPullParameters',
     label: { zh: '分片回源', en: 'Range Origin-Pull' },
+    desc: { zh: '按 Range 分片从源站拉取大文件，提升大文件与音视频的分发效率。', en: 'Pull large files from the origin by range, improving large-file and media delivery efficiency.' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -234,6 +247,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'UpstreamHTTP2',
     paramKey: 'UpstreamHTTP2Parameters',
     label: { zh: 'HTTP/2 回源', en: 'HTTP/2 Origin-Pull' },
+    desc: { zh: '使用 HTTP/2 协议回源，通过多路复用减少连接开销、提升回源效率。', en: 'Use HTTP/2 for origin-pull; multiplexing cuts connection overhead and improves efficiency.' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -241,6 +255,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'HTTP2',
     paramKey: 'HTTP2Parameters',
     label: { zh: 'HTTP/2 接入', en: 'HTTP/2 Access' },
+    desc: { zh: '为客户端开启 HTTP/2 接入，多路复用提升页面并发加载效率。', en: 'Enable HTTP/2 access for clients; multiplexing improves concurrent page loading.' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -248,6 +263,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'Compression',
     paramKey: 'CompressionParameters',
     label: { zh: '智能压缩', en: 'Smart Compression' },
+    desc: { zh: '按文件类型对响应内容做 Gzip / Brotli 压缩，减少传输体积、加快首屏呈现。', en: 'Compress responses with Gzip or Brotli to cut transfer size and speed up first paint.' },
     group: 'network',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -261,6 +277,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ContentCompression',
     paramKey: 'ContentCompressionParameters',
     label: { zh: '内容压缩', en: 'Content Compression' },
+    desc: { zh: '控制对哪些内容执行压缩传输。', en: 'Control which content types are delivered compressed.' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -268,6 +285,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'PostMaxSize',
     paramKey: 'PostMaxSizeParameters',
     label: { zh: 'POST 上传大小限制', en: 'POST Max Size' },
+    desc: { zh: '限制单次 POST 请求体大小，避免超大上传占用资源或被滥用。', en: 'Limit the size of a single POST body to prevent resource abuse from oversized uploads.' },
     group: 'network',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -278,6 +296,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ResponseSpeedLimit',
     paramKey: 'ResponseSpeedLimitParameters',
     label: { zh: '单连接下载限速', en: 'Response Speed Limit' },
+    desc: { zh: '对单个连接的下载速度限速，可按全过程、指定字节数或指定时间后生效，用于资源公平分配。', en: 'Throttle per-connection download speed (whole download, after N bytes, or after N seconds) for fair resource sharing.' },
     group: 'network',
     fields: [
       { name: 'Mode', label: { zh: '模式', en: 'Mode' }, type: 'select', options: [
@@ -293,6 +312,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'Vary',
     paramKey: 'VaryParameters',
     label: { zh: 'Vary 特性', en: 'Vary' },
+    desc: { zh: '开启 Vary 特性，按 Vary 请求头区分缓存副本，兼顾多端适配与缓存命中率。', en: 'Enable the Vary feature so cached copies are distinguished by the Vary request header.' },
     group: 'network',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -301,6 +321,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ForceRedirectHTTPS',
     paramKey: 'ForceRedirectHTTPSParameters',
     label: { zh: '强制 HTTPS', en: 'Forced HTTPS' },
+    desc: { zh: '将 HTTP 请求以 301 / 302 强制跳转到 HTTPS，保证全站加密访问。', en: 'Force HTTP requests to HTTPS with a 301/302 redirect for site-wide encrypted access.' },
     group: 'https',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -314,6 +335,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'OriginPullProtocol',
     paramKey: 'OriginPullProtocolParameters',
     label: { zh: '回源 HTTPS', en: 'Origin-Pull HTTPS' },
+    desc: { zh: '指定回源使用的协议（HTTP / HTTPS / 协议跟随），控制边缘节点到源站的加密方式。', en: 'Choose the origin-pull protocol (HTTP, HTTPS, or follow) to control edge-to-origin encryption.' },
     group: 'https',
     fields: [{ name: 'Protocol', label: { zh: '回源协议', en: 'Origin-Pull Protocol' }, type: 'select', options: protocol }],
   },
@@ -321,6 +343,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'HSTS',
     paramKey: 'HSTSParameters',
     label: { zh: 'HSTS 配置', en: 'HSTS' },
+    desc: { zh: '下发 HSTS 响应头，强制浏览器后续直接使用 HTTPS 访问，支持包含子域名与预加载。', en: 'Send the HSTS header so browsers use HTTPS directly afterwards, with subdomain and preload options.' },
     group: 'https',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -333,6 +356,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'OCSPStapling',
     paramKey: 'OCSPStaplingParameters',
     label: { zh: 'OCSP 装订', en: 'OCSP Stapling' },
+    desc: { zh: '开启 OCSP 装订，减少客户端校验证书状态的额外请求，加快 TLS 握手。', en: 'Enable OCSP stapling to avoid extra certificate-status requests and speed up TLS handshakes.' },
     group: 'https',
     fields: [switchField('Switch', { zh: '开关', en: 'Switch' })],
   },
@@ -340,6 +364,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'TLSConfig',
     paramKey: 'TLSConfigParameters',
     label: { zh: 'SSL/TLS 安全配置', en: 'SSL/TLS Security' },
+    desc: { zh: '指定允许的 TLS 协议版本与密码套件，按合规要求收紧加密策略。', en: 'Restrict allowed TLS versions and cipher suites to meet compliance requirements.' },
     group: 'https',
     fields: [
       { name: 'Version', label: { zh: 'TLS 版本', en: 'TLS Version' }, type: 'tags', placeholder: { zh: '如 TLSv1.2', en: 'e.g. TLSv1.2' } },
@@ -351,6 +376,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ClientIPHeader',
     paramKey: 'ClientIPHeaderParameters',
     label: { zh: '客户端 IP 头部', en: 'Client IP Header' },
+    desc: { zh: '在回源请求中新增自定义头，携带客户端真实 IP，便于源站获取访客地址。', en: 'Add a custom header carrying the real client IP to origin requests.' },
     group: 'header',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -361,6 +387,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ClientIPCountry',
     paramKey: 'ClientIPCountryParameters',
     label: { zh: '客户端 IP 地理位置头部', en: 'Client IP Country Header' },
+    desc: { zh: '在回源请求中新增头部，携带客户端 IP 归属地理位置，便于源站做区域化逻辑。', en: 'Add a header with the client IP geo location so the origin can apply region-aware logic.' },
     group: 'header',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -371,6 +398,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ModifyResponseHeader',
     paramKey: 'ModifyResponseHeaderParameters',
     label: { zh: '修改 HTTP 节点响应头', en: 'Modify Response Headers' },
+    desc: { zh: '对返回给客户端的响应头做设置、添加或删除，常用于安全响应头、跨域与缓存策略。', en: 'Set, add or delete response headers returned to clients, for security headers, CORS and caching policies.' },
     group: 'header',
     fields: [
       {
@@ -394,6 +422,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ModifyRequestHeader',
     paramKey: 'ModifyRequestHeaderParameters',
     label: { zh: '修改 HTTP 回源请求头', en: 'Modify Origin-Pull Request Headers' },
+    desc: { zh: '对发往源站的请求头做设置、添加或删除，用于鉴权透传、改写标识等场景。', en: 'Set, add or delete request headers sent to the origin, for auth passthrough and identifier rewriting.' },
     group: 'header',
     fields: [
       {
@@ -418,6 +447,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'AccessURLRedirect',
     paramKey: 'AccessURLRedirectParameters',
     label: { zh: '访问 URL 重定向', en: 'Access URL Redirect' },
+    desc: { zh: '将客户端请求重定向到指定的协议、主机名与路径（路径支持正则替换），用于站点迁移与路径调整。', en: 'Redirect client requests to a specified protocol, hostname and path (regex supported), for migrations and path changes.' },
     group: 'advanced',
     fields: [
       numField('StatusCode', { zh: '状态码', en: 'Status Code' }, { min: 301, max: 308 }),
@@ -450,6 +480,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'UpstreamURLRewrite',
     paramKey: 'UpstreamURLRewriteParameters',
     label: { zh: '回源 URL 重写', en: 'Origin URL Rewrite' },
+    desc: { zh: '在不改变客户端 URL 的前提下改写回源路径：完整替换、增加/移除前缀或正则替换。', en: 'Rewrite the origin path while keeping the client URL unchanged: replace, add/remove prefix, or regex replace.' },
     group: 'advanced',
     fields: [
       { name: 'Action', label: { zh: '方式', en: 'Action' }, type: 'select', options: [
@@ -467,6 +498,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'Authentication',
     paramKey: 'AuthenticationParameters',
     label: { zh: 'Token 鉴权', en: 'Token Authentication' },
+    desc: { zh: '按 A / B / C / D / V 方式对请求做 Token 签名鉴权，防止资源被盗链。', en: 'Validate request tokens (types A/B/C/D/V) to prevent hotlinking of your resources.' },
     group: 'advanced',
     fields: [
       { name: 'AuthType', label: { zh: '鉴权方式', en: 'Auth Type' }, type: 'select', options: [
@@ -491,6 +523,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'HostHeader',
     paramKey: 'HostHeaderParameters',
     label: { zh: 'Host Header 重写', en: 'Host Header Rewrite' },
+    desc: { zh: '改写回源请求的 Host 头，可跟随源站域名或指定自定义 Host / SNI。', en: 'Rewrite the Host header sent to the origin, following origins or using a custom host/SNI.' },
     group: 'advanced',
     fields: [
       { name: 'Action', label: { zh: '方式', en: 'Action' }, type: 'select', options: [
@@ -504,6 +537,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ModifyOrigin',
     paramKey: 'ModifyOriginParameters',
     label: { zh: '修改源站', en: 'Modify Origin' },
+    desc: { zh: '为命中的请求切换回源目标：IP / 域名、源站组、负载均衡、COS 或 S3 兼容存储，并可配置私有鉴权。', en: 'Switch the origin for matched requests: IP/domain, origin group, load balancer, COS or S3-compatible storage, with private access auth.' },
     group: 'advanced',
     fields: [
       { name: 'OriginType', label: { zh: '源站类型', en: 'Origin Type' }, type: 'select', options: [
@@ -533,6 +567,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'SiteFailover',
     paramKey: 'SiteFailoverParameters',
     label: { zh: '源站故障转移', en: 'Origin Failover' },
+    desc: { zh: '当源站返回指定状态码时自动转移：回源到备用地址、COS / S3、重定向或返回自定义响应页面。', en: 'On specific origin status codes, fail over automatically to a backup host, COS/S3, a redirect, or a custom response page.' },
     group: 'advanced',
     fields: [
       { name: 'SiteFailoverStatusCodes', label: { zh: '触发状态码', en: 'Status Codes' }, type: 'tags', placeholder: { zh: '如 4xx / 5xx', en: 'e.g. 4xx / 5xx' } },
@@ -564,6 +599,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'HTTPUpstreamTimeout',
     paramKey: 'HTTPUpstreamTimeoutParameters',
     label: { zh: '七层回源超时', en: 'Origin-Pull Timeout' },
+    desc: { zh: '设置回源响应超时时间，避免慢源站长期占用连接（流式大模型接口建议放宽到 300 秒以上）。', en: 'Set the origin response timeout so slow origins do not hold connections (relax to 300s or more for streaming LLM APIs).' },
     group: 'advanced',
     fields: [numField('ResponseTimeout', { zh: '回源响应超时时间（秒）', en: 'Response Timeout (s)' }, { min: 1 })],
   },
@@ -571,6 +607,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'HttpResponse',
     paramKey: 'HTTPResponseParameters',
     label: { zh: 'HTTP 应答', en: 'HTTP Response' },
+    desc: { zh: '直接由边缘节点返回指定状态码与响应页面，用于维护页、灰度拦截等场景。', en: 'Return a fixed status code and response page directly from the edge, for maintenance pages or blocking.' },
     group: 'advanced',
     fields: [
       numField('StatusCode', { zh: '响应状态码', en: 'Status Code' }, { min: 100, max: 599 }),
@@ -581,6 +618,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'ErrorPage',
     paramKey: 'ErrorPageParameters',
     label: { zh: '自定义错误页面', en: 'Custom Error Page' },
+    desc: { zh: '为指定错误状态码（4xx / 5xx）配置跳转 URL，统一品牌化的错误提示。', en: 'Configure a redirect URL for specific error codes (4xx/5xx) for branded error pages.' },
     group: 'advanced',
     fields: [
       {
@@ -599,6 +637,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'UpstreamFollowRedirect',
     paramKey: 'UpstreamFollowRedirectParameters',
     label: { zh: '回源跟随重定向', en: 'Origin-Pull Follow Redirect' },
+    desc: { zh: '源站返回 3xx 时由边缘节点自动跟随跳转，并可设置最大跟随次数。', en: 'Let the edge follow origin 3xx redirects automatically, with a maximum follow count.' },
     group: 'advanced',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
@@ -609,6 +648,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'UpstreamRequest',
     paramKey: 'UpstreamRequestParameters',
     label: { zh: '回源请求参数', en: 'Origin-Pull Request' },
+    desc: { zh: '控制回源时携带哪些查询字符串与 Cookie，避免无意义参数污染回源与缓存。', en: 'Control which query strings and cookies are forwarded to the origin.' },
     group: 'advanced',
     fields: [
       { name: 'QueryString', label: { zh: '查询字符串', en: 'Query String' }, type: 'group', fields: [
@@ -627,6 +667,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'Shield',
     paramKey: 'ShieldParameters',
     label: { zh: '源站卸载', en: 'Origin Shield' },
+    desc: { zh: '指定源站卸载空间，将回源请求汇聚到中间层，降低源站压力。', en: 'Specify an origin shield space so origin pulls are aggregated through a middle layer, reducing origin load.' },
     group: 'advanced',
     fields: [{ name: 'ShieldSpaceId', label: { zh: '源站卸载空间 ID', en: 'Shield Space ID' }, type: 'text' }],
   },
@@ -634,6 +675,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'SetContentIdentifier',
     paramKey: 'SetContentIdentifierParameters',
     label: { zh: '设置内容标识符', en: 'Set Content Identifier' },
+    desc: { zh: '为响应设置内容标识符，供日志与监控区分内容类型。', en: 'Set a content identifier on responses so logs and monitoring can classify content.' },
     group: 'advanced',
     fields: [{ name: 'ContentIdentifier', label: { zh: '内容标识符', en: 'Content Identifier' }, type: 'text' }],
   },
@@ -641,6 +683,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     name: 'OriginAuthentication',
     paramKey: 'OriginAuthenticationParameters',
     label: { zh: '回源鉴权', en: 'Origin Authentication' },
+    desc: { zh: '在回源请求中附加鉴权属性（类型 / 名称 / 值），满足源站自身的鉴权要求。', en: 'Attach authentication properties (type/name/value) to origin requests to satisfy origin-side auth.' },
     group: 'advanced',
     fields: [
       {
