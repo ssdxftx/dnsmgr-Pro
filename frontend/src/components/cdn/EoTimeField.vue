@@ -67,10 +67,11 @@ function onUnit(u: TimeUnit) {
 </script>
 
 <style scoped>
+/* 时间字段：数值 + 单位双控件组合，移动端收窄单位下拉 */
 .eo-time {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
 }
 .eo-time__num {

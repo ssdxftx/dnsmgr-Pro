@@ -17,7 +17,7 @@
             style="width: 100%"
             @update:value="(v: string) => setVariant(f, v)"
           />
-          <div v-if="activeVariant(f)" class="eo-params__group">
+          <div v-if="activeVariant(f)" class="eo-params__group eo-params__group--variant">
             <EoParamFields :fields="activeVariant(f)?.fields || []" :model="ensureObj(activeKey(f))" :locale="locale" :stacked="stacked" />
           </div>
         </div>
@@ -30,16 +30,19 @@
         </div>
       </n-form-item>
 
-      <!-- 列表：对象数组 -->
+      <!-- 列表：对象数组（条目卡片 + 序号徽章） -->
       <n-form-item v-else-if="f.type === 'list'" :label="labelOf(f)" :label-props="descProps(f)">
         <div class="eo-params__list">
           <div v-for="(item, i) in listOf(f.name)" :key="i" class="eo-params__list-item">
+            <div class="eo-params__list-head">
+              <span class="eo-params__list-index">{{ i + 1 }}</span>
+              <n-button size="tiny" type="error" quaternary @click="removeItem(f.name, i)">{{ t('cdnRules.actionRemove') }}</n-button>
+            </div>
             <div class="eo-params__list-body">
               <EoParamFields :fields="f.itemFields || []" :model="item" :locale="locale" :stacked="stacked" />
             </div>
-            <n-button size="tiny" type="error" quaternary @click="removeItem(f.name, i)">{{ t('cdnRules.actionRemove') }}</n-button>
           </div>
-          <n-button size="tiny" dashed block @click="addItem(f)">{{ t('cdnRules.actionAdd') }}</n-button>
+          <n-button size="tiny" dashed block class="eo-params__list-add" @click="addItem(f)">{{ t('cdnRules.actionAdd') }}</n-button>
         </div>
       </n-form-item>
 
@@ -200,6 +203,11 @@ function removeItem(name: string, index: number) {
 </script>
 
 <style scoped>
+/* ===========================================================================
+   EO 参数表单 · 卡片分层
+   设计意图：动作参数中的嵌套结构（group / oneof / list）一律卡片化，
+   白底子卡片落在浅色容器上形成清晰层级；序号徽章使用等宽字体呼应遥测语义。
+   =========================================================================== */
 .eo-params :deep(.n-form-item-blank) {
   min-width: 0;
 }
@@ -212,12 +220,24 @@ function removeItem(name: string, index: number) {
 .eo-params--stacked :deep(.n-form-item-label) {
   padding-bottom: 4px;
 }
+
+/* 嵌套分组 / oneof 生效分支：白底子卡片 + 发丝边框 */
 .eo-params__group {
   width: 100%;
-  padding: 8px 12px;
+  padding: 10px 12px;
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius);
-  background: var(--app-bg-soft);
+  background: var(--app-surface);
+  transition: border-color 0.18s var(--app-ease);
+}
+.eo-params__group:focus-within {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-divider));
+}
+/* oneof 生效分支：顶部虚线分隔，表达「从属于上方选择器」 */
+.eo-params__group--variant {
+  border-top: 1px dashed var(--app-divider);
+  border-radius: 0 0 var(--app-radius) var(--app-radius);
+  background: var(--app-surface-2);
 }
 .eo-params--stacked .eo-params__group {
   padding: 8px 10px;
@@ -228,6 +248,8 @@ function removeItem(name: string, index: number) {
   flex-direction: column;
   gap: 8px;
 }
+
+/* 列表：条目卡片纵向堆叠 */
 .eo-params__list {
   width: 100%;
   display: flex;
@@ -237,10 +259,39 @@ function removeItem(name: string, index: number) {
 .eo-params__list-item {
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius);
-  padding: 8px 10px;
-  background: var(--app-bg-soft);
+  background: var(--app-surface);
+  padding: 8px 10px 10px;
+  transition: border-color 0.18s var(--app-ease), box-shadow 0.18s var(--app-ease);
 }
-.eo-params__list-body {
-  margin-bottom: 4px;
+.eo-params__list-item:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-divider));
+  box-shadow: var(--app-shadow-sm);
+}
+.eo-params__list-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--app-divider);
+}
+.eo-params__list-head .n-button {
+  margin-left: auto;
+}
+/* 序号徽章：等宽数字芯片 */
+.eo-params__list-index {
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--app-primary);
+  background: var(--app-primary-weak);
+  border-radius: 6px;
+  padding: 1px 7px;
+  min-width: 22px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.eo-params__list-add {
+  height: 30px;
 }
 </style>

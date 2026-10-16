@@ -1,11 +1,13 @@
 <template>
   <div class="rule-editor">
-    <!-- 模式切换 + 操作条 -->
+    <!-- 模式切换 + 操作条（玻璃工具条） -->
     <div class="rule-editor__bar">
-      <n-radio-group v-model:value="mode" size="small">
-        <n-radio-button value="visual">{{ t('cdnRules.modeVisual') }}</n-radio-button>
-        <n-radio-button value="json">{{ t('cdnRules.modeJson') }}</n-radio-button>
-      </n-radio-group>
+      <div class="rule-editor__mode-pill">
+        <n-radio-group v-model:value="mode" size="small">
+          <n-radio-button value="visual">{{ t('cdnRules.modeVisual') }}</n-radio-button>
+          <n-radio-button value="json">{{ t('cdnRules.modeJson') }}</n-radio-button>
+        </n-radio-group>
+      </div>
       <n-space :size="8">
         <n-button v-if="editing" size="small" @click="emit('cancel')">{{ t('common.cancel') }}</n-button>
         <n-button size="small" type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
@@ -14,7 +16,7 @@
 
     <!-- ============ 可视化模式 ============ -->
     <template v-if="mode === 'visual'">
-      <div class="zone-panel">
+      <div class="zone-panel rule-editor__card">
         <div class="zone-panel__head">
           <h3 class="zone-panel__title">{{ t('cdnRules.groupCommon') }}</h3>
         </div>
@@ -64,7 +66,7 @@
       </div>
 
       <!-- ESA：行为字段（由官方字段表驱动） -->
-      <div v-if="isEsa" class="zone-panel">
+      <div v-if="isEsa" class="zone-panel rule-editor__card">
         <div class="zone-panel__head">
           <h3 class="zone-panel__title">{{ t('cdnRules.groupAction') }}</h3>
         </div>
@@ -82,163 +84,179 @@
         </n-form>
       </div>
 
-      <!-- EO：官方 IF / ELSE IF / ELSE 分支结构 -->
+      <!-- EO：官方 IF / ELSE IF / ELSE 分支结构（信号阶梯卡片流） -->
       <template v-else>
-        <div class="zone-panel">
+        <div class="zone-panel rule-editor__card">
           <div class="zone-panel__head">
             <h3 class="zone-panel__title">{{ t('cdnRules.condTitle') }}</h3>
           </div>
 
-          <div v-for="(br, bi) in form.eoBranches" :key="bi" class="rule-editor__branch">
-            <div class="rule-editor__branch-head">
-              <span class="rule-editor__branch-badge" :class="{ 'rule-editor__branch-badge--else': br.type === 'else' }">
-                {{ branchLabel(br, bi) }}
-              </span>
-              <span v-if="br.type === 'else'" class="hint-text">{{ t('cdnRules.branchElseHint') }}</span>
-              <n-radio-group v-if="br.type !== 'else'" v-model:value="br.condMode" size="small">
-                <n-radio-button value="visual">{{ t('cdnRules.condVisual') }}</n-radio-button>
-                <n-radio-button value="expr">{{ t('cdnRules.condExprMode') }}</n-radio-button>
-              </n-radio-group>
-              <n-button
-                v-if="bi > 0"
-                size="tiny"
-                type="error"
-                quaternary
-                style="margin-left: auto"
-                @click="form.eoBranches.splice(bi, 1)"
-              >
-                {{ t('cdnRules.branchRemove') }}
-              </n-button>
-            </div>
+          <!-- 信号阶梯：分支沿左侧轨道依次排布，表达自上而下判定 -->
+          <div class="rule-editor__ladder">
+            <section
+              v-for="(br, bi) in form.eoBranches"
+              :key="bi"
+              class="rule-editor__branch"
+              :class="{ 'rule-editor__branch--else': br.type === 'else' }"
+              :style="{ '--i': bi }"
+            >
+              <header class="rule-editor__branch-head">
+                <span class="rule-editor__branch-badge" :class="{ 'rule-editor__branch-badge--else': br.type === 'else' }">
+                  <i class="rule-editor__branch-dot" aria-hidden="true" />{{ branchLabel(br, bi) }}
+                </span>
+                <span v-if="br.type === 'else'" class="hint-text">{{ t('cdnRules.branchElseHint') }}</span>
+                <n-radio-group v-if="br.type !== 'else'" v-model:value="br.condMode" size="small">
+                  <n-radio-button value="visual">{{ t('cdnRules.condVisual') }}</n-radio-button>
+                  <n-radio-button value="expr">{{ t('cdnRules.condExprMode') }}</n-radio-button>
+                </n-radio-group>
+                <n-button
+                  v-if="bi > 0"
+                  size="tiny"
+                  type="error"
+                  quaternary
+                  style="margin-left: auto"
+                  @click="form.eoBranches.splice(bi, 1)"
+                >
+                  {{ t('cdnRules.branchRemove') }}
+                </n-button>
+              </header>
 
-            <!-- 注释（官方：IF 注释） -->
-            <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth" style="margin-bottom: 10px">
-              <n-form-item :label="t('cdnRules.branchComment')">
-                <n-input v-model:value="br.comment" size="small" clearable :placeholder="t('cdnRules.branchCommentPlaceholder')" />
-              </n-form-item>
-            </n-form>
+              <!-- 注释（官方：IF 注释） -->
+              <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth" style="margin-bottom: 10px">
+                <n-form-item :label="t('cdnRules.branchComment')">
+                  <n-input v-model:value="br.comment" size="small" clearable :placeholder="t('cdnRules.branchCommentPlaceholder')" />
+                </n-form-item>
+              </n-form>
 
-            <!-- 匹配条件 -->
-            <template v-if="br.type !== 'else'">
-              <n-input
-                v-if="br.condMode === 'expr'"
-                v-model:value="br.condExpr"
-                type="textarea"
-                :rows="2"
-                :placeholder="t('cdnRules.condExprHintEo')"
-                class="mono-input"
-                spellcheck="false"
-              />
-              <template v-else>
-                <div v-for="(grp, gi) in br.orGroups" :key="gi">
-                  <div v-if="gi > 0" class="rule-editor__or-divider">Or</div>
-                  <div class="rule-editor__group">
-                    <div class="rule-editor__group-head">
-                      <span v-if="br.orGroups.length > 1" class="rule-editor__group-title">
-                        {{ t('cdnRules.condGroupTitle', { index: gi + 1 }) }}
-                        <span class="hint-text">{{ t('cdnRules.condGroupHint') }}</span>
-                      </span>
-                      <n-space :size="6" style="margin-left: auto">
-                        <n-button size="tiny" @click="addEoCondition(bi, gi)">{{ t('cdnRules.condAddItem') }}</n-button>
-                        <n-button v-if="br.orGroups.length > 1" size="tiny" type="error" quaternary @click="br.orGroups.splice(gi, 1)">
-                          {{ t('cdnRules.condRemoveGroup') }}
-                        </n-button>
-                      </n-space>
-                    </div>
-                    <div class="rule-editor__cond-list">
-                      <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
-                        <n-select
-                          v-model:value="it.target"
-                          :options="targetSelectOptions"
-                          :placeholder="t('cdnRules.condTarget')"
-                          size="small"
-                          class="rule-editor__cond-target"
-                          @update:value="onTargetChange(it)"
-                        />
-                        <n-select
-                          v-model:value="it.operator"
-                          :options="operatorOptionsOf(it.target)"
-                          size="small"
-                          class="rule-editor__cond-op"
-                        />
-                        <n-input
-                          v-if="needName(it.target)"
-                          v-model:value="it.name"
-                          :placeholder="t('cdnRules.condParamName')"
-                          size="small"
-                          class="rule-editor__cond-name"
-                        />
-                        <n-select
-                          v-if="needValues(it) && isHostChoice(it)"
-                          v-model:value="it.values"
-                          :options="hostOptions"
-                          multiple
-                          filterable
-                          tag
-                          size="small"
-                          class="rule-editor__cond-values"
-                          :placeholder="t('cdnRules.condHostPick')"
-                        />
-                        <n-dynamic-tags
-                          v-else-if="needValues(it)"
-                          v-model:value="it.values"
-                          size="small"
-                          class="rule-editor__cond-values"
-                        />
-                        <n-tag v-else size="small" :bordered="false">{{ t('cdnRules.condNoValue') }}</n-tag>
-                        <n-popover v-if="ignoreCaseAble(it.target)" trigger="hover">
-                          <template #trigger>
-                            <span class="rule-editor__cond-case" @click="it.ignoreCase = !it.ignoreCase">
-                              Aa
-                            </span>
-                          </template>
-                          {{ t('cdnRules.condIgnoreCase') }}：{{ it.ignoreCase ? t('common.enabled') : t('common.disabled') }}
-                        </n-popover>
-                        <n-button size="tiny" type="error" quaternary circle @click="removeEoCondition(bi, gi, ii)">
-                          <template #icon><n-icon :component="CloseOutline" /></template>
-                        </n-button>
+              <!-- 匹配条件 -->
+              <template v-if="br.type !== 'else'">
+                <n-input
+                  v-if="br.condMode === 'expr'"
+                  v-model:value="br.condExpr"
+                  type="textarea"
+                  :rows="2"
+                  :placeholder="t('cdnRules.condExprHintEo')"
+                  class="mono-input"
+                  spellcheck="false"
+                />
+                <div v-else class="rule-editor__conds">
+                  <template v-for="(grp, gi) in br.orGroups" :key="gi">
+                    <div v-if="gi > 0" class="rule-editor__or-divider">Or</div>
+                    <div class="rule-editor__group">
+                      <div class="rule-editor__group-head">
+                        <span v-if="br.orGroups.length > 1" class="rule-editor__group-title">
+                          {{ t('cdnRules.condGroupTitle', { index: gi + 1 }) }}
+                          <span class="hint-text">{{ t('cdnRules.condGroupHint') }}</span>
+                        </span>
+                        <n-space :size="6" style="margin-left: auto">
+                          <n-button size="tiny" @click="addEoCondition(bi, gi)">{{ t('cdnRules.condAddItem') }}</n-button>
+                          <n-button v-if="br.orGroups.length > 1" size="tiny" type="error" quaternary @click="br.orGroups.splice(gi, 1)">
+                            {{ t('cdnRules.condRemoveGroup') }}
+                          </n-button>
+                        </n-space>
+                      </div>
+                      <div class="rule-editor__cond-list">
+                        <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
+                          <n-select
+                            v-model:value="it.target"
+                            :options="targetSelectOptions"
+                            :placeholder="t('cdnRules.condTarget')"
+                            size="small"
+                            class="rule-editor__cond-target"
+                            @update:value="onTargetChange(it)"
+                          />
+                          <n-select
+                            v-model:value="it.operator"
+                            :options="operatorOptionsOf(it.target)"
+                            size="small"
+                            class="rule-editor__cond-op"
+                          />
+                          <n-input
+                            v-if="needName(it.target)"
+                            v-model:value="it.name"
+                            :placeholder="t('cdnRules.condParamName')"
+                            size="small"
+                            class="rule-editor__cond-name"
+                          />
+                          <n-select
+                            v-if="needValues(it) && isHostChoice(it)"
+                            v-model:value="it.values"
+                            :options="hostOptions"
+                            multiple
+                            filterable
+                            tag
+                            size="small"
+                            class="rule-editor__cond-values"
+                            :placeholder="t('cdnRules.condHostPick')"
+                          />
+                          <n-dynamic-tags
+                            v-else-if="needValues(it)"
+                            v-model:value="it.values"
+                            size="small"
+                            class="rule-editor__cond-values"
+                          />
+                          <n-tag v-else size="small" :bordered="false">{{ t('cdnRules.condNoValue') }}</n-tag>
+                          <n-popover v-if="ignoreCaseAble(it.target)" trigger="hover">
+                            <template #trigger>
+                              <span
+                                class="rule-editor__cond-case"
+                                :class="{ 'rule-editor__cond-case--on': it.ignoreCase }"
+                                @click="it.ignoreCase = !it.ignoreCase"
+                              >
+                                Aa
+                              </span>
+                            </template>
+                            {{ t('cdnRules.condIgnoreCase') }}：{{ it.ignoreCase ? t('common.enabled') : t('common.disabled') }}
+                          </n-popover>
+                          <n-button size="tiny" type="error" quaternary circle @click="removeEoCondition(bi, gi, ii)">
+                            <template #icon><n-icon :component="CloseOutline" /></template>
+                          </n-button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </div>
-                <n-button size="small" dashed block style="margin-top: 6px" @click="addEoOrGroup(bi)">
-                  {{ t('cdnRules.condAddGroup') }}
-                </n-button>
-              </template>
-            </template>
-
-            <!-- 分支操作列表 -->
-            <div class="rule-editor__branch-actions">
-              <div v-for="(a, ai) in br.actions" :key="ai" class="rule-editor__group">
-                <div class="rule-editor__group-head">
-                  <n-select
-                    v-model:value="a.name"
-                    :options="actionSelectOptions"
-                    :placeholder="t('cdnRules.actionPick')"
-                    size="small"
-                    filterable
-                    class="rule-editor__action-pick"
-                    @update:value="() => onActionChange(a)"
-                  />
-                  <n-button size="tiny" type="error" quaternary style="margin-left: auto" @click="br.actions.splice(ai, 1)">
-                    {{ t('cdnRules.actionRemove') }}
+                  </template>
+                  <n-button size="small" dashed block class="rule-editor__add" @click="addEoOrGroup(bi)">
+                    {{ t('cdnRules.condAddGroup') }}
                   </n-button>
                 </div>
-                <div v-if="eoActionFields(a.name).length" class="rule-editor__params">
-                  <EoParamFields :fields="eoActionFields(a.name)" :model="a.params" :locale="localeKey" :stacked="isMobile" />
+              </template>
+
+              <!-- 分支操作列表 -->
+              <div class="rule-editor__branch-actions">
+                <div class="rule-editor__actions-caption">
+                  <span class="rule-editor__actions-caption-text">{{ t('cdnRules.actionTitle') }}</span>
                 </div>
+                <div v-for="(a, ai) in br.actions" :key="ai" class="rule-editor__group rule-editor__group--action">
+                  <div class="rule-editor__group-head">
+                    <n-select
+                      v-model:value="a.name"
+                      :options="actionSelectOptions"
+                      :placeholder="t('cdnRules.actionPick')"
+                      size="small"
+                      filterable
+                      class="rule-editor__action-pick"
+                      @update:value="() => onActionChange(a)"
+                    />
+                    <n-button size="tiny" type="error" quaternary style="margin-left: auto" @click="br.actions.splice(ai, 1)">
+                      {{ t('cdnRules.actionRemove') }}
+                    </n-button>
+                  </div>
+                  <div v-if="eoActionFields(a.name).length" class="rule-editor__params">
+                    <EoParamFields :fields="eoActionFields(a.name)" :model="a.params" :locale="localeKey" :stacked="isMobile" />
+                  </div>
+                </div>
+                <n-button size="small" dashed block class="rule-editor__add" @click="addEoAction(bi)">
+                  {{ t('cdnRules.actionAdd') }}
+                </n-button>
               </div>
-              <n-button size="small" dashed block style="margin-top: 6px" @click="addEoAction(bi)">
-                {{ t('cdnRules.actionAdd') }}
-              </n-button>
-            </div>
+            </section>
           </div>
 
           <!-- 分支添加（官方：添加 ELSE IF / 添加 ELSE） -->
-          <n-space :size="8" style="margin-top: 10px">
-            <n-button size="small" dashed @click="addEoBranch('elseif')">{{ t('cdnRules.branchAddElseIf') }}</n-button>
-            <n-button size="small" dashed @click="addEoBranch('else')">{{ t('cdnRules.branchAddElse') }}</n-button>
-          </n-space>
+          <div class="rule-editor__branch-add">
+            <n-button size="small" dashed class="rule-editor__add" @click="addEoBranch('elseif')">{{ t('cdnRules.branchAddElseIf') }}</n-button>
+            <n-button size="small" dashed class="rule-editor__add" @click="addEoBranch('else')">{{ t('cdnRules.branchAddElse') }}</n-button>
+          </div>
           <div class="hint-text" style="margin-top: 8px">{{ t('cdnRules.branchHint') }}</div>
         </div>
       </template>
@@ -246,11 +264,15 @@
 
     <!-- ============ JSON 源码模式 ============ -->
     <template v-else>
-      <n-alert type="info" :show-icon="false" style="margin-bottom: 10px">{{ t('cdnRules.modeJsonHint') }}</n-alert>
-      <n-input v-model:value="jsonText" type="textarea" :rows="18" spellcheck="false" class="mono-input" />
-      <n-space justify="end" style="margin-top: 10px">
-        <n-button size="small" @click="syncFromJson">{{ t('cdnRules.modeVisual') }}</n-button>
-      </n-space>
+      <div class="zone-panel rule-editor__card">
+        <n-alert type="info" :show-icon="false" style="margin-bottom: 10px">{{ t('cdnRules.modeJsonHint') }}</n-alert>
+        <div class="rule-editor__json-frame">
+          <n-input v-model:value="jsonText" type="textarea" :rows="18" spellcheck="false" class="mono-input" />
+        </div>
+        <n-space justify="end" style="margin-top: 10px">
+          <n-button size="small" @click="syncFromJson">{{ t('cdnRules.modeVisual') }}</n-button>
+        </n-space>
+      </div>
     </template>
   </div>
 </template>
@@ -689,26 +711,118 @@ watch(
 </script>
 
 <style scoped>
+/* ===========================================================================
+   规则编辑器 · 信号阶梯（Signal Ladder）
+   设计意图：IF / ELSE IF / ELSE 分支沿左侧发光轨道纵向排布，
+   把「自上而下依次判定」的官方语义画成一张流程图；
+   全部颜色 / 圆角 / 阴影 / 动效取自 tokens.css，与全站 Glass NOC 风格一致。
+   =========================================================================== */
+
+/* ---- 顶部工具条：玻璃质感，承载模式切换与保存 ---- */
 .rule-editor__bar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
+  padding: 8px 10px;
   margin-bottom: 14px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-sm);
+}
+.rule-editor__mode-pill {
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 10px;
+  background: var(--app-bg-soft);
+  border: 1px solid var(--app-divider);
 }
 .rule-editor__seq {
   width: 160px;
 }
 
-/* 分支：IF / ELSE IF / ELSE（官方编辑页结构） */
+/* ---- 分区卡片：编辑器内统一容器，沿用 zone-panel 观感 ---- */
+.rule-editor__card + .rule-editor__card {
+  margin-top: 12px;
+}
+
+/* ===========================================================================
+   分支卡片 · 信号阶梯
+   =========================================================================== */
+.rule-editor__ladder {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding-left: 26px;
+}
+/* 竖向轨道线：从首分支节点连到末分支节点 */
+.rule-editor__ladder::before {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 24px;
+  bottom: 24px;
+  width: 2px;
+  border-radius: 2px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--app-primary) 45%, var(--app-divider)),
+    var(--app-divider)
+  );
+}
+
 .rule-editor__branch {
+  position: relative;
+  background: var(--app-surface);
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius-lg);
-  background: var(--app-surface);
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: 14px 16px 16px;
+  box-shadow: var(--app-shadow-sm);
+  transition: border-color 0.2s var(--app-ease), box-shadow 0.25s var(--app-ease);
 }
+.rule-editor__branch:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 32%, var(--app-border));
+  box-shadow: var(--app-shadow);
+}
+/* 卡片左侧信号条 */
+.rule-editor__branch::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 16px;
+  bottom: 16px;
+  width: 3px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--app-primary), color-mix(in srgb, var(--app-primary) 30%, transparent));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--app-primary) 35%, transparent);
+}
+/* 轨道节点圆点：与竖线对齐 */
+.rule-editor__branch::after {
+  content: '';
+  position: absolute;
+  left: -23px;
+  top: 20px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--app-surface);
+  border: 2px solid var(--app-primary);
+  box-shadow: 0 0 0 3px var(--app-primary-weak), 0 0 10px color-mix(in srgb, var(--app-primary) 45%, transparent);
+}
+/* ELSE 分支：信号弱化（兜底语义） */
+.rule-editor__branch--else::before {
+  background: var(--app-border);
+  box-shadow: none;
+}
+.rule-editor__branch--else::after {
+  border-color: var(--app-text-3);
+  box-shadow: 0 0 0 3px var(--app-bg-soft);
+}
+
 .rule-editor__branch-head {
   display: flex;
   align-items: center;
@@ -716,53 +830,80 @@ watch(
   flex-wrap: wrap;
   margin-bottom: 10px;
 }
+/* 分支徽章：等宽大写 + 脉冲指示灯 */
 .rule-editor__branch-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-family: var(--app-font-mono);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
   color: var(--app-primary);
   background: var(--app-primary-weak);
-  border-radius: 6px;
-  padding: 2px 10px;
-  letter-spacing: 0.04em;
+  border: 1px solid color-mix(in srgb, var(--app-primary) 22%, transparent);
+  border-radius: 999px;
+  padding: 3px 12px 3px 9px;
+  letter-spacing: 0.1em;
+}
+.rule-editor__branch-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--app-primary);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--app-primary) 60%, transparent);
 }
 .rule-editor__branch-badge--else {
   color: var(--app-text-2);
   background: var(--app-bg-soft);
+  border-color: var(--app-divider);
 }
+.rule-editor__branch-badge--else .rule-editor__branch-dot {
+  background: var(--app-text-3);
+  box-shadow: none;
+}
+@keyframes re-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ===========================================================================
+   条件区：条件组子卡片 + 条件行 + Or 分隔
+   =========================================================================== */
+.rule-editor__conds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Or 分隔线：虚线 + 等宽大写，呼应表达式语义 */
 .rule-editor__or-divider {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin: 8px 0;
+  margin: 2px 0;
   font-family: var(--app-font-mono);
   font-size: 11px;
   font-weight: 700;
   color: var(--app-text-3);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 .rule-editor__or-divider::before,
 .rule-editor__or-divider::after {
   content: '';
   flex: 1;
-  height: 1px;
-  background: var(--app-divider);
-}
-.rule-editor__branch-actions {
-  margin-top: 10px;
-  padding-top: 10px;
-  border-top: 1px dashed var(--app-divider);
+  height: 0;
+  border-top: 1px dashed var(--app-border);
 }
 
-/* 条件组 / 操作组：左侧信号条 + 编号徽章，呼应全站信号语义 */
+/* 条件组 / 动作组：左侧信号条子卡片（沿用全站信号语义） */
 .rule-editor__group {
   border: 1px solid var(--app-divider);
   border-left: 3px solid color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
   border-radius: var(--app-radius);
-  background: var(--app-surface);
+  background: var(--app-surface-2);
   padding: 10px 12px;
-  margin-bottom: 10px;
-  transition: border-color 0.2s var(--app-ease);
+  transition: border-color 0.2s var(--app-ease), background 0.2s var(--app-ease);
 }
 .rule-editor__group:hover {
   border-left-color: var(--app-primary);
@@ -780,7 +921,7 @@ watch(
   color: var(--app-text-2);
 }
 
-/* 条件行：浅色底条 + 控件网格，密集但有序 */
+/* 条件行：白底芯片行，hover / focus-within 给出信号反馈 */
 .rule-editor__cond-list {
   display: flex;
   flex-direction: column;
@@ -791,9 +932,18 @@ watch(
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  padding: 6px 8px;
-  border-radius: 8px;
-  background: var(--app-bg-soft);
+  padding: 7px 9px;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-surface);
+  transition: border-color 0.18s var(--app-ease), box-shadow 0.18s var(--app-ease);
+}
+.rule-editor__cond-row:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-divider));
+}
+.rule-editor__cond-row:focus-within {
+  border-color: color-mix(in srgb, var(--app-primary) 45%, var(--app-divider));
+  box-shadow: 0 0 0 3px var(--app-primary-weak);
 }
 .rule-editor__cond-target {
   width: 160px;
@@ -808,6 +958,7 @@ watch(
   flex: 1;
   min-width: 200px;
 }
+/* Aa 忽略大小写开关：开启态点亮 */
 .rule-editor__cond-case {
   display: grid;
   place-items: center;
@@ -822,10 +973,53 @@ watch(
   cursor: pointer;
   user-select: none;
   flex-shrink: 0;
+  transition: border-color 0.15s var(--app-ease), color 0.15s var(--app-ease), background 0.15s var(--app-ease);
 }
 .rule-editor__cond-case:hover {
   border-color: var(--app-primary);
   color: var(--app-primary);
+}
+.rule-editor__cond-case--on {
+  border-color: color-mix(in srgb, var(--app-primary) 45%, transparent);
+  background: var(--app-primary-weak);
+  color: var(--app-primary);
+}
+
+/* ===========================================================================
+   动作区
+   =========================================================================== */
+.rule-editor__branch-actions {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--app-divider);
+}
+/* 「执行动作」小标题：等宽大写分隔标签 */
+.rule-editor__actions-caption {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.rule-editor__actions-caption::after {
+  content: '';
+  flex: 1;
+  height: 0;
+  border-top: 1px dashed var(--app-divider);
+}
+.rule-editor__actions-caption-text {
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--app-text-3);
+}
+.rule-editor__group--action + .rule-editor__group--action {
+  margin-top: 8px;
+}
+.rule-editor__group--action + .rule-editor__add,
+.rule-editor__conds > .rule-editor__add {
+  margin-top: 2px;
 }
 
 .rule-editor__action-pick {
@@ -840,9 +1034,71 @@ watch(
   padding-top: 10px;
 }
 
-/* 移动端：全部固定宽度改为弹性，避免横向溢出 */
+/* ===========================================================================
+   添加按钮 / 分支添加 / JSON 面板
+   =========================================================================== */
+.rule-editor__add {
+  height: 34px;
+  letter-spacing: 0.02em;
+}
+.rule-editor__branch-add {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding-left: 26px;
+}
+.rule-editor__json-frame {
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+  background: var(--app-bg-soft);
+  padding: 8px;
+}
+.rule-editor__json-frame :deep(.n-input) {
+  --n-border: none !important;
+  --n-border-hover: none !important;
+  --n-border-focus: none !important;
+  --n-box-shadow-focus: none !important;
+  background: transparent;
+}
+
+/* ===========================================================================
+   入场编排：分支卡片错峰上浮（reduced-motion 下由全局规则关闭）
+   =========================================================================== */
+@keyframes re-branch-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rule-editor__branch {
+    animation: re-branch-in 0.45s var(--app-ease) both;
+    animation-delay: calc(var(--i, 0) * 70ms);
+  }
+  .rule-editor__branch-dot {
+    animation: re-pulse 2.4s ease-in-out infinite;
+  }
+}
+
+/* ===========================================================================
+   移动端：轨道收起、条件行竖向堆叠、控件占满整行
+   =========================================================================== */
 @media (max-width: 767px) {
-  /* 条件行整体竖向堆叠，每个控件占满整行 */
+  .rule-editor__ladder {
+    padding-left: 0;
+  }
+  .rule-editor__ladder::before,
+  .rule-editor__branch::after {
+    display: none;
+  }
+  .rule-editor__branch-add {
+    padding-left: 0;
+  }
   .rule-editor__cond-row {
     flex-direction: column;
     align-items: stretch;
@@ -862,7 +1118,6 @@ watch(
   .rule-editor__cond-row > .n-button {
     align-self: flex-end;
   }
-  /* 操作选择占满整行 */
   .rule-editor__action-pick {
     width: 100%;
     min-width: 0;
@@ -875,9 +1130,8 @@ watch(
   .rule-editor__group {
     padding: 8px 10px;
   }
-  /* 减少分支卡片内外边距，给内容让出宽度 */
   .rule-editor__branch {
-    padding: 10px;
+    padding: 12px;
   }
   .rule-editor__branch-head {
     gap: 8px;
