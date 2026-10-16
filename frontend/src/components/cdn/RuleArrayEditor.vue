@@ -86,6 +86,7 @@ function removeRow(idx: number) {
 </script>
 
 <style scoped>
+/* 数组编辑：白底行卡片 + 等宽序号徽章，hover / focus-within 信号反馈 */
 .rule-array__row {
   display: flex;
   align-items: center;
@@ -94,11 +95,16 @@ function removeRow(idx: number) {
   margin-bottom: 6px;
   border: 1px solid var(--app-divider);
   border-radius: var(--app-radius);
-  background: var(--app-bg-soft);
-  transition: border-color 0.15s ease;
+  background: var(--app-surface);
+  box-shadow: var(--app-shadow-sm);
+  transition: border-color 0.15s var(--app-ease), box-shadow 0.15s var(--app-ease);
 }
 .rule-array__row:hover {
   border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
+}
+.rule-array__row:focus-within {
+  border-color: color-mix(in srgb, var(--app-primary) 45%, var(--app-divider));
+  box-shadow: 0 0 0 3px var(--app-primary-weak);
 }
 .rule-array__row :deep(.n-space) {
   flex-wrap: wrap;
@@ -109,15 +115,17 @@ function removeRow(idx: number) {
   text-align: center;
   font-family: var(--app-font-mono);
   font-size: 11px;
+  font-weight: 700;
   color: var(--app-primary);
   background: var(--app-primary-weak);
-  border-radius: 4px;
+  border-radius: 6px;
   padding: 1px 4px;
+  font-variant-numeric: tabular-nums;
 }
 .rule-array__empty {
   color: var(--app-text-3);
   font-size: 12px;
-  padding: 10px 0;
+  padding: 12px 0;
   text-align: center;
   border: 1px dashed var(--app-divider);
   border-radius: var(--app-radius);
