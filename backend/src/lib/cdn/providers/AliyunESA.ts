@@ -13,6 +13,7 @@ export class AliyunESA implements CdnProvider {
   private accessKeySecret: string;
   private error = '';
   private siteId: string | null = null;
+  private region: string;
 
   constructor(config: Record<string, any>) {
     this.accessKeyId = config.AccessKeyId || '';
@@ -20,6 +21,7 @@ export class AliyunESA implements CdnProvider {
     // ESA 端点必须带 Region（如 esa.cn-hangzhou.aliyuncs.com）；region 拼入主机名，做白名单校验避免注入
     const region = String(config.region || '').trim();
     const validRegion = /^[a-z0-9-]+$/i.test(region) ? region : 'cn-hangzhou';
+    this.region = validRegion;
     this.client = new Aliyun(this.accessKeyId, this.accessKeySecret, `esa.${validRegion}.aliyuncs.com`, '2024-09-10');
   }
 
@@ -456,7 +458,7 @@ export class AliyunESA implements CdnProvider {
       accountConfig: { AccessKeyId: this.accessKeyId, AccessKeySecret: this.accessKeySecret },
       accountName: 'CDN 证书联动（阿里云）',
       product: 'esa',
-      config: { esa_sitename: scope.siteName, region: 'cn-hangzhou' },
+      config: { esa_sitename: scope.siteName, region: this.region },
     };
   }
 

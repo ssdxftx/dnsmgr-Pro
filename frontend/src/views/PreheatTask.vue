@@ -45,7 +45,7 @@
           </n-radio-group>
         </n-form-item>
         <n-form-item v-if="form.cycle === 'daily'" :label="t('preheat.dailyTimeLabel')">
-          <n-time-picker v-model:value="form.runTime" format="HH:mm" :clearable="false" />
+          <n-time-picker v-model:value="form.runTime" format="HH:mm" value-format="HH:mm" :clearable="false" />
         </n-form-item>
         <n-form-item v-if="form.cycle === 'interval'" :label="t('preheat.intervalMinLabel')">
           <n-input-number v-model:value="form.intervalMin" :min="1" :max="10080" style="width: 200px" />
@@ -84,13 +84,14 @@ const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type !
 const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const form = reactive<any>({ name: '', urls: '', op: 'preheat', cycle: 'daily', runTime: 3 * 3600000 + 30 * 60000, intervalMin: 60, active: true });
+const form = reactive<any>({ name: '', urls: '', op: 'preheat', cycle: 'daily', runTime: '03:30', intervalMin: 60, active: true });
 
-function fmtRunTime(v: number | null): string {
-  if (v === null || v === undefined) return '-';
-  const d = new Date(v);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+function normalizeHm(v: any): string {
+  const m = String(v ?? '').trim().match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return '03:30';
+  const h = Math.min(23, Math.max(0, Number(m[1])));
+  const mi = Math.min(59, Math.max(0, Number(m[2])));
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
 }
 
 const columns = computed(() => [
@@ -161,15 +162,10 @@ function openAdd() {
   form.urls = '';
   form.op = 'preheat';
   form.cycle = 'daily';
-  form.runTime = 3 * 3600000 + 30 * 60000;
+  form.runTime = '03:30';
   form.intervalMin = 60;
   form.active = true;
   showEdit.value = true;
-}
-
-function hmToTimestamp(hm: string): number {
-  const [h, m] = String(hm || '03:30').split(':').map((n) => Number(n) || 0);
-  return h * 3600000 + m * 60000;
 }
 
 function openEdit(row: any) {
@@ -178,7 +174,7 @@ function openEdit(row: any) {
   form.urls = row.urls || '';
   form.op = row.op === 'purge' ? 'purge' : 'preheat';
   form.cycle = row.cycle === 'interval' ? 'interval' : 'daily';
-  form.runTime = hmToTimestamp(row.run_time);
+  form.runTime = normalizeHm(row.run_time);
   form.intervalMin = Number(row.interval_min) || 60;
   form.active = row.active == 1;
   showEdit.value = true;
@@ -189,7 +185,7 @@ async function save() {
   if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('preheat.pleaseInputInterval'));
   saving.value = true;
   try {
-    const runTime = form.cycle === 'daily' ? fmtRunTime(form.runTime) : null;
+    const runTime = form.cycle === 'daily' ? normalizeHm(form.runTime) : null;
     const body: any = { name: form.name, urls: form.urls, op: form.op, cycle: form.cycle, active: form.active ? 1 : 0 };
     if (form.cycle === 'interval') body.interval_min = form.intervalMin;
     else body.run_time = runTime;

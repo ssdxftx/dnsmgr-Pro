@@ -283,7 +283,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   NAlert, NButton, NDynamicTags, NForm, NFormItem, NIcon, NInput, NInputNumber,
-  NPopover, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag,
+  NPopover, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag, useMessage,
 } from 'naive-ui';
 import { CloseOutline } from '@vicons/ionicons5';
 import RuleFieldControl from './RuleFieldControl.vue';
@@ -314,6 +314,7 @@ const emit = defineEmits<{
 }>();
 
 const { t, te, locale } = useI18n();
+const message = useMessage();
 const { isMobile } = useResponsive();
 const isEsa = computed(() => props.vendor === 'esa');
 const isZh = computed(() => String(locale.value || '').toLowerCase().startsWith('zh'));
@@ -437,14 +438,16 @@ function branchLabel(br: EoBranch, idx: number): string {
   return 'ELSE';
 }
 function addEoBranch(type: 'elseif' | 'else') {
-  // ELSE 只允许存在一个，且位于最后
+  const branches = form.eoBranches as EoBranch[];
+  // ELSE 只允许存在一个，且位于最后；其后不允许再追加 ELSE IF
   if (type === 'else') {
-    const branches = form.eoBranches as EoBranch[];
     const last = branches[branches.length - 1];
     if (last?.type === 'else') return;
     branches.push(newBranch('else'));
   } else {
-    (form.eoBranches as EoBranch[]).push(newBranch('elseif'));
+    const last = branches[branches.length - 1];
+    if (last?.type === 'else') return;
+    branches.push(newBranch('elseif'));
   }
 }
 function addEoOrGroup(bi: number) {
@@ -594,9 +597,8 @@ function payload() {
 }
 
 function save() {
-  const p = payload();
-  if (!String(p.RuleName || '').trim()) return emit('save', p); // 名称校验交由调用方提示
-  emit('save', p);
+  // 名称等必填校验由调用方（saveRule）负责提示
+  emit('save', payload());
 }
 
 function syncFromJson() {
@@ -604,7 +606,8 @@ function syncFromJson() {
     const obj = JSON.parse(jsonText.value || '{}');
     loadFrom(obj, { fromJson: true });
   } catch {
-    /* 解析失败时保留用户输入，不覆盖 */
+    // 解析失败时保留用户输入并明确提示，避免用户误以为已生效后被旧模型覆盖
+    message.error(t('cdnRules.modeSyncFailed'));
   }
 }
 

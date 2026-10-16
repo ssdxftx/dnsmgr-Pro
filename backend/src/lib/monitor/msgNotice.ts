@@ -238,7 +238,8 @@ export async function sendCustomWebhook(sub: string, content: string): Promise<b
     c = stripTags(content.replace(/<br\/>/g, '\n'));
   }
 
-  const body = bodyTemplate.replace(/\{title\}/g, sub).replace(/\{content\}/g, c);
+  // 使用函数式替换，避免正文中的 $& / $' 等被当作替换模式解释
+  const body = bodyTemplate.replace(/\{title\}/g, () => sub).replace(/\{content\}/g, () => c);
 
   const headers: Record<string, string> = {};
   if (headersRaw) {

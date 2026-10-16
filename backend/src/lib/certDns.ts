@@ -17,6 +17,11 @@ function safeJson(s: string): Record<string, any> {
   return decryptConfig(s) || {};
 }
 
+// 归一化记录名（小写、去首尾空白与结尾点），用于精确比对，避免上游模糊匹配误伤同名相似记录
+function normName(s: any): string {
+  return String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
+}
+
 type DnsList = Record<string, DnsRecord[]>;
 
 async function getDnsModel(mainDomain: string): Promise<{ provider: any; type: string } | null> {
@@ -110,6 +115,7 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
 
       const list2 = cache[row.name].list;
       const matched = list2.filter((v: any) => {
+        if (normName(v.Name) !== normName(row.name)) return false;
         const val = Array.isArray(v.Value) ? v.Value.join(',') : v.Value;
         return v.Type === row.type && (val === row.value || String(val).replace(/\.$/, '') === row.value);
       });
@@ -119,7 +125,7 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
       }
 
       const keep = neededValues[row.name] || new Set<string>();
-      const sameType = list2.filter((v: any) => v.Type === row.type);
+      const sameType = list2.filter((v: any) => v.Type === row.type && normName(v.Name) === normName(row.name));
       for (const rec of sameType) {
         const rv = Array.isArray(rec.Value) ? rec.Value.join(',') : String(rec.Value ?? '');
         // 本批次仍需保留的值（如通配符与主域各自的 TXT）跳过，避免误删

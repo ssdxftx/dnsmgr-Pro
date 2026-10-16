@@ -1,4 +1,4 @@
-import { safeFetchDeploy } from '../../netGuard.js';
+import { safeFetchDeploy, assertSafeHostname } from '../../netGuard.js';
 import { createHash, createHmac } from 'node:crypto';
 import { Volcengine } from '../../clients/Volcengine.js';
 import { parseCertPem } from '../../cert/utils.js';
@@ -176,7 +176,7 @@ export class HuoshanDeploy implements DeployProvider {
       const body = JSON.stringify({
         CustomDomainRule: { Domain: domain, CertId: certId },
       });
-      const endpoint = config.bucket_domain;
+      const endpoint = assertSafeHostname(config.bucket_domain, 'Bucket域名');
       const time = Math.floor(Date.now() / 1000);
       const dateStr = volcDate(time);
       const headers: Record<string, string> = {

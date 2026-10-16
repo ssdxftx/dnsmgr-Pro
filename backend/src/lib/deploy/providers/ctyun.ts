@@ -102,7 +102,7 @@ export class CtyunDeploy implements DeployProvider {
 
       if (result.https_status == 'on' && result.cert_name == config.cert_name) {
         this.log('边缘安全加速域名 ' + domain + ' 证书已部署，无需重复操作！');
-        return;
+        continue;
       }
 
       result.https_status = 'on';
@@ -159,7 +159,7 @@ export class CtyunDeploy implements DeployProvider {
 
       if (data?.certConfig?.certificate && String(data.certConfig.certificate).trim() === fullchain.trim()) {
         this.log('函数计算域名 ' + domain + ' 证书已部署，无需重复操作！');
-        return;
+        continue;
       }
 
       if (data.protocol === 'HTTP') data.protocol = 'HTTP,HTTPS';

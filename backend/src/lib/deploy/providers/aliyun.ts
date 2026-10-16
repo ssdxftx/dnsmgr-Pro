@@ -389,7 +389,7 @@ export class AliyunDeploy implements DeployProvider {
         const oldCertId = listen.CertId;
         if (oldCertId && oldCertId === fullCertId) {
           this.log('WAF域名 ' + domain + ' 证书已配置，无需重复操作');
-          return;
+          continue;
         }
       }
 
@@ -629,7 +629,7 @@ export class AliyunDeploy implements DeployProvider {
 
       if (data.certConfig && data.certConfig.certificate === fullchain) {
         this.log('函数计算域名 ' + domain + ' 证书已配置，无需重复操作');
-        return;
+        continue;
       }
 
       if (data.protocol === 'HTTP') data.protocol = 'HTTP,HTTPS';

@@ -17,6 +17,9 @@ function fmt(ts: number): string {
   return fmtTimestamp(ts);
 }
 
+// 心跳最多每 30s 落库一次，判定阈值取 90s（心跳周期的 3 倍），避免正常抖动被误判为异常
+const RUN_STATE_STALE_MS = 90000;
+
 function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';
 }
@@ -33,7 +36,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     let runState = 0;
     if (runTime) {
       const t = new Date(runTime.replace(/-/g, '/')).getTime();
-      runState = Date.now() - t > 10000 ? 0 : 1;
+      runState = Date.now() - t > RUN_STATE_STALE_MS ? 0 : 1;
     }
 
     return {
@@ -280,7 +283,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     let runState = 0;
     if (runTime) {
       const t = new Date(runTime.replace(/-/g, '/')).getTime();
-      runState = Date.now() - t > 10000 ? 0 : 1;
+      runState = Date.now() - t > RUN_STATE_STALE_MS ? 0 : 1;
     }
     return runState === 1 ? { code: 0, data: 'ok' } : { code: 0, data: 'error' };
   });

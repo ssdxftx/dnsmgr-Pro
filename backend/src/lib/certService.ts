@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { query, queryOne, table } from '../db.js';
 import { getCertProvider, certConfig } from './cert/factory.js';
 import { addDns, delDns, verifyDns } from './certDns.js';
-import { appendLog } from './util.js';
+import { appendLog, fmtDateTime } from './util.js';
 import type { CertProvider } from './cert/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -168,9 +168,10 @@ export class CertOrderService {
     if (this.order.status >= 3) return 3;
     if (this.order.retry2 >= 3 && !isManual) throw new Error('已超出最大重试次数(' + this.order.error + ')');
     if (this.order.status != 1 && this.order.status != 2 && this.order.retry >= 3 && !isManual) {
-      if ([-2, -5, -6, -7].includes(this.order.status)) {
+      if ([-1, -2, -3, -4, -5, -6, -7].includes(this.order.status)) {
         await this.cancel();
-        if (this.order.status <= -5) await this.delDns();
+        // -3/-4 可能已写入过挑战记录，一并清理，避免残留 TXT
+        if (this.order.status <= -3) await this.delDns();
         await query(
           `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retrytime = NULL, updatetime = NOW(), retry2 = retry2 + 1 WHERE id = ?`,
           [this.oid],
@@ -312,7 +313,7 @@ export class CertOrderService {
       } else {
         this.saveLog('未查询到DNS解析记录(尝试第' + (this.order.retry + 1) + '次)');
         const iv = RETRY_INTERVAL[this.order.retry] ?? 1800;
-        await this.saveResult(1, null, new Date(Date.now() + iv * 1000).toISOString().slice(0, 19).replace('T', ' '));
+        await this.saveResult(1, null, fmtDateTime(new Date(Date.now() + iv * 1000)));
       }
       throw new Error('未查询到DNS解析记录(尝试第' + this.order.retry + '次)，请稍后再试');
     }
@@ -345,7 +346,7 @@ export class CertOrderService {
       } else {
         this.saveLog('订单验证未通过(尝试第' + (this.order.retry + 1) + '次)');
         const iv = RETRY_INTERVAL[this.order.retry] ?? 1800;
-        await this.saveResult(2, null, new Date(Date.now() + iv * 1000).toISOString().slice(0, 19).replace('T', ' '));
+        await this.saveResult(2, null, fmtDateTime(new Date(Date.now() + iv * 1000)));
       }
       throw new Error('订单验证未通过(尝试第' + this.order.retry + '次)，请稍后再试');
     }

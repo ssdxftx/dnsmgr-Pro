@@ -164,11 +164,16 @@ export async function executeCheckTasks(): Promise<number> {
       [fmtDateTime(next), t.id],
     );
     if (!claim || !claim.affectedRows) continue;
-    const { issues } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
-    if (issues && issues.length) {
-      await notifyHijack(t, issues);
+    // 逐条隔离：单个域名检测/通知异常不应中断其余任务（next_run 已推进，异常不隔离会静默漏掉整轮）
+    try {
+      const { issues } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
+      if (issues && issues.length) {
+        await notifyHijack(t, issues);
+      }
+      run++;
+    } catch (e: any) {
+      console.error('[dnscheck] 任务 ' + t.id + ' 执行失败:', e?.message || e);
     }
-    run++;
   }
   return run;
 }

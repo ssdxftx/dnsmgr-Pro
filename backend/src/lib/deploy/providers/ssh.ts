@@ -183,6 +183,8 @@ export class SshDeploy implements DeployProvider {
           await this.deployIis(conn, config.iis_domain, config.pfx_file, String(config.pfx_pass || ''), certHash);
           config.cmd = null;
         }
+      } else {
+        throw new Error('未知的证书格式：' + String(config.format || '(空)'));
       }
       if (config.cmd) {
         assertCommandAllowed();

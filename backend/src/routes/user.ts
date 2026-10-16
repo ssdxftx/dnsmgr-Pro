@@ -90,7 +90,7 @@ export default async function userRoutes(app: FastifyInstance) {
   app.get('/api/users', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const q = req.query || {};
-    const kw = (q.kw || '').trim();
+    const kw = String(q.kw ?? '').trim();
     const offset = clampOffset(q.offset);
     const limit = clampLimit(q.limit);
     const sort = q.sortName || '';
@@ -133,10 +133,10 @@ export default async function userRoutes(app: FastifyInstance) {
   app.post('/api/users', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const b = req.body || {};
-    const username = (b.username || '').trim();
-    const password = (b.password || '').trim();
+    const username = String(b.username ?? '').trim();
+    const password = String(b.password ?? '').trim();
     const isApi = Number(b.is_api || 0);
-    const apikey = (b.apikey || '').trim();
+    const apikey = String(b.apikey ?? '').trim();
     const level = Number(b.level || 1);
     const checkWhole = Number(b.check_whole || 0);
     const permission = Array.isArray(b.permission) ? b.permission : [];
@@ -174,11 +174,11 @@ export default async function userRoutes(app: FastifyInstance) {
     if (blocked) return { code: -1, msg: blocked };
 
     const b = req.body || {};
-    const username = (b.username || '').trim();
+    const username = String(b.username ?? '').trim();
     const isApi = Number(b.is_api || 0);
-    const apikey = (b.apikey || '').trim();
+    const apikey = String(b.apikey ?? '').trim();
     let level = Number(b.level || 1);
-    const repwd = (b.repwd || '').trim();
+    const repwd = String(b.repwd ?? '').trim();
     const checkWhole = Number(b.check_whole || 0);
     const statCache = Number(b.stat_cache) === 1 ? 1 : 0;
     const permission = Array.isArray(b.permission) ? b.permission : [];
@@ -203,7 +203,8 @@ export default async function userRoutes(app: FastifyInstance) {
       await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
     }
     if (repwd) {
-      await query(`UPDATE ${table('user')} SET password = ? WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
+      // 改密同时自增 token_version，使该用户已签发的旧 JWT 立即失效
+      await query(`UPDATE ${table('user')} SET password = ?, token_version = token_version + 1 WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
     }
     return { code: 0, msg: '修改用户成功！' };
   });
@@ -254,22 +255,23 @@ export default async function userRoutes(app: FastifyInstance) {
   // 操作日志列表
   app.get('/api/logs', auth, async (req: any) => {
     const q = req.query || {};
-    const uid = (q.uid || '').trim();
-    const domain = (q.domain || '').trim();
-    const kw = (q.kw || '').trim();
+    const uid = String(q.uid ?? '').trim();
+    const domain = String(q.domain ?? '').trim();
+    const kw = String(q.kw ?? '').trim();
     const offset = clampOffset(q.offset);
     const limit = clampLimit(q.limit);
 
     let where = ' WHERE 1=1';
     const params: any[] = [];
-    if (req.user.level === 1) {
-      where += ' AND uid = ?';
-      params.push(req.user.uid);
-    } else if (req.user.level >= 2) {
+    if (Number(req.user.level) >= 2) {
       if (!isNullOrEmpty(uid)) {
         where += ' AND uid = ?';
         params.push(Number(uid));
       }
+    } else {
+      // level 0/1（含非法值）一律只能查看自己的日志
+      where += ' AND uid = ?';
+      params.push(req.user.uid);
     }
     if (kw) {
       where += ' AND (action LIKE ? OR data LIKE ?)';

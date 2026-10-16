@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { getSysKey } from './config.js';
-import { isInstalled } from './installer.js';
+import { isInstalled, getInstallState } from './installer.js';
 import { findUserById } from './auth.js';
 import { setSecretKey } from './lib/secret.js';
 import { migrate } from './migrate.js';
@@ -37,6 +37,7 @@ import { executePreheatTasks } from './lib/cdn/preheatService.js';
 import { executeCheckTasks } from './lib/dns/checkService.js';
 import { certTaskRun } from './lib/cert/certTaskService.js';
 import { runGuarded } from './lib/scheduler/guards.js';
+import { withDistributedLock } from './lib/scheduler/distLock.js';
 import { refreshAllStatCache, getStatCacheIntervalMs, isStatCacheEnabled } from './lib/cdn/statistics/cacheService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
 
@@ -112,6 +113,7 @@ if (process.env.DNSMGR_RATE_LIMIT !== '0') {
     { paths: new Set(['/api/auth/login', '/api/auth/totp']), fn: createRateLimit({ windowMs: 60_000, max: 20 }) },
     { paths: new Set(['/api/register']), fn: createRateLimit({ windowMs: 60_000, max: 10 }) },
     { paths: new Set(['/api/register/send-code']), fn: createRateLimit({ windowMs: 60_000, max: 5 }) },
+    { paths: new Set(['/api/qqbot/webhook']), fn: createRateLimit({ windowMs: 60_000, max: 60 }) },
   ];
   app.addHook('onRequest', async (req: any, reply: any) => {
     const url = String(req.raw.url || '').split('?')[0];
@@ -124,10 +126,30 @@ if (process.env.DNSMGR_RATE_LIMIT !== '0') {
 
 // JWT 密钥取自数据库 sys_key；未安装时使用进程内随机密钥（仅 setup 阶段使用）
 let sysKey = randomBytes(24).toString('hex');
-try {
-  sysKey = await getSysKey();
-} catch {
-  // 未安装，忽略
+const bootState = await getInstallState();
+if (bootState !== 'not_installed') {
+  // 已安装或状态未知（数据库不可用）：必须拿到持久化 sys_key，不能以降级随机密钥启动
+  // （否则新写入的加密数据会使用临时密钥，重启后无法解密，造成不可恢复的数据损坏）
+  let ok = false;
+  for (let i = 0; i < 6 && !ok; i++) {
+    try {
+      sysKey = await getSysKey();
+      ok = true;
+    } catch (e: any) {
+      console.error(`[dnsmgr-backend] 读取 sys_key 失败（第 ${i + 1} 次）：${e?.message || e}`);
+      await new Promise((r) => setTimeout(r, Math.min(1000 * (i + 1), 5000)));
+    }
+  }
+  if (!ok) {
+    console.error('[dnsmgr-backend] 数据库不可用，无法读取 sys_key，退出进程等待编排层重启');
+    process.exit(1);
+  }
+} else {
+  try {
+    sysKey = await getSysKey();
+  } catch {
+    // 首次部署且尚无配置：使用进程内随机密钥，仅用于安装阶段
+  }
 }
 // 供账号凭据加解密使用（AES-256-GCM，密钥由 sys_key 派生）
 setSecretKey(sysKey);
@@ -171,6 +193,11 @@ const AUTH_USER_CACHE_MS = 10_000;
   req.user.totp_open = Number(dbUser.totp_open);
   req.user.stat_cache = Number(dbUser.stat_cache || 0);
   req.user.is_super = Number(dbUser.is_super || 0);
+  // 令牌版本校验：改密 / 变更 2FA 后自增，使旧令牌立即失效
+  if (Number(req.user.token_version || 0) !== Number(dbUser.token_version || 0)) {
+    authUserCache.delete(uid);
+    return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
+  }
   return undefined;
 });
 
@@ -232,14 +259,14 @@ try {
   console.log(`[dnsmgr-backend] 已启动，端口 ${port}${installed ? '' : '（未安装，等待初始化）'}`);
 
   if (installed) {
-    // 定时任务防重入：上一轮未结束则跳过本轮，避免网络请求超时导致的叠加执行
-    const guarded = (fn: () => Promise<unknown>, label: string) => {
+    // 定时任务防重入：进程内标志避免上一轮未结束就叠加执行；
+    // 叠加数据库命名锁，保证水平扩容（多副本）时同一任务只有一个实例执行
+    const distributed = (name: string, fn: () => Promise<unknown>, label: string) => {
       let running = false;
       return () => {
         if (running) return;
         running = true;
-        Promise.resolve()
-          .then(fn)
+        withDistributedLock('dnsmgr:' + name, fn)
           .catch((e: any) => console.error(label, e?.message || e))
           .finally(() => {
             running = false;
@@ -255,19 +282,19 @@ try {
     }, 60 * 1000);
     console.log('[dnsmgr-backend] 优选IP调度器已启动');
     console.log('[dnsmgr-backend] 定时切换解析调度器已启动');
-    setInterval(guarded(expireNoticeTask, '[expire] 到期提醒调度异常:'), 60 * 60 * 1000);
+    setInterval(distributed('expire', expireNoticeTask, '[expire] 到期提醒调度异常:'), 60 * 60 * 1000);
     console.log('[dnsmgr-backend] 域名到期提醒调度器已启动');
-    setInterval(guarded(executePreheatTasks, '[preheat] 自动预热调度异常:'), 60 * 1000);
+    setInterval(distributed('preheat', executePreheatTasks, '[preheat] 自动预热调度异常:'), 60 * 1000);
     console.log('[dnsmgr-backend] CDN 自动预热调度器已启动');
-    setInterval(guarded(executeCheckTasks, '[dnscheck] 自动检测调度异常:'), 60 * 1000);
+    setInterval(distributed('dnscheck', executeCheckTasks, '[dnscheck] 自动检测调度异常:'), 60 * 1000);
     console.log('[dnsmgr-backend] DNS 劫持检测调度器已启动');
-    setInterval(guarded(certTaskRun, '[cert] SSL证书续签调度异常:'), 5 * 60 * 1000);
+    setInterval(distributed('cert', certTaskRun, '[cert] SSL证书续签调度异常:'), 5 * 60 * 1000);
     console.log('[dnsmgr-backend] SSL证书续签调度器已启动');
 
     // CDN 数据统计缓存：按服务商数据粒度（近 30 天按天、近 48 小时按小时）定时拉取落库
     let statCacheLast = 0;
     setInterval(
-      guarded(async () => {
+      distributed('statcache', async () => {
         if (!(await isStatCacheEnabled())) return;
         const interval = await getStatCacheIntervalMs();
         if (Date.now() - statCacheLast < interval) return;
