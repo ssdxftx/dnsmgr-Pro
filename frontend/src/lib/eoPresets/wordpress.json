@@ -1,0 +1,111 @@
+{
+  "FormatVersion": "1.0",
+  "Rules": [
+    {
+      "RuleName": "WordPress 建站",
+      "Branches": [
+        {
+          "Condition": "${http.request.host} in []",
+          "SubRules": [
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['gif', 'png', 'bmp', 'jpeg', 'tif', 'tiff', 'zip', 'exe', 'wmv', 'swf', 'mp3', 'wma', 'rar', 'css', 'flv', 'mp4', 'txt', 'ico', 'js']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "CustomTime": {
+                          "CacheTime": 7,
+                          "IgnoreCacheControl": "off",
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.uri.path} in ['/']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "NoCache": {
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['aspx', 'jsp', 'php', 'asp', 'do', 'dwr', 'cgi', 'fcgi', 'action', 'ashx', 'axd']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "NoCache": {
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.uri.path} in ['/wp-admin/']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "NoCache": {
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "*",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "FollowOrigin": {
+                          "DefaultCache": "on",
+                          "DefaultCacheStrategy": "on",
+                          "DefaultCacheTime": 0,
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            }
+          ]
+        }
+      ],
+      "Description": []
+    }
+  ]
+}

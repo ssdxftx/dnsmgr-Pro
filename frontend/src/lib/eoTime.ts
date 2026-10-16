@@ -73,6 +73,27 @@ export function timeTransform(fields: EoField[], params: Record<string, any>, di
 }
 
 /**
+ * 按固定倍数缩放操作参数中的时间字段（结构同 timeTransform，仅处理 time 字段）。
+ * 用于导入「以非秒单位表达」的外部规则，例如官方控制台导出的预制规则（数值为小时）。
+ */
+export function scaleTimeFields(fields: EoField[], params: Record<string, any>, factor: number): void {
+  if (!params || typeof params !== 'object' || factor === 1) return;
+  for (const f of fields) {
+    if (f.type === 'number' && f.time) {
+      if (typeof params[f.name] === 'number') params[f.name] = Math.round(params[f.name] * factor);
+    } else if (f.type === 'group') {
+      if (params[f.name] && typeof params[f.name] === 'object') scaleTimeFields(f.fields || [], params[f.name], factor);
+    } else if (f.type === 'oneof') {
+      for (const v of f.variants || []) {
+        if (params[v.key] && typeof params[v.key] === 'object') scaleTimeFields(v.fields || [], params[v.key], factor);
+      }
+    } else if (f.type === 'list' && Array.isArray(params[f.name])) {
+      for (const it of params[f.name]) if (it && typeof it === 'object') scaleTimeFields(f.itemFields || [], it, factor);
+    }
+  }
+}
+
+/**
  * 由 JSON 视图回填可视化模型时：沿用上一份单位选择，并把展示单位的值还原为秒。
  * neu 为 JSON 解析得到的新参数对象，prev 为转换前的可视化参数对象。
  */

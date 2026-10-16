@@ -1,0 +1,74 @@
+{
+  "FormatVersion": "1.0",
+  "Rules": [
+    {
+      "RuleName": "网站加速",
+      "Branches": [
+        {
+          "Condition": "${http.request.host} in []",
+          "Actions": [
+            {
+              "Name": "Cache",
+              "CacheParameters": {
+                "FollowOrigin": {
+                  "DefaultCache": "on",
+                  "DefaultCacheStrategy": "on",
+                  "DefaultCacheTime": 0,
+                  "Switch": "on"
+                }
+              }
+            },
+            {
+              "Name": "CacheKey",
+              "CacheKeyParameters": {
+                "FullURLCache": "on",
+                "IgnoreCase": "off",
+                "QueryString": {
+                  "Switch": "off"
+                }
+              }
+            }
+          ],
+          "SubRules": [
+            {
+              "Branches": [
+                {
+                  "Condition": "lower(${http.request.file_extension}) in ['php', 'jsp', 'asp', 'aspx']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "NoCache": {
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['jpg', 'png', 'gif', 'bmp', 'svg', 'webp']",
+                  "Actions": [
+                    {
+                      "Name": "MaxAge",
+                      "MaxAgeParameters": {
+                        "CacheTime": 1,
+                        "FollowOrigin": "off"
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            }
+          ]
+        }
+      ],
+      "Description": []
+    }
+  ]
+}
