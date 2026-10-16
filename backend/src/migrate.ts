@@ -7,6 +7,7 @@ export async function migrate(): Promise<void> {
   await ensureColumn('user', 'check_whole', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('user', 'stat_cache', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('user', 'is_super', "tinyint(1) NOT NULL DEFAULT '0'");
+  await ensureColumn('user', 'token_version', "int(11) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'readonly', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'expiretime', 'datetime DEFAULT NULL');
   // 用户名唯一约束：防止并发注册/建号绕过「先查后插」判重产生重复账号

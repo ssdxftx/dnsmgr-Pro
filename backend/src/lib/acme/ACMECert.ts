@@ -157,6 +157,9 @@ export class ACMECert extends ACMEv2 {
 
   private async _register(termsOfServiceAgreed = false, contacts: string[] = [], extra: Record<string, any> = {}): Promise<string> {
     this.log('Registering account');
+    // 注册/重注册时清空旧 kid，确保采纳 newAccount 响应头 Location 中的最新账户 URL，
+    // 否则上游账户被吊销/迁移导致 kid 失效后无法自愈
+    this.kidHeader!.kid = null;
     const ret = await this.request('newAccount', {
       termsOfServiceAgreed: !!termsOfServiceAgreed,
       contact: this.makeContactsArray(contacts),

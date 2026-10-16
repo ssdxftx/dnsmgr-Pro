@@ -266,7 +266,6 @@ function openEdit(row: any) {
 }
 
 async function save() {
-  saving.value = true;
   let body: any;
   if (tab.value === 'import') {
     if (!form.fullchain || !form.privatekey) return message.warning(t('certOrder.saveWarning'));
@@ -277,15 +276,19 @@ async function save() {
     if (!domains.length) return message.warning(t('certOrder.domainsWarning'));
     body = { aid: form.aid, keytype: form.keytype, keysize: form.keysize, domains };
   }
-  const res = editingId.value
-    ? await api('PUT', `/cert/orders/${editingId.value}`, body)
-    : await api('POST', '/cert/orders', body);
-  saving.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    loadOrders();
-  } else message.error(res.msg);
+  saving.value = true;
+  try {
+    const res = editingId.value
+      ? await api('PUT', `/cert/orders/${editingId.value}`, body)
+      : await api('POST', '/cert/orders', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      loadOrders();
+    } else message.error(res.msg);
+  } finally {
+    saving.value = false;
+  }
 }
 
 async function process(row: any) {

@@ -69,7 +69,7 @@ export class BaiduDeploy implements DeployProvider {
         const data = await client.request('GET', '/v2/' + domain + '/certificates');
         if (data && data.certName && data.certName == config.cert_name) {
           this.log('CDN域名 ' + domain + ' 证书已存在，无需重复部署');
-          return;
+          continue;
         }
       } catch (e: any) {
         this.log(e.message);

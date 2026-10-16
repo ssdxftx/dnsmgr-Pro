@@ -287,7 +287,7 @@ export async function ensureCertDeployForDomain(cdnDomainId: number, orderId: nu
   }
   await linkLog(did, orderId, 'account', 'ok', `已定位加速站点 ${scope.siteName || scope.siteId}`);
   const task = await ensureCertDeploy(provider, row, scope, orderId);
-  if (task) await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [row.id]);
+  // https_enabled 仅在实际部署成功后置位（见 logDeployResult），避免创建任务即标记为已启用
   return task;
 }
 

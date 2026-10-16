@@ -15,3 +15,14 @@ export function runGuarded(key: string, fn: () => Promise<unknown>, label: strin
     }
   })();
 }
+
+// 与 runGuarded 共享同一份锁：供手动触发路径复用调度互斥，避免与周期任务并发执行
+export function tryAcquire(key: string): boolean {
+  if (running.has(key)) return false;
+  running.add(key);
+  return true;
+}
+
+export function release(key: string): void {
+  running.delete(key);
+}

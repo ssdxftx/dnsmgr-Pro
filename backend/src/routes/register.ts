@@ -51,7 +51,7 @@ export default async function registerRoutes(app: FastifyInstance) {
   app.post('/api/register/send-code', async (req: any) => {
     if (!(await registerEnabled())) return { code: -1, msg: '注册功能未开放' };
     if ((await registerMode()) !== 'email') return { code: -1, msg: '当前注册方式不支持邮箱验证' };
-    const email = ((req.body?.email) || '').trim().toLowerCase();
+    const email = String((req.body?.email) ?? '').trim().toLowerCase();
     if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
 
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
@@ -88,9 +88,9 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (!(await registerEnabled())) return { code: -1, msg: '注册功能未开放' };
     const mode = await registerMode();
     const b = req.body || {};
-    const username = (b.username || '').trim();
+    const username = String(b.username ?? '').trim();
     const password = String(b.password ?? '');
-    const email = (b.email || '').trim().toLowerCase();
+    const email = String(b.email ?? '').trim().toLowerCase();
 
     if (username.length < 3 || username.length > 32) return { code: -1, msg: '用户名长度需为 3-32 个字符' };
     if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
@@ -102,7 +102,7 @@ export default async function registerRoutes(app: FastifyInstance) {
 
     if (mode === 'email') {
       if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
-      const code = (b.code || '').trim();
+      const code = String(b.code ?? '').trim();
       if (!code) return { code: -1, msg: '请输入邮箱验证码' };
       const emailUsed = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
       if (emailUsed) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
@@ -131,7 +131,7 @@ export default async function registerRoutes(app: FastifyInstance) {
       if (!consumed || !consumed.affectedRows) return { code: -1, msg: '验证码错误或已过期' };
     } else {
       // 注册码模式
-      const regCode = (b.reg_code || '').trim().toUpperCase();
+      const regCode = String(b.reg_code ?? '').trim().toUpperCase();
       if (!regCode) return { code: -1, msg: '请输入注册码' };
       if (email && !isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
       const codeRow = await queryOne<any>(`SELECT * FROM ${table('reg_code')} WHERE code = ? LIMIT 1`, [regCode]);
@@ -183,7 +183,7 @@ export default async function registerRoutes(app: FastifyInstance) {
     const count = Math.min(Math.max(Math.floor(Number(b.count) || 1), 1), 100);
     const days = Math.max(0, Math.floor(Number(b.days) || 0));
     const maxUse = Math.max(0, Math.floor(Number(b.max_use) || 0));
-    const remark = (b.remark || '').trim();
+    const remark = String(b.remark ?? '').trim();
 
     const codes: string[] = [];
     for (let i = 0; i < count; i++) {

@@ -3,6 +3,7 @@ import { query, queryOne, table } from '../db.js';
 import { configGet, configSet } from '../config.js';
 import { fmtDateTime, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
+import { tryAcquire, release } from '../lib/scheduler/guards.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK } from '../lib/secret.js';
 
@@ -65,7 +66,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 查询积分
   app.post('/api/optimize/queryapi', auth, async (req: any) => {
     const api = Number((req.body || {}).optimize_ip_api);
-    let key = ((req.body || {}).optimize_ip_key || '').trim();
+    let key = String((req.body || {}).optimize_ip_key ?? '').trim();
     // 前端未重新输入密钥时提交的是掩码，回退使用已保存的密钥
     if (key === SECRET_MASK) key = ((await configGet('optimize_ip_key', '')) || '').trim();
     if (!key) return { code: -1, msg: '参数不能为空' };
@@ -136,13 +137,13 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const task = {
       did: Number(b.did),
-      rr: (b.rr || '').trim(),
+      rr: String(b.rr ?? '').trim(),
       type: Number(b.type),
-      ip_type: (b.ip_type || '').trim(),
+      ip_type: String(b.ip_type ?? '').trim(),
       cdn_type: Number(b.cdn_type),
       recordnum: Number(b.recordnum),
       ttl: Number(b.ttl),
-      remark: (b.remark || '').trim(),
+      remark: String(b.remark ?? '').trim(),
       addtime: fmtDateTime(),
       active: 1,
     };
@@ -167,13 +168,13 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const task = {
       did: Number(b.did),
-      rr: (b.rr || '').trim(),
+      rr: String(b.rr ?? '').trim(),
       type: Number(b.type),
-      ip_type: (b.ip_type || '').trim(),
+      ip_type: String(b.ip_type ?? '').trim(),
       cdn_type: Number(b.cdn_type),
       recordnum: Number(b.recordnum),
       ttl: Number(b.ttl),
-      remark: (b.remark || '').trim(),
+      remark: String(b.remark ?? '').trim(),
     };
     if (!task.did || !task.rr || !task.ip_type || !task.recordnum || !task.ttl) {
       return { code: -1, msg: '必填项不能为空' };
@@ -210,6 +211,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const task = await queryOne(`SELECT * FROM ${table('optimizeip')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '任务不存在' };
+    // 与周期任务共享同一把锁，避免并发执行基于同一份过期快照重复写入/误删记录
+    if (!tryAcquire('optimize')) return { code: -1, msg: '优选任务正在执行，请稍后再试' };
     try {
       const result = await executeOne(task);
       await query(`UPDATE ${table('optimizeip')} SET status = 1, errmsg = NULL, updatetime = ? WHERE id = ?`, [fmtDateTime(), id]);
@@ -217,6 +220,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     } catch (e: any) {
       await query(`UPDATE ${table('optimizeip')} SET status = 2, errmsg = ?, updatetime = ? WHERE id = ?`, [e.message || String(e), fmtDateTime(), id]);
       return { code: -1, msg: '优选任务执行失败：' + e.message };
+    } finally {
+      release('optimize');
     }
   });
 

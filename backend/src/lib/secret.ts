@@ -60,7 +60,7 @@ export function decryptConfig(raw: string | null | undefined): Record<string, an
   }
 }
 
-const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential|passphrase|hmac|skey)/i;
+const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential|passphrase|hmac|skey|spkey)/i;
 
 export function isSecretKey(key: string): boolean {
   const k = String(key || '');

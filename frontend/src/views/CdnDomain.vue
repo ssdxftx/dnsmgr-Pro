@@ -329,7 +329,7 @@
             <n-list-item v-for="r in certMgrFree" :key="r.id">
               <div class="cert-head">
                 <span class="cert-name">{{ r.name || certMgrTarget?.name }}</span>
-                <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
+                <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status, 'freecert') }}</n-tag>
               </div>
               <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
               <div v-if="r.records && r.records.length" class="cert-records">
@@ -406,7 +406,7 @@
             <n-list-item v-for="r in certMgrApply" :key="r.id">
               <div class="cert-head">
                 <span class="cert-name">{{ r.name || certMgrTarget?.name }}</span>
-                <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status) }}</n-tag>
+                <n-tag :type="statusType(r.status)" size="small" :bordered="false">{{ statusText(r.status, 'certapply') }}</n-tag>
               </div>
               <div v-if="r.domains && r.domains.length" class="cert-scope">{{ t('cdnDomain.certScope', { domains: r.domains.join('、') }) }}</div>
               <div v-if="r.message" class="cert-msg">{{ r.message }}</div>
@@ -781,9 +781,9 @@ const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
 const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));
 const summaryType = computed(() => (certResults.value.some((r) => r.status === 'failed') ? 'warning' : 'success'));
 
-function statusText(status: string) {
+function statusText(status: string, mode: string = certMode.value) {
   if (status === 'applied') return t('cdnDomain.statusApplied');
-  if (status === 'pending') return certMode.value === 'link' ? t('cdnDomain.statusPendingLink') : t('cdnDomain.statusPendingFree');
+  if (status === 'pending') return mode === 'freecert' ? t('cdnDomain.statusPendingFree') : t('cdnDomain.statusPendingLink');
   return t('cdnDomain.statusFailed');
 }
 function statusType(status: string): 'success' | 'warning' | 'error' {
@@ -1074,19 +1074,24 @@ async function openLinkDialog(target: { id?: number; name: string }): Promise<st
   linkError.value = '';
   showLink.value = true;
   linkLoading.value = true;
-  const res = await fetchCandidates(target.name);
-  linkLoading.value = false;
-  if (res.code !== 0) {
-    linkError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
-  } else {
-    const d = res.data || {};
-    linkCandidates.value = d;
-    if (d.exact && d.exact.length) linkChoice.value = `order:${d.exact[0].oid}`;
-    else if (d.defaultLe) linkChoice.value = 'default';
-  }
-  return new Promise((resolve) => {
+  // 先挂载 resolve，确保加载期间用户取消弹窗也能正常结束等待（否则 Promise 永不 resolve）
+  const done = new Promise<string | null>((resolve) => {
     linkResolve = resolve;
   });
+  const res = await fetchCandidates(target.name);
+  linkLoading.value = false;
+  // 弹窗已在加载期间被关闭则不再覆盖状态
+  if (linkResolve) {
+    if (res.code !== 0) {
+      linkError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
+    } else {
+      const d = res.data || {};
+      linkCandidates.value = d;
+      if (d.exact && d.exact.length) linkChoice.value = `order:${d.exact[0].oid}`;
+      else if (d.defaultLe) linkChoice.value = 'default';
+    }
+  }
+  return done;
 }
 
 function finishLink(choice: string | null) {

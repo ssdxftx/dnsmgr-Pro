@@ -70,3 +70,8 @@ export function hasDbConfigFile(): boolean {
     return false;
   }
 }
+
+// 是否通过环境变量显式提供了数据库配置（用于区分「首次部署 bootstrap」与「已配置实例」）
+export function hasEnvDbConfig(): boolean {
+  return !!(process.env.DB_HOST || process.env.DB_USER || process.env.DB_NAME);
+}

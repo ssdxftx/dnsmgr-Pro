@@ -1,5 +1,5 @@
 import { exec } from 'node:child_process';
-import { existsSync, writeFileSync, realpathSync } from 'node:fs';
+import { existsSync, writeFileSync, chmodSync, realpathSync } from 'node:fs';
 import { dirname, normalize, sep, basename, join, win32 } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
@@ -112,6 +112,8 @@ export class LocalDeploy implements DeployProvider {
       this.log('证书已保存到：' + certFile);
       // 私钥显式以 0600 写入，避免按进程 umask 落盘为全局可读
       writeFileSync(keyFile, privatekey, { mode: 0o600 });
+      // 文件已存在时 mode 不生效，显式收紧权限
+      try { chmodSync(keyFile, 0o600); } catch { /* 忽略：部分文件系统不支持 */ }
       this.log('私钥已保存到：' + keyFile);
     } else if (config.format === 'pfx') {
       const pfxFile = safeTargetPath(config.pfx_file);
@@ -120,7 +122,10 @@ export class LocalDeploy implements DeployProvider {
       const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
       // PFX 内含私钥，显式以 0600 写入，避免按进程 umask 落盘为全局可读
       writeFileSync(pfxFile, pfx, { mode: 0o600 });
+      try { chmodSync(pfxFile, 0o600); } catch { /* 忽略：部分文件系统不支持 */ }
       this.log('PFX证书已保存到：' + pfxFile);
+    } else {
+      throw new Error('未知的证书格式：' + String(config.format || '(空)'));
     }
     if (config.cmd) {
       assertCommandAllowed();

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
@@ -120,8 +120,13 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
     const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
-    await query(`DELETE FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
-    await query(`DELETE FROM ${table('cdn_account')} WHERE id = ?`, [id]);
+    // 级联清理关联数据并置于同一事务，避免遗留缓存规则/统计数据等孤儿记录
+    await withTransaction(async (q) => {
+      await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did IN (SELECT id FROM ${table('cdn_domain')} WHERE aid = ?)`, [id]);
+      await q(`DELETE FROM ${table('cdn_stat_data')} WHERE aid = ?`, [id]);
+      await q(`DELETE FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
+      await q(`DELETE FROM ${table('cdn_account')} WHERE id = ?`, [id]);
+    });
     return { code: 0, msg: '删除成功' + (dcount && dcount.c > 0 ? '，已一并删除 ' + dcount.c + ' 个加速域名' : '') };
   });
 

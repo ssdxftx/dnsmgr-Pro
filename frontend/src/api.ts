@@ -38,7 +38,18 @@ export async function api<T = any>(method: string, url: string, body?: any): Pro
     payload = JSON.stringify(body);
   }
 
-  const res = await fetch(fullUrl, { method, headers, body: payload });
+  const controller = new AbortController();
+  // 避免后端僵死时 fetch 永不 settle，导致各页 loading 永久转圈
+  const timer = setTimeout(() => controller.abort(), 120000);
+  let res: Response;
+  try {
+    res = await fetch(fullUrl, { method, headers, body: payload, signal: controller.signal });
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return { code: -1, msg: '请求超时，请稍后重试' } as T;
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
   if (res.status === 401) {
     clearToken();
     if (!location.pathname.startsWith('/login')) location.href = '/login';

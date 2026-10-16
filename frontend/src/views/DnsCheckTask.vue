@@ -49,7 +49,7 @@
           </n-radio-group>
         </n-form-item>
         <n-form-item v-if="form.cycle === 'daily'" :label="t('dnsCheck.dailyTime')">
-          <n-time-picker v-model:value="form.runTime" format="HH:mm" :clearable="false" />
+          <n-time-picker v-model:value="form.runTime" format="HH:mm" value-format="HH:mm" :clearable="false" />
         </n-form-item>
         <n-form-item v-if="form.cycle === 'interval'" :label="t('dnsCheck.intervalMin')">
           <n-input-number v-model:value="form.intervalMin" :min="1" :max="10080" style="width: 200px" />
@@ -117,18 +117,14 @@ const showResult = ref(false);
 const runningResult = ref<any>({ total: 0, issues: [], error: '' });
 const typeList = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
 
-const form = reactive<any>({ name: '', did: null, sub: null, types: [], cycle: 'daily', runTime: 4 * 3600000, intervalMin: 60, noticeEmail: '', active: true });
+const form = reactive<any>({ name: '', did: null, sub: null, types: [], cycle: 'daily', runTime: '04:00', intervalMin: 60, noticeEmail: '', active: true });
 
-function hmToTs(hm: string): number {
-  const [h, m] = String(hm || '04:00').split(':').map((n) => Number(n) || 0);
-  return h * 3600000 + m * 60000;
-}
-
-function fmtTs(v: number | null): string {
-  if (v === null || v === undefined) return '-';
-  const d = new Date(v);
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${p(d.getHours())}:${p(d.getMinutes())}`;
+function normalizeHm(v: any): string {
+  const m = String(v ?? '').trim().match(/^(\d{1,2}):(\d{1,2})$/);
+  if (!m) return '04:00';
+  const h = Math.min(23, Math.max(0, Number(m[1])));
+  const mi = Math.min(59, Math.max(0, Number(m[2])));
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
 }
 
 const columns = computed(() => [
@@ -235,7 +231,7 @@ function onDomainChange(v: number) {
 function openAdd() {
   editingId.value = null;
   subOptions.value = [];
-  Object.assign(form, { name: '', did: null, sub: null, types: [], cycle: 'daily', runTime: 4 * 3600000, intervalMin: 60, noticeEmail: '', active: true });
+  Object.assign(form, { name: '', did: null, sub: null, types: [], cycle: 'daily', runTime: '04:00', intervalMin: 60, noticeEmail: '', active: true });
   showEdit.value = true;
 }
 
@@ -246,7 +242,7 @@ function openEdit(row: any) {
   form.sub = row.sub || null;
   form.types = String(row.types || '').split(/[,;，；]/).map((x: string) => x.trim()).filter(Boolean);
   form.cycle = row.cycle === 'interval' ? 'interval' : 'daily';
-  form.runTime = hmToTs(row.run_time);
+  form.runTime = normalizeHm(row.run_time);
   form.intervalMin = Number(row.interval_min) || 60;
   form.noticeEmail = row.notice_email || '';
   form.active = row.active == 1;
@@ -259,7 +255,7 @@ async function save() {
   if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('dnsCheck.intervalRequired'));
   saving.value = true;
   try {
-    const runTime = form.cycle === 'daily' ? fmtTs(form.runTime) : null;
+    const runTime = form.cycle === 'daily' ? normalizeHm(form.runTime) : null;
     const body: any = {
       name: form.name,
       did: form.did,

@@ -196,7 +196,9 @@ export async function expireNoticeTask(): Promise<void> {
   const anyOn = ['expire_notice_mail', 'expire_notice_wxtpl', 'expire_notice_tgbot', 'expire_notice_qqbot', 'expire_notice_webhook', 'expire_notice_custom_webhook'];
   let enabled = false;
   for (const k of anyOn) {
-    if ((await configGet(k)) === '1') { enabled = true; break; }
+    const v = await configGet(k);
+    // 与发送逻辑（msgNotice）保持一致：1 与 2 均视为开启（2 表示「始终发送」）
+    if (v === '1' || v === '2') { enabled = true; break; }
   }
   if (daysStr && enabled && nowHour >= 9) {
     await noticeExpiringDomainList(maxDay, days);

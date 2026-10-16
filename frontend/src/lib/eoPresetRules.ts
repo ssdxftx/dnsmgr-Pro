@@ -40,7 +40,7 @@ function stripHostValues(node: any): void {
     return;
   }
   if (typeof node.Condition === 'string') {
-    node.Condition = node.Condition.replace(HOST_VALUES_RE, (m) => m.replace(/\[[^\]]*\]$/, '[]'));
+    node.Condition = node.Condition.replace(HOST_VALUES_RE, (m: string) => m.replace(/\[[^\]]*\]$/, '[]'));
   }
   for (const key of Object.keys(node)) {
     if (key === 'Condition') continue;

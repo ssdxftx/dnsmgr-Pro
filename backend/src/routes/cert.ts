@@ -16,7 +16,7 @@ import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
 import { configGet, configSet } from '../config.js';
-import { escapeLike, clientMessage, clampLimit, clampOffset } from '../lib/util.js';
+import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime } from '../lib/util.js';
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 import { localResolve } from '../lib/dns/localResolve.js';
 
@@ -96,8 +96,8 @@ function parseCertKey(fullchain: string, privatekey: string) {
     code: 0,
     keytype,
     keysize,
-    issuetime: new Date(cert.validFrom).toISOString().slice(0, 19).replace('T', ' '),
-    expiretime: new Date(cert.validTo).toISOString().slice(0, 19).replace('T', ' '),
+    issuetime: fmtDateTime(new Date(cert.validFrom)),
+    expiretime: fmtDateTime(new Date(cert.validTo)),
     issuer,
     domains,
   };
@@ -248,15 +248,11 @@ export default async function certRoutes(app: FastifyInstance) {
 
   app.delete('/api/cert/accounts/:id', auth, async (req: any) => {
     const { id } = req.params as any;
-    const { deploy = 0 } = req.query || {};
-    const isDeploy = Number(deploy) === 1;
-    if (isDeploy) {
-      const count = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE aid = ?`, [id]))?.c || 0;
-      if (count > 0) return { code: -1, msg: '该账户下存在自动部署任务，无法删除' };
-    } else {
-      const count = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE aid = ?`, [id]))?.c || 0;
-      if (count > 0) return { code: -1, msg: '该账户下存在证书订单，无法删除' };
-    }
+    // 两项关联检查都必须执行，避免客户端通过 deploy 参数只触发其一而绕过
+    const deployCount = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE aid = ?`, [id]))?.c || 0;
+    if (deployCount > 0) return { code: -1, msg: '该账户下存在自动部署任务，无法删除' };
+    const orderCount = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE aid = ?`, [id]))?.c || 0;
+    if (orderCount > 0) return { code: -1, msg: '该账户下存在证书订单，无法删除' };
     await query(`DELETE FROM ${table('cert_account')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });

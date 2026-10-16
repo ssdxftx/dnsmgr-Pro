@@ -1,18 +1,19 @@
 import type { FastifyInstance } from 'fastify';
-import { beginInstall, endInstall, isInstalled, performInstall, testConnection } from '../installer.js';
+import { beginInstall, endInstall, getInstallState, performInstall, testConnection } from '../installer.js';
 import { getDbConfig } from '../db.js';
 
 export default async function setupRoutes(app: FastifyInstance) {
   // 安装状态（前端据此决定展示安装页还是登录页）
   app.get('/api/setup/status', async () => {
-    const installed = await isInstalled();
-    return { code: 0, data: { installed } };
+    const state = await getInstallState();
+    return { code: 0, data: { installed: state === 'installed' } };
   });
 
   // 测试数据库连接，并返回是否已初始化（已存在彩虹 DNS 数据表）；仅未安装时可用，避免已部署实例被用作连接探测
   app.post('/api/setup/check', async (req: any) => {
-    if (await isInstalled()) {
-      return { code: -1, msg: '系统已安装' };
+    const state = await getInstallState();
+    if (state !== 'not_installed') {
+      return { code: -1, msg: state === 'unknown' ? '系统状态未知（数据库暂不可用），请稍后重试' : '系统已安装' };
     }
     const b = req.body || {};
     const cfg = {
@@ -33,8 +34,9 @@ export default async function setupRoutes(app: FastifyInstance) {
 
   // 执行安装：全新空库建表+创建管理员；已有表则绑定现有数据
   app.post('/api/setup/install', async (req: any) => {
-    if (await isInstalled()) {
-      return { code: -1, msg: '系统已安装' };
+    const state = await getInstallState();
+    if (state !== 'not_installed') {
+      return { code: -1, msg: state === 'unknown' ? '系统状态未知（数据库暂不可用），请稍后重试' : '系统已安装' };
     }
     const b = req.body || {};
     const cfg = {

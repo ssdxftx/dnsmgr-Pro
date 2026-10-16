@@ -53,6 +53,8 @@ export class FtpDeploy implements DeployProvider {
         const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
         await client.uploadFrom(pfx, config.pfx_file);
         this.log('PFX证书已上传到：' + config.pfx_file);
+      } else {
+        throw new Error('未知的证书格式：' + String(config.format || '(空)'));
       }
     } catch (e: any) {
       throw new Error('FTP上传失败：' + e.message);

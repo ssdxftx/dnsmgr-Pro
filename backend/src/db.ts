@@ -47,6 +47,11 @@ export function getDbConfig(): DbConfig {
   return loadDbConfig();
 }
 
+// 供分布式锁等需要独占连接的场景使用
+export function getPool(): mysql.Pool {
+  return pool;
+}
+
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
   const [rows] = await pool.query(sql, params);
   return rows as T[];

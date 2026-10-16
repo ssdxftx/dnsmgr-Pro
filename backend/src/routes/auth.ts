@@ -44,7 +44,7 @@ export default async function authRoutes(app: FastifyInstance) {
       const preToken = (app as any).jwt.sign({ uid: user.id, type: 'totp_pre' }, { expiresIn: '5m' });
       return { code: -1, msg: '需要验证动态口令', vcode: 2, data: { pre_token: preToken } };
     }
-    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, type: 'session' };
+    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session' };
     const token = (app as any).jwt.sign(payload);
     await query(`UPDATE ${table('user')} SET lasttime = NOW() WHERE id = ?`, [user.id]);
     await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES (?, ?, ?, NOW())`, [
@@ -77,7 +77,7 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!verifyTOTP(totpSecret, code)) return { code: -1, msg: '动态口令错误' };
     if (!markTotpUsed(user.id, String(code).trim())) return { code: -1, msg: '动态口令已被使用，请稍后再试' };
 
-    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, type: 'session' };
+    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session' };
     const token = (app as any).jwt.sign(payload);
     await query(`UPDATE ${table('user')} SET lasttime = NOW() WHERE id = ?`, [user.id]);
     await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES (?, ?, ?, NOW())`, [
@@ -112,10 +112,10 @@ export default async function authRoutes(app: FastifyInstance) {
       if (!secret) return { code: -1, msg: '密钥不能为空' };
       if (!code) return { code: -1, msg: '请输入动态口令' };
       if (!verifyTOTP(secret, code)) return { code: -1, msg: '动态口令错误' };
-      await query(`UPDATE ${table('user')} SET totp_open = 1, totp_secret = ? WHERE id = ?`, [encryptText(secret), req.user.uid]);
+      await query(`UPDATE ${table('user')} SET totp_open = 1, totp_secret = ?, token_version = token_version + 1 WHERE id = ?`, [encryptText(secret), req.user.uid]);
       return { code: 0, msg: 'TOTP 二次验证绑定成功' };
     }
-    await query(`UPDATE ${table('user')} SET totp_open = 0, totp_secret = NULL WHERE id = ?`, [req.user.uid]);
+    await query(`UPDATE ${table('user')} SET totp_open = 0, totp_secret = NULL, token_version = token_version + 1 WHERE id = ?`, [req.user.uid]);
     return { code: 0, msg: '已关闭 TOTP 二次验证' };
   });
 

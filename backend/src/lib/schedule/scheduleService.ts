@@ -108,10 +108,14 @@ export async function updateNexttime(row: any): Promise<void> {
     if (row.cycle === 2) {
       const date = parseInt(row.switchdate);
       if (isNaN(date)) throw new Error('每月日期配置错误');
-      let d = new Date(today.getFullYear(), today.getMonth(), date, 0, 0, 0);
+      const daysIn = (y: number, mIdx: number) => new Date(y, mIdx + 1, 0).getDate();
+      const y = today.getFullYear();
+      let d = new Date(y, today.getMonth(), Math.min(date, daysIn(y, today.getMonth())), 0, 0, 0);
       applyHms(d, switchtime);
       if (d.getTime() / 1000 <= now) {
-        d = new Date(d.getFullYear(), d.getMonth() + 1, date, 0, 0, 0);
+        const ny = d.getFullYear();
+        const nm = d.getMonth() + 1;
+        d = new Date(ny, nm, Math.min(date, daysIn(ny, nm)), 0, 0, 0);
         applyHms(d, switchtime);
       }
       nexttime = Math.floor(d.getTime() / 1000);

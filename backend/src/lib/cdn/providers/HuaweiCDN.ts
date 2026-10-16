@@ -46,8 +46,8 @@ export class HuaweiCDN implements CdnProvider {
     const data = await this.call('GET', '/v1.0/cdn/domains', { domain_name: domain, page_size: 10, page_number: 1 });
     if (!data) return null;
     for (const d of data.domains || []) {
-      if ((d.domain_name || d.DomainName) === domain || d.id) {
-        if (d.id) return String(d.id);
+      if ((d.domain_name || d.DomainName) === domain && d.id) {
+        return String(d.id);
       }
     }
     const detail = await this.getDomainDetail(domain);

@@ -61,7 +61,7 @@ export async function localResolve(domain: string, type: string): Promise<string
     if (type === 'MX') return dedupe((await resolveMx(domain)).map((r: any) => norm(r.exchange)));
     if (type === 'TXT') return dedupe((await resolveTxt(domain)).flat().map((s: string) => s));
     if (type === 'NS') return dedupe((await resolveNs(domain)).map(norm));
-    if (type === 'SRV') return dedupe((await resolveSrv(domain)).map((r: any) => norm(r.name)));
+    if (type === 'SRV') return dedupe((await resolveSrv(domain)).map((r: any) => `${r.priority} ${r.weight} ${r.port} ${norm(r.name)}`));
   } catch {
     // 本地解析失败或返回空，回退 DoH
   }

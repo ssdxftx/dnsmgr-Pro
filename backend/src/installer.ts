@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
-import { saveDbConfig, type DbConfig } from './config-loader.js';
+import { saveDbConfig, hasDbConfigFile, hasEnvDbConfig, type DbConfig } from './config-loader.js';
 import { reinitPool, table, queryOne } from './db.js';
 
 const SCHEMA_SQL = fs.readFileSync(fileURLToPath(new URL('./sql/schema-init.sql', import.meta.url)), 'utf8');
@@ -167,18 +167,27 @@ export function endInstall(): void {
   installInProgress = false;
 }
 
-// 启动时/状态探测：当前配置下数据库是否已可正常使用（config 表存在即视为已安装）
-// 仅缓存“已安装”，数据库异常时不缓存，避免瞬时故障导致安装接口被错误开放
-export async function isInstalled(): Promise<boolean> {
-  if (installedFlag === true) return true;
+// 安装状态探测：区分「确认已安装 / 确认未安装 / 无法确认（数据库异常）」。
+// 只有确认未安装时才允许走安装接口；数据库不可用时 fail-closed，避免瞬时故障把安装接口错误开放。
+export type InstallState = 'installed' | 'not_installed' | 'unknown';
+
+export async function getInstallState(): Promise<InstallState> {
+  if (installedFlag === true) return 'installed';
   try {
     const one = await queryOne(`SELECT 1 FROM ${table('config')} LIMIT 1`);
     if (one) {
       installedFlag = true;
-      return true;
+      return 'installed';
     }
-    return false;
+    return 'not_installed';
   } catch {
-    return false;
+    // 存在数据库配置（配置文件或环境变量）说明本实例已配置过，此时连接失败属「无法确认」，
+    // 不能开放安装入口；仅首次部署（无任何配置）才允许继续安装。
+    return hasDbConfigFile() || hasEnvDbConfig() ? 'unknown' : 'not_installed';
   }
+}
+
+// 兼容旧调用：仅在确认已安装时返回 true
+export async function isInstalled(): Promise<boolean> {
+  return (await getInstallState()) === 'installed';
 }

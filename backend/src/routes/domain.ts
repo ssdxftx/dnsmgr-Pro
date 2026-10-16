@@ -349,6 +349,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (res === false) return { code: -1, msg: provider.getError() };
     if (!acc.admin) {
       res.list = filterRecords(acc, info.domain.name, res.list);
+      // 非管理员不得通过 total 推断域名全量记录数，按过滤后可见数返回
+      res.total = res.list.length;
     }
     (res as any)._access = buildAccess(acc, info.domain.name);
     return { code: 0, data: res };
@@ -433,6 +435,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         const cur = await provider.getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const err = writeErr(acc, info.domain.name, cur.Name);
         if (err) return { code: -1, msg: err };
       }
@@ -718,6 +721,7 @@ export default async function domainRoutes(app: FastifyInstance) {
           if (!acc.admin) {
             const cur = await (provider as any).getDomainRecordInfo(recordId);
             if (!cur) continue;
+            if (!recordOwnedByDomain(cur, info.domain.name)) continue;
             if (writeErr(acc, info.domain.name, cur.Name)) continue;
           }
           if (await provider.updateRecordWeight(recordId, Number(w))) success++;

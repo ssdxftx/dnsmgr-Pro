@@ -165,9 +165,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   async function loadCdnDomain(id: number): Promise<any> {
     const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     if (!row) return null;
-    const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [row.aid]);
-    if (!acct) return null;
-    row._config = acct.config;
+    // 账户密钥不应回传前端：此处不再挂载账户原始 config
     return row;
   }
 
@@ -1105,6 +1103,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const r = await removeLinkedDnsRecord(row);
       dnsMsg = r.message;
     }
+    await query(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
     await query(`DELETE FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     let msg = deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）';
     if (linked.orders) msg += `；已吊销并删除联动证书 ${linked.orders} 个、自动部署任务 ${linked.deployTasks} 个`;
@@ -1403,9 +1402,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
       await linkLog(domainId, Number(order.id), 'issue', 'ok', `已复用已签发证书 #${order.id}`);
       const task: any = await ensureCertDeploy(provider, row, scope, Number(order.id)).catch(() => false);
       if (task) await new CertDeployService(task.taskId).process(true).catch(() => undefined);
-      await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
       const t = task ? await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [task.taskId]) : null;
       if (Number(t?.status) === 1) {
+        // 仅在实际部署成功后置位，避免部署失败仍标记已启用
+        await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [domainId]);
         await linkLog(domainId, Number(order.id), 'deploy', 'ok', '证书已上传并绑定到 CDN 加速域名，部署完成');
         return { status: 'applied', message: `已复用已签发证书并部署到 ${row.name}`, order_id: Number(order.id) };
       }

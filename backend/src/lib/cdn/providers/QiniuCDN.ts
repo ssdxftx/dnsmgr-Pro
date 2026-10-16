@@ -184,7 +184,9 @@ export class QiniuCDN implements CdnProvider {
         })) !== false
       );
     }
-    return true;
+    // 未绑定证书时开启 HTTPS 属无效操作，显式报错，避免上层误置 https_enabled=1
+    this.error = '该域名未绑定证书，无法开启 HTTPS';
+    return false;
   }
 
   async purge(urls: string[], type: 'url' | 'dir'): Promise<string | false> {

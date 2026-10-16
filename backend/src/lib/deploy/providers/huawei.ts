@@ -155,7 +155,7 @@ export class HuaweiDeploy implements DeployProvider {
       '<PrivateKey>' + escapeXml(privatekey) + '</PrivateKey>' +
       '</CustomDomainConfiguration>';
 
-    const hostname = bucket + '.' + endpoint;
+    const hostname = assertSafeHostname(bucket + '.' + endpoint, 'OBS Endpoint');
     const date = new Date().toUTCString();
     const contentType = 'application/xml';
     const contentMd5 = createHash('md5').update(body, 'utf8').digest('base64');
