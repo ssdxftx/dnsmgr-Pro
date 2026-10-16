@@ -150,6 +150,8 @@ function summarizeResults(list: any[], pendingLabel: string): string {
 
 export default async function cdnRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
+  const providerCache = new Map<string, { at: number; provider: CdnProvider | false }>();
+  const PROVIDER_CACHE_TTL = 5000;
 
   // 数据统计：管理员，或被管理员单独授权使用统计缓存的用户
   const statAuth = {
@@ -173,20 +175,43 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return cdnForZone(row.aid, row.zone_id);
   }
 
+  // provider 短时缓存：批量操作（缓存刷新/同步）常对同一账户+站点反复构造 provider
+  // （每次含 account 查询 + AES 解密），按 aid#zone 缓存 5s，避免逐条重建
   async function cdnForZone(aid: number, zoneId: string | null): Promise<CdnProvider | false> {
+    const key = `${aid}#${zoneId || ''}`;
+    const cached = providerCache.get(key);
+    if (cached && Date.now() - cached.at < PROVIDER_CACHE_TTL) return cached.provider;
+    let provider: CdnProvider | false = false;
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
-    if (!acct) return false;
-    const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
-    if (!provider) return false;
-    if (zoneId && typeof provider.setZoneId === 'function') provider.setZoneId(zoneId);
-    if (zoneId && typeof provider.setSiteId === 'function') provider.setSiteId(zoneId);
+    if (acct) {
+      const p: any = getCdnProvider(acct.type, safeJson(acct.config));
+      if (p) {
+        if (zoneId && typeof p.setZoneId === 'function') p.setZoneId(zoneId);
+        if (zoneId && typeof p.setSiteId === 'function') p.setSiteId(zoneId);
+        provider = p;
+      }
+    }
+    if (providerCache.size > 200) providerCache.clear();
+    providerCache.set(key, { at: Date.now(), provider });
     return provider;
   }
 
   // 列表
   app.get('/api/cdn/domains', auth, async (req: any) => {
     const q = req.query || {};
-    const rows = await query(`SELECT * FROM ${table('cdn_domain')} ORDER BY id DESC`);
+    // 可选按账户 / 站点过滤，避免站点设置页为取少量域名而拉取全量列表
+    const conds: string[] = [];
+    const params: any[] = [];
+    if (Number(q.aid || 0)) {
+      conds.push('aid = ?');
+      params.push(Number(q.aid));
+    }
+    if (q.zone_id !== undefined && q.zone_id !== null && String(q.zone_id) !== '') {
+      conds.push('zone_id = ?');
+      params.push(String(q.zone_id));
+    }
+    const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+    const rows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const cdnAccounts = await query(`SELECT id, type FROM ${table('cdn_account')}`);
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
@@ -194,13 +219,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
     // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
     const linkedDids = new Set<number>();
-    for (const o of await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%cdnDomainId%'])) {
-      try {
-        const did = Number(JSON.parse((o as any).link)?.cdnDomainId);
-        if (did) linkedDids.add(did);
-      } catch {
-        // link 非 JSON 时忽略
-      }
+    // cdn_domain_id 为 link 的生成列 + 索引，避免 link LIKE '%cdnDomainId%' 的前缀通配全表扫描
+    for (const o of await query(`SELECT DISTINCT cdn_domain_id FROM ${table('cert_order')} WHERE cdn_domain_id IS NOT NULL`)) {
+      const did = Number((o as any).cdn_domain_id);
+      if (did) linkedDids.add(did);
     }
     const data = rows.map((r: any) => ({
       ...r,
@@ -1447,15 +1469,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 查找该加速域名已绑定的联动证书订单（按 link 中的 cdnDomainId 精确匹配）
   async function findLinkedOrder(did: number): Promise<any | null> {
-    const rows = await query(`SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE link LIKE ? ORDER BY id DESC LIMIT 50`, ['%cdnDomainId%']);
-    for (const r of rows as any[]) {
-      try {
-        if (Number(JSON.parse(r.link)?.cdnDomainId) === did) return r;
-      } catch {
-        // 忽略非 JSON 的 link
-      }
-    }
-    return null;
+    // 走 cdn_domain_id 生成列索引精确匹配，替代 link LIKE 前缀通配全表扫描
+    const rows = await query(`SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE cdn_domain_id = ? ORDER BY id DESC LIMIT 1`, [did]);
+    return (rows as any[])[0] || null;
   }
 
   // 记录/切换证书管理方式：切换离开「由本项目管理」时停用其联动部署任务，切回时重新启用

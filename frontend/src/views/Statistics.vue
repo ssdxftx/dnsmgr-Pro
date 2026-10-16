@@ -138,13 +138,15 @@ import { LineChart, BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { api, getUser } from '../api';
+import { useResponsive } from '../composables/useResponsive';
 import { useThemeMode } from '../composables/useThemeMode';
 import PageHeader from '../components/PageHeader.vue';
 import StatCard from '../components/StatCard.vue';
 
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
-const isMobile = ref(window.innerWidth < 768);
+// 统一走 useResponsive（内部 passive 监听）；本页仅额外保留图表 resize（rAF 合并）
+const { isMobile } = useResponsive();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const { t } = useI18n();
 const { isDark } = useThemeMode();
@@ -241,22 +243,36 @@ const summary = computed(() => {
   };
 });
 
-function cssVar(name: string, fallback = ''): string {
-  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || fallback;
+// 设计令牌缓存：getComputedStyle 是同步强制样式读取，避免每次重绘图表都反复读取（原为 24 次/渲染）
+let tokenCache: Record<string, string> | null = null;
+function readTokens(): Record<string, string> {
+  const s = getComputedStyle(document.documentElement);
+  const g = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
+  return {
+    primary: g('--app-primary', '#0a7a5c'),
+    text: g('--app-text-2', '#888'),
+    faint: g('--app-text-3', '#aaa'),
+    line: g('--app-divider', 'rgba(0,0,0,0.1)'),
+    surface: g('--app-surface', '#fff'),
+    textMain: g('--app-text', '#222'),
+  };
+}
+function tokens(): Record<string, string> {
+  if (!tokenCache) tokenCache = readTokens();
+  return tokenCache;
+}
+// 主题切换时令牌已变化，需失效缓存后重读
+function clearTokenCache(): void {
+  tokenCache = null;
 }
 
 // 调色板跟随设计令牌：信号青为主，其余为辅，状态色仅用于区分系列
 function chartPalette(): string[] {
-  return [cssVar('--app-primary', '#0a7a5c'), '#38bdf8', '#fbbf24', '#fb7185', '#a78bfa', '#34d399'];
+  return [tokens().primary, '#38bdf8', '#fbbf24', '#fb7185', '#a78bfa', '#34d399'];
 }
 
 function baseOption(): any {
-  const text = cssVar('--app-text-2', '#888');
-  const faint = cssVar('--app-text-3', '#aaa');
-  const line = cssVar('--app-divider', 'rgba(0,0,0,0.1)');
-  const surface = cssVar('--app-surface', '#fff');
-  const textMain = cssVar('--app-text', '#222');
+  const { text, faint, line, surface, textMain } = tokens();
   return {
     color: chartPalette(),
     textStyle: { fontFamily: "'IBM Plex Mono', monospace" },
@@ -291,7 +307,8 @@ function renderChart(el: HTMLDivElement | undefined, option: any, seriesData: an
     chart = echarts.init(el);
     charts.push(chart);
   }
-  chart.setOption(option, true);
+  // 增量更新替代全量替换，避免每次 load/主题切换整体重绘
+  chart.setOption(option, { notMerge: false, lazyUpdate: true });
   void seriesData;
 }
 
@@ -401,6 +418,7 @@ async function loadOptions() {
 
 // 主题切换时按新令牌重绘图表
 watch(isDark, () => {
+  clearTokenCache();
   renderCharts();
 });
 
@@ -410,7 +428,6 @@ function handleResize() {
   if (resizeRaf) return;
   resizeRaf = requestAnimationFrame(() => {
     resizeRaf = 0;
-    isMobile.value = window.innerWidth < 768;
     charts.forEach((c) => c.resize());
   });
 }

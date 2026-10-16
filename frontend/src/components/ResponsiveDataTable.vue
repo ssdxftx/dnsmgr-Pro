@@ -11,6 +11,8 @@
       :striped="striped"
       :scroll-x="scrollX"
       :pagination="pagination"
+      :virtual-scroll="virtualScroll"
+      :max-height="virtualScroll ? maxHeight : undefined"
       :checked-row-keys="hasSelection ? checkedRowKeys : undefined"
       @update:checked-row-keys="onUpdateChecked"
     />
@@ -78,6 +80,8 @@ const props = withDefaults(
     scrollX?: number;
     titleKey?: string;
     emptyText?: string;
+    virtualScroll?: boolean;
+    maxHeight?: number;
   }>(),
   {
     loading: false,
@@ -90,6 +94,8 @@ const props = withDefaults(
     scrollX: undefined,
     titleKey: undefined,
     emptyText: '',
+    virtualScroll: false,
+    maxHeight: undefined,
   },
 );
 

@@ -131,24 +131,33 @@ export async function refreshAllStatCache(): Promise<{ accounts: number; errors:
   const hourEnd = now;
 
   const errors: string[] = [];
-  let count = 0;
-  for (const acct of accounts) {
+  const jobs = accounts.filter((acct) => {
     const route = String(acct.type || '');
     const list = byAid.get(Number(acct.id)) || [];
-    if (!route || !list.length || !hasCdnStatistics(route)) continue;
-    const config = safeConfig(acct.config);
-    count++;
-    try {
-      await storeResult(route, Number(acct.id), 'day', config, list, dayStart, dayEnd, 'All');
-    } catch (e: any) {
-      errors.push(`${route}#${acct.id}(天): ${e?.message || e}`);
+    return !!route && list.length > 0 && hasCdnStatistics(route);
+  });
+  const count = jobs.length;
+  // 并发工作池：串行等待所有账户云端统计会长时间占用连接池并与用户请求争抢，限流 4 并发
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < jobs.length) {
+      const acct = jobs[cursor++];
+      const route = String(acct.type || '');
+      const list = byAid.get(Number(acct.id)) || [];
+      const config = safeConfig(acct.config);
+      try {
+        await storeResult(route, Number(acct.id), 'day', config, list, dayStart, dayEnd, 'All');
+      } catch (e: any) {
+        errors.push(`${route}#${acct.id}(天): ${e?.message || e}`);
+      }
+      try {
+        await storeResult(route, Number(acct.id), 'hour', config, list, hourStart, hourEnd, 'All');
+      } catch (e: any) {
+        errors.push(`${route}#${acct.id}(小时): ${e?.message || e}`);
+      }
     }
-    try {
-      await storeResult(route, Number(acct.id), 'hour', config, list, hourStart, hourEnd, 'All');
-    } catch (e: any) {
-      errors.push(`${route}#${acct.id}(小时): ${e?.message || e}`);
-    }
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker));
 
   await query(`DELETE FROM ${table('cdn_stat_data')} WHERE ts < ?`, [fmt(new Date(now.getTime() - (STAT_RETENTION_DAYS + 1) * 86400000))]);
   await configSet('cdn_stats_cache_last', fmt(now));

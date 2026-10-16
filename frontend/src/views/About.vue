@@ -247,8 +247,8 @@ async function check(force = false) {
 
 onMounted(async () => {
   loading.value = true;
-  await loadInfo();
-  await check(false);
+  // 信息加载与更新检查相互独立，并行发起，省一次往返
+  await Promise.all([loadInfo(), check(false)]);
 });
 </script>
 

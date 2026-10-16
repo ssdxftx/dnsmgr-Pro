@@ -235,7 +235,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 
 const route = useRoute();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const domainId = Number(route.params.id);
@@ -265,6 +265,20 @@ const fallbackForm = reactive<any>({ origin: '' });
 
 const showDetail = ref(false);
 const detailRow = ref<any>(null);
+
+// 并发工作池：批量操作由 N 次串行请求改为限流并发，保持结果与输入同序
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const i = cursor++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 const tlsOptions = ['1.0', '1.1', '1.2', '1.3'].map((v) => ({ label: v, value: v }));
 
@@ -296,9 +310,16 @@ const columns = computed<any[]>(() => [
   },
 ]);
 
+// 日期格式化结果按原始字符串缓存：表格重渲染时避免逐格走 ICU，并使用当前语言而非硬编码 zh-CN
+const fmtCache = new Map<string, string>();
 function fmt(s: string) {
+  if (!s) return s;
+  const hit = fmtCache.get(s);
+  if (hit !== undefined) return hit;
   const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? s : d.toLocaleString('zh-CN', { hour12: false });
+  const out = Number.isNaN(d.getTime()) ? s : d.toLocaleString(locale.value, { hour12: false });
+  fmtCache.set(s, out);
+  return out;
 }
 
 function statusTag(v: string) {
@@ -319,7 +340,7 @@ async function load() {
 }
 
 async function loadDomainInfo() {
-  const res = await api<any>('GET', '/domains');
+  const res = await api<any>('GET', '/domains', undefined, { cache: true });
   if (res.code === 0) {
     const d = res.data.find((x: any) => x.id === domainId);
     if (d) domainName.value = d.name;
@@ -411,7 +432,7 @@ function refreshOne(row: any) {
 
 function batchRefresh() {
   dialog.info({ title: t('cfHostnames.batchRefreshVerify'), content: t('cfHostnames.batchRefreshConfirm', { count: selection.value.length }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    for (const id of selection.value) await api('POST', `/cloudflare/domains/${domainId}/hostnames/${id}/refresh`);
+    await mapPool([...selection.value], 5, (id) => api('POST', `/cloudflare/domains/${domainId}/hostnames/${id}/refresh`));
     message.success(t('cfHostnames.refreshReinitiated'));
     load();
   } });
@@ -419,15 +440,24 @@ function batchRefresh() {
 
 function delOne(row: any) {
   dialog.warning({ title: t('cfHostnames.deleteTitle'), content: t('cfHostnames.deleteConfirm', { hostname: row.hostname }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+    // 乐观移除
+    const idx = rows.value.findIndex((r: any) => Number(r.id) === Number(row.id));
+    const removed = idx >= 0 ? rows.value[idx] : null;
+    if (idx >= 0) rows.value.splice(idx, 1);
     const res = await api('DELETE', `/cloudflare/domains/${domainId}/hostnames/${row.id}?hostname=${encodeURIComponent(row.hostname)}`);
-    if (res.code === 0) { message.success(res.msg); load(); } else message.error(res.msg);
+    if (res.code === 0) message.success(res.msg);
+    else { if (removed) rows.value.splice(idx, 0, removed); message.error(res.msg); }
   } });
 }
 
 function confirmBatchDelete() {
   dialog.warning({ title: t('cfHostnames.batchDelete'), content: t('cfHostnames.batchDeleteConfirm', { count: selection.value.length }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
+    const ids = selection.value.map(Number);
+    const removed = rows.value.filter((r: any) => ids.includes(Number(r.id)));
+    rows.value = rows.value.filter((r: any) => !ids.includes(Number(r.id)));
     const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_delete`, { hostname_ids: selection.value });
-    if (res.code === 0) { message.success(res.msg); load(); } else message.error(res.msg);
+    if (res.code === 0) { message.success(res.msg); selection.value = []; }
+    else { rows.value = [...rows.value, ...removed]; message.error(res.msg); }
   } });
 }
 
@@ -486,14 +516,12 @@ function groupByDomain(items: { label: string; name: string; value: string; cand
 
 async function openBatchDcv() {
   if (!dcvUuid.value) { await loadDcvUuid(); if (!dcvUuid.value) return; }
-  const items: any[] = [];
-  for (const id of selection.value) {
-    const row = rows.value.find((r) => r.id === id);
-    if (!row) continue;
+  const picked = selection.value.map((id) => rows.value.find((r) => r.id === id)).filter(Boolean);
+  const items = await mapPool(picked, 5, async (row: any) => {
     const name = `_acme-challenge.${row.hostname}`;
     const candidates = await resolveTargets(name);
-    items.push({ label: row.hostname, name, value: `${row.hostname}.${dcvUuid.value}.dcv.cloudflare.com`, candidates, type: 'CNAME' });
-  }
+    return { label: row.hostname, name, value: `${row.hostname}.${dcvUuid.value}.dcv.cloudflare.com`, candidates, type: 'CNAME' };
+  });
   if (!items.length) return message.warning(t('cfHostnames.noHostnames'));
   batchRecord.title = t('cfHostnames.batchDcvTitle', { uuid: dcvUuid.value });
   batchRecord.warning = t('cfHostnames.batchDcvWarning');
@@ -503,11 +531,9 @@ async function openBatchDcv() {
 }
 
 async function openBatchTxt(kind: 'hostname' | 'cert') {
-  const items: any[] = [];
   const skipped: string[] = [];
-  for (const id of selection.value) {
-    const row = rows.value.find((r) => r.id === id);
-    if (!row) continue;
+  const picked = selection.value.map((id) => rows.value.find((r) => r.id === id)).filter(Boolean);
+  const resolved = await mapPool(picked, 5, async (row: any) => {
     let name = '';
     let value = '';
     if (kind === 'hostname') {
@@ -518,10 +544,14 @@ async function openBatchTxt(kind: 'hostname' | 'cert') {
       name = rec?.txt_name || row.ssl?.txt_name || '';
       value = rec?.txt_value || row.ssl?.txt_value || '';
     }
-    if (!name || !value) { skipped.push(row.hostname); continue; }
+    if (!name || !value) {
+      skipped.push(row.hostname);
+      return null;
+    }
     const candidates = await resolveTargets(name);
-    items.push({ label: row.hostname, name, value, candidates, type: 'TXT' });
-  }
+    return { label: row.hostname, name, value, candidates, type: 'TXT' };
+  });
+  const items = resolved.filter(Boolean) as any[];
   if (!items.length) return message.warning(t('cfHostnames.noVerifyInfo'));
   batchRecord.title = kind === 'hostname' ? t('cfHostnames.batchHostnameTxtTitle') : t('cfHostnames.batchCertTxtTitle');
   batchRecord.warning = skipped.length ? t('cfHostnames.skippedWarning', { count: skipped.length, list: skipped.join(', ') }) : '';
@@ -535,17 +565,23 @@ async function runBatchRecord() {
     if (!g.domainId) return message.warning(t('cfHostnames.selectProviderRequired'));
   }
   batchRecord.running = true;
+  const jobs: any[] = [];
+  for (const g of batchRecord.groups) for (const it of g.items) jobs.push({ g, it });
+  const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
+    const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
+    if (!cand) return { ok: false, msg: `${it.label}: ${t('cfHostnames.domainNotFound')}` };
+    const line = await getDefaultLine(g.domainId!);
+    const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: it.type, value: it.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfVerifyRemark') });
+    return res.code === 0 ? { ok: true, msg: '' } : { ok: false, msg: `${it.label}: ${res.msg}` };
+  });
   let ok = 0;
   let fail = 0;
   const errors: string[] = [];
-  for (const g of batchRecord.groups) {
-    for (const it of g.items) {
-      const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
-      if (!cand) { fail++; errors.push(`${it.label}: ${t('cfHostnames.domainNotFound')}`); continue; }
-      const line = await getDefaultLine(g.domainId!);
-      const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: it.type, value: it.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfVerifyRemark') });
-      if (res.code === 0) ok++;
-      else { fail++; errors.push(`${it.label}: ${res.msg}`); }
+  for (const r of results) {
+    if (r.ok) ok++;
+    else {
+      fail++;
+      if (r.msg) errors.push(r.msg);
     }
   }
   batchRecord.running = false;
@@ -553,13 +589,19 @@ async function runBatchRecord() {
   dialog.info({ title: t('cfHostnames.processDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
 }
 
+const lineCache = new Map<string, string>();
 async function getDefaultLine(targetDomainId: number | string): Promise<string> {
+  const key = String(targetDomainId);
+  const cached = lineCache.get(key);
+  if (cached !== undefined) return cached;
   const res = await api<any>('GET', `/domains/${targetDomainId}/lines`);
+  let line = '0';
   if (res.code === 0 && res.data) {
     const keys = Object.keys(res.data);
-    if (keys.length) return res.data[keys[0]];
+    if (keys.length) line = res.data[keys[0]];
   }
-  return '0';
+  lineCache.set(key, line);
+  return line;
 }
 
 // ==================== CF 优选 ====================
@@ -592,11 +634,10 @@ async function openCfOptimized(single: boolean, hostname?: string) {
   cfOptimized.running = false;
 
   const hostnames = single ? [hostname!] : selection.value.map((id) => rows.value.find((r) => r.id === id)?.hostname).filter(Boolean);
-  const items: any[] = [];
-  for (const h of hostnames) {
+  const items = await mapPool(hostnames as string[], 5, async (h) => {
     const candidates = await resolveTargets(h);
-    items.push({ hostname: h, candidates });
-  }
+    return { hostname: h, candidates };
+  });
   const groups: Record<string, CfGroup> = {};
   for (const it of items) {
     const domainName = it.candidates.length ? it.candidates[0].domain_name : t('cfHostnames.unknownDomain');
@@ -639,17 +680,23 @@ async function runCfOptimized() {
     if (!g.domainId) return message.warning(t('cfHostnames.selectProviderRequired'));
   }
   cfOptimized.running = true;
+  const jobs: any[] = [];
+  for (const g of cfOptimized.groups) for (const it of g.items) jobs.push({ g, it });
+  const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
+    const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
+    if (!cand) return { ok: false, msg: `${it.hostname}: ${t('cfHostnames.domainNotFound')}` };
+    const line = g.line || (await getDefaultLine(g.domainId!));
+    const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: target.type, value: target.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfOptimizedRemark') });
+    return res.code === 0 ? { ok: true, msg: '' } : { ok: false, msg: `${it.hostname}: ${res.msg}` };
+  });
   let ok = 0;
   let fail = 0;
   const errors: string[] = [];
-  for (const g of cfOptimized.groups) {
-    const line = g.line || (await getDefaultLine(g.domainId!));
-    for (const it of g.items) {
-      const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
-      if (!cand) { fail++; errors.push(`${it.hostname}: ${t('cfHostnames.domainNotFound')}`); continue; }
-      const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: target.type, value: target.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfOptimizedRemark') });
-      if (res.code === 0) ok++;
-      else { fail++; errors.push(`${it.hostname}: ${res.msg}`); }
+  for (const r of results) {
+    if (r.ok) ok++;
+    else {
+      fail++;
+      if (r.msg) errors.push(r.msg);
     }
   }
   cfOptimized.running = false;

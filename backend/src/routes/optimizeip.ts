@@ -26,7 +26,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 域名列表（排除 cloudflare，用于添加任务）
   app.get('/api/optimize/domains', auth, async () => {
     const rows = await query(
-      `SELECT A.id, A.name FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE B.type <> 'cloudflare' ORDER BY A.id DESC`
+      `SELECT A.id, A.name FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE B.type <> 'cloudflare' ORDER BY A.id DESC LIMIT 2000`
     );
     return { code: 0, data: rows };
   });

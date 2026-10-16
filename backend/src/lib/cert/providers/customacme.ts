@@ -16,7 +16,7 @@ export class CustomacmeCert extends AcmeCertBase {
       return { kid, key: this.ext.key };
     }
 
-    const key = this.ac.generateRSAKey(2048);
+    const key = await this.ac.generateRSAKey(2048);
     this.ac.loadAccountKey(key);
     const kid = await (this.config.kid && this.config.key
       ? this.ac.registerEAB(true, this.config.kid, this.config.key, this.config.email)

@@ -19,15 +19,8 @@ export default defineConfig({
         assetFileNames: 'assets/[name]-[hash][extname]',
         manualChunks(id: string) {
           if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'vendor-charts';
-          if (
-            id.includes('/node_modules/naive-ui/') ||
-            id.includes('/node_modules/vueuc/') ||
-            id.includes('/node_modules/seemly/') ||
-            id.includes('/node_modules/css-render/') ||
-            id.includes('/node_modules/@css-render/')
-          ) {
-            return 'vendor-ui';
-          }
+          // naive-ui / vueuc / seemly / css-render 不再强制并入单一 vendor-ui：
+          // 交给 rollup 按引用图自然分块，避免整块组件库被入口静态拉成首屏强依赖。
           if (
             id.includes('/node_modules/vue/') ||
             id.includes('/node_modules/@vue/') ||

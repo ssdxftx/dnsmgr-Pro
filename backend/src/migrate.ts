@@ -169,6 +169,43 @@ export async function migrate(): Promise<void> {
   await ensureIndex('domain', 'idx_checkstatus', '(`checkstatus`)');
   await ensureIndex('domain', 'idx_expiretime', '(`expiretime`)');
   await ensureIndex('cert_order', 'idx_renew', '(`status`, `isauto`, `expiretime`)');
+
+  // 证书联动查询索引：cdn_domain_id 为 link 中 cdnDomainId 的生成列 + 索引，
+  // 替代 link LIKE '%cdnDomainId%' 的前缀通配全表扫描（CDN 列表 / 证书联动轮询热点）
+  await ensureCertOrderCdnDomainId();
+
+  // CDN 统计查询/清理索引：查询条件不含唯一索引最左列 route，补 (granularity, ts) 与 (ts)
+  await ensureIndex('cdn_stat_data', 'idx_gran_ts', '(`granularity`, `ts`)');
+  await ensureIndex('cdn_stat_data', 'idx_ts', '(`ts`)');
+
+  // 高频点查/关联索引：消除按 aid / 域名 / (did,domain) 关联时的全表扫描
+  await ensureIndex('cdn_domain', 'idx_aid', '(`aid`)');
+  await ensureIndex('cdn_domain', 'idx_aid_zone', '(`aid`, `zone_id`)');
+  await ensureIndex('domain', 'idx_aid', '(`aid`)');
+  await ensureIndex('cert_deploy', 'idx_aid_oid', '(`aid`, `oid`)');
+  await ensureIndex('cert_order', 'idx_aid', '(`aid`)');
+  await ensureIndex('cert_domain', 'idx_domain', '(`domain`)');
+  await ensureIndex('cert_cname', 'idx_did_domain', '(`did`, `domain`)');
+}
+
+// cert_order.link 的 cdnDomainId 生成列 + 索引：MySQL 5.7+ 生成列；
+// 失败（旧版本或 link 存在非法 JSON）时记录并继续，不影响启动
+async function ensureCertOrderCdnDomainId(): Promise<void> {
+  const cols = await query<any>(
+    `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'cdn_domain_id' LIMIT 1`,
+    [table('cert_order')]
+  );
+  if (cols.length === 0) {
+    try {
+      await query(
+        `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INT UNSIGNED GENERATED ALWAYS AS (CAST(JSON_UNQUOTE(JSON_EXTRACT(link, '$.cdnDomainId')) AS UNSIGNED)) STORED`
+      );
+    } catch (e: any) {
+      console.log(`[migrate] 为 cert_order 添加 cdn_domain_id 生成列失败（跳过联动索引）：${e?.message || e}`);
+      return;
+    }
+  }
+  await ensureIndex('cert_order', 'idx_cdn_domain_id', '(`cdn_domain_id`)');
 }
 
 async function ensureIndex(tableName: string, indexName: string, columns: string): Promise<void> {

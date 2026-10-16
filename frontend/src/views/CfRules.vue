@@ -727,8 +727,8 @@ async function removeCredential() {
 }
 
 onMounted(async () => {
-  await loadPhases();
-  await loadDomains();
+  // loadPhases 与 loadDomains 无依赖关系，并行发起；loadRules 依赖已加载的域名，随后执行
+  await Promise.all([loadPhases(), loadDomains()]);
   await loadRules();
 });
 </script>

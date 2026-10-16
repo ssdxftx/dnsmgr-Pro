@@ -168,7 +168,8 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const q = req.query || {};
     const offset = clampOffset(q.offset);
-    const limit = clampLimit(q.limit);
+    // 注册码管理页单次最多取 500 条，与前端契约一致（clampLimit 默认上限 200）
+    const limit = clampLimit(q.limit, 10, 500);
     const totalRow = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('reg_code')}`);
     const list = await query(
       `SELECT * FROM ${table('reg_code')} ORDER BY id DESC LIMIT ? OFFSET ?`,

@@ -34,6 +34,8 @@
         :row-key="(row: any) => row.id"
         v-model:checked-row-keys="checkedIds"
         :empty-text="t('cdnDomain.empty')"
+        :virtual-scroll="domains.length > 200"
+        :max-height="620"
       />
     </n-card>
 
@@ -673,7 +675,6 @@ async function applyFreeCertMgr() {
     certMgrFree.value = res.data || [];
     certMgrTarget.value.cert_mode = 'freecert';
     message.success(res.msg);
-    loadDomains();
   } else message.error(res.msg);
 }
 
@@ -685,7 +686,6 @@ async function checkFreeCertMgr() {
   if (res.code === 0) {
     certMgrFree.value = res.data || [];
     message.success(res.msg);
-    loadDomains();
   } else message.error(res.msg);
 }
 
@@ -698,7 +698,6 @@ async function applyCertApplyMgr() {
     certMgrApply.value = res.data || [];
     certMgrTarget.value.cert_mode = 'certapply';
     message.success(res.msg);
-    loadDomains();
   } else message.error(res.msg);
 }
 
@@ -711,7 +710,6 @@ async function applyLinkMgr() {
   if (res.code === 0) {
     certMgrTarget.value.cert_mode = 'certlink';
     message.success(res.msg);
-    loadDomains();
     await loadCertMgrLog();
   } else {
     certMgrError.value = res.msg || t('cdnDomain.certFailedRetry');
@@ -726,7 +724,6 @@ async function applyNoneMgr() {
   if (res.code === 0) {
     certMgrTarget.value.cert_mode = '';
     message.success(res.msg);
-    loadDomains();
   } else message.error(res.msg);
 }
 
@@ -817,12 +814,12 @@ const certModeOptions = computed(() => {
 const linkCanConfirm = computed(() => !!linkChoice.value && !!linkCandidates.value);
 
 const columns = computed<any[]>(() => [
-  { type: 'selection' },
+  { type: 'selection', width: 40 },
   { title: 'ID', key: 'id', width: 60 },
   {
     title: t('cdnDomain.accelDomain'),
     key: 'name',
-    minWidth: 170,
+    width: 200,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.name });
     },
@@ -831,7 +828,7 @@ const columns = computed<any[]>(() => [
   {
     title: t('cdnDomain.originCol'),
     key: 'origin',
-    minWidth: 160,
+    width: 180,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.origin || '' });
     },
@@ -839,7 +836,7 @@ const columns = computed<any[]>(() => [
   {
     title: 'CNAME',
     key: 'cname',
-    minWidth: 180,
+    width: 200,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.cname || '' });
     },
@@ -884,7 +881,7 @@ async function loadAccounts() {
 }
 
 async function loadDnsDomains() {
-  const res = await api<any>('GET', '/domains');
+  const res = await api<any>('GET', '/domains', undefined, { cache: true });
   if (res.code === 0) dnsDomains.value = res.data.map((d: any) => ({ id: d.id, name: d.name }));
 }
 
@@ -1216,11 +1213,16 @@ async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
   if (deleteCloud) params.set('delete_cloud', '1');
   if (deleteDns) params.set('delete_dns', '1');
   const qs = params.toString();
+  // 乐观移除：后端失败时本地记录并未删除，直接回滚
+  const idx = domains.value.findIndex((d: any) => Number(d.id) === Number(row.id));
+  const removed = idx >= 0 ? domains.value[idx] : null;
+  if (idx >= 0) domains.value.splice(idx, 1);
   const res = await api('DELETE', `/cdn/domains/${row.id}${qs ? '?' + qs : ''}`);
-  if (res.code === 0) {
-    message.success(res.msg);
-    loadDomains();
-  } else message.error(res.msg);
+  if (res.code === 0) message.success(res.msg);
+  else {
+    if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
+    message.error(res.msg);
+  }
 }
 
 onMounted(() => {

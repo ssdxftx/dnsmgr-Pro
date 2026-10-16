@@ -99,9 +99,11 @@
 
       <main class="app-content" :native-scrollbar="true">
         <div class="app-page">
-          <router-view v-slot="{ Component }">
+          <router-view v-slot="{ Component, route: current }">
             <transition name="fade-slide" mode="out-in">
-              <component :is="Component" />
+              <keep-alive :include="keepAliveViews">
+                <component :is="Component" :key="current.path" />
+              </keep-alive>
             </transition>
           </router-view>
         </div>
@@ -136,6 +138,8 @@ const { setLocale } = useLocale();
 const version = __APP_VERSION__;
 const collapsed = ref(false);
 const drawerShow = ref(false);
+// 高频列表页缓存：返回列表零请求、零重渲（组件名由 SFC 文件名推断，带参详情页不缓存）
+const keepAliveViews = ['DomainList', 'CdnDomain', 'UserList', 'CertOrder'];
 
 /* 顶栏实时时钟：直接更新 DOM 文本，避免每秒触发整个布局重渲染 */
 const clockEl = ref<HTMLElement | null>(null);
@@ -364,9 +368,8 @@ function onUserSelect(key: string) {
   flex-direction: column;
   width: var(--app-sidebar-w);
   flex-shrink: 0;
-  background: var(--app-glass);
-  backdrop-filter: blur(18px) saturate(1.2);
-  -webkit-backdrop-filter: blur(18px) saturate(1.2);
+  /* 侧栏为常驻元素：用半透明近似替代实时 backdrop-filter，避免滚动时反复模糊重采样 */
+  background: color-mix(in srgb, var(--app-surface) 92%, transparent);
   border-right: 1px solid var(--app-border);
   transition: width 0.22s var(--app-ease);
   animation: slide-in-left 0.5s var(--app-ease) both;
@@ -494,9 +497,8 @@ function onUserSelect(key: string) {
   height: var(--app-header-h);
   padding: 0 20px;
   flex-shrink: 0;
-  background: color-mix(in srgb, var(--app-surface) 70%, transparent);
-  backdrop-filter: blur(16px) saturate(1.3);
-  -webkit-backdrop-filter: blur(16px) saturate(1.3);
+  /* 顶栏常驻：半透明近似替代实时 backdrop-filter */
+  background: color-mix(in srgb, var(--app-surface) 92%, transparent);
   border-bottom: 1px solid var(--app-border);
   animation: fade-down 0.5s 0.08s var(--app-ease) both;
 }

@@ -92,7 +92,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref } from 'vue';
+import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, PeopleOutline, ShieldCheckmarkOutline, KeyOutline } from '@vicons/ionicons5';
@@ -125,15 +126,8 @@ const saving = ref(false);
 const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [] });
 const domainOptions = ref<any[]>([]);
 
-const isMobile = ref(false);
-function checkMobile() {
-  isMobile.value = window.innerWidth < 768;
-}
-onMounted(() => {
-  checkMobile();
-  window.addEventListener('resize', checkMobile);
-});
-onBeforeUnmount(() => window.removeEventListener('resize', checkMobile));
+// 统一走 useResponsive（内部已用 passive 监听），避免重复注册 resize 监听
+const { isMobile } = useResponsive();
 
 // 手机端标签置顶并把弹窗限制在视口内，避免子域名分配的域名选择框被挤压
 const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
@@ -342,20 +336,40 @@ async function save() {
   } else message.error(res.msg);
 }
 
+const togglePending = new Set<number>();
 function toggleStatus(row: any) {
-  api('POST', `/users/${row.id}/status`, { status: row.status ? 0 : 1 }).then((res) => {
-    if (res.code === 0) loadUsers();
-    else message.error(res.msg);
-  });
+  const id = Number(row.id);
+  if (togglePending.has(id)) return; // 防双击重复提交
+  togglePending.add(id);
+  const prev = row.status ? 1 : 0;
+  const target = prev ? 0 : 1;
+  row.status = target; // 乐观更新：立即反馈，避免整表重拉
+  api('POST', `/users/${row.id}/status`, { status: target })
+    .then((res) => {
+      if (res.code !== 0) {
+        row.status = prev; // 失败回滚
+        message.error(res.msg);
+      }
+    })
+    .finally(() => togglePending.delete(id));
 }
 
 function toggleStatCache(row: any) {
-  api('POST', `/users/${row.id}/stat-cache`, { stat_cache: row.stat_cache ? 0 : 1 }).then((res) => {
-    if (res.code === 0) {
-      message.success(res.msg);
-      loadUsers();
-    } else message.error(res.msg);
-  });
+  const id = Number(row.id);
+  if (togglePending.has(id)) return; // 防双击重复提交
+  togglePending.add(id);
+  const prev = row.stat_cache ? 1 : 0;
+  const target = prev ? 0 : 1;
+  row.stat_cache = target; // 乐观更新
+  api('POST', `/users/${row.id}/stat-cache`, { stat_cache: target })
+    .then((res) => {
+      if (res.code === 0) message.success(res.msg);
+      else {
+        row.stat_cache = prev; // 失败回滚
+        message.error(res.msg);
+      }
+    })
+    .finally(() => togglePending.delete(id));
 }
 
 function del(row: any) {
@@ -365,11 +379,17 @@ function del(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
+      const idx = users.value.findIndex((u: any) => Number(u.id) === Number(row.id));
+      const removed = idx >= 0 ? users.value[idx] : null;
+      if (idx >= 0) users.value.splice(idx, 1);
       const res = await api('DELETE', `/users/${row.id}`);
       if (res.code === 0) {
         message.success(t('userList.deleteSuccess'));
-        loadUsers();
-      } else message.error(res.msg);
+        if (pagination.itemCount > 0) pagination.itemCount--;
+      } else {
+        if (removed) users.value.splice(idx, 0, removed); // 失败回滚
+        message.error(res.msg);
+      }
     },
   });
 }

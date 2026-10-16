@@ -154,7 +154,8 @@ const accessForm = reactive<any>({
 });
 
 async function load() {
-  const res = await api<any>('GET', `/cdn/domains/${domainId}`);
+  // 详情与访问配置相互独立，并行拉取
+  const [res] = await Promise.all([api<any>('GET', `/cdn/domains/${domainId}`), loadAccess()]);
   if (res.code !== 0) {
     message.error(res.msg);
     return;
@@ -173,7 +174,6 @@ async function load() {
   httpsForm.https_enabled = !!_info.https_enabled;
   httpsForm.force_redirect = !!_info.force_redirect;
   cacheForm.rules = (_rules || []).map((r: any) => ({ path: r.path, ttl: Number(r.ttl || 0) }));
-  loadAccess();
 }
 
 async function loadAccess() {
@@ -289,10 +289,8 @@ onMounted(load);
 .n-space > .n-card {
   position: relative;
   overflow: hidden;
-  background: var(--app-glass);
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   border: 1px solid var(--app-border);
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
   border-radius: var(--app-radius-lg);
   box-shadow: var(--app-shadow-sm);
   transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);

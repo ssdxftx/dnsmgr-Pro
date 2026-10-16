@@ -17,7 +17,7 @@ export class LetsencryptCert extends AcmeCertBase {
       const kid = await this.ac.register(true, this.config.email);
       return { kid, key: this.ext.key };
     }
-    const key = this.ac.generateRSAKey(2048);
+    const key = await this.ac.generateRSAKey(2048);
     this.ac.loadAccountKey(key);
     const kid = await this.ac.register(true, this.config.email);
     return { kid, key };

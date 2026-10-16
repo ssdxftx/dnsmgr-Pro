@@ -1,8 +1,10 @@
-import { X509Certificate } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
-import { readdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, realpathSync } from 'node:fs';
+import { createHash, X509Certificate } from 'node:crypto';
+import { execFile, execFileSync } from 'node:child_process';
+import { readdirSync, realpathSync } from 'node:fs';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
+import { promisify } from 'node:util';
 import { query, table } from '../../db.js';
 
 let domainsCache: string[] | null = null;
@@ -57,16 +59,27 @@ export function unzip(zipPath: string, destDir: string): void {
   execFileSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
 }
 
-export function buildPfx(fullchain: string, privatekey: string, pwd: string): Buffer {
-  const dir = mkdtempSync(join(tmpdir(), 'pfx_'));
+const execFileAsync = promisify(execFile);
+
+// 同一订单的 PFX 结果缓存（按 fullchain + 私钥 + 密码哈希）：避免证书详情/批量部署反复重新生成
+const pfxCache = new Map<string, { at: number; buf: Buffer }>();
+const PFX_CACHE_TTL = 10 * 60_000;
+const PFX_CACHE_MAX = 64;
+
+export async function buildPfx(fullchain: string, privatekey: string, pwd: string): Promise<Buffer> {
+  const cacheKey = createHash('sha256').update(pwd).update('\0').update(fullchain).update('\0').update(privatekey).digest('hex');
+  const cached = pfxCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < PFX_CACHE_TTL) return cached.buf;
+
+  const dir = await mkdtemp(join(tmpdir(), 'pfx_'));
   const certFile = join(dir, 'fullchain.pem');
   const keyFile = join(dir, 'key.pem');
   const pfxFile = join(dir, 'out.pfx');
   try {
-    writeFileSync(certFile, fullchain);
-    writeFileSync(keyFile, privatekey, { mode: 0o600 });
+    await writeFile(certFile, fullchain);
+    await writeFile(keyFile, privatekey, { mode: 0o600 });
     try {
-      execFileSync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', `pass:${pwd}`]);
+      await execFileAsync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', `pass:${pwd}`]);
     } catch (e: any) {
       // 区分「未安装 openssl」与「openssl 执行失败」，避免环境问题被误判为证书内容问题
       if (e && e.code === 'ENOENT') {
@@ -75,9 +88,12 @@ export function buildPfx(fullchain: string, privatekey: string, pwd: string): Bu
       const detail = e && e.stderr ? String(e.stderr).trim() : e?.message || String(e);
       throw new Error('生成 PFX 失败：' + detail);
     }
-    return readFileSync(pfxFile);
+    const buf = await readFile(pfxFile);
+    if (pfxCache.size >= PFX_CACHE_MAX) pfxCache.clear();
+    pfxCache.set(cacheKey, { at: Date.now(), buf });
+    return buf;
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true });
   }
 }
 

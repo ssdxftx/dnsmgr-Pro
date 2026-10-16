@@ -175,7 +175,7 @@ export class SshDeploy implements DeployProvider {
         await this.writeFile(conn, config.pem_key_file, Buffer.from(privatekey), 0o600);
         this.log('私钥已保存到：' + config.pem_key_file);
       } else if (config.format === 'pfx') {
-        const pfx = buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
+        const pfx = await buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
         await this.writeFile(conn, config.pfx_file, pfx, 0o600);
         this.log('PFX证书已保存到：' + config.pfx_file);
         if (config.uptype === '1' && config.iis_domain) {

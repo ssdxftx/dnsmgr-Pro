@@ -45,12 +45,15 @@ const typeOptions = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'RED
 const lineOptions = computed(() => Object.entries(lines.value).map(([name, code]) => ({ label: name, value: code })));
 
 onMounted(async () => {
-  const dl = await api<any>('GET', '/domains');
+  // 域名信息与线路列表相互独立，并行拉取
+  const [dl, lr] = await Promise.all([
+    api<any>('GET', '/domains', undefined, { cache: true }),
+    api<any>('GET', `/domains/${domainId}/lines`),
+  ]);
   if (dl.code === 0) {
     const d = (dl.data || []).find((x: any) => x.id === domainId);
     if (d) domainName.value = d._base_name || d.name;
   }
-  const lr = await api<any>('GET', `/domains/${domainId}/lines`);
   if (lr.code === 0) {
     lines.value = lr.data || {};
     const def = Object.values(lines.value)[0];

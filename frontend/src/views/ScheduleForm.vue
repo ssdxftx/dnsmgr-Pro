@@ -201,8 +201,8 @@ async function submit() {
 }
 
 onMounted(async () => {
-  await loadDomains();
-  if (isEdit.value) await loadTask();
+  // 域名选项与任务详情相互独立，并行拉取
+  await Promise.all([loadDomains(), isEdit.value ? loadTask() : Promise.resolve()]);
 });
 </script>
 

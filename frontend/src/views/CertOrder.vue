@@ -291,10 +291,18 @@ async function save() {
   }
 }
 
+// 防重复提交：处理中订单加入集合，忽略重复点击（签发为耗时操作，重复触发会重复下单）
+const processing = new Set<number>();
 async function process(row: any) {
-  const res = await api('POST', `/cert/orders/${row.id}/process`, {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
+  if (processing.has(Number(row.id))) return;
+  processing.add(Number(row.id));
+  try {
+    const res = await api('POST', `/cert/orders/${row.id}/process`, {});
+    if (res.code === 0) message.success(res.msg);
+    else message.error(res.msg);
+  } finally {
+    processing.delete(Number(row.id));
+  }
   loadOrders();
 }
 
@@ -329,10 +337,15 @@ function revoke(row: any) {
 }
 
 async function toggleAuto(row: any) {
-  const res = await api('POST', `/cert/orders/${row.id}/setauto`, { isauto: row.isauto ? 0 : 1 });
+  const prev = row.isauto ? 1 : 0;
+  const target = prev ? 0 : 1;
+  row.isauto = target; // 乐观更新
+  const res = await api('POST', `/cert/orders/${row.id}/setauto`, { isauto: target });
   if (res.code === 0) message.success(t('common.success'));
-  else message.error(res.msg);
-  loadOrders();
+  else {
+    row.isauto = prev; // 失败回滚
+    message.error(res.msg);
+  }
 }
 
 async function viewInfo(row: any) {

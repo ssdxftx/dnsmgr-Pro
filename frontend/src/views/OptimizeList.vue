@@ -191,11 +191,24 @@ async function run(row: any) {
   loadTasks();
 }
 
+const activePending = new Set<number>();
 async function toggleActive(row: any) {
-  const res = await api('POST', `/optimize/tasks/${row.id}/active`, { active: row.active ? 0 : 1 });
-  if (res.code === 0) message.success(t('common.success'));
-  else message.error(res.msg);
-  loadTasks();
+  const id = Number(row.id);
+  if (activePending.has(id)) return; // 防双击重复提交
+  activePending.add(id);
+  const prev = row.active ? 1 : 0;
+  const target = prev ? 0 : 1;
+  row.active = target; // 乐观更新
+  try {
+    const res = await api('POST', `/optimize/tasks/${row.id}/active`, { active: target });
+    if (res.code === 0) message.success(t('common.success'));
+    else {
+      row.active = prev; // 失败回滚
+      message.error(res.msg);
+    }
+  } finally {
+    activePending.delete(id);
+  }
 }
 
 function del(row: any) {
@@ -205,11 +218,15 @@ function del(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
+      const idx = tasks.value.findIndex((x: any) => Number(x.id) === Number(row.id));
+      const removed = idx >= 0 ? tasks.value[idx] : null;
+      if (idx >= 0) tasks.value.splice(idx, 1);
       const res = await api('DELETE', `/optimize/tasks/${row.id}`);
-      if (res.code === 0) {
-        message.success(t('optimize.deleteSuccess'));
-        loadTasks();
-      } else message.error(res.msg);
+      if (res.code === 0) message.success(t('optimize.deleteSuccess'));
+      else {
+        if (removed) tasks.value.splice(idx, 0, removed); // 失败回滚
+        message.error(res.msg);
+      }
     },
   });
 }

@@ -6,7 +6,7 @@ let pool: mysql.Pool;
 
 function buildPool(cfg: DbConfig): mysql.Pool {
   currentPrefix = cfg.db_prefix || 'dnsmgr_';
-  return mysql.createPool({
+  const pool = mysql.createPool({
     host: cfg.db_host,
     port: Number(cfg.db_port || 3306),
     user: cfg.db_user,
@@ -23,6 +23,11 @@ function buildPool(cfg: DbConfig): mysql.Pool {
     charset: 'utf8mb4',
     dateStrings: true,
   });
+  // GROUP_CONCAT 默认上限 1024 字节，站点聚合（域名列表）会被截断；每条新连接统一放大
+  pool.on('connection', (conn: any) => {
+    conn.query('SET SESSION group_concat_max_len = 1048576');
+  });
+  return pool;
 }
 
 // 启动时用当前配置初始化连接池
