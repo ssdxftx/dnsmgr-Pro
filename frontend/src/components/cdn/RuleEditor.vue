@@ -157,19 +157,19 @@
                       </div>
                       <div class="rule-editor__cond-list">
                         <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
-                          <n-select
-                            v-model:value="it.target"
-                            :options="targetSelectOptions"
-                            :placeholder="t('cdnRules.condTarget')"
-                            size="small"
+                          <ConditionPicker
+                            kind="target"
+                            :model-value="it.target"
+                            :options="targetCardOptions"
                             class="rule-editor__cond-target"
-                            @update:value="onTargetChange(it)"
+                            @select="(v: string) => applyTarget(it, v)"
                           />
-                          <n-select
-                            v-model:value="it.operator"
+                          <ConditionPicker
+                            kind="operator"
+                            :model-value="it.operator"
                             :options="operatorOptionsOf(it.target)"
-                            size="small"
                             class="rule-editor__cond-op"
+                            @select="(v: string) => (it.operator = v)"
                           />
                           <n-input
                             v-if="needName(it.target)"
@@ -228,14 +228,11 @@
                 </div>
                 <div v-for="(a, ai) in br.actions" :key="ai" class="rule-editor__group rule-editor__group--action">
                   <div class="rule-editor__group-head">
-                    <n-select
-                      v-model:value="a.name"
-                      :options="actionSelectOptions"
-                      :placeholder="t('cdnRules.actionPick')"
-                      size="small"
-                      filterable
+                    <ActionPicker
+                      :model-value="a.name"
+                      :locale="localeKey"
                       class="rule-editor__action-pick"
-                      @update:value="() => onActionChange(a)"
+                      @select="(name: string) => applyActionName(a, name)"
                     />
                     <n-button size="tiny" type="error" quaternary style="margin-left: auto" @click="br.actions.splice(ai, 1)">
                       {{ t('cdnRules.actionRemove') }}
@@ -287,13 +284,12 @@ import {
 import { CloseOutline } from '@vicons/ionicons5';
 import RuleFieldControl from './RuleFieldControl.vue';
 import EoParamFields from './EoParamFields.vue';
+import ActionPicker from './ActionPicker.vue';
+import ConditionPicker from './ConditionPicker.vue';
 import { useResponsive } from '../../composables/useResponsive';
 import { toEnabled } from '../../lib/cdnSwitch';
-import {
-  EO_ACTION_GROUPS, EO_OPERATORS, EO_TARGETS,
-  eoActionInfo, type EoLocale,
-} from '../../lib/eoRuleMeta';
-import { EO_ACTION_SCHEMAS, eoActionFields, eoParamKey, type EoField } from '../../lib/eoRuleSchema';
+import { EO_OPERATORS, EO_TARGETS, type EoLocale } from '../../lib/eoRuleMeta';
+import { eoActionFields, eoParamKey, type EoField } from '../../lib/eoRuleSchema';
 import { timeTransform, restoreSeconds, pickTimeUnit } from '../../lib/eoTime';
 import { buildCondition, parseCondition, type EoCondItem, type EoOrGroup } from '../../lib/eoRuleExpr';
 
@@ -381,35 +377,25 @@ function insertSnippet(tpl: string) {
 }
 
 // ---------- EO 官方元数据 ----------
-/** 匹配类型下拉（官方中文，去掉「全部」——全部请求即 ELSE 分支） */
-const targetSelectOptions = computed(() =>
-  EO_TARGETS.filter((x) => x.value !== 'all').map((x) => ({ label: isZh.value ? x.label.zh : x.label.en, value: x.value })),
+/** 匹配类型卡片：官方中文名 + 作用说明（去掉「全部」——全部请求即 ELSE 分支） */
+const targetCardOptions = computed(() =>
+  EO_TARGETS.filter((x) => x.value !== 'all').map((x) => ({
+    value: x.value,
+    label: isZh.value ? x.label.zh : x.label.en,
+    desc: isZh.value ? x.desc.zh : x.desc.en,
+  })),
 );
 
-/** 运算符下拉：官方仅查询字符串 / HTTP 请求头支持「存在/不存在」 */
+/** 运算符卡片：官方仅查询字符串 / HTTP 请求头支持「存在/不存在」 */
 function operatorOptionsOf(target: string) {
   const meta = EO_TARGETS.find((x) => x.value === target);
   const ops = meta?.existable ? EO_OPERATORS : EO_OPERATORS.filter((o) => o.value === 'equal' || o.value === 'notEquals' || o.value === 'matches');
-  return ops.map((o) => ({ label: isZh.value ? o.label.zh : o.label.en, value: o.value }));
+  return ops.map((o) => ({
+    value: o.value,
+    label: isZh.value ? o.label.zh : o.label.en,
+    desc: isZh.value ? o.desc.zh : o.desc.en,
+  }));
 }
-
-/** 操作下拉：按官方分组（缓存配置 / 网络优化 / HTTPS 优化 / 修改 HTTP 头 / 高级配置），中文显示 */
-const actionSelectOptions = computed(() => {
-  const byGroup = new Map<string, { label: string; value: string }[]>();
-  for (const s of EO_ACTION_SCHEMAS) {
-    const info = eoActionInfo(s.name, localeKey.value);
-    if (!byGroup.has(info.group)) byGroup.set(info.group, []);
-    byGroup.get(info.group)!.push({ label: info.label, value: s.name });
-  }
-  return EO_ACTION_GROUPS
-    .filter((g) => byGroup.has(g.key))
-    .map((g) => ({
-      type: 'group' as const,
-      label: isZh.value ? g.label.zh : g.label.en,
-      key: g.key,
-      children: byGroup.get(g.key)!,
-    }));
-});
 
 function needName(target: string) {
   return !!EO_TARGETS.find((x) => x.value === target)?.needName;
@@ -432,6 +418,12 @@ function onTargetChange(it: EoCondItem) {
   const meta = EO_TARGETS.find((x) => x.value === it.target);
   if (!meta?.existable && (it.operator === 'exist' || it.operator === 'notexist')) it.operator = 'equal';
   if (!meta?.needName) it.name = undefined;
+}
+
+/** 匹配类型卡片选择：先写入新类型再执行既有收敛逻辑（与原下拉选择行为一致） */
+function applyTarget(it: EoCondItem, target: string) {
+  it.target = target;
+  onTargetChange(it);
 }
 
 // ---------- EO 分支/条件/操作 ----------
@@ -471,6 +463,12 @@ function onActionChange(a: EoActionItem) {
   // 新增操作时，顶层开关默认开启（与官方新增操作一致）
   for (const f of fields) if (f.type === 'switch' && a.params[f.name] === undefined) a.params[f.name] = 'on';
   ensureStructure(fields, a.params);
+}
+
+/** 动作大卡片选择：写入动作名后沿用既有 onActionChange 初始化参数（与原下拉选择行为一致） */
+function applyActionName(a: EoActionItem, name: string) {
+  a.name = name;
+  onActionChange(a);
 }
 
 /** 保证操作参数结构完整（分组对象 / 列表数组 / oneof 生效分支存在），避免渲染期补建 */
@@ -1022,6 +1020,7 @@ watch(
   margin-top: 2px;
 }
 
+/* 动作选择：触发器占位（窄屏整行占满），点开为分组大卡片弹层 */
 .rule-editor__action-pick {
   flex: 1;
   min-width: 300px;

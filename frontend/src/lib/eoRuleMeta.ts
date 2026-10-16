@@ -15,6 +15,8 @@ interface Bi {
 export interface EoTargetMeta {
   value: string;
   label: Bi;
+  /** 匹配类型作用说明（选择匹配类型时在弹出卡片中展示） */
+  desc: Bi;
   /** 需要填写参数名（query_string / request_header 的参数名） */
   needName?: boolean;
   /** 支持忽略大小写（官方：URL path/URL full/查询字符串/文件后缀/文件名称/HTTP 请求头） */
@@ -26,28 +28,122 @@ export interface EoTargetMeta {
 }
 
 /** 官方运算符（注意 notEquals 为官方拼写，非 notequal） */
-export const EO_OPERATORS: { value: string; label: Bi }[] = [
-  { value: 'equal', label: { zh: '等于', en: 'Equal' } },
-  { value: 'notEquals', label: { zh: '不等于', en: 'Does not equal' } },
-  { value: 'matches', label: { zh: '匹配正则', en: 'Matches regex' } },
-  { value: 'exist', label: { zh: '存在', en: 'Exists' } },
-  { value: 'notexist', label: { zh: '不存在', en: 'Does not exist' } },
+export const EO_OPERATORS: { value: string; label: Bi; desc: Bi }[] = [
+  {
+    value: 'equal',
+    label: { zh: '等于', en: 'Equal' },
+    desc: {
+      zh: '匹配值命中列表中的任意一项即生效；填写多个值时为「或」关系，适用于精确指定域名、后缀、方法等。',
+      en: 'Takes effect when the value matches any item in the list; multiple values are OR-ed. Best for exact hosts, extensions or methods.',
+    },
+  },
+  {
+    value: 'notEquals',
+    label: { zh: '不等于', en: 'Does not equal' },
+    desc: {
+      zh: '匹配值不在列表中时生效，常用于排除特定路径、后缀或域名，做反向过滤。',
+      en: 'Takes effect when the value is NOT in the list. Commonly used to exclude specific paths, extensions or hosts.',
+    },
+  },
+  {
+    value: 'matches',
+    label: { zh: '匹配正则', en: 'Matches regex' },
+    desc: {
+      zh: '匹配值满足正则表达式时生效，一条即可覆盖批量路径或命名规律，适合规则复杂但结构一致的场景。',
+      en: 'Takes effect when the value matches the regular expression. One rule can cover many paths with a shared pattern.',
+    },
+  },
+  {
+    value: 'exist',
+    label: { zh: '存在', en: 'Exists' },
+    desc: {
+      zh: '所指定的参数名或请求头存在即生效，无需填写匹配值（仅查询字符串与 HTTP 请求头支持）。',
+      en: 'Takes effect when the named parameter or request header exists; no value needed (only for query string and HTTP request header).',
+    },
+  },
+  {
+    value: 'notexist',
+    label: { zh: '不存在', en: 'Does not exist' },
+    desc: {
+      zh: '所指定的参数名或请求头不存在时生效（仅查询字符串与 HTTP 请求头支持），用于兜底与兼容处理。',
+      en: 'Takes effect when the named parameter or request header is absent (only for query string and HTTP request header).',
+    },
+  },
 ];
 
 /** 官方匹配类型（客户端请求） */
 export const EO_TARGETS: EoTargetMeta[] = [
-  { value: 'host', label: { zh: 'HOST', en: 'HOST' } },
-  { value: 'url', label: { zh: 'URL path', en: 'URL Path' }, ignoreCase: true },
-  { value: 'full_url', label: { zh: 'URL full', en: 'URL Full' }, ignoreCase: true },
-  { value: 'query_string', label: { zh: '查询字符串', en: 'Query String' }, needName: true, ignoreCase: true, existable: true },
-  { value: 'extension', label: { zh: '文件后缀', en: 'File Extension' }, ignoreCase: true },
-  { value: 'filename', label: { zh: '文件名称', en: 'File Name' }, ignoreCase: true },
-  { value: 'request_header', label: { zh: 'HTTP 请求头', en: 'HTTP Request Header' }, needName: true, ignoreCase: true, existable: true },
-  { value: 'client_country', label: { zh: '客户端地理位置', en: 'Client Geo Location' } },
-  { value: 'request_protocol', label: { zh: '请求协议', en: 'Request Protocol' } },
-  { value: 'client_ip', label: { zh: '客户端 IP', en: 'Client IP' } },
-  { value: 'request_method', label: { zh: '请求方法', en: 'Request Method' } },
-  { value: 'all', label: { zh: '全部（站点任意请求）', en: 'All (any request)' }, fixedValues: ['all'] },
+  {
+    value: 'host',
+    label: { zh: 'HOST', en: 'HOST' },
+    desc: { zh: '按请求的域名（Host）匹配，常用于按站点主域名或子域名分流不同策略。', en: 'Match by request host. Commonly used to split policies per domain or subdomain.' },
+  },
+  {
+    value: 'url',
+    label: { zh: 'URL path', en: 'URL Path' },
+    desc: { zh: '按请求路径匹配，不含域名与查询参数，适合按目录或接口前缀划分规则。', en: 'Match the request path without host or query string; handy for directory or API-prefix rules.' },
+    ignoreCase: true,
+  },
+  {
+    value: 'full_url',
+    label: { zh: 'URL full', en: 'URL Full' },
+    desc: { zh: '按完整 URL 匹配，包含协议、域名、路径与查询参数，用于精确锁定某个链接。', en: 'Match the full URL including scheme, host, path and query string, to pin down an exact link.' },
+    ignoreCase: true,
+  },
+  {
+    value: 'query_string',
+    label: { zh: '查询字符串', en: 'Query String' },
+    desc: { zh: '填写参数名后按该参数的值匹配，也可用「存在 / 不存在」判断参数是否携带。', en: 'Match the value of a named query parameter, or test whether it is present.' },
+    needName: true,
+    ignoreCase: true,
+    existable: true,
+  },
+  {
+    value: 'extension',
+    label: { zh: '文件后缀', en: 'File Extension' },
+    desc: { zh: '按文件扩展名匹配（如 jpg、css、js），是静态资源与音视频缓存规则的首选维度。', en: 'Match by file extension (e.g. jpg, css, js); the first choice for static and media cache rules.' },
+    ignoreCase: true,
+  },
+  {
+    value: 'filename',
+    label: { zh: '文件名称', en: 'File Name' },
+    desc: { zh: '按文件名（不含扩展名）匹配，用于对个别特定文件单独下发策略。', en: 'Match by file name without extension, to target individual files.' },
+    ignoreCase: true,
+  },
+  {
+    value: 'request_header',
+    label: { zh: 'HTTP 请求头', en: 'HTTP Request Header' },
+    desc: { zh: '填写头部名称后按取值匹配，也可用「存在 / 不存在」判断，常用于 UA、Referer 等维度。', en: 'Match the value of a named request header, or test whether it is present (e.g. UA, Referer).' },
+    needName: true,
+    ignoreCase: true,
+    existable: true,
+  },
+  {
+    value: 'client_country',
+    label: { zh: '客户端地理位置', en: 'Client Geo Location' },
+    desc: { zh: '按客户端 IP 归属国家或地区匹配，用于区域化的缓存、重定向与访问控制策略。', en: 'Match by client IP country or region for geo-specific caching, redirects or access control.' },
+  },
+  {
+    value: 'request_protocol',
+    label: { zh: '请求协议', en: 'Request Protocol' },
+    desc: { zh: '按请求协议（HTTP / HTTPS）匹配，用于强制跳转、加密访问控制等场景。', en: 'Match the request scheme (HTTP / HTTPS) for forced redirect and encryption policies.' },
+  },
+  {
+    value: 'client_ip',
+    label: { zh: '客户端 IP', en: 'Client IP' },
+    desc: { zh: '按客户端 IP 或网段匹配，适合内网放行、灰度发布与来源限制。', en: 'Match the client IP or CIDR range, for allowlists, canary release and origin restrictions.' },
+  },
+  {
+    value: 'request_method',
+    label: { zh: '请求方法', en: 'Request Method' },
+    desc: { zh: '按 HTTP 方法（GET / POST 等）匹配，用于区分读请求与写请求的不同缓存策略。', en: 'Match the HTTP method (GET, POST, ...) to apply different caching for reads and writes.' },
+  },
+  {
+    value: 'all',
+    label: { zh: '全部（站点任意请求）', en: 'All (any request)' },
+    desc: { zh: '不做任何过滤，规则对站点内全部请求生效；在可视化编辑中对应 ELSE 分支。', en: 'No filtering: the rule applies to every request. Corresponds to the ELSE branch in the visual editor.' },
+    fixedValues: ['all'],
+  },
 ];
 
 /** 官方操作分组（控制台顺序） */
