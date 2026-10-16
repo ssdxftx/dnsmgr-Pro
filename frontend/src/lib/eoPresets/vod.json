@@ -1,0 +1,62 @@
+{
+  "FormatVersion": "1.0",
+  "Rules": [
+    {
+      "RuleName": "音视频点播",
+      "Branches": [
+        {
+          "Condition": "${http.request.host} in []",
+          "Actions": [
+            {
+              "Name": "Cache",
+              "CacheParameters": {
+                "CustomTime": {
+                  "CacheTime": 1,
+                  "IgnoreCacheControl": "off",
+                  "Switch": "on"
+                }
+              }
+            },
+            {
+              "Name": "CacheKey",
+              "CacheKeyParameters": {
+                "FullURLCache": "off",
+                "IgnoreCase": "off",
+                "QueryString": {
+                  "Switch": "off"
+                }
+              }
+            },
+            {
+              "Name": "RangeOriginPull",
+              "RangeOriginPullParameters": {
+                "Switch": "on"
+              }
+            }
+          ],
+          "SubRules": [
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['php', 'jsp', 'asp', 'aspx']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "NoCache": {
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            }
+          ]
+        }
+      ],
+      "Description": []
+    }
+  ]
+}

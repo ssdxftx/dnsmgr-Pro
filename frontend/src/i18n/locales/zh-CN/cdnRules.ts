@@ -72,10 +72,23 @@ export default {
     condExprHintEo: '无法结构化的表达式会原样保留，官方语法示例：',
     timeUnitHint: '选择单位后自动换算为秒写入配置',
 
-    tplTitle: '选择规则模板',
-    tplHint: '从常用场景一键生成规则，创建后仍可自由编辑；或选择空白规则从零配置。',
-    tplBlank: '创建空白规则',
-    tplBlankDesc: '不预设任何条件与操作，完全从零开始配置',
+    // 新建规则：一级「选择创建方式」三选一
+    createTitle: '新建规则',
+    createHint: '选择创建方式：官方预制规则开箱即用，本项目预制规则贴合常用加速场景；也可以从空白规则开始自行配置。',
+    createOfficial: '官方预制规则',
+    createOfficialDesc: '腾讯云 EdgeOne 控制台官方的预设规则模板，按官方最佳实践预置节点缓存、Cache Key 与回源策略；选中后请把 HOST 匹配值填写为自己的站点域名',
+    createProject: '本项目预制规则',
+    createProjectDesc: '本项目整理的常用场景模板（AI 接口直通、全站静态缓存、静态资源、媒体加速等），可按需继续调整',
+    createBlank: '创建空白规则',
+    createBlankDesc: '不预设任何条件与操作，完全从零开始配置',
+    createCount: '{n} 套模板',
+    createFromScratch: '从零开始',
+
+    // 预制规则选择：二级弹窗（官方 / 本项目）
+    tplTitleOfficial: '选择官方预制规则',
+    tplHintOfficial: '以下为腾讯云 EdgeOne 控制台官方预设模板；选择后进入编辑页，请把「HOST」匹配值填写为你自己的站点域名。',
+    tplTitleProject: '选择本项目预制规则',
+    tplHintProject: '以下为本项目整理的常用场景模板；选择后进入编辑页，可按需调整匹配条件与操作。',
 
     branchAddElseIf: '添加 ELSE IF',
     branchAddElse: '添加 ELSE',

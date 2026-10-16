@@ -73,10 +73,23 @@ export default {
     condExprHintEo: 'Expressions that cannot be structured are kept as-is; official syntax example: ',
     timeUnitHint: 'The value is auto-converted to seconds in the config',
 
-    tplTitle: 'Choose a Rule Template',
-    tplHint: 'Generate a rule from common scenarios in one click, then edit freely; or start from a blank rule.',
-    tplBlank: 'Create Blank Rule',
-    tplBlankDesc: 'Start from scratch with no preset conditions or actions',
+    // New rule: step 1 — pick how to start
+    createTitle: 'Create Rule',
+    createHint: 'Choose how to start: official presets work out of the box, project presets cover common acceleration scenarios, or start from a blank rule.',
+    createOfficial: 'Official Presets',
+    createOfficialDesc: 'Preset rule templates from the Tencent Cloud EdgeOne console, built on official best practices for node cache, cache key and origin-pull; set the HOST match value to your own domain after choosing',
+    createProject: 'Project Presets',
+    createProjectDesc: 'Templates curated by this project (AI API passthrough, whole-site static cache, static assets, media acceleration, ...); adjust freely after choosing',
+    createBlank: 'Blank Rule',
+    createBlankDesc: 'No preset conditions or actions; configure everything from scratch',
+    createCount: '{n} templates',
+    createFromScratch: 'From scratch',
+
+    // Preset picker: step 2 (official / project)
+    tplTitleOfficial: 'Choose an Official Preset',
+    tplHintOfficial: 'These are the official preset templates of the Tencent Cloud EdgeOne console; after choosing, set the HOST match value to your own domain in the editor.',
+    tplTitleProject: 'Choose a Project Preset',
+    tplHintProject: 'These templates are curated by this project; adjust conditions and actions freely after choosing.',
 
     branchAddElseIf: 'Add ELSE IF',
     branchAddElse: 'Add ELSE',

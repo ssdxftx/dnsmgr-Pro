@@ -2,41 +2,51 @@
   <n-modal
     :show="show"
     preset="card"
-    :title="t('cdnRules.tplTitle')"
+    :title="title"
     style="width: min(900px, calc(100vw - 24px))"
     :mask-closable="true"
     @update:show="(v: boolean) => emit('update:show', v)"
   >
-    <div class="tpl-hint">{{ t('cdnRules.tplHint') }}</div>
+    <div class="tpl-hint">{{ hint }}</div>
     <div class="tpl-grid">
-      <button v-for="tpl in templates" :key="tpl.id" type="button" class="tpl-card" @click="emit('select', tpl.id)">
+      <button v-for="tpl in items" :key="tpl.id" type="button" class="tpl-card" @click="emit('select', tpl.id)">
         <span class="tpl-card__tag">{{ tpl.id }}</span>
         <span class="tpl-card__title">{{ bi(tpl.label) }}</span>
         <span class="tpl-card__desc">{{ bi(tpl.desc) }}</span>
-      </button>
-      <button type="button" class="tpl-card tpl-card--blank" @click="emit('select', '')">
-        <span class="tpl-card__title">{{ t('cdnRules.tplBlank') }}</span>
-        <span class="tpl-card__desc">{{ t('cdnRules.tplBlankDesc') }}</span>
       </button>
     </div>
   </n-modal>
 </template>
 
 <script setup lang="ts">
+// 预制规则选择：数据源由 source 决定——官方（EdgeOne 控制台预设模板）/ 本项目（常用场景模板）。
+// 选中后由调用方生成规则并进入编辑页（官方模板的 HOST 匹配值已置空，需填写站点域名）。
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NModal } from 'naive-ui';
-import { EO_RULE_TEMPLATES, type EoRuleTemplate } from '../../lib/eoRuleTemplates';
+import { EO_PRESET_RULES } from '../../lib/eoPresetRules';
+import { EO_RULE_TEMPLATES } from '../../lib/eoRuleTemplates';
 
-defineProps<{ show: boolean }>();
+const props = defineProps<{
+  show: boolean;
+  /** 数据源：官方预制 / 本项目预制 */
+  source: 'official' | 'project';
+}>();
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void;
   (e: 'select', id: string): void;
 }>();
 
 const { t, locale } = useI18n();
-const templates = computed<EoRuleTemplate[]>(() => EO_RULE_TEMPLATES);
 const isZh = computed(() => String(locale.value || '').toLowerCase().startsWith('zh'));
+const isOfficial = computed(() => props.source === 'official');
+
+/** 两个数据源结构一致（id / label / desc），仅用于卡片展示 */
+const items = computed<{ id: string; label: { zh: string; en: string }; desc: { zh: string; en: string } }[]>(() =>
+  isOfficial.value ? EO_PRESET_RULES : EO_RULE_TEMPLATES,
+);
+const title = computed(() => t(isOfficial.value ? 'cdnRules.tplTitleOfficial' : 'cdnRules.tplTitleProject'));
+const hint = computed(() => t(isOfficial.value ? 'cdnRules.tplHintOfficial' : 'cdnRules.tplHintProject'));
 
 function bi(b: { zh: string; en: string }): string {
   return isZh.value ? b.zh : b.en;
@@ -45,9 +55,9 @@ function bi(b: { zh: string; en: string }): string {
 
 <style scoped>
 /* ===========================================================================
-   模板选择器 · 信号卡片网格
+   预制规则选择器 · 信号卡片网格
    设计意图：模板以卡片陈列，悬停时左侧信号条点亮 + 上浮，
-   等宽 ID 芯片呼应全站遥测语义；空白模板用虚线卡区分「从零开始」。
+   等宽 ID 芯片呼应全站遥测语义（官方模板 ID 前缀 official- 便于与本地模板区分）。
    =========================================================================== */
 .tpl-hint {
   font-size: 13px;
@@ -124,16 +134,6 @@ function bi(b: { zh: string; en: string }): string {
   font-size: 12px;
   line-height: 1.6;
   color: var(--app-text-3);
-}
-/* 空白模板：虚线卡，信号条常显弱化 */
-.tpl-card--blank {
-  border-style: dashed;
-  background: var(--app-surface-2);
-}
-.tpl-card--blank::before {
-  opacity: 1;
-  background: var(--app-text-3);
-  box-shadow: none;
 }
 @media (max-width: 767px) {
   .tpl-grid {
