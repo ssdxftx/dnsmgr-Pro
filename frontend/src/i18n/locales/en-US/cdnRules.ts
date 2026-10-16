@@ -67,6 +67,12 @@ export default {
     condVisual: 'Visual',
     condExprMode: 'Expression',
     condExprHintEo: "Official syntax example: ${http.request.host} in ['example.com']; expressions that cannot be structured are kept as-is",
+    timeUnitHint: 'The value is auto-converted to seconds in the config',
+
+    tplTitle: 'Choose a Rule Template',
+    tplHint: 'Generate a rule from common scenarios in one click, then edit freely; or start from a blank rule.',
+    tplBlank: 'Create Blank Rule',
+    tplBlankDesc: 'Start from scratch with no preset conditions or actions',
 
     branchAddElseIf: 'Add ELSE IF',
     branchAddElse: 'Add ELSE',

@@ -60,6 +60,16 @@
           style="width: 100%"
           @update:value="(v: any) => setVal(f.name, v)"
         />
+        <EoTimeField
+          v-else-if="f.type === 'number' && f.time"
+          :value="numOrNull(model[f.name])"
+          :unit="unitOf(f)"
+          :min="f.min"
+          :max="f.max"
+          :locale="locale"
+          @update:value="(v: number | null) => setVal(f.name, v)"
+          @update:unit="(u) => setUnit(f.name, u)"
+        />
         <n-input-number
           v-else-if="f.type === 'number'"
           :value="numOrNull(model[f.name])"
@@ -89,6 +99,8 @@ import { useI18n } from 'vue-i18n';
 import { NDynamicTags, NButton, NForm, NFormItem, NInput, NInputNumber, NSelect, NSwitch } from 'naive-ui';
 import type { EoField } from '../../lib/eoRuleSchema';
 import type { EoLocale } from '../../lib/eoRuleMeta';
+import { pickTimeUnit, type TimeUnit } from '../../lib/eoTime';
+import EoTimeField from './EoTimeField.vue';
 
 const props = defineProps<{
   fields: EoField[];
@@ -135,6 +147,14 @@ function arrOf(name: string): string[] {
 function numOrNull(v: any) {
   const n = Number(v);
   return Number.isFinite(n) && v !== '' && v !== null ? n : null;
+}
+/** 时间字段当前展示单位：优先取模型内已存的选择，否则按秒数自动挑选 */
+function unitOf(f: EoField): TimeUnit {
+  return props.model.__units?.[f.name] || pickTimeUnit(numOrNull(props.model[f.name]));
+}
+function setUnit(name: string, u: TimeUnit) {
+  if (!props.model.__units || typeof props.model.__units !== 'object') props.model.__units = {};
+  props.model.__units[name] = u;
 }
 function ensureGroup(name: string): Record<string, any> {
   if (!props.model[name] || typeof props.model[name] !== 'object' || Array.isArray(props.model[name])) props.model[name] = {};

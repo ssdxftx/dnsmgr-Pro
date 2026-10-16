@@ -29,6 +29,7 @@ export interface EoTargetMeta {
 export const EO_OPERATORS: { value: string; label: Bi }[] = [
   { value: 'equal', label: { zh: '等于', en: 'Equal' } },
   { value: 'notEquals', label: { zh: '不等于', en: 'Does not equal' } },
+  { value: 'matches', label: { zh: '匹配正则', en: 'Matches regex' } },
   { value: 'exist', label: { zh: '存在', en: 'Exists' } },
   { value: 'notexist', label: { zh: '不存在', en: 'Does not exist' } },
 ];

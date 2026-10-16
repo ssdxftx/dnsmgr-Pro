@@ -128,7 +128,7 @@
                   @update:value="loadRules"
                 />
                 <n-button size="small" @click="loadRules">{{ t('cdnZoneSetting.refresh') }}</n-button>
-                <n-button size="small" type="primary" @click="openRuleEditor(null)">
+                <n-button size="small" type="primary" @click="createRuleClick">
                   {{ t('cdnRules.createRule') }}
                 </n-button>
               </div>
@@ -247,6 +247,9 @@
       </n-tabs>
     </n-card>
 
+    <!-- 新建规则：模板选择 -->
+    <RuleTemplatePicker v-model:show="showTemplatePicker" @select="selectRuleTemplate" />
+
     <!-- 规则编辑器 -->
     <n-modal
       v-model:show="showRuleEditor"
@@ -278,10 +281,12 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import RuleEditor from '../components/cdn/RuleEditor.vue';
+import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
 import CdnZoneGlobalSetting from '../components/cdn/CdnZoneGlobalSetting.vue';
 import { ruleEnabled } from '../lib/cdnSwitch';
+import { EO_RULE_TEMPLATES } from '../lib/eoRuleTemplates';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const route = useRoute();
@@ -522,6 +527,7 @@ const ruleSaving = ref(false);
 const ruleKind = ref('RedirectRule');
 const ruleSchema = ref<any>(null);
 const showRuleEditor = ref(false);
+const showTemplatePicker = ref(false);
 const ruleEditingId = ref('');
 const ruleInitial = ref<any>(null);
 const ruleKindOptions = ref<any[]>([]);
@@ -590,6 +596,30 @@ async function openRuleEditor(row: any) {
   } else {
     ruleInitial.value = isEsa.value ? { RuleEnable: 'on' } : { Status: 'enable', Branches: [] };
   }
+  showRuleEditor.value = true;
+}
+
+/** 新建规则：EO 先选择预制模板；ESA 无模板，直接进入空白编辑 */
+function createRuleClick() {
+  if (isEsa.value) openRuleEditor(null);
+  else showTemplatePicker.value = true;
+}
+
+/** 选择模板（id 为空表示创建空白规则） */
+function selectRuleTemplate(id: string) {
+  showTemplatePicker.value = false;
+  if (!id) {
+    openRuleEditor(null);
+    return;
+  }
+  const tpl = EO_RULE_TEMPLATES.find((x) => x.id === id);
+  if (!tpl) {
+    openRuleEditor(null);
+    return;
+  }
+  const zh = String(locale.value || '').toLowerCase().startsWith('zh');
+  ruleEditingId.value = '';
+  ruleInitial.value = tpl.build(zh ? 'zh' : 'en');
   showRuleEditor.value = true;
 }
 
