@@ -176,6 +176,9 @@ export class AliyunESA implements CdnProvider {
             const dataObj = r.Data && typeof r.Data === 'object' ? r.Data : {};
             const origin = dataObj.value ? String(dataObj.value) : '';
             const originType = r.RecordType === 'A/AAAA' ? 'ipaddr' : 'domain';
+            // 注意：ESA 的站点/记录列表无法反映「域名级 HTTPS 开关」与「强制跳转」的真实状态，
+            // 这里刻意不返回 https_enabled / force_redirect，避免云端同步（syncFromCloud）把它们回写成
+            // false 从而清空本地已启用的 HTTPS 状态（其真实值由证书联动/HTTPS 规则维护）。
             list.push({
               domain,
               cname: r.RecordCname || '',
@@ -187,8 +190,6 @@ export class AliyunESA implements CdnProvider {
               origin_protocol: 'follow',
               http_port: 80,
               https_port: 443,
-              https_enabled: false,
-              force_redirect: false,
             });
           }
           const rtotal = Number(rr.TotalCount || 0);
@@ -339,17 +340,10 @@ export class AliyunESA implements CdnProvider {
     }
     const sid = Number(siteId);
     const list = Array.isArray(rules) ? rules : [];
-    // 全量同步：目标集合 = 全局规则（*）+ 逐条具体规则
+    // 全量同步：目标集合 = 逐条具体规则 + 全局规则（*）
+    // 注意 Sequence 语义：数值越小越优先执行。全局规则命中所有路径，
+    // 必须排在具体路径规则之后（Sequence 更大），否则会覆盖具体规则导致其永不生效。
     const targets: { ruleName: string; condition: string; mode: string; ttl: number }[] = [];
-    const globalRule = list.find((r) => parsePathRule(r?.path).type === 'global');
-    if (globalRule) {
-      targets.push({
-        ruleName: this.esaRuleName(domain),
-        condition: this.esaHostCondition(domain) + ')',
-        mode: Number(globalRule.ttl) > 0 ? 'override_origin' : 'no_cache',
-        ttl: Math.max(0, Number(globalRule.ttl) || 0),
-      });
-    }
     let idx = 0;
     for (const r of list) {
       if (parsePathRule(r?.path).type === 'global') continue;
@@ -359,6 +353,15 @@ export class AliyunESA implements CdnProvider {
         condition: this.esaHostCondition(domain) + this.esaPathCondition(parsePathRule(r?.path)),
         mode: Number(r?.ttl) > 0 ? 'override_origin' : 'no_cache',
         ttl: Math.max(0, Number(r?.ttl) || 0),
+      });
+    }
+    const globalRule = list.find((r) => parsePathRule(r?.path).type === 'global');
+    if (globalRule) {
+      targets.push({
+        ruleName: this.esaRuleName(domain),
+        condition: this.esaHostCondition(domain) + ')',
+        mode: Number(globalRule.ttl) > 0 ? 'override_origin' : 'no_cache',
+        ttl: Math.max(0, Number(globalRule.ttl) || 0),
       });
     }
     try {

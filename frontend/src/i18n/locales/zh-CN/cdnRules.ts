@@ -63,6 +63,7 @@ export default {
     condGroupHint: '组内条件需全部满足（AND）',
     condNoValue: '该运算符无需取值',
     condParamName: '参数名',
+    condHostPick: '选择或输入域名',
     condIgnoreCase: '忽略大小写',
     condVisual: '可视化',
     condExprMode: '表达式',
