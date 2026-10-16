@@ -67,6 +67,12 @@ export default {
     condVisual: '可视化',
     condExprMode: '表达式',
     condExprHintEo: "官方语法示例：${http.request.host} in ['example.com']；无法结构化的表达式会原样保留",
+    timeUnitHint: '选择单位后自动换算为秒写入配置',
+
+    tplTitle: '选择规则模板',
+    tplHint: '从常用场景一键生成规则，创建后仍可自由编辑；或选择空白规则从零配置。',
+    tplBlank: '创建空白规则',
+    tplBlankDesc: '不预设任何条件与操作，完全从零开始配置',
 
     branchAddElseIf: '添加 ELSE IF',
     branchAddElse: '添加 ELSE',

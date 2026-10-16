@@ -261,6 +261,7 @@ import {
   eoActionInfo, type EoLocale,
 } from '../../lib/eoRuleMeta';
 import { EO_ACTION_SCHEMAS, eoActionFields, eoParamKey, type EoField } from '../../lib/eoRuleSchema';
+import { timeTransform, restoreSeconds, pickTimeUnit } from '../../lib/eoTime';
 import { buildCondition, parseCondition, type EoCondItem, type EoOrGroup } from '../../lib/eoRuleExpr';
 
 const props = defineProps<{
@@ -353,7 +354,7 @@ const targetSelectOptions = computed(() =>
 /** 运算符下拉：官方仅查询字符串 / HTTP 请求头支持「存在/不存在」 */
 function operatorOptionsOf(target: string) {
   const meta = EO_TARGETS.find((x) => x.value === target);
-  const ops = meta?.existable ? EO_OPERATORS : EO_OPERATORS.filter((o) => o.value === 'equal' || o.value === 'notEquals');
+  const ops = meta?.existable ? EO_OPERATORS : EO_OPERATORS.filter((o) => o.value === 'equal' || o.value === 'notEquals' || o.value === 'matches');
   return ops.map((o) => ({ label: isZh.value ? o.label.zh : o.label.en, value: o.value }));
 }
 
@@ -450,6 +451,9 @@ function ensureStructure(fields: EoField[], params: Record<string, any>) {
         if (params[key].Switch === undefined) params[key].Switch = 'on';
         ensureStructure(variants.find((v) => v.key === key)?.fields || [], params[key]);
       }
+    } else if (f.type === 'number' && f.time) {
+      if (!params.__units || typeof params.__units !== 'object') params.__units = {};
+      if (!params.__units[f.name]) params.__units[f.name] = pickTimeUnit(params[f.name]);
     }
   }
 }
@@ -471,10 +475,11 @@ function buildEsaPayload(): Record<string, any> {
   return out;
 }
 
-/** 递归剔除空值（空串 / null / undefined / 空对象），保留 off / 0 / 空数组等有效取值 */
+/** 递归剔除空值（空串 / null / undefined / 空对象）与内部键（__ 前缀，如 __units），保留 off / 0 / 空数组等有效取值 */
 function pruneParams(obj: Record<string, any>): Record<string, any> {
   const out: Record<string, any> = {};
   for (const [k, v] of Object.entries(obj || {})) {
+    if (k.startsWith('__')) continue;
     if (v === undefined || v === null || v === '') continue;
     if (Array.isArray(v)) {
       out[k] = v;
@@ -490,9 +495,12 @@ function pruneParams(obj: Record<string, any>): Record<string, any> {
   return out;
 }
 
-/** EO：操作 → 官方 RuleEngineAction（Name + <Name>Parameters） */
-function toEoAction(a: EoActionItem): Record<string, any> {
-  return { Name: a.name, [eoParamKey(a.name)]: pruneParams(a.params) };
+/** EO：操作 → 官方 RuleEngineAction（Name + <Name>Parameters）
+ *  display=true 时时间字段按所选单位展示（用于 JSON 视图；真实写入仍为秒） */
+function toEoAction(a: EoActionItem, display = false): Record<string, any> {
+  const fields = eoActionFields(a.name);
+  const params = display ? timeTransform(fields, a.params, 'toDisplay') : a.params;
+  return { Name: a.name, [eoParamKey(a.name)]: pruneParams(params) };
 }
 
 /** 分支条件 → 表达式字符串（ELSE 无条件） */
@@ -502,24 +510,24 @@ function branchCondition(br: EoBranch): string {
   return buildCondition(br.orGroups);
 }
 
-function branchActions(br: EoBranch): Record<string, any>[] {
-  return br.actions.filter((a) => a.name).map(toEoAction);
+function branchActions(br: EoBranch, display = false): Record<string, any>[] {
+  return br.actions.filter((a) => a.name).map((a) => toEoAction(a, display));
 }
 
 /** EO payload：官方 RuleEngineItem { RuleName, Status, Branches }（IF 为主分支，其余为 SubRules） */
-function buildEoRuleItem(): Record<string, any> {
+function buildEoRuleItem(display = false): Record<string, any> {
   const branches = form.eoBranches as EoBranch[];
   const first = branches[0] || newBranch('if');
   const root: Record<string, any> = {};
   const c0 = branchCondition(first);
   if (c0) root.Condition = c0;
-  const a0 = branchActions(first);
+  const a0 = branchActions(first, display);
   if (a0.length) root.Actions = a0;
   const subs = branches.slice(1).map((b) => {
     const br: Record<string, any> = {};
     const c = branchCondition(b);
     if (c) br.Condition = c;
-    const acts = branchActions(b);
+    const acts = branchActions(b, display);
     if (acts.length) br.Actions = acts;
     return { Branches: [br], Description: b.comment ? [b.comment] : [] };
   });
@@ -545,7 +553,7 @@ function save() {
 function syncFromJson() {
   try {
     const obj = JSON.parse(jsonText.value || '{}');
-    loadFrom(obj);
+    loadFrom(obj, { fromJson: true });
   } catch {
     /* 解析失败时保留用户输入，不覆盖 */
   }
@@ -586,7 +594,7 @@ function descriptionText(desc: any): string {
   return Array.isArray(desc) && desc.length ? String(desc[0] ?? '') : '';
 }
 
-function loadFrom(raw: any) {
+function loadFrom(raw: any, opts: { fromJson?: boolean } = {}) {
   const src = raw && typeof raw === 'object' ? raw : {};
   // 兼容 { FormatVersion, Rules:[item] } 包裹
   const item = Array.isArray(src.Rules) && src.Rules.length ? src.Rules[0] : src;
@@ -609,6 +617,8 @@ function loadFrom(raw: any) {
     for (const f of esaActionFields.value) if (src[f.name] !== undefined) data[f.name] = src[f.name];
     form.data = data;
   } else {
+    // JSON 视图中的时间值为展示单位；先快照当前单位选择，解析后按此还原为秒
+    const prev = opts.fromJson ? (JSON.parse(JSON.stringify(form.eoBranches)) as EoBranch[]) : [];
     const list: EoBranch[] = [];
     const top = Array.isArray(item.Branches) ? item.Branches : [];
     top.forEach((b: any, i: number) => {
@@ -618,14 +628,21 @@ function loadFrom(raw: any) {
       }
     });
     form.eoBranches = list.length ? list : [newBranch('if')];
+    if (opts.fromJson) {
+      list.forEach((br, bi) => {
+        const pb = prev[bi];
+        br.actions.forEach((a, ai) => restoreSeconds(eoActionFields(a.name), a.params, pb?.actions?.[ai]?.params));
+      });
+    }
   }
   jsonText.value = JSON.stringify(jsonDocument(), null, 2);
 }
 
-/** JSON 视图：EO 采用官方控制台格式（FormatVersion + Rules，不含 Status） */
+/** JSON 视图：EO 采用官方控制台格式（FormatVersion + Rules，不含 Status）；
+ *  时间字段按用户所选单位展示（仅影响展示，保存仍写入秒） */
 function jsonDocument(): any {
   if (isEsa.value) return buildEsaPayload();
-  const rule = buildEoRuleItem();
+  const rule = buildEoRuleItem(true);
   delete rule.Status;
   return { FormatVersion: '1.0', Rules: [rule] };
 }

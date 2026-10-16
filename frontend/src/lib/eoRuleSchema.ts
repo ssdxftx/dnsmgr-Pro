@@ -32,6 +32,8 @@ export interface EoField {
   min?: number;
   max?: number;
   unit?: Bi;
+  /** 秒级时长字段：可视化编辑器提供 秒/分钟/小时/天/月 换算，JSON 仍按秒写入 */
+  time?: boolean;
   placeholder?: Bi;
   /** group：子字段（对应参数中的嵌套对象） */
   fields?: EoField[];
@@ -96,7 +98,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
             fields: [
               { name: 'DefaultCache', label: { zh: '无 Cache-Control 时缓存', en: 'Cache without Cache-Control' }, type: 'select', options: onoff },
               { name: 'DefaultCacheStrategy', label: { zh: '默认缓存策略', en: 'Default cache policy' }, type: 'select', options: onoff, showIf: (p) => p.DefaultCache === 'on' },
-              numField('DefaultCacheTime', { zh: '默认缓存时间（秒）', en: 'Default cache time (s)' }, { min: 0, showIf: (p) => p.DefaultCache === 'on' }),
+              numField('DefaultCacheTime', { zh: '默认缓存时间（秒）', en: 'Default cache time (s)' }, { min: 0, time: true, showIf: (p) => p.DefaultCache === 'on' }),
             ],
           },
           {
@@ -104,7 +106,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
             label: { zh: '自定义时间', en: 'Custom time' },
             fields: [
               { name: 'IgnoreCacheControl', label: { zh: '强制缓存', en: 'Ignore origin Cache-Control' }, type: 'select', options: onoff },
-              numField('CacheTime', { zh: '时间（秒）', en: 'Cache time (s)' }, { min: 0 }),
+              numField('CacheTime', { zh: '时间（秒）', en: 'Cache time (s)' }, { min: 0, time: true }),
             ],
           },
           {
@@ -161,7 +163,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
         { value: 'on', label: { zh: '遵循源站', en: 'Follow origin' } },
         { value: 'off', label: { zh: '自定义时间', en: 'Custom time' } },
       ] },
-      numField('CacheTime', { zh: '缓存时间（秒）', en: 'Cache Time (s)' }, { min: 0, showIf: (p) => p.FollowOrigin === 'off' }),
+      numField('CacheTime', { zh: '缓存时间（秒）', en: 'Cache Time (s)' }, { min: 0, time: true, showIf: (p) => p.FollowOrigin === 'off' }),
     ],
   },
   {
@@ -176,7 +178,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
         type: 'list',
         itemFields: [
           numField('StatusCode', { zh: '状态码', en: 'Status Code' }, { min: 100, max: 599 }),
-          numField('CacheTime', { zh: '缓存时间（秒）', en: 'Cache Time (s)' }, { min: 0 }),
+          numField('CacheTime', { zh: '缓存时间（秒）', en: 'Cache Time (s)' }, { min: 0, time: true }),
         ],
         newItem: () => ({ StatusCode: 404, CacheTime: 0 }),
       },
@@ -322,7 +324,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
     group: 'https',
     fields: [
       switchField('Switch', { zh: '开关', en: 'Switch' }),
-      numField('Timeout', { zh: '有效时长（秒）', en: 'Max Age (s)' }, { min: 1, showIf: (p) => p.Switch === 'on' }),
+      numField('Timeout', { zh: '有效时长（秒）', en: 'Max Age (s)' }, { min: 1, time: true, showIf: (p) => p.Switch === 'on' }),
       { name: 'IncludeSubDomains', label: { zh: '包含子域名', en: 'Include Subdomains' }, type: 'select', options: onoff, showIf: (p) => p.Switch === 'on' },
       { name: 'Preload', label: { zh: '预加载', en: 'Preload' }, type: 'select', options: onoff, showIf: (p) => p.Switch === 'on' },
     ],
@@ -475,7 +477,7 @@ export const EO_ACTION_SCHEMAS: EoActionSchema[] = [
         { value: 'TypeVOD', label: { zh: '鉴权方式 V', en: 'Type V' } },
       ] },
       { name: 'SecretKey', label: { zh: '主鉴权密钥', en: 'Primary Key' }, type: 'text' },
-      numField('Timeout', { zh: '有效时长（秒）', en: 'Timeout (s)' }, { min: 1 }),
+      numField('Timeout', { zh: '有效时长（秒）', en: 'Timeout (s)' }, { min: 1, time: true }),
       { name: 'BackupSecretKey', label: { zh: '备鉴权密钥', en: 'Backup Key' }, type: 'text' },
       { name: 'AuthParam', label: { zh: '鉴权加密串参数名称', en: 'Auth Parameter Name' }, type: 'text' },
       { name: 'TimeParam', label: { zh: '时间戳参数名称', en: 'Time Parameter Name' }, type: 'text' },

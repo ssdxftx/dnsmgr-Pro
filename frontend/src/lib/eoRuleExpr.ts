@@ -67,6 +67,8 @@ export function buildConditionItem(it: EoCondItem): string {
   switch (it.operator) {
     case 'notEquals':
       return `${lhs} not in [${values}]`;
+    case 'matches':
+      return `${base} matches '${escapeValue((it.values || [])[0] || '')}'`;
     case 'exist':
       return `exists(${base})`;
     case 'notexist':
