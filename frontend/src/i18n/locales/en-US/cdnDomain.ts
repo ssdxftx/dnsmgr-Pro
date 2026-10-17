@@ -2,6 +2,8 @@ export default {
   cdnDomain: {
     title: 'CDN Domains',
     subtitle: 'Manage CDN acceleration domains, certificates and cache policies across providers',
+    overview: 'Domain Overview',
+    listTitle: 'Domain List',
     empty: 'No CDN acceleration domains yet',
     freeCert: 'Platform Free Cert',
     certLink: 'Apply Project Cert',
@@ -154,6 +156,8 @@ export default {
   preheat: {
     title: 'Auto Preheat',
     subtitle: 'Auto preheat or purge CDN cache resources',
+    overview: 'Preheat Overview',
+    listTitle: 'Preheat List',
     add: 'Add Task',
     empty: 'No preheat tasks yet. Click "Add Task" to configure auto preheat',
     modalTitle: 'Preheat Task',

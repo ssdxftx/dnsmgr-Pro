@@ -22,21 +22,36 @@
       </template>
     </PageHeader>
     <n-grid cols="1 s:3 m:3" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :spark="sparks[0]" /></n-grid-item>
-      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :spark="sparks[1]" /></n-grid-item>
-      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :spark="sparks[2]" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :spark="sparks[0]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :spark="sparks[1]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :spark="sparks[2]" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="domains"
-        :loading="loadBusy"
-        :row-key="(row: any) => row.id"
-        v-model:checked-row-keys="checkedIds"
-        :empty-text="t('cdnDomain.empty')"
-        :virtual-scroll="domains.length > 200"
-        :max-height="620"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cdnDomain.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('cdnDomain.statusEnabled')">{{ enabledCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cdnDomain.statusStopped')">{{ stoppedCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.selected')">{{ checkedIds.length }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cdnDomain.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="domains"
+          :loading="loadBusy"
+          :row-key="(row: any) => row.id"
+          v-model:checked-row-keys="checkedIds"
+          :empty-text="t('cdnDomain.empty')"
+          :virtual-scroll="domains.length > 200"
+          :max-height="620"
+        />
+      </div>
     </n-card>
 
     <!-- 接入域名：每步独立弹窗，下一步/上一步切换弹窗 -->
@@ -437,7 +452,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
-import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { AddOutline, CloudDownloadOutline, GlobeOutline, CloudOutline, CheckmarkCircleOutline, FolderOpenOutline } from '@vicons/ionicons5';
@@ -774,6 +789,8 @@ function stopLinkLogTimer() {
 }
 const certMgrHasPendingFree = computed(() => certMgrFree.value.some((r) => r.status === 'pending'));
 
+const enabledCount = computed(() => domains.value.filter((d: any) => d.status !== 'offline').length);
+const stoppedCount = computed(() => domains.value.filter((d: any) => d.status === 'offline').length);
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
 const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
 const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));
@@ -861,7 +878,7 @@ const columns = computed<any[]>(() => [
       }
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

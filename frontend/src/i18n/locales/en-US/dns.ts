@@ -24,6 +24,8 @@ export default {
   domain: {
     title: 'Domain Management',
     subtitle: 'Manage imported domains, categories and expiry reminders',
+    overview: 'Domain Overview',
+    listTitle: 'Domain List',
     batchNoticeOn: 'Enable Reminders',
     batchNoticeOff: 'Disable Reminders',
     expireNotice: 'Expiry Reminder Settings',
@@ -148,6 +150,8 @@ export default {
     autoType: 'Auto detect',
     weightTitle: 'Weighted Records - {name}',
     weightSubtitle: 'Aliyun only; assign weights to records of the same subdomain',
+    weightOverview: 'Weight Overview',
+    weightListTitle: 'Weight List',
     weightSubdomain: 'Host',
     weightStatusLabel: 'Weight status',
     weightConfigure: 'Configure weights',
@@ -169,6 +173,9 @@ export default {
   cname: {
     title: 'CNAME Proxy',
     subtitle: 'Configure CNAME delegation for certificate DNS validation',
+    guideTitle: 'How it works',
+    guide: 'Point the validation record at the CNAME target provided by acme-dns at your DNS provider, then click "Check" to verify.',
+    listTitle: 'Records',
     add: 'Add CNAME',
     addTitle: 'Add CNAME Proxy',
     domain: 'Domain',
@@ -203,6 +210,8 @@ export default {
   dnsCheck: {
     title: 'DNS Hijack Detection',
     subtitle: 'Configure automatic hijack detection tasks for domain records',
+    overview: 'Detection Overview',
+    listTitle: 'Detection Tasks',
     addTask: 'Add Task',
     empty: 'No detection tasks yet. Click "Add Task" to configure automatic hijack detection',
     taskTitle: 'Detection Task',

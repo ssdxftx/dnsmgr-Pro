@@ -2,6 +2,8 @@ export default {
   dm: {
     title: '容灾监控',
     subtitle: '查看容灾调度运行状态与切换日志',
+    overview: '运行态',
+    listTitle: '策略列表',
     scheduleStatus: '调度运行状态',
     running: '运行中',
     stopped: '已停止',
@@ -108,6 +110,8 @@ export default {
   optimize: {
     taskTitle: '优选IP任务',
     listSubtitle: '管理域名优选 IP 任务与执行状态',
+    overview: '任务概览',
+    listTitle: '任务列表',
     formSubtitle: '配置域名优选 IP 任务的解析参数',
     settingsTitle: '优选IP设置',
     settingsSubtitle: '配置优选 IP 数据接口与自动更新间隔',
@@ -173,6 +177,8 @@ export default {
   schedule: {
     policyTitle: '定时切换策略',
     listSubtitle: '按计划自动切换域名解析记录',
+    overview: '策略概览',
+    listTitle: '策略列表',
     formSubtitle: '按计划配置解析记录的定时切换策略',
     addPolicy: '添加策略',
     domainSelect: '域名选择',

@@ -22,6 +22,7 @@ export default {
   certOrder: {
     title: 'Certificate Orders',
     subtitle: 'Manage certificate application, issuance and renewal',
+    listTitle: 'Order List',
     settings: 'Scheduled Task Settings',
     apply: 'Apply for Certificate',
     empty: 'No certificate orders',
@@ -129,6 +130,8 @@ export default {
   deployTask: {
     title: 'Deploy Tasks',
     subtitle: 'Manage certificate deployment tasks',
+    overview: 'Deployment Overview',
+    listTitle: 'Task List',
     add: 'Add Task',
     empty: 'No deploy tasks',
     editTitle: 'Edit Task',

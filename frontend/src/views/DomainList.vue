@@ -16,9 +16,9 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="domains.length" :label="t('common.total')" tone="primary" :icon="GlobeOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="queryFailed" :label="t('common.queryFailed')" tone="warning" :icon="AlertCircleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="domains.length" :label="t('common.total')" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="queryFailed" :label="t('common.queryFailed')" tone="warning" :icon="AlertCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
       <n-input
@@ -36,29 +36,44 @@
       <n-button size="small" @click="clearSearch">{{ t('common.refresh') }}</n-button>
     </div>
     <n-card :bordered="false">
-      <template v-if="showRecords">
-        <n-alert type="info" :show-icon="false" :bordered="false" class="mb-3">{{ t('domain.recordResults') }}</n-alert>
-        <RecordTable
-          :records="recordResults"
+      <div v-if="!showRecords" class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('domain.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('domain.recordCountCol')">{{ recordTotal }}</n-descriptions-item>
+          <n-descriptions-item :label="t('domain.categoryCol')">{{ categoryCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('domain.noticeOff')">{{ domains.length - noticeOn }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('domain.listTitle') }}</h3>
+        </div>
+        <template v-if="showRecords">
+          <n-alert type="info" :show-icon="false" :bordered="false" class="mb-3">{{ t('domain.recordResults') }}</n-alert>
+          <RecordTable
+            :records="recordResults"
+            :loading="loadBusy"
+            :show-full-name="true"
+            :show-add="false"
+            @refresh="loadDomains"
+          />
+        </template>
+        <ResponsiveDataTable
+          v-else
+          v-model:checked-row-keys="checked"
+          :columns="columns"
+          :data="domains"
           :loading="loadBusy"
-          :show-full-name="true"
-          :show-add="false"
-          @refresh="loadDomains"
+          :row-key="(row: any) => row._key || row.id"
+          :empty-text="t('domain.empty')"
+          :error="loadError"
+          :virtual-scroll="domains.length > 200"
+          :max-height="620"
+          @retry="loadDomains"
         />
-      </template>
-      <ResponsiveDataTable
-        v-else
-        v-model:checked-row-keys="checked"
-        :columns="columns"
-        :data="domains"
-        :loading="loadBusy"
-        :row-key="(row: any) => row._key || row.id"
-        :empty-text="t('domain.empty')"
-        :error="loadError"
-        :virtual-scroll="domains.length > 200"
-        :max-height="620"
-        @retry="loadDomains"
-      />
+      </div>
     </n-card>
 
     <!-- 导入域名弹窗 -->
@@ -152,6 +167,8 @@ const saveBusy = ref(false);
 const domains = ref<any[]>([]);
 const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatus === 2).length);
 const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
+const recordTotal = computed(() => domains.value.reduce((sum: number, d: any) => sum + (d._count_error ? 0 : Number(d.recordcount) || 0), 0));
+const categoryCount = computed(() => new Set(domains.value.map((d: any) => d.category_name).filter(Boolean)).size);
 const recordResults = ref<any[]>([]);
 const showRecords = ref(false);
 const checked = ref<string[]>([]);
@@ -237,7 +254,7 @@ const columns = computed(() => {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
       }
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   });
   return cols;

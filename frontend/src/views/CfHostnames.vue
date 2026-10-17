@@ -13,37 +13,49 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="GlobeOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
 
     <n-card :bordered="false">
-      <n-space class="mb-12">
-        <n-button type="primary" size="small" @click="openAdd">{{ t('common.add') }}</n-button>
-        <n-button size="small" @click="openBatchAdd">{{ t('cfHostnames.batchAdd') }}</n-button>
-        <n-button size="small" :disabled="!selection.length" @click="openBatchEdit">{{ t('cfHostnames.batchEdit') }}</n-button>
-        <n-button size="small" :disabled="!selection.length" @click="batchRefresh">{{ t('cfHostnames.batchRefreshVerify') }}</n-button>
-        <n-button size="small" :disabled="!selection.length" @click="confirmBatchDelete">{{ t('cfHostnames.batchDelete') }}</n-button>
-        <n-divider vertical />
-        <n-button size="small" :disabled="!selection.length" @click="openBatchDcv">{{ t('cfHostnames.batchDcvDelegate') }}</n-button>
-        <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('hostname')">{{ t('cfHostnames.batchHostnameVerify') }}</n-button>
-        <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('cert')">{{ t('cfHostnames.batchCertVerify') }}</n-button>
-        <n-button size="small" :disabled="!selection.length" @click="openCfOptimized(false)">{{ t('cfHostnames.cfOptimized') }}</n-button>
-        <n-button size="small" :loading="!!busy['load']" :disabled="!!busy['load']" @click="run('load', load)"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cfHostnames.batchPanel') }}</h3>
+        </div>
+        <n-space>
+          <n-button type="primary" size="small" @click="openAdd">{{ t('common.add') }}</n-button>
+          <n-button size="small" @click="openBatchAdd">{{ t('cfHostnames.batchAdd') }}</n-button>
+          <n-button size="small" :disabled="!selection.length" @click="openBatchEdit">{{ t('cfHostnames.batchEdit') }}</n-button>
+          <n-button size="small" :disabled="!selection.length" @click="batchRefresh">{{ t('cfHostnames.batchRefreshVerify') }}</n-button>
+          <n-button size="small" :disabled="!selection.length" @click="confirmBatchDelete">{{ t('cfHostnames.batchDelete') }}</n-button>
+          <n-divider vertical />
+          <n-button size="small" :disabled="!selection.length" @click="openBatchDcv">{{ t('cfHostnames.batchDcvDelegate') }}</n-button>
+          <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('hostname')">{{ t('cfHostnames.batchHostnameVerify') }}</n-button>
+          <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('cert')">{{ t('cfHostnames.batchCertVerify') }}</n-button>
+          <n-button size="small" :disabled="!selection.length" @click="openCfOptimized(false)">{{ t('cfHostnames.cfOptimized') }}</n-button>
+          <n-button size="small" :loading="!!busy['load']" :disabled="!!busy['load']" @click="run('load', load)"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+        </n-space>
+      </div>
+    </n-card>
 
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="rows"
-        :loading="loadBusy"
-        :row-key="(row: any) => row.id"
-        size="small"
-        v-model:checked-row-keys="selection"
-        :empty-text="t('cfHostnames.empty')"
-        :error="loadError"
-        @retry="load"
-      />
+    <n-card :bordered="false">
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cfHostnames.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="rows"
+          :loading="loadBusy"
+          :row-key="(row: any) => row.id"
+          size="small"
+          v-model:checked-row-keys="selection"
+          :empty-text="t('cfHostnames.empty')"
+          :error="loadError"
+          @retry="load"
+        />
+      </div>
     </n-card>
 
     <!-- 单个添加/编辑 -->

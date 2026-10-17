@@ -9,12 +9,27 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.deployTasks')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.deployTasks')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.live')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" :caption="t('common.live')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loadBusy" :empty-text="t('deployTask.empty')" />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('deployTask.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('common.total')">{{ tasks.length }}</n-descriptions-item>
+          <n-descriptions-item :label="t('deployTask.deployed')">{{ deployedCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('deployTask.failed')">{{ failedCount }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('deployTask.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loadBusy" :empty-text="t('deployTask.empty')" />
+      </div>
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployTask.editTitle') : t('deployTask.addTitle')" class="modal-md" :mask-closable="false">
@@ -53,7 +68,7 @@
 <script setup lang="ts">
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ListOutline, CheckmarkCircleOutline, TimeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { evalShow, isSecretField } from '../lib/safe';
@@ -70,6 +85,8 @@ const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pendingTasks = computed(() => tasks.value.filter((t: any) => t.status !== 1).length);
+const deployedCount = computed(() => tasks.value.filter((t: any) => t.status === 1).length);
+const failedCount = computed(() => tasks.value.filter((t: any) => t.status === -1).length);
 const providers = ref<Record<string, any>>({});
 const accounts = ref<any[]>([]);
 const orders = ref<any[]>([]);
@@ -167,7 +184,7 @@ const columns = computed(() => [
         );
       }
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

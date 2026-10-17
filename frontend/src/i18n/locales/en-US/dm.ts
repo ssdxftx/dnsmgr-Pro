@@ -2,6 +2,8 @@ export default {
   dm: {
     title: 'Failover Monitor',
     subtitle: 'View failover scheduling status and switch logs',
+    overview: 'Runtime',
+    listTitle: 'Policy List',
     scheduleStatus: 'Scheduler Status',
     running: 'Running',
     stopped: 'Stopped',
@@ -108,6 +110,8 @@ export default {
   optimize: {
     taskTitle: 'Optimized IP Tasks',
     listSubtitle: 'Manage optimized IP tasks and their execution status',
+    overview: 'Task Overview',
+    listTitle: 'Task List',
     formSubtitle: 'Configure DNS parameters for domain optimized IP tasks',
     settingsTitle: 'Optimized IP Settings',
     settingsSubtitle: 'Configure optimized IP data sources and auto-update interval',
@@ -173,6 +177,8 @@ export default {
   schedule: {
     policyTitle: 'Scheduled Switch Policies',
     listSubtitle: 'Automatically switch DNS records on a schedule',
+    overview: 'Policy Overview',
+    listTitle: 'Policy List',
     formSubtitle: 'Configure scheduled switch policies for DNS records',
     addPolicy: 'Add Policy',
     domainSelect: 'Domain Selection',

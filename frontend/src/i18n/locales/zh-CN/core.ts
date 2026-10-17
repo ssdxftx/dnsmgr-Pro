@@ -85,6 +85,10 @@ export default {
     monitorTasks: '监测任务',
     deployTasks: '部署任务',
     scheduleTasks: '调度策略',
+    live: '实时',
+    cumulative: '累计',
+    last24h: '近 24 小时',
+    last30d: '近 30 天',
   },
   nav: {
     dashboard: '仪表盘',

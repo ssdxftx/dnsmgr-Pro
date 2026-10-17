@@ -9,9 +9,9 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="accounts.length" :label="t('common.total')" tone="primary" :icon="ServerOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="providerCount" :label="t('common.providers')" tone="info" :icon="PeopleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="tunnelAccounts" :label="t('common.tunnelReady')" tone="success" :icon="GlobeOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="accounts.length" :label="t('common.total')" tone="primary" :icon="ServerOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="providerCount" :label="t('common.providers')" tone="info" :icon="PeopleOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="tunnelAccounts" :label="t('common.tunnelReady')" tone="success" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
       <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loadBusy" :empty-text="t('dnsAccount.empty')" />
@@ -52,7 +52,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ServerOutline, PeopleOutline, GlobeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { isSecretField } from '../lib/safe';
@@ -110,7 +110,7 @@ const columns = computed(() => [
       }
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

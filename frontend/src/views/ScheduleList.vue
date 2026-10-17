@@ -9,9 +9,9 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.scheduleTasks')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.scheduleTasks')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
       <n-select v-model:value="searchType" :options="searchTypeOptions" size="small" style="width: 130px" />
@@ -22,23 +22,38 @@
     </div>
 
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        v-model:checked-row-keys="checkedRowKeys"
-        :columns="columns"
-        :data="tasks"
-        :loading="loadBusy"
-        :pagination="pagination"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('schedule.empty')"
-        :error="loadError"
-        @retry="loadTasks"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('schedule.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('schedule.cycleShort')">{{ cycleCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('schedule.onceShort')">{{ tasks.length - cycleCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.active')">{{ activeTasks }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('schedule.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          v-model:checked-row-keys="checkedRowKeys"
+          :columns="columns"
+          :data="tasks"
+          :loading="loadBusy"
+          :pagination="pagination"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('schedule.empty')"
+          :error="loadError"
+          @retry="loadTasks"
+        />
 
-      <n-space v-if="checkedRowKeys.length" class="mt-3">
-        <n-button size="small" @click="batch('open')">{{ t('schedule.batchOpen') }}</n-button>
-        <n-button size="small" @click="batch('close')">{{ t('schedule.batchClose') }}</n-button>
-        <n-button size="small" type="error" secondary @click="batch('delete')">{{ t('schedule.batchDelete') }}</n-button>
-      </n-space>
+        <n-space v-if="checkedRowKeys.length" class="mt-3">
+          <n-button size="small" @click="batch('open')">{{ t('schedule.batchOpen') }}</n-button>
+          <n-button size="small" @click="batch('close')">{{ t('schedule.batchClose') }}</n-button>
+          <n-button size="small" type="error" secondary @click="batch('delete')">{{ t('schedule.batchDelete') }}</n-button>
+        </n-space>
+      </div>
     </n-card>
   </div>
 </template>
@@ -47,7 +62,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, ListOutline, CheckmarkCircleOutline, PauseOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -65,6 +80,7 @@ const loadError = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pausedTasks = computed(() => tasks.value.filter((t: any) => !t.active).length);
+const cycleCount = computed(() => tasks.value.filter((t: any) => t.type === 1).length);
 const page = ref(1);
 const pageSize = ref(10);
 const checkedRowKeys = ref<number[]>([]);
@@ -161,7 +177,7 @@ const columns = computed<any[]>(() => [
         )
       );
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

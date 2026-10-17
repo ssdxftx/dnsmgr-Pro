@@ -9,19 +9,34 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.monitorTasks')" tone="primary" :icon="PulseOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="issueTasks" :label="t('common.abnormal')" tone="error" :icon="AlertCircleOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.monitorTasks')" tone="primary" :icon="PulseOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.live')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="issueTasks" :label="t('common.abnormal')" tone="error" :icon="AlertCircleOutline" :caption="t('common.live')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="tasks"
-        :loading="loadBusy"
-        :pagination="{ pageSize: 20 }"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('dnsCheck.empty')"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('dnsCheck.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('common.enable')">{{ activeTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.disabled')">{{ tasks.length - activeTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.abnormal')">{{ issueTasks }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('dnsCheck.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="tasks"
+          :loading="loadBusy"
+          :pagination="{ pageSize: 20 }"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('dnsCheck.empty')"
+        />
+      </div>
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="t('dnsCheck.taskTitle')" class="modal-md" :mask-closable="false">

@@ -5,13 +5,13 @@
     <!-- 遥测卡：计数动画 + 曲线描边 -->
     <n-grid :cols="isMobile ? 1 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
       <n-grid-item span="1" v-reveal class="d1">
-        <TelemetryCard :label="t('dashboard.statDomains')" :value="stats.domains" tone="primary" :icon="ServerOutline" :spark="sparks[0]" />
+        <TelemetryCard :label="t('dashboard.statDomains')" :value="stats.domains" tone="primary" :icon="ServerOutline" :spark="sparks[0]" :caption="t('common.cumulative')" />
       </n-grid-item>
       <n-grid-item span="1" v-reveal class="d2">
-        <TelemetryCard :label="t('dashboard.statAccounts')" :value="stats.accounts" tone="success" :icon="LinkOutline" :spark="sparks[1]" />
+        <TelemetryCard :label="t('dashboard.statAccounts')" :value="stats.accounts" tone="success" :icon="LinkOutline" :spark="sparks[1]" :caption="t('common.cumulative')" />
       </n-grid-item>
       <n-grid-item span="1" v-reveal class="d3">
-        <TelemetryCard :label="t('dashboard.statCdnDomains')" :value="stats.cdnDomains" tone="warning" :icon="GlobeOutline" :spark="sparks[2]" />
+        <TelemetryCard :label="t('dashboard.statCdnDomains')" :value="stats.cdnDomains" tone="warning" :icon="GlobeOutline" :spark="sparks[2]" :caption="t('common.cumulative')" />
       </n-grid-item>
     </n-grid>
 

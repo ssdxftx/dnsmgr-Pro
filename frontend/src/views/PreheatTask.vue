@@ -9,19 +9,33 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="tasks"
-        :loading="loadBusy"
-        :pagination="{ pageSize: 20 }"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('preheat.empty')"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('preheat.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('common.enable')">{{ activeCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('preheat.stopped')">{{ tasks.length - activeCount }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('preheat.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="tasks"
+          :loading="loadBusy"
+          :pagination="{ pageSize: 20 }"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('preheat.empty')"
+        />
+      </div>
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="t('preheat.modalTitle')" class="modal-md" :mask-closable="false">
@@ -82,6 +96,7 @@ const { busy, run } = useAction();
 const loadBusy = ref(false);
 const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
+const activeCount = computed(() => tasks.value.filter((t: any) => t.active).length);
 const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const showEdit = ref(false);

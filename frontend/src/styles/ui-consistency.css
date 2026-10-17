@@ -64,6 +64,16 @@
   flex-wrap: wrap;
 }
 
+/* 表格行内操作：保持单行，避免按钮多时换行撑高行 */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.ml-auto { margin-left: auto; }
+
 /* ---- 弹窗宽度三档：sm=480 / md=640 / lg=800（替代 10+ 种内联 max-width） ---- */
 .modal-sm { max-width: 480px; }
 .modal-md { max-width: 640px; }

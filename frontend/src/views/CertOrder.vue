@@ -12,13 +12,18 @@
       </template>
     </PageHeader>
     <n-grid cols="1 s:2 m:4" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :spark="sparks[0]" /></n-grid-item>
-      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :spark="sparks[1]" /></n-grid-item>
-      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :spark="sparks[2]" /></n-grid-item>
-      <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :spark="sparks[3]" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :spark="sparks[0]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :spark="sparks[1]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :spark="sparks[2]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :spark="sparks[3]" :caption="t('common.last30d')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="orders" :loading="loadBusy" :empty-text="t('certOrder.empty')" />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('certOrder.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable :columns="columns" :data="orders" :loading="loadBusy" :empty-text="t('certOrder.empty')" />
+      </div>
     </n-card>
 
     <!-- 添加/编辑弹窗 -->
@@ -103,7 +108,7 @@
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NDropdown, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NDropdown, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ShieldCheckmarkOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -263,7 +268,7 @@ const columns = computed(() => [
         );
       }
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

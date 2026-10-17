@@ -24,6 +24,8 @@ export default {
   domain: {
     title: '域名管理',
     subtitle: '管理已接入的域名、分类与到期提醒',
+    overview: '域名概览',
+    listTitle: '域名列表',
     batchNoticeOn: '开启提醒',
     batchNoticeOff: '关闭提醒',
     expireNotice: '到期提醒设置',
@@ -148,6 +150,8 @@ export default {
     autoType: '自动识别',
     weightTitle: '权重解析 - {name}',
     weightSubtitle: '仅阿里云支持；为同一子域名的多条记录分配权重',
+    weightOverview: '权重概览',
+    weightListTitle: '权重列表',
     weightSubdomain: '主机记录',
     weightStatusLabel: '权重状态',
     weightConfigure: '配置权重',
@@ -169,6 +173,9 @@ export default {
   cname: {
     title: 'CNAME 代理',
     subtitle: '为证书 DNS 验证配置 CNAME 委托',
+    guideTitle: '接入说明',
+    guide: '在域名服务商处把验证记录指向 acme-dns 提供的 CNAME 目标，添加后点击「检测」确认生效。',
+    listTitle: '记录列表',
     add: '添加CNAME',
     addTitle: '添加CNAME代理',
     domain: '域名',
@@ -203,6 +210,8 @@ export default {
   dnsCheck: {
     title: 'DNS 劫持检测',
     subtitle: '配置域名解析劫持的自动检测任务',
+    overview: '检测概览',
+    listTitle: '检测任务列表',
     addTask: '添加任务',
     empty: '暂无检测任务，点击「添加任务」配置自动劫持检测',
     taskTitle: '检测任务',
