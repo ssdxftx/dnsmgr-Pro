@@ -1218,8 +1218,11 @@ async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
   const removed = idx >= 0 ? domains.value[idx] : null;
   if (idx >= 0) domains.value.splice(idx, 1);
   const res = await api('DELETE', `/cdn/domains/${row.id}${qs ? '?' + qs : ''}`);
-  if (res.code === 0) message.success(res.msg);
-  else {
+  if (res.code === 0) {
+    // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
+    checkedIds.value = checkedIds.value.filter((k: any) => Number(k) !== Number(row.id));
+    message.success(res.msg);
+  } else {
     if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
     message.error(res.msg);
   }

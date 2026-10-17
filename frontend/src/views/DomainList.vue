@@ -188,7 +188,12 @@ const columns = computed(() => {
     width: 160,
     render: (row: any) => h(NEllipsis, { style: 'max-width:160px' }, { default: () => row.remark || '' }),
   });
-  cols.push({ title: t('domain.recordCountCol'), key: 'recordcount', width: 90 });
+  cols.push({
+    title: t('domain.recordCountCol'),
+    key: 'recordcount',
+    width: 90,
+    render: (row: any) => (row._count_error ? '—' : row.recordcount),
+  });
   cols.push({
     title: t('domain.expireTimeCol'),
     key: 'expiretime',
@@ -419,14 +424,14 @@ function batchDelete() {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       const ids = checked.value.map(Number);
-      const removed = domains.value.filter((d) => ids.includes(Number(d.id)));
+      const snapshot = [...domains.value];
       domains.value = domains.value.filter((d) => !ids.includes(Number(d.id)));
       const res = await api('POST', '/domains/batch-del', { ids });
       if (res.code === 0) {
         message.success(res.msg);
         checked.value = [];
       } else {
-        domains.value = [...domains.value, ...removed]; // 失败回滚
+        domains.value = snapshot; // 失败回滚：整体还原，保持原有顺序
         message.error(res.msg);
       }
     },
@@ -444,8 +449,11 @@ function delDomain(row: any) {
       const removed = idx >= 0 ? domains.value[idx] : null;
       if (idx >= 0) domains.value.splice(idx, 1);
       const res = await api('DELETE', `/domains/${row.id}`);
-      if (res.code === 0) message.success(t('domain.deleteSuccess'));
-      else {
+      if (res.code === 0) {
+        // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
+        checked.value = checked.value.filter((k) => Number(k) !== Number(row.id));
+        message.success(t('domain.deleteSuccess'));
+      } else {
         if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
         message.error(res.msg);
       }

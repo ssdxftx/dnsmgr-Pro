@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getToken, getUser } from '../api';
+import { getToken, getUser, clearToken } from '../api';
 import { useLocale } from '../composables/useLocale';
 
 export const useAuthStore = defineStore('auth', () => {
@@ -19,6 +19,8 @@ export const useAuthStore = defineStore('auth', () => {
   function logout() {
     token.value = '';
     user.value = null;
+    // 同时清理 localStorage 中的登录态与 GET 缓存，避免残留或串号
+    clearToken();
   }
 
   return { token, user, setAuth, logout };

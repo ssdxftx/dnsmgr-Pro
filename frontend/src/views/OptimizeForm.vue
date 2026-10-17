@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('optimize.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable remote :loading="domainLoading" @search="loadDomains" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -82,6 +82,7 @@ const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'))
 const editId = computed(() => Number(route.params.id));
 
 const domainOptions = ref<any[]>([]);
+const domainLoading = ref(false);
 const saving = ref(false);
 const optimizeIpApi = ref('0');
 const ipTypeSelect = ref<string[]>(['v4']);
@@ -112,12 +113,17 @@ function toggleIpType(v: string, checked: boolean) {
   } else {
     ipTypeSelect.value = ipTypeSelect.value.filter((x) => x !== v);
   }
-  form.ip_type = ipTypeSelect.value.join(',') || 'v4';
+  form.ip_type = ipTypeSelect.value.join(',');
 }
 
-async function loadDomains() {
-  const res = await api<any>('GET', '/optimize/domains');
-  if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id }));
+async function loadDomains(kw = '') {
+  domainLoading.value = true;
+  try {
+    const res = await api<any>('GET', '/optimize/domains', kw ? { kw } : undefined);
+    if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id }));
+  } finally {
+    domainLoading.value = false;
+  }
 }
 
 async function loadSettings() {
@@ -142,7 +148,8 @@ async function loadTask() {
 }
 
 async function submit() {
-  if (!form.did || !form.rr || !form.ip_type || !form.recordnum || !form.ttl) {
+  // 校验实际提交的 ipTypeSelect（body 用其 join 结果），避免全部取消后仍提交空值
+  if (!form.did || !form.rr || !ipTypeSelect.value.length || !form.recordnum || !form.ttl) {
     return message.warning(t('optimize.requiredEmpty'));
   }
   saving.value = true;

@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('schedule.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable style="flex: 1" @update:value="onDomainChange" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable remote :loading="domainLoading" @search="loadDomains" @update:value="onDomainChange" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -89,6 +89,7 @@ const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'))
 const editId = computed(() => Number(route.params.id));
 
 const domainOptions = ref<any[]>([]);
+const domainLoading = ref(false);
 const recordOptions = ref<any[]>([]);
 const dnstype = ref<string | null>(null);
 const loadingRecords = ref(false);
@@ -125,9 +126,14 @@ const weekdayOptions = computed(() => [
   { label: t('schedule.weekdaySat'), value: '6' },
 ]);
 
-async function loadDomains() {
-  const res = await api<any>('GET', '/schedule/domains');
-  if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id, type: d.type }));
+async function loadDomains(kw = '') {
+  domainLoading.value = true;
+  try {
+    const res = await api<any>('GET', '/schedule/domains', kw ? { kw } : undefined);
+    if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id, type: d.type }));
+  } finally {
+    domainLoading.value = false;
+  }
 }
 
 function onDomainChange() {

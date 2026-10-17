@@ -224,7 +224,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
@@ -312,6 +312,8 @@ const columns = computed<any[]>(() => [
 
 // 日期格式化结果按原始字符串缓存：表格重渲染时避免逐格走 ICU，并使用当前语言而非硬编码 zh-CN
 const fmtCache = new Map<string, string>();
+// 切换语言后缓存中的旧语言格式失效，需清空重算
+watch(locale, () => fmtCache.clear());
 function fmt(s: string) {
   if (!s) return s;
   const hit = fmtCache.get(s);
@@ -445,19 +447,22 @@ function delOne(row: any) {
     const removed = idx >= 0 ? rows.value[idx] : null;
     if (idx >= 0) rows.value.splice(idx, 1);
     const res = await api('DELETE', `/cloudflare/domains/${domainId}/hostnames/${row.id}?hostname=${encodeURIComponent(row.hostname)}`);
-    if (res.code === 0) message.success(res.msg);
-    else { if (removed) rows.value.splice(idx, 0, removed); message.error(res.msg); }
+    if (res.code === 0) {
+      // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
+      selection.value = selection.value.filter((k: any) => Number(k) !== Number(row.id));
+      message.success(res.msg);
+    } else { if (removed) rows.value.splice(idx, 0, removed); message.error(res.msg); }
   } });
 }
 
 function confirmBatchDelete() {
   dialog.warning({ title: t('cfHostnames.batchDelete'), content: t('cfHostnames.batchDeleteConfirm', { count: selection.value.length }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
     const ids = selection.value.map(Number);
-    const removed = rows.value.filter((r: any) => ids.includes(Number(r.id)));
+    const snapshot = [...rows.value];
     rows.value = rows.value.filter((r: any) => !ids.includes(Number(r.id)));
     const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_delete`, { hostname_ids: selection.value });
     if (res.code === 0) { message.success(res.msg); selection.value = []; }
-    else { rows.value = [...rows.value, ...removed]; message.error(res.msg); }
+    else { rows.value = snapshot; message.error(res.msg); }
   } });
 }
 

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel, getUserPermissions } from '../auth.js';
 import { checkDomainRecords, calcNextRun, listSubDomains } from '../lib/dns/checkService.js';
-import { fmtDateTime } from '../lib/util.js';
+import { fmtDateTime, escapeLike } from '../lib/util.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -12,19 +12,21 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
   // 任务列表：管理员看全部，普通用户只看自己的
   app.get('/api/dns-check/tasks', auth, async (req: any) => {
     const isAdmin = checkLevel(req.user, 2);
+    // JOIN 域名表取名称，替代「另查前 2000 条域名做映射」（后者在域名超 2000 时任务行domain_name 为空）
     const rows = isAdmin
-      ? await query(`SELECT * FROM ${table('dns_check_task')} ORDER BY id DESC`)
-      : await query(`SELECT * FROM ${table('dns_check_task')} WHERE uid = ? ORDER BY id DESC`, [req.user.uid]);
-    const domains: any[] = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC LIMIT 2000`);
-    const nameMap = Object.fromEntries(domains.map((d: any) => [d.id, d.name]));
-    const data = rows.map((r: any) => ({ ...r, domain_name: nameMap[r.did] || '' }));
+      ? await query(`SELECT T.*, D.name AS domain_name FROM ${table('dns_check_task')} T LEFT JOIN ${table('domain')} D ON T.did = D.id ORDER BY T.id DESC`)
+      : await query(`SELECT T.*, D.name AS domain_name FROM ${table('dns_check_task')} T LEFT JOIN ${table('domain')} D ON T.did = D.id WHERE T.uid = ? ORDER BY T.id DESC`, [req.user.uid]);
+    const data = rows.map((r: any) => ({ ...r }));
     return { code: 0, data };
   });
 
   // 普通用户可选的域名（其授权范围内的域名）
   app.get('/api/dns-check/domains', auth, async (req: any) => {
+    const kw = String(req.query?.kw ?? '').trim();
     if (checkLevel(req.user, 2)) {
-      const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC LIMIT 2000`);
+      const where = kw ? " WHERE name LIKE ? ESCAPE '!'" : '';
+      const params = kw ? ['%' + escapeLike(kw) + '%'] : [];
+      const rows = await query(`SELECT id, name FROM ${table('domain')}${where} ORDER BY id DESC LIMIT 2000`, params);
       return { code: 0, data: rows };
     }
     const perms = await getUserPermissions(req.user.uid);

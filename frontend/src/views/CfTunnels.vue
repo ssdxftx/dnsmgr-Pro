@@ -100,7 +100,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 
 const route = useRoute();
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const accountId = Number(route.params.id);
@@ -203,7 +203,7 @@ const routeColumns = computed<any[]>(() => [
 function fmt(s: string) {
   if (!s) return '-';
   const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? s : d.toLocaleString('zh-CN', { hour12: false });
+  return Number.isNaN(d.getTime()) ? s : d.toLocaleString(locale.value, { hour12: false });
 }
 
 function statusTag(v: string) {

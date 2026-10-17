@@ -68,7 +68,7 @@
           <div class="perm-list">
             <div v-for="(p, idx) in form.permission" :key="idx" class="perm-item">
               <div class="perm-row">
-                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable class="perm-domain" />
+                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable remote :loading="domainLoading" @search="loadDomains" class="perm-domain" />
                 <div class="perm-actions">
                   <n-select v-model:value="p.readonly" :options="modeOptions" class="perm-mode" />
                   <n-button size="small" type="error" quaternary @click="removePerm(idx)">{{ t('common.delete') }}</n-button>
@@ -125,6 +125,7 @@ const editingId = ref<number | null>(null);
 const saving = ref(false);
 const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [] });
 const domainOptions = ref<any[]>([]);
+const domainLoading = ref(false);
 
 // 统一走 useResponsive（内部已用 passive 监听），避免重复注册 resize 监听
 const { isMobile } = useResponsive();
@@ -164,7 +165,7 @@ const pagination = reactive({
 });
 
 const columns = computed<any[]>(() => [
-  { title: 'UID', key: 'id', width: 70, sorter: true },
+  { title: 'UID', key: 'id', width: 70 },
   { title: t('userList.username'), key: 'username', minWidth: 140 },
   {
     title: t('userList.level'),
@@ -232,21 +233,36 @@ const columns = computed<any[]>(() => [
   },
 ]);
 
+let loadAbort: AbortController | null = null;
 async function loadUsers() {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', '/users', { offset: (page.value - 1) * pageSize.value, limit: pageSize.value, kw: kw.value || undefined });
-  if (res.code === 0) {
-    users.value = res.data.list;
-    pagination.itemCount = res.data.total;
-    pagination.page = page.value;
-    pagination.pageSize = pageSize.value;
-  } else message.error(res.msg);
-  loading.value = false;
+  try {
+    const res = await api<any>('GET', '/users', { offset: (page.value - 1) * pageSize.value, limit: pageSize.value, kw: kw.value || undefined }, { signal: ac.signal });
+    if (loadAbort !== ac) return;
+    if (res.code === 0) {
+      users.value = res.data.list;
+      pagination.itemCount = res.data.total;
+      pagination.page = page.value;
+      pagination.pageSize = pageSize.value;
+    } else message.error(res.msg);
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
+  }
 }
 
-async function loadDomains() {
-  const res = await api<any>('GET', '/user/domains');
-  if (res.code === 0) domainOptions.value = res.data.map((d: string) => ({ label: d, value: d }));
+async function loadDomains(kw = '') {
+  domainLoading.value = true;
+  try {
+    const res = await api<any>('GET', '/user/domains', kw ? { kw } : undefined);
+    if (res.code === 0) domainOptions.value = res.data.map((d: string) => ({ label: d, value: d }));
+  } finally {
+    domainLoading.value = false;
+  }
 }
 
 function search() {
@@ -336,11 +352,12 @@ async function save() {
   } else message.error(res.msg);
 }
 
-const togglePending = new Set<number>();
+// 状态开关与统计缓存开关各自维护 pending，避免同一行两个开关在请求窗口内互吞点击
+const statusPending = new Set<number>();
 function toggleStatus(row: any) {
   const id = Number(row.id);
-  if (togglePending.has(id)) return; // 防双击重复提交
-  togglePending.add(id);
+  if (statusPending.has(id)) return; // 防双击重复提交
+  statusPending.add(id);
   const prev = row.status ? 1 : 0;
   const target = prev ? 0 : 1;
   row.status = target; // 乐观更新：立即反馈，避免整表重拉
@@ -351,13 +368,14 @@ function toggleStatus(row: any) {
         message.error(res.msg);
       }
     })
-    .finally(() => togglePending.delete(id));
+    .finally(() => statusPending.delete(id));
 }
 
+const statCachePending = new Set<number>();
 function toggleStatCache(row: any) {
   const id = Number(row.id);
-  if (togglePending.has(id)) return; // 防双击重复提交
-  togglePending.add(id);
+  if (statCachePending.has(id)) return; // 防双击重复提交
+  statCachePending.add(id);
   const prev = row.stat_cache ? 1 : 0;
   const target = prev ? 0 : 1;
   row.stat_cache = target; // 乐观更新
@@ -369,7 +387,7 @@ function toggleStatCache(row: any) {
         message.error(res.msg);
       }
     })
-    .finally(() => togglePending.delete(id));
+    .finally(() => statCachePending.delete(id));
 }
 
 function del(row: any) {

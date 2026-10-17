@@ -24,9 +24,17 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
   // 域名列表（排除 cloudflare，用于添加任务）
-  app.get('/api/optimize/domains', auth, async () => {
+  app.get('/api/optimize/domains', auth, async (req: any) => {
+    const kw = String(req.query?.kw ?? '').trim();
+    const conds = ["B.type <> 'cloudflare'"];
+    const params: any[] = [];
+    if (kw) {
+      conds.push("A.name LIKE ? ESCAPE '!'");
+      params.push('%' + escapeLike(kw) + '%');
+    }
     const rows = await query(
-      `SELECT A.id, A.name FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE B.type <> 'cloudflare' ORDER BY A.id DESC LIMIT 2000`
+      `SELECT A.id, A.name FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE ${conds.join(' AND ')} ORDER BY A.id DESC LIMIT 2000`,
+      params,
     );
     return { code: 0, data: rows };
   });

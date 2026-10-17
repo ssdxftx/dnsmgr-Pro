@@ -9,6 +9,7 @@ export class TechnitiumDns implements DnsProvider {
   private domain: string;
   private domainid: string;
   private recordsCache: any[] = [];
+  private recordsLoaded = false;
 
   constructor(config: Record<string, any>) {
     this.url = String(config.url || '').replace(/\/+$/, '') + '/api';
@@ -107,6 +108,7 @@ export class TechnitiumDns implements DnsProvider {
     if (data?.response?.records) {
       const records: any[] = data.response.records;
       this.recordsCache = records;
+      this.recordsLoaded = true;
       let list: RecordInfo[] = records.map((row, i) => {
         const name = row.name === this.domain ? '@' : String(row.name).replace('.' + this.domain, '');
         const { value, mx } = this.toValue(row.type, row.rData);
@@ -197,6 +199,18 @@ export class TechnitiumDns implements DnsProvider {
     return oldRecord;
   }
 
+  // RecordId 为记录在缓存数组中的下标，写操作前必须保证缓存已拉取，
+  // 否则「管理员」分支（不预热）会误判记录不存在。
+  private async ensureRecords(): Promise<boolean> {
+    if (this.recordsLoaded) return true;
+    const res = await this.getDomainRecords();
+    if (res === false) {
+      if (!this.error) this.error = '获取域名记录失败，请刷新页面重试';
+      return false;
+    }
+    return true;
+  }
+
   async addDomainRecord(Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
     const domain = Name === '@' ? this.domain : Name + '.' + this.domain;
     const params: Record<string, any> = { domain, zone: this.domain, type: Type, ttl: Number(TTL) };
@@ -212,6 +226,7 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const domain = oldRecord.name;
@@ -233,6 +248,7 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async updateDomainRecordRemark(RecordId: string, Remark: string | null): Promise<boolean> {
+    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const params: Record<string, any> = { domain: oldRecord.name, zone: this.domain, type: oldRecord.type, comments: Remark ?? '' };
@@ -241,6 +257,7 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async deleteDomainRecord(RecordId: string) {
+    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const params: Record<string, any> = { domain: oldRecord.name, zone: this.domain, type: oldRecord.type };
@@ -249,6 +266,7 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async setDomainRecordStatus(RecordId: string, Status: string) {
+    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const params: Record<string, any> = {

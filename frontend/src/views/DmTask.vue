@@ -164,23 +164,33 @@ const columns = computed<any[]>(() => [
   },
 ]);
 
+let loadAbort: AbortController | null = null;
 async function loadTasks() {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', '/dmonitor/tasks', {
-    offset: (page.value - 1) * pageSize.value,
-    limit: pageSize.value,
-    type: searchType.value,
-    kw: kw.value || undefined,
-    status: status.value === null ? undefined : status.value,
-  });
-  if (res.code === 0) {
-    tasks.value = res.data.list;
-    total.value = res.data.total;
-    pagination.itemCount = res.data.total;
-    pagination.page = page.value;
-    pagination.pageSize = pageSize.value;
+  try {
+    const res = await api<any>('GET', '/dmonitor/tasks', {
+      offset: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+      type: searchType.value,
+      kw: kw.value || undefined,
+      status: status.value === null ? undefined : status.value,
+    }, { signal: ac.signal });
+    if (loadAbort !== ac) return;
+    if (res.code === 0) {
+      tasks.value = res.data.list;
+      total.value = res.data.total;
+      pagination.itemCount = res.data.total;
+      pagination.page = page.value;
+      pagination.pageSize = pageSize.value;
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
   }
-  loading.value = false;
 }
 
 function search() {
@@ -263,8 +273,13 @@ function del(row: any) {
       const removed = idx >= 0 ? tasks.value[idx] : null;
       if (idx >= 0) tasks.value.splice(idx, 1);
       const res = await api('DELETE', `/dmonitor/tasks/${row.id}`);
-      if (res.code === 0) message.success(t('dm.deleteSuccess'));
-      else {
+      if (res.code === 0) {
+        message.success(t('dm.deleteSuccess'));
+        // 同步分页总数，避免「共 N 条」偏大、末页删空后停在空白页
+        if (pagination.itemCount > 0) pagination.itemCount--;
+        if (total.value > 0) total.value--;
+        checkedRowKeys.value = checkedRowKeys.value.filter((k) => Number(k) !== Number(row.id));
+      } else {
         if (removed) tasks.value.splice(idx, 0, removed); // 失败回滚
         message.error(res.msg);
       }

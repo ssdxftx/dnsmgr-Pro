@@ -76,18 +76,28 @@ const pagination = computed(() => ({
   },
 }));
 
+let loadAbort: AbortController | null = null;
 async function loadRecords() {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', `/domains/${domainId}/records`, { page: page.value, pagesize: pageSize.value, subdomain: subFilter.value || undefined });
-  if (res.code === 0) {
-    records.value = res.data.list;
-    total.value = res.data.total;
-    domainName.value = res.data.list?.[0]?.Domain || domainName.value;
-    access.value = res.data._access || { admin: true, readonly: false, writable: true };
-  } else {
-    message.error(res.msg);
+  try {
+    const res = await api<any>('GET', `/domains/${domainId}/records`, { page: page.value, pagesize: pageSize.value, subdomain: subFilter.value || undefined }, { signal: ac.signal });
+    if (loadAbort !== ac) return;
+    if (res.code === 0) {
+      records.value = res.data.list;
+      total.value = res.data.total;
+      domainName.value = res.data.list?.[0]?.Domain || domainName.value;
+      access.value = res.data._access || { admin: true, readonly: false, writable: true };
+    } else {
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
   }
-  loading.value = false;
 }
 
 async function loadDomainInfo() {

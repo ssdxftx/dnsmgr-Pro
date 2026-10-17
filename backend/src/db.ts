@@ -13,8 +13,10 @@ function buildPool(cfg: DbConfig): mysql.Pool {
     password: cfg.db_password,
     database: cfg.db_name,
     waitForConnections: true,
-    connectionLimit: 10,
-    maxIdle: 10,
+    // 批量解析记录操作按并发 8 打云端，同时还有多个并发请求读库，10 条连接易被打满；
+    // 适当放大到 20，兼顾并发与数据库压力
+    connectionLimit: 20,
+    maxIdle: 20,
     idleTimeout: 60000,
     // DB 不可达时快速失败，避免请求长时间挂起
     connectTimeout: 10000,

@@ -4,6 +4,7 @@ import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
 import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
+import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -95,6 +96,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     const id = await insertAndGetId(`INSERT INTO ${table('cdn_account')} (type, name, config, remark, addtime) VALUES (?, ?, ?, ?, NOW())`, [
       type, name, encryptConfig(config), remark || '',
     ]);
+    bumpCdnAccountEpoch();
     return { code: 0, msg: '添加CDN账户成功', data: id };
   });
 
@@ -113,6 +115,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     await query(`UPDATE ${table('cdn_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [
       type, name, encryptConfig(merged), remark || '', id,
     ]);
+    bumpCdnAccountEpoch();
     return { code: 0, msg: '修改CDN账户成功' };
   });
 
@@ -127,6 +130,7 @@ export default async function accountRoutes(app: FastifyInstance) {
       await q(`DELETE FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
       await q(`DELETE FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     });
+    bumpCdnAccountEpoch();
     return { code: 0, msg: '删除成功' + (dcount && dcount.c > 0 ? '，已一并删除 ' + dcount.c + ' 个加速域名' : '') };
   });
 

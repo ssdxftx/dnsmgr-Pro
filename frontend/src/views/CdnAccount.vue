@@ -25,6 +25,9 @@
         <n-form-item :label="t('cdnAccount.accountName')">
           <n-input v-model:value="form.name" :placeholder="t('cdnAccount.remarkPlaceholder')" />
         </n-form-item>
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" clearable />
+        </n-form-item>
         <n-alert v-if="currentProvider?.note" type="info" style="margin-bottom:12px">{{ currentProvider.note }}</n-alert>
         <n-form-item v-for="(field, key) in currentProvider?.config || {}" :key="key" :label="field.name">
           <n-select v-if="field.type === 'select'" v-model:value="form.config[key]" :options="field.options || []" :placeholder="field.placeholder || field.name" clearable />
@@ -68,7 +71,7 @@ const showEdit = ref(false);
 const editingId = ref<number | null>(null);
 const saving = ref(false);
 const currentProvider = ref<any>(null);
-const form = reactive<any>({ type: '', name: '', config: {} as Record<string, any> });
+const form = reactive<any>({ type: '', name: '', remark: '', config: {} as Record<string, any> });
 
 const columns = computed(() => [
   { title: 'ID', key: 'id', width: 60 },
@@ -146,6 +149,7 @@ function openAdd() {
   editingId.value = null;
   form.type = '';
   form.name = '';
+  form.remark = '';
   form.config = {};
   currentProvider.value = null;
   showEdit.value = true;
@@ -155,6 +159,7 @@ function openEdit(row: any) {
   editingId.value = row.id;
   form.type = row.type;
   form.name = row.name;
+  form.remark = row.remark || '';
   form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
   currentProvider.value = providers.value[form.type] || null;
   showEdit.value = true;
@@ -163,7 +168,7 @@ function openEdit(row: any) {
 async function save() {
   if (!form.type || !form.name) return message.warning(t('cdnAccount.fillWarning'));
   saving.value = true;
-  const body = { type: form.type, name: form.name, config: form.config, remark: '' };
+  const body = { type: form.type, name: form.name, config: form.config, remark: form.remark || '' };
   const res = editingId.value
     ? await api('PUT', `/cdn/accounts/${editingId.value}`, body)
     : await api('POST', '/cdn/accounts', body);

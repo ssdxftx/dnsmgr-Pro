@@ -11,6 +11,7 @@
       :striped="striped"
       :scroll-x="scrollX"
       :pagination="pagination"
+      :remote="remote"
       :virtual-scroll="virtualScroll"
       :max-height="virtualScroll ? maxHeight : undefined"
       :checked-row-keys="hasSelection ? checkedRowKeys : undefined"
@@ -127,6 +128,11 @@ const titleColumn = computed(() => {
 const restColumns = computed(() => dataColumns.value.filter((c) => c !== titleColumn.value));
 
 const checkedSet = computed(() => new Set(props.checkedRowKeys || []));
+
+// 服务端分页由调用方传入 itemCount（当前页数据仅一页的条数）并自行翻页；
+// 不告知 naive-ui「remote」时，它会用 data.length 推导页数，导致分页器只有 1 页、桌面端无法翻页。
+// 客户端分页（如 `{ pageSize: 20 }`）不传 itemCount，仍交由 naive-ui 本地切片。
+const remote = computed(() => !!props.pagination && (props.pagination as any).itemCount !== undefined);
 
 function keyOf(row: any) {
   if (props.rowKey) return props.rowKey(row);

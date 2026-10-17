@@ -105,11 +105,11 @@ onMounted(async () => {
     api<any>('GET', '/cdn/domains').catch(() => ({ code: -1 })),
   ]);
   stats.value = {
-    domains: d.code === 0 ? d.data.length : 0,
-    accounts: a.code === 0 ? a.data.length : 0,
-    cdnDomains: c.code === 0 ? c.data.length : 0,
+    domains: d.code === 0 && Array.isArray(d.data) ? d.data.length : 0,
+    accounts: a.code === 0 && Array.isArray(a.data) ? a.data.length : 0,
+    cdnDomains: c.code === 0 && Array.isArray(c.data) ? c.data.length : 0,
   };
-  accounts.value = a.code === 0 ? a.data : [];
+  accounts.value = a.code === 0 && Array.isArray(a.data) ? a.data : [];
 });
 </script>
 

@@ -1,4 +1,5 @@
 import { query, table } from './db.js';
+import { setCdnDomainIdColumnAvailable } from './lib/cert/cdnDomainIdColumn.js';
 
 // 启动时幂等迁移：为多用户注册系统补齐表结构与字段，已存在则跳过。
 export async function migrate(): Promise<void> {
@@ -183,6 +184,10 @@ export async function migrate(): Promise<void> {
   await ensureIndex('cdn_domain', 'idx_aid_zone', '(`aid`, `zone_id`)');
   await ensureIndex('domain', 'idx_aid', '(`aid`)');
   await ensureIndex('cert_deploy', 'idx_aid_oid', '(`aid`, `oid`)');
+  // 以下为实际查询条件补索引：cert_deploy 按 oid 查询、cert_cname 按 domain 查询、cdn_stat_data 按 aid 清理
+  await ensureIndex('cert_deploy', 'idx_oid', '(`oid`)');
+  await ensureIndex('cert_cname', 'idx_domain_only', '(`domain`)');
+  await ensureIndex('cdn_stat_data', 'idx_aid', '(`aid`)');
   await ensureIndex('cert_order', 'idx_aid', '(`aid`)');
   await ensureIndex('cert_domain', 'idx_domain', '(`domain`)');
   await ensureIndex('cert_cname', 'idx_did_domain', '(`did`, `domain`)');
@@ -196,25 +201,42 @@ async function ensureCertOrderCdnDomainId(): Promise<void> {
     [table('cert_order')]
   );
   if (cols.length === 0) {
+    // 生成列基于 JSON_EXTRACT：历史 link 若含非法 JSON，整个 ALTER 会失败。
+    // 先清洗非法 JSON（这些行本就无法被应用解析使用），再尝试建列。
     try {
       await query(
-        `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INT UNSIGNED GENERATED ALWAYS AS (CAST(JSON_UNQUOTE(JSON_EXTRACT(link, '$.cdnDomainId')) AS UNSIGNED)) STORED`
+        `UPDATE ${table('cert_order')} SET link = NULL WHERE link IS NOT NULL AND JSON_VALID(link) = 0`
       );
     } catch (e: any) {
-      console.log(`[migrate] 为 cert_order 添加 cdn_domain_id 生成列失败（跳过联动索引）：${e?.message || e}`);
+      console.log(`[migrate] 清洗 cert_order.link 非法 JSON 失败（跳过）：${e?.message || e}`);
+    }
+    try {
+      await query(
+        `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INT UNSIGNED GENERATED ALWAYS AS (CAST(JSON_UNQUOTE(JSON_EXTRACT(link, '$.cdnDomainId')) AS UNSIGNED)) VIRTUAL`
+      );
+    } catch (e: any) {
+      // 建列失败时标记该列不可用，查询方回退到 link LIKE + 解析，保证功能可用而非整块 500
+      setCdnDomainIdColumnAvailable(false);
+      console.log(`[migrate] 为 cert_order 添加 cdn_domain_id 生成列失败，已降级为 link LIKE 查询：${e?.message || e}`);
       return;
     }
   }
+  setCdnDomainIdColumnAvailable(true);
   await ensureIndex('cert_order', 'idx_cdn_domain_id', '(`cdn_domain_id`)');
 }
 
 async function ensureIndex(tableName: string, indexName: string, columns: string): Promise<void> {
-  const rows = await query<any>(
-    `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
-    [table(tableName), indexName]
-  );
-  if (rows.length === 0) {
-    await query(`ALTER TABLE ${table(tableName)} ADD INDEX ${indexName} ${columns}`);
+  try {
+    const rows = await query<any>(
+      `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
+      [table(tableName), indexName]
+    );
+    if (rows.length === 0) {
+      await query(`ALTER TABLE ${table(tableName)} ADD INDEX ${indexName} ${columns}`);
+    }
+  } catch (e: any) {
+    // 单个索引创建失败（表不存在、列缺失、权限不足等）不应中断后续索引的创建
+    console.log(`[migrate] 为 ${tableName} 创建索引 ${indexName} 失败（跳过）：${e?.message || e}`);
   }
 }
 

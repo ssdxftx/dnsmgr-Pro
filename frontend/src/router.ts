@@ -89,6 +89,23 @@ router.beforeEach(async (to, from, next) => {
     if (to.path.startsWith('/statistics') && Number(u?.stat_cache) === 1) return next();
     return next('/domains');
   }
+  // 带参数路由的 id 必须是正整数，避免 Number('abc')=NaN 直接进接口（页面回显 #NaN、报错无意义）
+  if (to.params.id !== undefined) {
+    const id = Number(to.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      const listMap: [string, string][] = [
+        ['/domains/', '/domains'],
+        ['/cdn-domains/', '/cdn-domains'],
+        ['/cloudflare/domains/', '/cdn-domains'],
+        ['/cloudflare/accounts/', '/cdn-accounts'],
+        ['/dm-tasks/', '/dm-tasks'],
+        ['/optimize-tasks/', '/optimize-tasks'],
+        ['/schedule-tasks/', '/schedule-tasks'],
+      ];
+      const fallback = listMap.find(([p]) => to.path.startsWith(p))?.[1] || '/domains';
+      return next(fallback);
+    }
+  }
   next();
 });
 

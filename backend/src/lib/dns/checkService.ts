@@ -33,11 +33,14 @@ export interface CheckIssue {
 /** 拉取某域名全部记录（分页） */
 async function fetchAllRecords(provider: any): Promise<any[]> {
   let list: any[] = [];
+  let pageSize = 500;
   for (let page = 1; page <= 10; page++) {
     const res = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
     if (res === false || !res.list || !res.list.length) break;
     list = list.concat(res.list);
-    if (res.total && list.length >= res.total) break;
+    if (page === 1) pageSize = res.list.length;
+    // 返回条数不足一页即结束，不依赖厂商 total（部分厂商 total 只代表本页条数，会导致首屏就 break 而漏记录）
+    if (res.list.length < pageSize) break;
   }
   return list;
 }

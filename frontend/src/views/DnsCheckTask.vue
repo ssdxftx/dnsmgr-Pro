@@ -30,7 +30,7 @@
           <n-input v-model:value="form.name" :placeholder="t('dnsCheck.namePlaceholder')" />
         </n-form-item>
         <n-form-item :label="t('dnsCheck.domain')">
-          <n-select v-model:value="form.did" :options="domainOptions" filterable :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
+          <n-select v-model:value="form.did" :options="domainOptions" filterable remote :loading="domainLoading" @search="loadDomains" :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
         </n-form-item>
         <n-form-item :label="t('dnsCheck.subdomain')">
           <n-select v-model:value="form.sub" :options="subOptions" filterable clearable :placeholder="t('dnsCheck.subPlaceholder')" :disabled="!form.did" />
@@ -110,6 +110,7 @@ const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const issueTasks = computed(() => tasks.value.filter((t: any) => t.status && t.status !== 'ok').length);
 const domainOptions = ref<any[]>([]);
+const domainLoading = ref(false);
 const subOptions = ref<any[]>([]);
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
@@ -207,10 +208,15 @@ async function load() {
   }
 }
 
-async function loadDomains() {
-  const res = await api<any>('GET', '/dns-check/domains');
-  if (res.code === 0) {
-    domainOptions.value = (res.data || []).map((d: any) => ({ label: d.name, value: d.id }));
+async function loadDomains(kw = '') {
+  domainLoading.value = true;
+  try {
+    const res = await api<any>('GET', '/dns-check/domains', kw ? { kw } : undefined);
+    if (res.code === 0) {
+      domainOptions.value = (res.data || []).map((d: any) => ({ label: d.name, value: d.id }));
+    }
+  } finally {
+    domainLoading.value = false;
   }
 }
 

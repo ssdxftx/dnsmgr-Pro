@@ -455,13 +455,14 @@ function parseExtraParams(text: string) {
     return undefined;
   }
 }
-async function loadOriginData() {
+async function loadOriginData(): Promise<boolean> {
   const [og, lb] = await Promise.all([
     api<any>('GET', `/cdn/accounts/${aid}/origin-groups`, { zoneId, page: 1, size: 100 }),
     api<any>('GET', `/cdn/accounts/${aid}/load-balancers`, { zoneId, page: 1, size: 100 }),
   ]);
   originGroups.value = og.code === 0 ? og.data?.list || [] : [];
   loadBalancers.value = lb.code === 0 ? lb.data?.list || [] : [];
+  return og.code === 0 && lb.code === 0;
 }
 async function createOriginGroup() {
   if (!ogForm.name) return message.warning(t('cdnOrigin.needName'));
@@ -569,26 +570,35 @@ async function loadRuleSchemaForKind() {
   const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-schema`, { kind: ruleKind.value });
   if (res.code === 0) ruleSchema.value = res.data;
 }
-async function loadRules() {
+async function loadRules(): Promise<boolean> {
   ruleLoading.value = true;
-  if (isEsa.value) await loadRuleSchemaForKind();
-  if (isEsa.value) {
-    // ESA 规则按 kind 分页，单页 100；循环取全量，避免规则较多时列表被截断
-    const all: any[] = [];
-    for (let page = 1; page <= 20; page++) {
-      const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, page, size: 100 });
-      if (res.code !== 0) break;
-      const l = res.data?.list || [];
-      all.push(...l);
-      const total = Number(res.data?.total || 0);
-      if (l.length < 100 || all.length >= total) break;
+  let ok = true;
+  try {
+    if (isEsa.value) await loadRuleSchemaForKind();
+    if (isEsa.value) {
+      // ESA 规则按 kind 分页，单页 100；循环取全量，避免规则较多时列表被截断
+      const all: any[] = [];
+      for (let page = 1; page <= 20; page++) {
+        const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, page, size: 100 });
+        if (res.code !== 0) {
+          ok = false;
+          break;
+        }
+        const l = res.data?.list || [];
+        all.push(...l);
+        const total = Number(res.data?.total || 0);
+        if (l.length < 100 || all.length >= total) break;
+      }
+      ruleList.value = all;
+    } else {
+      const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, { zoneId });
+      ok = res.code === 0;
+      ruleList.value = ok ? res.data || [] : [];
     }
-    ruleList.value = all;
-  } else {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, { zoneId });
-    ruleList.value = res.code === 0 ? res.data || [] : [];
+  } finally {
+    ruleLoading.value = false;
   }
-  ruleLoading.value = false;
+  return ok;
 }
 const ruleColumns = computed(() => {
   const cols: any[] = [{ title: t('cdnRules.colName'), key: 'ruleName', minWidth: 200 }];
@@ -763,24 +773,27 @@ const ipColumns = computed(() => [
 function secRoute(key: string) {
   return key === 'originProtection' ? 'origin-protection' : key;
 }
-async function loadSecurity() {
+async function loadSecurity(): Promise<boolean> {
   // 各安全配置相互独立：并行拉取，替代 3 次串行等待
-  const tasks: Promise<any>[] = [];
+  const tasks: Promise<boolean>[] = [];
   if (caps.value.securityIpGroup) {
     tasks.push(
       (async () => {
         const res = await api<any>('GET', `/cdn/accounts/${aid}/security/ip-groups`, { zoneId });
         ipGroups.value = res.code === 0 ? res.data : [];
+        return res.code === 0;
       })(),
     );
   }
   for (const cfg of securityCfgs) if (caps.value[cfg.cap]) tasks.push(loadSecurityConfig(cfg.key, true));
-  await Promise.all(tasks);
+  const results = await Promise.all(tasks);
+  return results.every(Boolean);
 }
-async function loadSecurityConfig(key: string, silent = false) {
+async function loadSecurityConfig(key: string, silent = false): Promise<boolean> {
   const res = await api<any>('GET', `/cdn/accounts/${aid}/security/${secRoute(key)}`, { zoneId });
   if (res.code === 0) secJson[key] = JSON.stringify(res.data, null, 2);
   else if (!silent) message.error(res.msg);
+  return res.code === 0;
 }
 async function saveSecurityConfig(key: string) {
   let config: any;
@@ -846,10 +859,11 @@ const l4Columns = computed(() => [
       h(NButton, { size: 'tiny', type: 'error', onClick: () => delL4Proxy(r) }, { default: () => t('cdnZoneSetting.delete') }),
   },
 ]);
-async function loadL4Proxies() {
-  if (!caps.value.l4) return;
+async function loadL4Proxies(): Promise<boolean> {
+  if (!caps.value.l4) return true;
   const res = await api<any>('GET', `/cdn/accounts/${aid}/l4-proxies`, { zoneId, page: 1, size: 100 });
   l4Proxies.value = res.code === 0 ? res.data?.list || [] : [];
+  return res.code === 0;
 }
 async function createL4Proxy() {
   if (!l4Form.name) return message.warning(t('cdnAdvanced.needName'));
@@ -895,14 +909,15 @@ const taskColumns = computed(() => [
   { title: t('cdnRules.colStatus'), key: 'status', width: 120 },
   { title: t('cdnAccount.addTime'), key: 'createTime', minWidth: 160 },
 ]);
-async function loadTasks() {
-  if (!caps.value.tasks) return;
+async function loadTasks(): Promise<boolean> {
+  if (!caps.value.tasks) return true;
   const [p, pf] = await Promise.all([
     api<any>('GET', `/cdn/accounts/${aid}/tasks/purge`, { zoneId, page: 1, size: 50 }),
     api<any>('GET', `/cdn/accounts/${aid}/tasks/prefetch`, { zoneId, page: 1, size: 50 }),
   ]);
   purgeTasks.value = p.code === 0 ? p.data?.list || [] : [];
   prefetchTasks.value = pf.code === 0 ? pf.data?.list || [] : [];
+  return p.code === 0 && pf.code === 0;
 }
 async function loadQuota() {
   const res = await api<any>('GET', isEsa.value ? `/cdn/accounts/${aid}/quota/purge` : `/cdn/accounts/${aid}/quota/content`, { zoneId, type: 'file' });
@@ -912,7 +927,9 @@ async function loadQuota() {
 async function loadTopAnalysis() {
   const now = new Date();
   const start = new Date(now.getTime() - 24 * 3600 * 1000);
-  const fmt = (d: Date) => d.toISOString().slice(0, 19).replace('T', ' ');
+  // 与项目其余时间语义保持一致：使用本地时间而非 UTC
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   const res = await api<any>('GET', `/cdn/accounts/${aid}/analysis/top`, {
     zoneIds: zoneId,
     startTime: fmt(start),
@@ -925,16 +942,18 @@ async function loadTopAnalysis() {
 }
 
 // ===================== 汇总 =====================
-// 记录已加载的 tab：来回切换时跳过重复请求（reloadAll 或主动刷新时强制重载）
+// 记录已加载的 tab：来回切换时跳过重复请求（reloadAll 或主动刷新时强制重载）。
+// 仅在加载成功时记录，避免首次失败后反复切 tab 永不重试。
 const loadedTabs = new Set<string>();
 async function loadByTab(name: string, force = false) {
   if (!force && loadedTabs.has(name)) return;
-  if (name === 'origin') await loadOriginData();
-  else if (name === 'rules') await loadRules();
-  else if (name === 'security') await loadSecurity();
-  else if (name === 'l4') await loadL4Proxies();
-  else if (name === 'tasks') await loadTasks();
-  loadedTabs.add(name);
+  let ok = true;
+  if (name === 'origin') ok = await loadOriginData();
+  else if (name === 'rules') ok = await loadRules();
+  else if (name === 'security') ok = await loadSecurity();
+  else if (name === 'l4') ok = await loadL4Proxies();
+  else if (name === 'tasks') ok = await loadTasks();
+  if (ok) loadedTabs.add(name);
 }
 async function reloadAll() {
   loadedTabs.clear();
