@@ -309,7 +309,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useMessage, useDialog, NButton, NSpace, NTag } from 'naive-ui';
+import { useMessage, useDialog, NButton, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -475,7 +475,7 @@ const regCodeColumns = computed<any[]>(() => [
     key: 'actions',
     width: 160,
     render: (row: any) =>
-      h(NSpace, null, () => [
+      h('div', { class: 'row-actions' }, [
         h(
           NButton,
           {

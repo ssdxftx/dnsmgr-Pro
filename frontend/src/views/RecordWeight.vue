@@ -54,7 +54,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
-import { NButton, NSpace, NTag, NModal, NText, NTable, NInputNumber, useMessage } from 'naive-ui';
+import { NButton, NTag, NModal, NText, NTable, NInputNumber, useMessage } from 'naive-ui';
 import { api } from '../api';
 import { ListOutline, LayersOutline, BarChartOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
@@ -94,23 +94,21 @@ const columns = computed(() => [
     key: 'actions',
     width: 220,
     render: (r: any) =>
-      h(NSpace, null, {
-        default: () => [
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              type: r.Open === true || r.Open === 'true' ? 'default' : 'success',
-              loading: !!busy[`toggle:${r.rr}:${r.Type}:${r.Line}`],
-              disabled: !!busy[`toggle:${r.rr}:${r.Type}:${r.Line}`],
-              onClick: () => run(`toggle:${r.rr}:${r.Type}:${r.Line}`, () => toggle(r)),
-            },
-            { default: () => (r.Open === true || r.Open === 'true' ? t('record.weightDisable') : t('record.weightEnable')) },
-          ),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(r) }, { default: () => t('record.weightConfigure') }),
-        ],
-      }),
+      h('div', { class: 'row-actions' }, [
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: r.Open === true || r.Open === 'true' ? 'default' : 'success',
+            loading: !!busy[`toggle:${r.rr}:${r.Type}:${r.Line}`],
+            disabled: !!busy[`toggle:${r.rr}:${r.Type}:${r.Line}`],
+            onClick: () => run(`toggle:${r.rr}:${r.Type}:${r.Line}`, () => toggle(r)),
+          },
+          { default: () => (r.Open === true || r.Open === 'true' ? t('record.weightDisable') : t('record.weightEnable')) },
+        ),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(r) }, { default: () => t('record.weightConfigure') }),
+      ]),
   },
 ]);
 

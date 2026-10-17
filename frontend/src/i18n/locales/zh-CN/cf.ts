@@ -96,6 +96,7 @@ export default {
     overview: '规则概览',
     listTitle: '规则列表',
     credentialSettings: '凭证设置',
+    credentialSource: '凭证来源',
     addRule: '添加规则',
     selectDomain: '选择 Cloudflare 域名',
     dedicatedCredential: '专用凭证',

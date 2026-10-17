@@ -224,6 +224,7 @@ export default {
     empty: '暂无定时切换策略',
     nextRun: '下次执行',
     lastRun: '上次执行',
+    run24h: '近 24 小时执行',
     running: '运行中',
     stopped: '已停止',
     batchOpen: '开启运行',

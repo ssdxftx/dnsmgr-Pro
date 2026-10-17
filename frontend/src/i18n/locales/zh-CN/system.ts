@@ -155,6 +155,7 @@ export default {
     readOnlyView: '仅查看',
     addTime: '添加时间',
     lastLogin: '上次登录',
+    neverLogin: '从未登录',
     normal: '正常',
     banned: '封禁',
     deleteTitle: '删除用户',

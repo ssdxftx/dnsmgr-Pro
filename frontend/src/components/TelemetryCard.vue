@@ -12,12 +12,12 @@
     <div class="tele-card__value font-mono">
       {{ display }}<span v-if="suffix" class="tele-card__suffix">{{ suffix }}</span>
     </div>
-    <div class="tele-card__spark-wrap" aria-hidden="true">
-      <svg v-if="points" class="tele-card__spark" viewBox="0 0 120 36" preserveAspectRatio="none">
+    <div class="tele-card__spark-wrap">
+      <svg v-if="points" class="tele-card__spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true">
         <polygon class="spark-area" :points="`${points} 120,36 0,36`" />
         <polyline ref="lineRef" class="spark-line" :points="points" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
-      <span v-else-if="captionText" class="tele-card__caption">{{ captionText }}</span>
+      <span v-if="captionText" class="tele-card__caption" :class="{ 'is-inline': !points }">{{ captionText }}</span>
     </div>
   </div>
 </template>
@@ -175,19 +175,25 @@ onMounted(() => {
   margin-left: 3px;
 }
 .tele-card__spark-wrap {
-  height: 40px;
+  min-height: 40px;
   margin-top: auto;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
 }
 .tele-card__caption {
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 14px;
   color: var(--app-text-3);
   letter-spacing: 0.02em;
 }
+.tele-card__caption.is-inline {
+  margin-top: auto;
+}
 .tele-card__spark {
   width: 100%;
-  height: 36px;
+  height: 24px;
   display: block;
 }
 .spark-line {
@@ -203,4 +209,21 @@ onMounted(() => {
 .tele-card--success .spark-area { fill: color-mix(in srgb, var(--app-success) 12%, transparent); }
 .tele-card--warning .spark-area { fill: color-mix(in srgb, var(--app-warning) 12%, transparent); }
 .tele-card--error .spark-area { fill: color-mix(in srgb, var(--app-error) 12%, transparent); }
+
+@media (max-width: 640px) {
+  .tele-card {
+    min-height: 0;
+    padding: 14px 16px;
+    gap: 4px;
+  }
+  .tele-card__icon {
+    width: 30px;
+    height: 30px;
+  }
+  .tele-card__value { font-size: 26px; }
+  .tele-card__spark-wrap {
+    min-height: 0;
+  }
+  .tele-card__spark { height: 18px; }
+}
 </style>

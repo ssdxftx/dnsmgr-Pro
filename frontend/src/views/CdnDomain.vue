@@ -22,9 +22,9 @@
       </template>
     </PageHeader>
     <n-grid cols="1 s:3 m:3" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :spark="sparks[0]" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :spark="sparks[1]" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :spark="sparks[2]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
       <div class="app-panel">
@@ -468,11 +468,6 @@ const message = useMessage();
 const dialog = useDialog();
 const loadBusy = ref(false);
 const domains = ref<any[]>([]);
-const sparks = [
-  [4, 7, 6, 10, 8, 13, 10, 15, 12],
-  [3, 5, 7, 6, 9, 8, 11, 10, 13],
-  [2, 4, 3, 6, 5, 8, 7, 10, 9],
-];
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
 const providerCaps = ref<Record<string, any>>({});

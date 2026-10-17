@@ -133,7 +133,7 @@
 import { computed, h, reactive, ref } from 'vue';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from './ResponsiveDataTable.vue';
 import { useAction } from '../composables/useAction';
@@ -456,10 +456,9 @@ const columns = computed<any[]>(() => {
           },
           { default: () => t('record.check') },
         );
-        if (!rowWritable(row)) return h(NSpace, null, { default: () => [checkBtn] });
+        if (!rowWritable(row)) return h('div', { class: 'row-actions' }, [checkBtn]);
         const toggleKey = `toggle:${row.RecordId}`;
-        return h(NSpace, null, {
-          default: () => [
+        return h('div', { class: 'row-actions' }, [
             h(
               NButton,
               {
@@ -474,8 +473,7 @@ const columns = computed<any[]>(() => {
             h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
             h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRecord(row) }, { default: () => t('common.delete') }),
             checkBtn,
-          ],
-        });
+        ]);
       },
     },
   );

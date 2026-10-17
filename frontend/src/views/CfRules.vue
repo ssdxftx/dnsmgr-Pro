@@ -43,7 +43,7 @@
           <h3 class="app-panel__title">{{ t('cfRules.overview') }}</h3>
         </div>
         <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('common.total')">{{ rules.length }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cfRules.credentialSource')">{{ credentialSourceLabel }}</n-descriptions-item>
           <n-descriptions-item :label="t('cfRules.statusOn')">{{ enabledCount }}</n-descriptions-item>
           <n-descriptions-item :label="t('cfRules.statusOff')">{{ rules.length - enabledCount }}</n-descriptions-item>
         </n-descriptions>
@@ -220,7 +220,7 @@
 import { computed, onMounted, reactive, ref, h } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import { ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
@@ -249,6 +249,11 @@ const rules = ref<any[]>([]);
 const enabledCount = computed(() => rules.value.filter((r: any) => r.enabled).length);
 const typeCount = computed(() => new Set(rules.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rules.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
+const credentialSourceLabel = computed(() => {
+  if (credentialSource.value === 'dedicated') return t('cfRules.dedicatedCredential');
+  if (credentialSource.value === 'dns') return t('cfRules.dnsAccountKey');
+  return '-';
+});
 const loadBusy = ref(false);
 const needCredential = ref(false);
 const credentialMessage = ref('');
@@ -407,12 +412,10 @@ const columns = computed<any[]>(() => [
     key: 'actions',
     width: 130,
     render: (row: any) =>
-      h(NSpace, { size: 2 }, {
-        default: () => [
-          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEditRule(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => confirmDelete(row) }, { default: () => t('common.delete') }),
-        ],
-      }),
+      h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEditRule(row) }, { default: () => t('common.edit') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => confirmDelete(row) }, { default: () => t('common.delete') }),
+      ]),
   },
 ]);
 

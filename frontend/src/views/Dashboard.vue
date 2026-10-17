@@ -5,13 +5,13 @@
     <!-- 遥测卡：计数动画 + 曲线描边 -->
     <n-grid :cols="isMobile ? 1 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
       <n-grid-item span="1" v-reveal class="d1">
-        <TelemetryCard :label="t('dashboard.statDomains')" :value="stats.domains" tone="primary" :icon="ServerOutline" :spark="sparks[0]" :caption="t('common.cumulative')" />
+        <TelemetryCard :label="t('dashboard.statDomains')" :value="stats.domains" tone="primary" :icon="ServerOutline" :caption="t('common.cumulative')" />
       </n-grid-item>
       <n-grid-item span="1" v-reveal class="d2">
-        <TelemetryCard :label="t('dashboard.statAccounts')" :value="stats.accounts" tone="success" :icon="LinkOutline" :spark="sparks[1]" :caption="t('common.cumulative')" />
+        <TelemetryCard :label="t('dashboard.statAccounts')" :value="stats.accounts" tone="success" :icon="LinkOutline" :caption="t('common.cumulative')" />
       </n-grid-item>
       <n-grid-item span="1" v-reveal class="d3">
-        <TelemetryCard :label="t('dashboard.statCdnDomains')" :value="stats.cdnDomains" tone="warning" :icon="GlobeOutline" :spark="sparks[2]" :caption="t('common.cumulative')" />
+        <TelemetryCard :label="t('dashboard.statCdnDomains')" :value="stats.cdnDomains" tone="warning" :icon="GlobeOutline" :caption="t('common.cumulative')" />
       </n-grid-item>
     </n-grid>
 
@@ -74,11 +74,6 @@ const { isMobile } = useResponsive();
 const stats = ref({ domains: 0, accounts: 0, cdnDomains: 0 });
 const accounts = ref<any[]>([]);
 
-const sparks = [
-  [6, 10, 8, 14, 11, 16, 13, 19, 16],
-  [5, 8, 7, 12, 10, 15, 12, 17, 14],
-  [7, 6, 10, 9, 13, 11, 16, 14, 19],
-];
 
 const quickActions = computed(() => [
   { title: t('dashboard.quickAddAccount'), desc: t('dashboard.quickAddAccountDesc'), path: '/dns-accounts', icon: LinkOutline, tone: 'primary' },

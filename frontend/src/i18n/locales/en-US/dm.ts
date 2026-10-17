@@ -224,6 +224,7 @@ export default {
     empty: 'No scheduled switch policies yet',
     nextRun: 'Next Run',
     lastRun: 'Last Run',
+    run24h: 'Runs (24h)',
     running: 'Running',
     stopped: 'Stopped',
     batchOpen: 'Start Running',

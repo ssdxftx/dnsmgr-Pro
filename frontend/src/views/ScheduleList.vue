@@ -29,7 +29,7 @@
         <n-descriptions :column="3" size="small" label-placement="top">
           <n-descriptions-item :label="t('schedule.cycleShort')">{{ cycleCount }}</n-descriptions-item>
           <n-descriptions-item :label="t('schedule.onceShort')">{{ tasks.length - cycleCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('common.active')">{{ activeTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('schedule.run24h')">{{ run24hCount }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -79,6 +79,13 @@ const loadBusy = ref(false);
 const loadError = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
+const run24hCount = computed(() => {
+  const since = Date.now() - 24 * 3600 * 1000;
+  return tasks.value.filter((t: any) => {
+    const ts = t.updatetimestr ? new Date(String(t.updatetimestr).replace(' ', 'T')).getTime() : NaN;
+    return Number.isFinite(ts) && ts >= since;
+  }).length;
+});
 const pausedTasks = computed(() => tasks.value.filter((t: any) => !t.active).length);
 const cycleCount = computed(() => tasks.value.filter((t: any) => t.type === 1).length);
 const page = ref(1);

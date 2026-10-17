@@ -26,6 +26,7 @@ export default {
     subtitle: 'Manage imported domains, categories and expiry reminders',
     overview: 'Domain Overview',
     listTitle: 'Domain List',
+    expired: 'Expired',
     batchNoticeOn: 'Enable Reminders',
     batchNoticeOff: 'Disable Reminders',
     expireNotice: 'Expiry Reminder Settings',

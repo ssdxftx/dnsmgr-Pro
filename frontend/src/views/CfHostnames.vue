@@ -247,7 +247,7 @@
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { RefreshOutline, ListOutline, LayersOutline, GlobeOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -321,15 +321,13 @@ const columns = computed<any[]>(() => [
     key: 'actions',
     width: 240,
     render(row: any) {
-      return h(NSpace, { size: 2 }, {
-        default: () => [
-          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => refreshOne(row) }, { default: () => t('cfHostnames.refreshVerify') }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openCfOptimized(true, row.hostname) }, { default: () => t('cfHostnames.optimize') }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => showDetailOf(row) }, { default: () => t('common.detail') }),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delOne(row) }, { default: () => t('common.delete') }),
-        ],
-      });
+      return h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => refreshOne(row) }, { default: () => t('cfHostnames.refreshVerify') }),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openCfOptimized(true, row.hostname) }, { default: () => t('cfHostnames.optimize') }),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => showDetailOf(row) }, { default: () => t('common.detail') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delOne(row) }, { default: () => t('common.delete') }),
+      ]);
     },
   },
 ]);

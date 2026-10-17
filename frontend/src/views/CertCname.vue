@@ -46,7 +46,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NModal, NForm, NFormItem, NInput, NSelect, useDialog, useMessage } from 'naive-ui';
+import { NButton, NTag, NModal, NForm, NFormItem, NInput, NSelect, useDialog, useMessage } from 'naive-ui';
 import { api } from '../api';
 import { ListOutline, LayersOutline, LinkOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
@@ -81,23 +81,21 @@ const columns = computed(() => [
     key: 'actions',
     width: 160,
     render: (r: any) =>
-      h(NSpace, null, {
-        default: () => [
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              type: 'info',
-              loading: !!busy[`check:${r.id}`],
-              disabled: !!busy[`check:${r.id}`],
-              onClick: () => run(`check:${r.id}`, () => check(r)),
-            },
-            { default: () => t('cname.check') },
-          ),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(r) }, { default: () => t('common.delete') }),
-        ],
-      }),
+      h('div', { class: 'row-actions' }, [
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: 'info',
+            loading: !!busy[`check:${r.id}`],
+            disabled: !!busy[`check:${r.id}`],
+            onClick: () => run(`check:${r.id}`, () => check(r)),
+          },
+          { default: () => t('cname.check') },
+        ),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(r) }, { default: () => t('common.delete') }),
+      ]),
   },
 ]);
 
