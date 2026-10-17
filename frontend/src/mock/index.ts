@@ -105,10 +105,10 @@ const OPTIMIZE_TASKS = [
 
 // DNS 检测任务（DnsCheckTask）：status 'ok' / 'not_found' / 'mismatch'
 const DNS_CHECK_TASKS = [
-  { id: 1, active: true, status: 'ok' },
-  { id: 2, active: true, status: 'not_found' },
-  { id: 3, active: false, status: 'ok' },
-  { id: 4, active: true, status: 'mismatch' },
+  { id: 1, name: '主站解析', did: 101, domain_name: 'example.com', sub: null, types: 'A,CNAME', cycle: 'daily', interval_min: 0, run_time: '04:00', notice_email: 'ops@example.com', active: 1, last_run: '2026-10-17 04:00:12', next_run: '2026-10-18 04:00:00', last_status: 0, issue_count: 0 },
+  { id: 2, name: 'API 网关', did: 101, domain_name: 'example.com', sub: 'api', types: 'A', cycle: 'interval', interval_min: 30, run_time: null, notice_email: '', active: 1, last_run: '2026-10-17 12:30:05', next_run: '2026-10-17 13:00:00', last_status: 1, issue_count: 2 },
+  { id: 3, name: '静态资源', did: 103, domain_name: 'cdn-static.com', sub: null, types: '', cycle: 'daily', interval_min: 0, run_time: '02:00', notice_email: '', active: 0, last_run: '2026-10-15 02:00:08', next_run: null, last_status: 0, issue_count: 0 },
+  { id: 4, name: '图片域名', did: 104, domain_name: 'img-cdn.com', sub: null, types: 'CNAME', cycle: 'interval', interval_min: 60, run_time: null, notice_email: 'ops@example.com', active: 1, last_run: '2026-10-17 12:00:03', next_run: '2026-10-17 13:00:00', last_status: 1, issue_count: 1 },
 ];
 
 // 操作日志（UserLog）：uid<=0 视为系统事件

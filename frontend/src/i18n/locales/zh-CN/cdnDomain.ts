@@ -152,6 +152,7 @@ export default {
     originCol: '源站',
     statusEnabled: '已启用',
     statusStopped: '已停用',
+    certPending: '待配置证书',
   },
   preheat: {
     title: '自动预热',

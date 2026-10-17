@@ -33,9 +33,9 @@
           <h3 class="app-panel__title">{{ t('optimize.overview') }}</h3>
         </div>
         <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('optimize.recordCount')">{{ recordTotal }}</n-descriptions-item>
-          <n-descriptions-item :label="t('common.active')">{{ activeTasks }}</n-descriptions-item>
-          <n-descriptions-item :label="t('common.disabled')">{{ pausedTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('optimize.totalRecords')">{{ recordTotal }}</n-descriptions-item>
+          <n-descriptions-item :label="t('optimize.domainCovered')">{{ domainCovered }}</n-descriptions-item>
+          <n-descriptions-item :label="t('optimize.lastUpdate')">{{ lastUpdate }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -77,6 +77,11 @@ const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pausedTasks = computed(() => tasks.value.filter((t: any) => !t.active).length);
 const recordTotal = computed(() => tasks.value.reduce((sum: number, t: any) => sum + (Number(t.recordnum) || 0), 0));
+const domainCovered = computed(() => new Set(tasks.value.map((t: any) => t.did ?? t.domain).filter(Boolean)).size);
+const lastUpdate = computed(() => {
+  const times = tasks.value.map((t: any) => t.updatetime).filter(Boolean).sort();
+  return times.length ? times[times.length - 1] : '-';
+});
 const page = ref(1);
 const pageSize = ref(10);
 

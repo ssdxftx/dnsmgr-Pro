@@ -175,12 +175,15 @@ onMounted(() => {
   margin-left: 3px;
 }
 .tele-card__spark-wrap {
-  min-height: 40px;
+  min-height: 0;
   margin-top: auto;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
   gap: 2px;
+}
+.tele-card__spark-wrap:has(.tele-card__spark) {
+  min-height: 40px;
 }
 .tele-card__caption {
   font-size: 11px;
@@ -221,7 +224,8 @@ onMounted(() => {
     height: 30px;
   }
   .tele-card__value { font-size: 26px; }
-  .tele-card__spark-wrap {
+  .tele-card__spark-wrap,
+  .tele-card__spark-wrap:has(.tele-card__spark) {
     min-height: 0;
   }
   .tele-card__spark { height: 18px; }

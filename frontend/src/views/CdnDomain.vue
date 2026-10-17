@@ -34,7 +34,7 @@
         <n-descriptions :column="3" size="small" label-placement="top">
           <n-descriptions-item :label="t('cdnDomain.statusEnabled')">{{ enabledCount }}</n-descriptions-item>
           <n-descriptions-item :label="t('cdnDomain.statusStopped')">{{ stoppedCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('common.selected')">{{ checkedIds.length }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cdnDomain.certPending')">{{ certPendingCount }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -786,6 +786,7 @@ const certMgrHasPendingFree = computed(() => certMgrFree.value.some((r) => r.sta
 
 const enabledCount = computed(() => domains.value.filter((d: any) => d.status !== 'offline').length);
 const stoppedCount = computed(() => domains.value.filter((d: any) => d.status === 'offline').length);
+const certPendingCount = computed(() => domains.value.filter((d: any) => !d.cert_mode || d.cert_mode === 'none').length);
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
 const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
 const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));

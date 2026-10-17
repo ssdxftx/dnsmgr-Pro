@@ -211,6 +211,8 @@ export default {
     service: '服务',
     path: '路径',
     connectionCount: '连接数',
+    activeTunnels: '有连接隧道',
+    idleTunnels: '空隧道',
     leaveBlank: '留空',
     nameRequired: '请输入名称',
     hostnameRequired: '请输入主机名',

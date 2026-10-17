@@ -84,7 +84,7 @@ const { busy, run } = useAction();
 const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
-const pendingTasks = computed(() => tasks.value.filter((t: any) => t.status !== 1).length);
+const pendingTasks = computed(() => tasks.value.filter((t: any) => Number(t.status) === 0).length);
 const deployedCount = computed(() => tasks.value.filter((t: any) => t.status === 1).length);
 const failedCount = computed(() => tasks.value.filter((t: any) => t.status === -1).length);
 const providers = ref<Record<string, any>>({});

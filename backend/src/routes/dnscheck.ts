@@ -115,7 +115,11 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const types = String(row.types || '').split(/[,;，；]/).map((x: string) => x.trim().toUpperCase()).filter(Boolean);
     const result = await checkDomainRecords(row.did, types.length ? types : undefined, row.uid, row.sub);
     const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
-    await query(`UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [next, id]);
+    const issueCount = result.issues ? result.issues.length : 0;
+    await query(
+      `UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ?, last_status = ?, issue_count = ? WHERE id = ?`,
+      [next, issueCount ? 1 : 0, issueCount, id],
+    );
     return { code: 0, ...result };
   });
 

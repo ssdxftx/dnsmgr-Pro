@@ -222,6 +222,7 @@ a {
   display: flex;
   align-items: center;
   gap: 14px;
+  height: 100%;
   min-height: 132px;
   padding: 18px 20px;
   background: var(--app-surface);
@@ -273,6 +274,12 @@ a {
   color: var(--app-text);
   font-variant-numeric: tabular-nums;
   word-break: break-word;
+}
+.stat-card__value.is-text {
+  font-size: 20px;
+  line-height: 1.35;
+  font-family: inherit;
+  letter-spacing: 0;
 }
 .stat-card__suffix {
   font-size: 13px;
