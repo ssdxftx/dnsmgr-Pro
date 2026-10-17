@@ -233,6 +233,8 @@ export default {
     noticeEmail: 'Notification Email',
     emailPlaceholder: 'Leave blank to use the system default mailbox',
     resultTitle: 'Check Result',
+    resultOk: 'Normal',
+    issueCount: '{count} issue(s)',
     issuesFound: 'Found {count} abnormal records, possible hijacking!',
     allClear: 'Check completed, {count} records in total, no issues found',
     nameCol: 'Name',

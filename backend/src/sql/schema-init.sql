@@ -341,6 +341,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_dns_check_task` (
   `notice_email` varchar(255) DEFAULT NULL,
   `active` tinyint(1) NOT NULL DEFAULT '1',
   `last_run` datetime DEFAULT NULL,
+  `last_status` tinyint(1) NOT NULL DEFAULT '0',
+  `issue_count` int(11) NOT NULL DEFAULT '0',
   `next_run` datetime DEFAULT NULL,
   `addtime` datetime NOT NULL,
   PRIMARY KEY (`id`),

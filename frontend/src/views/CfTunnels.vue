@@ -17,8 +17,9 @@
           <h3 class="app-panel__title">{{ t('cfTunnels.overview') }}</h3>
         </div>
         <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('common.total')">{{ rows.length }}</n-descriptions-item>
           <n-descriptions-item :label="t('cfTunnels.connectionCount')">{{ totalConnections }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cfTunnels.activeTunnels')">{{ activeTunnels }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cfTunnels.idleTunnels')">{{ rows.length - activeTunnels }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -124,6 +125,7 @@ const accountName = ref('');
 const loadBusy = ref(false);
 const rows = ref<any[]>([]);
 const totalConnections = computed(() => rows.value.reduce((sum: number, r: any) => sum + (Number(r.connection_count) || 0), 0));
+const activeTunnels = computed(() => rows.value.filter((r: any) => Number(r.connection_count) > 0).length);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const saveBusy = ref(false);

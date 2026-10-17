@@ -92,6 +92,8 @@ export async function migrate(): Promise<void> {
       notice_email varchar(255) DEFAULT NULL,
       active tinyint(1) NOT NULL DEFAULT '1',
       last_run datetime DEFAULT NULL,
+      last_status tinyint(1) NOT NULL DEFAULT '0',
+      issue_count int(11) NOT NULL DEFAULT '0',
       next_run datetime DEFAULT NULL,
       addtime datetime NOT NULL,
       PRIMARY KEY (id),
@@ -101,6 +103,9 @@ export async function migrate(): Promise<void> {
   );
   await ensureColumn('dns_check_task', 'uid', "int(11) unsigned NOT NULL DEFAULT '0'");
   await ensureColumn('dns_check_task', 'sub', 'varchar(255) DEFAULT NULL');
+  // 检测结果落库：last_status 0 正常 / 1 异常，issue_count 异常记录数（供运维台展示真实异常数）
+  await ensureColumn('dns_check_task', 'last_status', "tinyint(1) NOT NULL DEFAULT '0'");
+  await ensureColumn('dns_check_task', 'issue_count', "int(11) NOT NULL DEFAULT '0'");
 
   // 证书联动：签发成功后按 link 记录自动创建 CDN 部署任务
   await ensureColumn('cert_order', 'link', 'text DEFAULT NULL');

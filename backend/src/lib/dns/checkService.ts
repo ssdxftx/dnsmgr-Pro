@@ -170,6 +170,12 @@ export async function executeCheckTasks(): Promise<number> {
     // 逐条隔离：单个域名检测/通知异常不应中断其余任务（next_run 已推进，异常不隔离会静默漏掉整轮）
     try {
       const { issues } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
+      // 结果落库，供前端展示真实异常数（此前只发邮件，页面无从得知）
+      const issueCount = issues ? issues.length : 0;
+      await query(
+        `UPDATE ${table('dns_check_task')} SET last_status = ?, issue_count = ? WHERE id = ?`,
+        [issueCount ? 1 : 0, issueCount, t.id],
+      );
       if (issues && issues.length) {
         await notifyHijack(t, issues);
       }

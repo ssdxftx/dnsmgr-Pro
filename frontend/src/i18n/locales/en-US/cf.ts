@@ -211,6 +211,8 @@ export default {
     service: 'Service',
     path: 'Path',
     connectionCount: 'Connections',
+    activeTunnels: 'Tunnels With Connections',
+    idleTunnels: 'Idle Tunnels',
     leaveBlank: 'Leave blank',
     nameRequired: 'Please enter a name',
     hostnameRequired: 'Please enter a hostname',

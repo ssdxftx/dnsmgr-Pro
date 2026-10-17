@@ -5,7 +5,7 @@
     </div>
     <div class="stat-card__body">
       <div class="stat-card__label">{{ label }}</div>
-      <div class="stat-card__value">
+      <div class="stat-card__value" :class="{ 'is-text': isText }">
         {{ value }}<span v-if="suffix" class="stat-card__suffix">{{ suffix }}</span>
       </div>
     </div>
@@ -14,10 +14,10 @@
 </template>
 
 <script setup lang="ts">
-import type { Component } from 'vue';
+import { computed, type Component } from 'vue';
 import { NIcon } from 'naive-ui';
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     label: string;
     value: string | number;
@@ -27,4 +27,7 @@ withDefaults(
   }>(),
   { suffix: '', tone: 'primary', icon: undefined },
 );
+
+// 时间串等长文本改用正文字体与较小字号，避免等宽数字字体折行、比计数还抢眼
+const isText = computed(() => typeof props.value === 'string' && props.value.length > 10);
 </script>

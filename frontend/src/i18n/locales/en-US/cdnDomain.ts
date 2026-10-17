@@ -152,6 +152,7 @@ export default {
     originCol: 'Origin',
     statusEnabled: 'Enabled',
     statusStopped: 'Disabled',
+    certPending: 'Pending Certificate',
   },
   preheat: {
     title: 'Auto Preheat',

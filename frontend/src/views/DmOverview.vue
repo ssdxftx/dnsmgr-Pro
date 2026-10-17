@@ -3,28 +3,26 @@
     <PageHeader :title="t('dm.title')" :subtitle="t('dm.subtitle')" />
     <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="d1">
-        <StatCard
-          :label="t('dm.scheduleStatus')"
-          :value="info.run_state === 1 ? t('dm.running') : t('dm.stopped')"
-          :tone="info.run_state === 1 ? 'success' : 'error'"
-          :icon="PulseOutline"
-        />
-      </n-grid-item>
-      <n-grid-item v-reveal class="d2">
         <TelemetryCard :label="t('dm.runCount')" :value="Number(info.run_count) || 0" tone="primary" :icon="SyncOutline" :caption="t('common.live')" />
       </n-grid-item>
-      <n-grid-item v-reveal class="d3">
-        <StatCard :label="t('dm.lastRunTime')" :value="info.run_time || t('common.none')" tone="info" :icon="TimeOutline" />
-      </n-grid-item>
-      <n-grid-item v-reveal class="d4">
+      <n-grid-item v-reveal class="d2">
         <TelemetryCard :label="t('dm.switchCount24')" :value="Number(info.switch_count) || 0" tone="warning" :icon="SwapHorizontalOutline" :caption="t('common.last24h')" />
       </n-grid-item>
-      <n-grid-item v-reveal class="d5">
+      <n-grid-item v-reveal class="d3">
         <TelemetryCard :label="t('dm.failCount24')" :value="Number(info.fail_count) || 0" tone="error" :icon="CloseCircleOutline" :caption="t('common.last24h')" />
       </n-grid-item>
     </n-grid>
 
-    <n-card :bordered="false" :title="t('dm.runLog')">
+    <n-card :bordered="false">
+      <template #header>
+        <div class="log-head">
+          <span>{{ t('dm.runLog') }}</span>
+          <n-tag :type="info.run_state === 1 ? 'success' : 'error'" size="small" round :bordered="false">
+            {{ info.run_state === 1 ? t('dm.running') : t('dm.stopped') }}
+          </n-tag>
+        </div>
+      </template>
+      <n-text depth="3" class="log-meta">{{ t('dm.lastRunTime') }} · {{ info.run_time || t('common.none') }}</n-text>
       <n-alert v-if="info.run_error" type="error" class="mb-3">{{ t('dm.runError') }}{{ info.run_error }}</n-alert>
       <div class="clean-row">
         <n-input-number v-model:value="days" :min="0" class="days-input" />
@@ -39,10 +37,9 @@
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage, useDialog } from 'naive-ui';
-import { PulseOutline, SyncOutline, TimeOutline, SwapHorizontalOutline, CloseCircleOutline } from '@vicons/ionicons5';
+import { SyncOutline, SwapHorizontalOutline, CloseCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
-import StatCard from '../components/StatCard.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 
 const message = useMessage();
@@ -74,6 +71,15 @@ onMounted(load);
 </script>
 
 <style scoped>
+.log-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.log-meta {
+  display: block;
+  margin-bottom: 12px;
+}
 .clean-row {
   display: flex;
   align-items: center;

@@ -21,7 +21,8 @@
         <n-descriptions :column="3" size="small" label-placement="top">
           <n-descriptions-item :label="t('common.enable')">{{ activeTasks }}</n-descriptions-item>
           <n-descriptions-item :label="t('common.disabled')">{{ tasks.length - activeTasks }}</n-descriptions-item>
-          <n-descriptions-item :label="t('common.abnormal')">{{ issueTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('dnsCheck.lastRun')">{{ lastRunAt }}</n-descriptions-item>
+          <n-descriptions-item :label="t('dnsCheck.nextRun')">{{ nextRunAt }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -125,7 +126,15 @@ const loadBusy = ref(false);
 const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
-const issueTasks = computed(() => tasks.value.filter((t: any) => t.status && t.status !== 'ok').length);
+const issueTasks = computed(() => tasks.value.filter((t: any) => Number(t.last_status) === 1).length);
+const lastRunAt = computed(() => {
+  const times = tasks.value.map((t: any) => t.last_run).filter(Boolean).sort();
+  return times.length ? times[times.length - 1] : '-';
+});
+const nextRunAt = computed(() => {
+  const times = tasks.value.filter((t: any) => t.active && t.next_run).map((t: any) => t.next_run).sort();
+  return times.length ? times[0] : '-';
+});
 const domainOptions = ref<any[]>([]);
 const domainLoadBusy = ref(false);
 const subOptions = ref<any[]>([]);
@@ -178,6 +187,15 @@ const columns = computed(() => [
     key: 'active',
     width: 80,
     render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('common.enable') : t('dnsCheck.stopped')) }),
+  },
+  {
+    title: t('dnsCheck.resultTitle'),
+    key: 'last_status',
+    width: 110,
+    render: (row: any) =>
+      Number(row.last_status) === 1
+        ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('dnsCheck.issueCount', { count: Number(row.issue_count) || 0 }) })
+        : h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('dnsCheck.resultOk') }),
   },
   { title: t('dnsCheck.lastRun'), key: 'last_run', width: 170, render: (row: any) => row.last_run || '-' },
   { title: t('dnsCheck.nextRun'), key: 'next_run', width: 170, render: (row: any) => row.next_run || '-' },
