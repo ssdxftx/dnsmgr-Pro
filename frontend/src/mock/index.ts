@@ -91,11 +91,11 @@ const CDN_ACCOUNTS = [
 
 // 部署任务（DeployTask）：status 1=已完成，其余=待处理；active=是否启用
 const DEPLOY_TASKS = [
-  { id: 1, active: true, status: 1 },
-  { id: 2, active: true, status: 1 },
-  { id: 3, active: false, status: 2 },
-  { id: 4, active: true, status: 1 },
-  { id: 5, active: false, status: 3 },
+  { id: 1, active: true, status: 1, lasttime: '2026-10-17 09:12:00' },
+  { id: 2, active: true, status: 1, lasttime: '2026-10-16 22:40:00' },
+  { id: 3, active: false, status: 0, lasttime: null },
+  { id: 4, active: true, status: 1, lasttime: '2026-10-15 08:05:00' },
+  { id: 5, active: false, status: 0, lasttime: null },
 ];
 
 // 调度策略（ScheduleList）

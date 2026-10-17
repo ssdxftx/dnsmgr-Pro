@@ -9,7 +9,7 @@
       :bordered="bordered"
       :size="size"
       :striped="striped"
-      :scroll-x="scrollX"
+      :scroll-x="resolvedScrollX"
       :pagination="pagination"
       :remote="remote"
       :virtual-scroll="virtualScroll"
@@ -170,6 +170,17 @@ const titleColumn = computed(() => {
   return cols.find((c) => String(c.key) !== 'id') || cols[0];
 });
 const restColumns = computed(() => dataColumns.value.filter((c) => c !== titleColumn.value));
+
+// 未显式传 scroll-x 时按列宽合计兜底，避免固定列总和超出容器后表格直接溢出、
+// 操作列被裁且无法横向滚动（naive-ui 仅在设置 scroll-x 时才生成可滚动表体）。
+const resolvedScrollX = computed(() => {
+  if (props.scrollX != null) return props.scrollX;
+  const total = props.columns.reduce((sum: number, col: any) => {
+    if (isSystemColumn(col)) return sum + 40;
+    return sum + (Number(col?.width) || 140);
+  }, 0);
+  return total || undefined;
+});
 
 const checkedSet = computed(() => new Set(props.checkedRowKeys || []));
 
