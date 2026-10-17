@@ -160,18 +160,18 @@ function normalizeHm(v: any): string {
 }
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 56 },
-  { title: t('dnsCheck.nameCol'), key: 'name', width: 130, render: (row: any) => row.name || '-' },
+  { title: 'ID', key: 'id', width: 48 },
+  { title: t('dnsCheck.nameCol'), key: 'name', width: 110, render: (row: any) => row.name || '-' },
   {
     title: t('dnsCheck.domain'),
     key: 'domain_name',
-    width: 190,
+    width: 170,
     render: (row: any) => (row.sub ? `${row.sub}.${row.domain_name}` : row.domain_name || '-'),
   },
   {
     title: t('dnsCheck.checkType'),
     key: 'types',
-    width: 120,
+    width: 96,
     render: (row: any) => {
       const types = String(row.types || '').trim();
       return types ? types : t('dnsCheck.all');
@@ -180,7 +180,7 @@ const columns = computed(() => [
   {
     title: t('dnsCheck.cycle'),
     key: 'cycle',
-    width: 120,
+    width: 104,
     render: (row: any) => {
       if (row.cycle === 'interval') return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('dnsCheck.everyInterval', { minutes: row.interval_min }) });
       return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('dnsCheck.everyDay', { time: row.run_time || '-' }) });
@@ -189,20 +189,20 @@ const columns = computed(() => [
   {
     title: t('dnsCheck.noticeEmail'),
     key: 'notice_email',
-    width: 110,
+    width: 92,
     ellipsis: { tooltip: true },
     render: (row: any) => row.notice_email || t('dnsCheck.systemDefault'),
   },
   {
     title: t('common.status'),
     key: 'active',
-    width: 76,
+    width: 64,
     render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('common.enable') : t('dnsCheck.stopped')) }),
   },
   {
     title: t('dnsCheck.resultTitle'),
     key: 'last_status',
-    width: 100,
+    width: 92,
     render: (row: any) => {
       if (!row.last_run) return h(NTag, { size: 'small', type: 'default', bordered: false }, { default: () => t('dnsCheck.neverRun') });
       if (Number(row.last_status) === 1) {
@@ -214,7 +214,7 @@ const columns = computed(() => [
   {
     title: t('dnsCheck.lastRun'),
     key: 'last_run',
-    width: 170,
+    width: 150,
     render: (row: any) => {
       if (!row.last_run) return '-';
       return h('div', { style: 'line-height: 1.35' }, [
@@ -228,7 +228,7 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 150,
+    width: 140,
     render(row: any) {
       const rKey = `run:${row.id}`;
       const tKey = `toggle:${row.id}`;
