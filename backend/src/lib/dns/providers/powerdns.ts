@@ -164,8 +164,23 @@ export class PowerDns implements DnsProvider {
     return v;
   }
 
+  // 写操作依赖 rrsetsCache 才能定位/保留同组记录。缓存仅由 getDomainRecords 填充，
+  // 而写操作多为新建实例直接调用，故此处按需先拉取一次，避免：
+  // 1) 新增时以 REPLACE 静默覆盖同名同类型已有记录；2) 改/删时误判「记录不存在」。
+  private async ensureRrsets(): Promise<boolean> {
+    if (this.rrsetsCache !== null) return true;
+    const res = await this.getDomainRecords(1, 1000);
+    if (res === false) {
+      if (!this.error) this.error = '获取域名记录失败，请刷新页面重试';
+      return false;
+    }
+    return true;
+  }
+
   async addDomainRecord(Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
     const value = this.normalizeValue(Type, Value, MX);
+    // 未预热时先拉取同域名记录，否则 existing 恒为 undefined，REPLACE 会删除已有同名记录
+    if (!(await this.ensureRrsets())) return false;
     const rrsets = this.rrsetsCache || [];
     const existing = rrsets.find((r) => r.host === Name && r.type === Type);
     let records: PdnsRecord[] = [];
@@ -182,6 +197,7 @@ export class PowerDns implements DnsProvider {
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
     const value = this.normalizeValue(Type, Value, MX);
+    if (!(await this.ensureRrsets())) return false;
     const rrsets = this.rrsetsCache || [];
     if (!rrsets.length) {
       this.error = '记录不存在，请刷新页面重试';
@@ -215,6 +231,7 @@ export class PowerDns implements DnsProvider {
   }
 
   async deleteDomainRecord(RecordId: string) {
+    if (!(await this.ensureRrsets())) return false;
     const rrsets = this.rrsetsCache || [];
     if (!rrsets.length) {
       this.error = '记录不存在，请刷新页面重试';
@@ -237,6 +254,7 @@ export class PowerDns implements DnsProvider {
   }
 
   async setDomainRecordStatus(RecordId: string, Status: string) {
+    if (!(await this.ensureRrsets())) return false;
     const rrsets = this.rrsetsCache || [];
     const [rrsetIdStr, recordIdStr] = RecordId.split('_');
     const rrsetId = Number(rrsetIdStr);

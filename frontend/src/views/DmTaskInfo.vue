@@ -140,22 +140,32 @@ async function loadInfo() {
   else message.error(res.msg);
 }
 
+let loadAbort: AbortController | null = null;
 async function loadLogs() {
   const id = Number(route.params.id);
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', `/dmonitor/tasks/${id}/logs`, {
-    offset: (page.value - 1) * pageSize.value,
-    limit: pageSize.value,
-    action: actionFilter.value,
-  });
-  if (res.code === 0) {
-    logs.value = res.data.list;
-    total.value = res.data.total;
-    pagination.itemCount = res.data.total;
-    pagination.page = page.value;
-    pagination.pageSize = pageSize.value;
+  try {
+    const res = await api<any>('GET', `/dmonitor/tasks/${id}/logs`, {
+      offset: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+      action: actionFilter.value,
+    }, { signal: ac.signal });
+    if (loadAbort !== ac) return;
+    if (res.code === 0) {
+      logs.value = res.data.list;
+      total.value = res.data.total;
+      pagination.itemCount = res.data.total;
+      pagination.page = page.value;
+      pagination.pageSize = pageSize.value;
+    }
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
   }
-  loading.value = false;
 }
 
 onMounted(() => {

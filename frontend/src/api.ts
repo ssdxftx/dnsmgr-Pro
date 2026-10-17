@@ -10,6 +10,9 @@ export function setToken(t: string) {
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+  // 登录态变更（含登出）后清空 GET 缓存，避免把上一账号的数据带给下一账号
+  getCache.clear();
+  inflight.clear();
 }
 export function getUser(): any {
   try {
@@ -32,16 +35,28 @@ export interface ApiOptions {
 }
 
 const GET_DEFAULT_TTL = 5000;
+const GET_CACHE_MAX = 200;
 const getCache = new Map<string, { at: number; data: any }>();
 const inflight = new Map<string, Promise<any>>();
+let cacheEpoch = 0;
 
-/** 失效 GET 缓存：写操作后调用；传入前缀仅失效匹配项，省略则整体清空 */
+// 缓存超限时淘汰最旧的一批，避免无上限增长
+function evictGetCache(): void {
+  if (getCache.size < GET_CACHE_MAX) return;
+  const drop = Math.max(1, Math.floor(GET_CACHE_MAX * 0.2));
+  const entries = [...getCache.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (let i = 0; i < drop && i < entries.length; i++) getCache.delete(entries[i][0]);
+}
+
+/** 失效 GET 缓存：写操作后调用；传入前缀仅失效该前缀下的项，省略则整体清空。
+ *  同时自增 cacheEpoch，用于阻止「写之前发出、写之后返回」的 GET 把旧值写回缓存。 */
 export function invalidateApiCache(prefix?: string): void {
+  cacheEpoch++;
   if (!prefix) {
     getCache.clear();
     return;
   }
-  for (const key of [...getCache.keys()]) if (key.includes(prefix)) getCache.delete(key);
+  for (const key of [...getCache.keys()]) if (key.startsWith(prefix)) getCache.delete(key);
 }
 
 export async function api<T = any>(method: string, url: string, body?: any, opts: ApiOptions = {}): Promise<T> {
@@ -115,14 +130,21 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
         const m = json.msg || json.message || json.error;
         return { code: -1, msg: m || `服务器响应异常（HTTP ${res.status}）` } as T;
       }
+      // 权限被后台调整后本地用户对象可能过期：403 时刷新一次用户信息，避免「能进页面但接口全 403」
+      if (res.status === 403) refreshMe();
       return json as T;
     } catch {
       return { code: -1, msg: `服务器响应异常（HTTP ${res.status}）` } as T;
     }
   };
 
+  const epochAtStart = cacheEpoch;
   const task = doFetch().then((data) => {
-    if (isGet && ttl > 0 && (data as any)?.code === 0) getCache.set(cacheKey, { at: Date.now(), data });
+    // 若期间发生过写操作（cacheEpoch 变化），不把可能过期的 GET 结果写回缓存
+    if (isGet && ttl > 0 && cacheEpoch === epochAtStart && (data as any)?.code === 0) {
+      evictGetCache();
+      getCache.set(cacheKey, { at: Date.now(), data });
+    }
     return data;
   });
 
@@ -134,4 +156,20 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
     task.then((data) => { if ((data as any)?.code === 0) invalidateApiCache(); }).catch(() => {});
   }
   return task;
+}
+
+// 401/403 后刷新本地用户对象（含 level / stat_cache），使菜单与路由准入与后端一致
+let meRefreshing = false;
+function refreshMe(): void {
+  if (meRefreshing || !getToken()) return;
+  meRefreshing = true;
+  fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + getToken() } })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((res) => {
+      if (res && res.code === 0 && res.data) setUser(res.data);
+    })
+    .catch(() => undefined)
+    .finally(() => {
+      meRefreshing = false;
+    });
 }

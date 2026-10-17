@@ -1,6 +1,7 @@
 import { domainToASCII } from 'node:url';
 import { query, queryOne, table } from '../../db.js';
 import { certConfig } from '../cert/factory.js';
+import { isCdnDomainIdColumnAvailable } from '../cert/cdnDomainIdColumn.js';
 import { getCdnProvider } from './factory.js';
 import type { CertDeployPlan } from './types.js';
 
@@ -350,8 +351,23 @@ export async function logDeployResult(taskId: number, status: number, error?: st
 export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number): Promise<{ orders: number; deployTasks: number }> {
   const did = Number(cdnDomainId || 0);
   if (!did) return { orders: 0, deployTasks: 0 };
-  // 走 cdn_domain_id 生成列索引精确匹配，替代 link LIKE 前缀通配全表扫描
-  const targets: any[] = await query(`SELECT id, status, link FROM ${table('cert_order')} WHERE cdn_domain_id = ?`, [did]);
+  // 走 cdn_domain_id 生成列索引精确匹配；生成列不可用时降级为 link LIKE 粗筛 + 解析
+  let targets: any[];
+  if (isCdnDomainIdColumnAvailable()) {
+    targets = await query(`SELECT id, status, link FROM ${table('cert_order')} WHERE cdn_domain_id = ?`, [did]);
+  } else {
+    const candidates = await query(
+      `SELECT id, status, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`,
+      ['%"cdnDomainId"%'],
+    );
+    targets = (candidates as any[]).filter((r) => {
+      try {
+        return Number(JSON.parse(r.link)?.cdnDomainId) === did;
+      } catch {
+        return false;
+      }
+    });
+  }
 
   // 阶段一：先吊销所有已签发（status=3）的联动证书，任一失败则整体中止
   for (const o of targets) {

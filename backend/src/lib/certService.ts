@@ -165,7 +165,12 @@ export class CertOrderService {
 
   async process(isManual = false): Promise<number> {
     await this.load();
-    if (this.order.status >= 3) return 3;
+    // 已签发：直接返回成功；已吊销（4）不得被当作成功，否则会误发「签发成功」通知并创建 CDN 联动部署
+    if (this.order.status === 4) {
+      this.saveLog('证书订单已吊销，跳过处理');
+      return 4;
+    }
+    if (this.order.status === 3) return 3;
     if (this.order.retry2 >= 3 && !isManual) throw new Error('已超出最大重试次数(' + this.order.error + ')');
     if (this.order.status != 1 && this.order.status != 2 && this.order.retry >= 3 && !isManual) {
       if ([-1, -2, -3, -4, -5, -6, -7].includes(this.order.status)) {

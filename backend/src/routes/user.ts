@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
+import { SECRET_MASK } from '../lib/secret.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -83,7 +84,10 @@ export default async function userRoutes(app: FastifyInstance) {
   // 域名列表（供权限选择，仅管理员）
   app.get('/api/user/domains', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
-    const rows = await query(`SELECT id, name FROM ${table('domain')} ORDER BY id DESC LIMIT 2000`);
+    const kw = String(req.query?.kw ?? '').trim();
+    const where = kw ? " WHERE name LIKE ? ESCAPE '!'" : '';
+    const params = kw ? ['%' + escapeLike(kw) + '%'] : [];
+    const rows = await query(`SELECT name FROM ${table('domain')}${where} ORDER BY id DESC LIMIT 2000`, params);
     return { code: 0, data: rows.map((r: any) => r.name) };
   });
 
@@ -127,6 +131,8 @@ export default async function userRoutes(app: FastifyInstance) {
     if (blocked) return { code: -1, msg: blocked };
     const perms = await query(`SELECT domain, sub, readonly, expiretime FROM ${table('permission')} WHERE uid = ?`, [id]);
     row.permission = perms.map((p: any) => ({ domain: p.domain, sub: p.sub || null, readonly: Number(p.readonly || 0), expiretime: p.expiretime || null }));
+    // API 密钥不回发明文，以掩码返回；编辑保存时掩码值会被识别为「未修改」
+    if (row.apikey) row.apikey = SECRET_MASK;
     return { code: 0, data: row };
   });
 
@@ -177,15 +183,13 @@ export default async function userRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const username = String(b.username ?? '').trim();
     const isApi = Number(b.is_api || 0);
-    const apikey = String(b.apikey ?? '').trim();
+    const apikeyRaw = String(b.apikey ?? '').trim();
     let level = Number(b.level || 1);
     const repwd = String(b.repwd ?? '').trim();
-    const checkWhole = Number(b.check_whole || 0);
-    const statCache = Number(b.stat_cache) === 1 ? 1 : 0;
     const permission = Array.isArray(b.permission) ? b.permission : [];
 
     if (!username) return { code: -1, msg: '用户名不能为空' };
-    if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
+    if (isApi === 1 && !apikeyRaw) return { code: -1, msg: 'API密钥不能为空' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? AND id <> ?`, [username, id]);
     if (exists) return { code: -1, msg: '用户名已存在' };
     // 密码校验前置，避免主 UPDATE 已落库后才因密码不合规而报错，产生部分更新
@@ -197,7 +201,26 @@ export default async function userRoutes(app: FastifyInstance) {
     const levelBlocked = adminManageBlocked(req, row as any, level);
     if (levelBlocked) return { code: -1, msg: levelBlocked };
 
-    await query(`UPDATE ${table('user')} SET username = ?, is_api = ?, apikey = ?, level = ?, check_whole = ?, stat_cache = ? WHERE id = ?`, [username, isApi, apikey, level, checkWhole, statCache, id]);
+    // check_whole / stat_cache 仅在请求体显式携带时才更新，避免「编辑用户」这一独立接口
+// 因前端未提交该字段而把授权静默重置为 0（与 /users/:id/stat-cache 互相覆盖）
+    // apikey 为掩码时表示前端未修改，沿用库中原值，避免把「**********」写回
+    let apikey = apikeyRaw;
+    if (apikeyRaw === SECRET_MASK) {
+      const curKey = await queryOne(`SELECT apikey FROM ${table('user')} WHERE id = ?`, [id]);
+      apikey = String(curKey?.apikey ?? '');
+    }
+    const sets: string[] = ['username = ?', 'is_api = ?', 'apikey = ?', 'level = ?'];
+    const params: any[] = [username, isApi, apikey, level];
+    if (b.check_whole !== undefined) {
+      sets.push('check_whole = ?');
+      params.push(Number(b.check_whole) === 1 ? 1 : 0);
+    }
+    if (b.stat_cache !== undefined) {
+      sets.push('stat_cache = ?');
+      params.push(Number(b.stat_cache) === 1 ? 1 : 0);
+    }
+    params.push(id);
+    await query(`UPDATE ${table('user')} SET ${sets.join(', ')} WHERE id = ?`, params);
     if (level === 1) {
       await savePermissions(id, permission);
     } else {

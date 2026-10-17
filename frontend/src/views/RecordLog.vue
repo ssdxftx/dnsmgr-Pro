@@ -52,14 +52,25 @@ const pagination = computed(() => ({
   },
 }));
 
+let loadAbort: AbortController | null = null;
 async function load() {
+  // 取消上一次未完成的请求，避免快速翻页时旧响应覆盖新页数据
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', `/domains/${domainId}/recordlog`, { page: page.value, pagesize: pageSize.value });
-  if (res.code === 0) {
-    rows.value = res.data?.list || [];
-    total.value = res.data?.total || 0;
-  } else message.error(res.msg);
-  loading.value = false;
+  try {
+    const res = await api<any>('GET', `/domains/${domainId}/recordlog`, { page: page.value, pagesize: pageSize.value }, { signal: ac.signal });
+    if (loadAbort !== ac) return;
+    if (res.code === 0) {
+      rows.value = res.data?.list || [];
+      total.value = res.data?.total || 0;
+    } else message.error(res.msg);
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
+  }
 }
 
 onMounted(async () => {

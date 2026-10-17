@@ -84,22 +84,32 @@ const columns = computed<any[]>(() => [
   { title: t('common.time'), key: 'addtime', width: 170 },
 ]);
 
+let loadAbort: AbortController | null = null;
 async function loadLogs() {
+  loadAbort?.abort();
+  const ac = new AbortController();
+  loadAbort = ac;
   loading.value = true;
-  const res = await api<any>('GET', '/logs', {
-    offset: (page.value - 1) * pageSize.value,
-    limit: pageSize.value,
-    uid: uid.value || undefined,
-    domain: domain.value || undefined,
-    kw: kw.value || undefined,
-  });
-  if (res.code === 0) {
-    logs.value = res.data.list;
-    pagination.itemCount = res.data.total;
-    pagination.page = page.value;
-    pagination.pageSize = pageSize.value;
-  } else message.error(res.msg);
-  loading.value = false;
+  try {
+    const res = await api<any>('GET', '/logs', {
+      offset: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+      uid: uid.value || undefined,
+      domain: domain.value || undefined,
+      kw: kw.value || undefined,
+    }, { signal: ac.signal });
+    if (loadAbort !== ac) return;
+    if (res.code === 0) {
+      logs.value = res.data.list;
+      pagination.itemCount = res.data.total;
+      pagination.page = page.value;
+      pagination.pageSize = pageSize.value;
+    } else message.error(res.msg);
+  } catch (e: any) {
+    if (e?.name === 'AbortError') return;
+  } finally {
+    if (loadAbort === ac) loading.value = false;
+  }
 }
 
 function search() {

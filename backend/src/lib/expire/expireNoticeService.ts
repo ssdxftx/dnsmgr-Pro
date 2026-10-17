@@ -123,32 +123,38 @@ export async function updateDomainDate(id: number, domain: string) {
 
 export async function refreshDomainList(): Promise<number> {
   const rows: any[] = await query(`SELECT id, name FROM ${table('domain')} WHERE checkstatus = 0`);
-  let count = 0;
+  let done = 0;
+  let success = 0;
   for (const row of rows) {
     const res = await updateDomainDate(row.id, row.name);
-    if (res.code === 0) console.log(`[expire] 域名: ${row.name} 注册时间: ${res.regTime ?? '-'} 到期时间: ${res.expireTime}`);
-    else console.log(`[expire] 域名: ${row.name} 更新失败，${res.msg}`);
-    count++;
-    if (count >= 5) break;
+    if (res.code === 0) {
+      success++;
+      console.log(`[expire] 域名: ${row.name} 注册时间: ${res.regTime ?? '-'} 到期时间: ${res.expireTime}`);
+    } else console.log(`[expire] 域名: ${row.name} 更新失败，${res.msg}`);
+    done++;
+    if (done >= 5) break;
     await sleep(1000);
   }
-  return count;
+  return success;
 }
 
 export async function refreshExpiringDomainList(maxDay: number): Promise<number> {
   const rows: any[] = await query(
     `SELECT id, name FROM ${table('domain')} WHERE expiretime >= (NOW() - INTERVAL 5 DAY) AND expiretime <= (NOW() + INTERVAL ${maxDay} DAY) AND checktime <= (NOW() - INTERVAL 1 DAY)`,
   );
-  let count = 0;
+  let done = 0;
+  let success = 0;
   for (const row of rows) {
     const res = await updateDomainDate(row.id, row.name);
-    if (res.code === 0) console.log(`[expire] 域名: ${row.name} 注册时间: ${res.regTime ?? '-'} 到期时间: ${res.expireTime}`);
-    else console.log(`[expire] 域名: ${row.name} 更新失败，${res.msg}`);
-    count++;
-    if (count >= 5) break;
+    if (res.code === 0) {
+      success++;
+      console.log(`[expire] 域名: ${row.name} 注册时间: ${res.regTime ?? '-'} 到期时间: ${res.expireTime}`);
+    } else console.log(`[expire] 域名: ${row.name} 更新失败，${res.msg}`);
+    done++;
+    if (done >= 5) break;
     await sleep(1000);
   }
-  return count;
+  return success;
 }
 
 async function noticeExpiringDomainList(maxDay: number, days: number[]): Promise<void> {
@@ -179,9 +185,6 @@ export async function expireNoticeTask(): Promise<void> {
   console.log('[expire] 开始执行域名到期提醒任务...');
   await configSet('domain_expire_time', fmtDateTime());
 
-  let count = await refreshDomainList();
-  if (count > 0) return;
-
   let daysStr = (await configGet('expire_noticedays', '')) || '';
   let maxDay = 30;
   let days: number[] = [];
@@ -189,8 +192,12 @@ export async function expireNoticeTask(): Promise<void> {
     days = daysStr.split(',').map((s) => parseInt(s)).filter((n) => !isNaN(n));
     maxDay = (days.length ? Math.max(...days) : 30) + 1;
   }
-  count = await refreshExpiringDomainList(maxDay);
-  if (count > 0) return;
+
+  // whois 刷新与到期通知解耦：刷新有单次配额（最多 5 条），
+  // 但不得据此跳过通知——否则只要存在待刷新域名，到期提醒会长期不发。
+  // 刷新失败的域名在下一轮重试，不影响本轮已就绪域名的通知。
+  await refreshDomainList();
+  await refreshExpiringDomainList(maxDay);
 
   const nowHour = new Date().getHours();
   const anyOn = ['expire_notice_mail', 'expire_notice_wxtpl', 'expire_notice_tgbot', 'expire_notice_qqbot', 'expire_notice_webhook', 'expire_notice_custom_webhook'];

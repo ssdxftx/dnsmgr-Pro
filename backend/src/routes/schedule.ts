@@ -20,9 +20,13 @@ function isNullOrEmpty(v: any): boolean {
 export default async function scheduleRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
-  app.get('/api/schedule/domains', auth, async () => {
+  app.get('/api/schedule/domains', auth, async (req: any) => {
+    const kw = String(req.query?.kw ?? '').trim();
+    const where = kw ? " WHERE A.name LIKE ? ESCAPE '!'" : '';
+    const params = kw ? ['%' + escapeLike(kw) + '%'] : [];
     const rows = await query(
-      `SELECT A.id, A.name, B.type FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC LIMIT 2000`
+      `SELECT A.id, A.name, B.type FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id${where} ORDER BY A.id DESC LIMIT 2000`,
+      params,
     );
     return { code: 0, data: rows };
   });
@@ -159,8 +163,9 @@ export default async function scheduleRoutes(app: FastifyInstance) {
       const res: any = await query(`DELETE FROM ${table('sctask')} WHERE id IN (${ph})`, list);
       success = Number(res?.affectedRows ?? list.length);
     } else if (act === 'open' || act === 'close') {
-      const res: any = await query(`UPDATE ${table('sctask')} SET active = ? WHERE id IN (${ph})`, [act === 'open' ? 1 : 0, ...list]);
-      success = Number(res?.affectedRows ?? list.length);
+      await query(`UPDATE ${table('sctask')} SET active = ? WHERE id IN (${ph})`, [act === 'open' ? 1 : 0, ...list]);
+      // UPDATE 在目标值本就相同时 affectedRows 为 0，未报错即视为成功
+      success = list.length;
     }
     return { code: 0, msg: '成功操作' + success + '个定时切换策略' };
   });

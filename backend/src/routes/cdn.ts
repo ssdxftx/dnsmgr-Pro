@@ -5,6 +5,8 @@ import { configGet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
+import { isCdnDomainIdColumnAvailable } from '../lib/cert/cdnDomainIdColumn.js';
+import { getCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
 import {
   ensureWildcardOrder,
   ensureExactOrder,
@@ -152,6 +154,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
   const providerCache = new Map<string, { at: number; provider: CdnProvider | false }>();
   const PROVIDER_CACHE_TTL = 5000;
+  let providerCacheEpoch = getCdnAccountEpoch();
 
   // 数据统计：管理员，或被管理员单独授权使用统计缓存的用户
   const statAuth = {
@@ -178,6 +181,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // provider 短时缓存：批量操作（缓存刷新/同步）常对同一账户+站点反复构造 provider
   // （每次含 account 查询 + AES 解密），按 aid#zone 缓存 5s，避免逐条重建
   async function cdnForZone(aid: number, zoneId: string | null): Promise<CdnProvider | false> {
+    // 账户配置发生增删改时立即失效缓存，避免最长 5s 内仍用旧配置
+    const epoch = getCdnAccountEpoch();
+    if (epoch !== providerCacheEpoch) {
+      providerCache.clear();
+      providerCacheEpoch = epoch;
+    }
     const key = `${aid}#${zoneId || ''}`;
     const cached = providerCache.get(key);
     if (cached && Date.now() - cached.at < PROVIDER_CACHE_TTL) return cached.provider;
@@ -219,10 +228,24 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
     // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
     const linkedDids = new Set<number>();
-    // cdn_domain_id 为 link 的生成列 + 索引，避免 link LIKE '%cdnDomainId%' 的前缀通配全表扫描
-    for (const o of await query(`SELECT DISTINCT cdn_domain_id FROM ${table('cert_order')} WHERE cdn_domain_id IS NOT NULL`)) {
-      const did = Number((o as any).cdn_domain_id);
-      if (did) linkedDids.add(did);
+    // cdn_domain_id 为 link 的生成列 + 索引，避免 link LIKE '%cdnDomainId%' 的前缀通配全表扫描；
+    // 生成列不可用时降级为 LIKE 粗筛 + 解析，保证功能可用
+    if (isCdnDomainIdColumnAvailable()) {
+      for (const o of await query(`SELECT DISTINCT cdn_domain_id FROM ${table('cert_order')} WHERE cdn_domain_id IS NOT NULL`)) {
+        const did = Number((o as any).cdn_domain_id);
+        if (did) linkedDids.add(did);
+      }
+    } else {
+      const lrows = await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%']);
+      for (const o of lrows as any[]) {
+        let did = 0;
+        try {
+          did = Number(JSON.parse(o.link)?.cdnDomainId || 0);
+        } catch {
+          did = 0;
+        }
+        if (did) linkedDids.add(did);
+      }
     }
     const data = rows.map((r: any) => ({
       ...r,
@@ -1469,9 +1492,23 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 查找该加速域名已绑定的联动证书订单（按 link 中的 cdnDomainId 精确匹配）
   async function findLinkedOrder(did: number): Promise<any | null> {
-    // 走 cdn_domain_id 生成列索引精确匹配，替代 link LIKE 前缀通配全表扫描
-    const rows = await query(`SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE cdn_domain_id = ? ORDER BY id DESC LIMIT 1`, [did]);
-    return (rows as any[])[0] || null;
+    // 走 cdn_domain_id 生成列索引精确匹配；生成列不可用时降级为 LIKE 粗筛 + 解析
+    if (isCdnDomainIdColumnAvailable()) {
+      const rows = await query(`SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE cdn_domain_id = ? ORDER BY id DESC LIMIT 1`, [did]);
+      return (rows as any[])[0] || null;
+    }
+    const candidates = await query(
+      `SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ? ORDER BY id DESC LIMIT 50`,
+      ['%"cdnDomainId"%'],
+    );
+    for (const r of candidates as any[]) {
+      try {
+        if (Number(JSON.parse(r.link)?.cdnDomainId) === did) return r;
+      } catch {
+        /* 非法 JSON 忽略 */
+      }
+    }
+    return null;
   }
 
   // 记录/切换证书管理方式：切换离开「由本项目管理」时停用其联动部署任务，切回时重新启用

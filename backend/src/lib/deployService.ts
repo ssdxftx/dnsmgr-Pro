@@ -49,6 +49,11 @@ export class CertDeployService {
     this.task.status = status;
     let err = error;
     if (err && err.length > 300) err = err.slice(0, 300);
+    // 单点保证：失败态必须带 retrytime，否则 findDeployTasks 不会再调度该任务，也永远没有终态
+    if (status < 0 && !retrytime) {
+      const iv = [60, 300, 600, 1800, 3600][this.task.retry] ?? 3600;
+      retrytime = new Date(Date.now() + iv * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    }
     const update: any = { status, error: err ? err.replace(/[\r\n]/g, '') : null, retrytime: retrytime ? new Date(retrytime) : null };
     if (status === 1) {
       update.retry = 0;

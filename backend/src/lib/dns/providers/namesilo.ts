@@ -105,9 +105,11 @@ export class NamesiloDns implements DnsProvider {
         list = list.filter((v) => v.Type === Type);
       }
     }
-    void PageNumber;
-    void PageSize;
-    return { total: (data.resource_record || []).length, list };
+    // 接口一次性返回全部记录，此处按请求分页本地切片；total 为过滤后的真实条数
+    const total = list.length;
+    const start = (Math.max(1, Number(PageNumber) || 1) - 1) * (Number(PageSize) || 20);
+    const paged = list.slice(start, start + (Number(PageSize) || 20));
+    return { total, list: paged };
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {

@@ -49,7 +49,8 @@ async function tick(): Promise<void> {
   );
 
   for (const row of rows) {
-    runMonitorTask(row);
+    // 等待任务完成再推进 checknexttime，避免任务耗时超过 frequency 时重叠执行
+    await runMonitorTask(row);
     await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
       now,
       now + (row.frequency || 60),

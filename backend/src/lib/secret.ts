@@ -60,13 +60,14 @@ export function decryptConfig(raw: string | null | undefined): Record<string, an
   }
 }
 
-const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential|passphrase|hmac|skey|spkey)/i;
+const SECRET_KEY_RE = /(secret|password|passwd|pwd|token|apikey|api_key|private_?key|accesskey|credential|passphrase|hmac|skey|spkey|kubeconfig|kube_config)/i;
 
 export function isSecretKey(key: string): boolean {
   const k = String(key || '');
   if (SECRET_KEY_RE.test(k)) return true;
-  if (/(^|_)key$/i.test(k)) return true;
-  return ['SecretId', 'AccessKeyId', 'api_password', 'skey', 'passphrase'].includes(k);
+  // 收尾为 key / pass 的字段名（如 access_key、pfx_pass）同样是敏感字段
+  if (/(^|_)(key|pass)$/i.test(k)) return true;
+  return ['SecretId', 'AccessKeyId', 'api_password', 'skey', 'passphrase', 'kubeconfig', 'kube_config', 'pfx_pass'].includes(k);
 }
 
 // 返回给前端的配置：敏感字段以掩码替换，避免明文回显（递归处理嵌套对象/数组）

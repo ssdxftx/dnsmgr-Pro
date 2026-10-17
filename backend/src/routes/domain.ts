@@ -18,14 +18,31 @@ function safeJson(s: any): Record<string, any> {
 async function runPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);
   let cursor = 0;
+  let aborted = false;
   const worker = async () => {
     while (cursor < items.length) {
+      // 首个任务出错后不再领取新任务（批量写操作 fail-fast），
+      // 避免接口已返回错误、其余 worker 仍在后台继续写云端数据
+      if (aborted) return;
       const i = cursor++;
-      results[i] = await fn(items[i], i);
+      try {
+        results[i] = await fn(items[i], i);
+      } catch (e) {
+        aborted = true;
+        throw e;
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
   return results;
+}
+
+/** 缓存超限时淘汰最旧的一批（约 10%），避免整表 clear 造成命中率归零 */
+function evictOldest<K, V extends { at: number }>(map: Map<K, V>, max: number): void {
+  if (map.size < max) return;
+  const drop = Math.max(1, Math.floor(max * 0.1));
+  const entries = [...map.entries()].sort((a, b) => a[1].at - b[1].at);
+  for (let i = 0; i < drop && i < entries.length; i++) map.delete(entries[i][0]);
 }
 
 const allRecordsCache = new Map<string, { at: number; list: any[] }>();
@@ -42,26 +59,39 @@ async function fetchAccountMap(aids: number[]): Promise<Map<number, any>> {
   return map;
 }
 
-/** 拉取某域名全部解析记录（带 60s 内存缓存），用于统计子域名记录数；acct 可由调用方批量预取后传入 */
-async function fetchAllRecords(d: any, acct?: any): Promise<any[]> {
+/** 拉取某域名全部解析记录（带 60s 内存缓存），用于统计子域名记录数；acct 可由调用方批量预取后传入。
+ *  返回 ok 以区分「记录为空」与「云端拉取失败」：失败时不写缓存，由调用方在行上标记，避免把失败伪装成 0 条。 */
+async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: boolean }> {
   const cached = allRecordsCache.get(d.name);
-  if (cached && Date.now() - cached.at < RECORDS_TTL) return cached.list;
+  if (cached && Date.now() - cached.at < RECORDS_TTL) return { list: cached.list, ok: true };
   let list: any[] = [];
+  let ok = false;
   const acctRow = acct !== undefined ? acct : await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
   if (acctRow) {
     const provider = getDnsProvider(acctRow.type, safeJson(acctRow.config), d.name, d.thirdid);
     if (provider) {
+      ok = true;
+      let pageSize = 500;
       for (let page = 1; page <= 10; page++) {
         const r = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
-        if (r === false || !r.list || !r.list.length) break;
+        if (r === false) {
+          // 云端返回失败：标记失败且不写缓存
+          ok = false;
+          break;
+        }
+        if (!r.list || !r.list.length) break;
         list = list.concat(r.list);
-        if (list.length >= (r.total || 0)) break;
+        if (page === 1) pageSize = r.list.length;
+        // 返回条数不足一页即结束，不依赖厂商 total（部分厂商 total 只代表本页条数）
+        if (r.list.length < pageSize) break;
       }
     }
   }
-  if (allRecordsCache.size >= RECORDS_CACHE_MAX) allRecordsCache.clear();
-  allRecordsCache.set(d.name, { at: Date.now(), list });
-  return list;
+  if (ok) {
+    evictOldest(allRecordsCache, RECORDS_CACHE_MAX);
+    allRecordsCache.set(d.name, { at: Date.now(), list });
+  }
+  return { list, ok };
 }
 
 const recordTotalCache = new Map<string, { at: number; total: number }>();
@@ -80,7 +110,7 @@ async function fetchRecordTotal(d: any, acct?: any): Promise<number> {
       if (r && typeof (r as any).total === 'number') total = Number((r as any).total);
     }
   }
-  if (recordTotalCache.size >= RECORD_TOTAL_CACHE_MAX) recordTotalCache.clear();
+  if (recordTotalCache.size >= RECORD_TOTAL_CACHE_MAX) evictOldest(recordTotalCache, RECORD_TOTAL_CACHE_MAX);
   recordTotalCache.set(d.name, { at: Date.now(), total });
   return total;
 }
@@ -168,7 +198,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       }
       // 批量取账户（一次 IN 查询），替代每条授权各查一次 account（含 AES 解密）
       const acctMap = await fetchAccountMap([...permsByDomain.keys()].map((n) => Number(byName.get(n)!.aid)));
-      const domainResult = new Map<string, { total: number; records: any[] }>();
+      const domainResult = new Map<string, { total: number; records: any[]; countOk: boolean }>();
       const entries = [...permsByDomain.entries()];
       let cursor = 0;
       // 并发工作池：最多 8 个域名同时拉取云端记录（原实现为串行，M 条授权 ≈ M 次 DB + 最多 10M 次 HTTP）
@@ -180,14 +210,14 @@ export default async function domainRoutes(app: FastifyInstance) {
           const hasFull = perms.some((p) => !p.sub);
           const hasSub = perms.some((p) => !!p.sub);
           try {
-            const [total, records] = await Promise.all([
+            const [total, recordsRes] = await Promise.all([
               hasFull ? fetchRecordTotal(d, acctRow) : Promise.resolve(0),
-              hasSub ? fetchAllRecords(d, acctRow) : Promise.resolve([] as any[]),
+              hasSub ? fetchAllRecords(d, acctRow) : Promise.resolve({ list: [] as any[], ok: true }),
             ]);
-            domainResult.set(name, { total, records });
+            domainResult.set(name, { total, records: recordsRes.list, countOk: recordsRes.ok });
           } catch {
-            // 单个域名云端拉取失败时降级为库内记录数，不影响其余域名
-            domainResult.set(name, { total: Number(d.recordcount || 0), records: [] });
+            // 单个域名云端拉取失败时降级为库内记录数，并标记「记录数不可信」，避免把失败伪装成 0 条
+            domainResult.set(name, { total: Number(d.recordcount || 0), records: [], countOk: false });
           }
         }
       };
@@ -209,6 +239,7 @@ export default async function domainRoutes(app: FastifyInstance) {
         out.push({
           ...dSafe,
           recordcount: cnt,
+          _count_error: p.sub ? !(res && res.countOk) : false,
           expiretime: p.expiretime || d.expiretime || null,
           checkstatus: p.expiretime ? 1 : d.checkstatus,
           _key: `${d.id}:${p.sub || ''}`,
@@ -278,7 +309,7 @@ export default async function domainRoutes(app: FastifyInstance) {
         const d = targets[cursor++];
         if (out.length >= LIMIT) return;
         try {
-          const list = await fetchAllRecords(d, acctMap.get(Number(d.aid)));
+          const list = (await fetchAllRecords(d, acctMap.get(Number(d.aid)))).list;
           for (const r of list || []) {
             // 命中上限即早停，避免为返回 200 条而全量拉取所有域名
             if (out.length >= LIMIT) return;
@@ -301,7 +332,10 @@ export default async function domainRoutes(app: FastifyInstance) {
       }
     };
     await Promise.all(Array.from({ length: Math.min(5, targets.length) }, worker));
-    return { code: 0, data: out.slice(0, LIMIT) };
+    // 并发早停会让「先跑到上限」的 worker 决定结果集，且可能丢弃后续匹配；
+    // 明确返回 truncated 让前端提示「结果过多，请细化关键词」，避免用户误以为结果完整
+    const truncated = out.length >= LIMIT;
+    return { code: 0, data: out.slice(0, LIMIT), truncated };
   });
 
   app.get('/api/domains/categories', auth, async (req: any) => {
@@ -420,8 +454,17 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (res === false) return { code: -1, msg: provider.getError() };
     if (!acc.admin) {
       res.list = filterRecords(acc, info.domain.name, res.list);
-      // 非管理员不得通过 total 推断域名全量记录数，按过滤后可见数返回
-      res.total = res.list.length;
+      // 有整域名授权时可见全部记录，provider 的 total 准确且不构成信息泄露，直接沿用；
+      // 仅子域名授权时不得用 provider 全量 total（会泄露域名记录总数），也不能用本页可见数
+      // 冒充总数（会导致分页恒为 1 页、授权记录不在首页时完全看不到，见审计 B-04）。
+      // 这里按「页边界」推断占位总数：满页时给出足以启用下一页的值，未满页时按已见数累加。
+      const fullAccess = acc.perms.some((p) => p.domain === info.domain.name && !p.sub);
+      if (!fullAccess) {
+        const pageSize = Number(q.pagesize || 20) || 20;
+        const page = Number(q.page || 1) || 1;
+        const visible = res.list.length;
+        res.total = visible >= pageSize ? page * pageSize + 1 : (page - 1) * pageSize + visible;
+      }
     }
     (res as any)._access = buildAccess(acc, info.domain.name);
     return { code: 0, data: res };
@@ -598,6 +641,9 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    // 批量任务并发放大，provider 实例字段（this.error、记录缓存等）会被并发读写串台，
+    // 故为每个任务创建独立实例
+    const makeProvider = (): any => getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     const acc = await getUserPerms(req);
     const b = req.body || {};
     const action = String(b.action || '');
@@ -607,33 +653,36 @@ export default async function domainRoutes(app: FastifyInstance) {
       // 以云端真实记录名判权，避免客户端用 r.Name 通过校验、却用 r.RecordId 越权操作
       const fn = provider.getDomainRecordInfo;
       if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持批量操作' };
-      const checks = await runPool(records, 8, async (r: any) => {
-        const cur = await fn.call(provider, r.RecordId);
-        if (!cur) return '无权限操作该记录';
-        if (!recordOwnedByDomain(cur, info.domain.name)) return '无权限操作该记录';
-        const e = writeErr(acc, info.domain.name, cur.Name);
-        if (e) return e;
-        // 修改记录值/线路时会改写记录名，需同时对目标名判权
-        if ((action === 'value' || action === 'line') && r.Name) {
-          const e2 = writeErr(acc, info.domain.name, r.Name);
-          if (e2) return '新记录超出授权子域名范围';
-        }
-        return null;
-      });
-      const firstErr = checks.find((c) => c);
-      if (firstErr) return { code: -1, msg: firstErr };
+      try {
+        await runPool(records, 8, async (r: any) => {
+          // 本地范围预筛：目标名明显越权时直接拒绝，无需打云端
+          if ((action === 'value' || action === 'line') && r.Name) {
+            const le = writeErr(acc, info.domain.name, r.Name);
+            if (le) throw new Error('新记录超出授权子域名范围');
+          }
+          const p: any = makeProvider();
+          const cur = await p.getDomainRecordInfo(r.RecordId);
+          if (!cur) throw new Error('无权限操作该记录');
+          if (!recordOwnedByDomain(cur, info.domain.name)) throw new Error('无权限操作该记录');
+          const e = writeErr(acc, info.domain.name, cur.Name);
+          if (e) throw new Error(e);
+        });
+      } catch (e: any) {
+        // runPool 首个错误即中止其余 worker，避免首个越权后仍对全部 recordId 打云端
+        return { code: -1, msg: e?.message || '无权限操作该记录' };
+      }
     }
     let success = 0;
     let fail = 0;
     if (action === 'open' || action === 'pause') {
       const st = action === 'open' ? '1' : '0';
-      const results = await runPool(records, 8, async (r: any) => !!(await provider.setDomainRecordStatus(r.RecordId, st)));
+      const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().setDomainRecordStatus(r.RecordId, st)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       return { code: 0, msg: `成功${action === 'open' ? '启用' : '暂停'}${success}条解析记录` };
     }
     if (action === 'delete') {
-      const results = await runPool(records, 8, async (r: any) => !!(await provider.deleteDomainRecord(r.RecordId)));
+      const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().deleteDomainRecord(r.RecordId)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       if (success) await bumpRecordCount(id, -success);
@@ -643,7 +692,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       const remark = b.remark ? String(b.remark) : null;
       const fn = provider.updateDomainRecordRemark;
       if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持备注' };
-      const results = await runPool(records, 8, async (r: any) => !!(await fn.call(provider, r.RecordId, remark)));
+      const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().updateDomainRecordRemark(r.RecordId, remark)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       return { code: 0, msg: `批量修改备注，成功${success}条，失败${fail}条` };
@@ -653,7 +702,7 @@ export default async function domainRoutes(app: FastifyInstance) {
         const type = action === 'value' ? String(b.type || r.Type) : r.Type;
         const value = action === 'value' ? String(b.value ?? '') : (Array.isArray(r.Value) ? r.Value.join(',') : r.Value);
         const line = action === 'line' ? String(b.line ?? '') : r.Line;
-        return !!(await provider.updateDomainRecord(r.RecordId, r.Name, type, value, line || 'default', Number(r.TTL || 600), Number(r.MX || 1), r.Weight ?? null, r.Remark ?? null));
+        return !!(await makeProvider().updateDomainRecord(r.RecordId, r.Name, type, value, line || 'default', Number(r.TTL || 600), Number(r.MX || 1), r.Weight ?? null, r.Remark ?? null));
       });
       success = results.filter(Boolean).length;
       fail = results.length - success;
@@ -686,19 +735,25 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!lines.length) return { code: -1, msg: '参数不能为空' };
     if (lines.length > 500) return { code: -1, msg: '单次最多添加 500 条解析记录' };
     const acc = await getUserPerms(req);
-    const results = await runPool(lines, 8, async (ln: string) => {
+    // 格式非法的行（缺少主机记录或记录值）不计入失败数，与既有语义一致
+    const parsed = lines.map((ln: string) => {
       const [name, value] = ln.split(/\s+/);
-      if (!name || !value) return false;
-      const rType = type || detectType(value);
-      const e = writeErr(acc, info.domain.name, name);
+      return { ln, name, value };
+    });
+    const valid = parsed.filter((p) => p.name && p.value);
+    const invalid = parsed.length - valid.length;
+    const results = await runPool(valid, 8, async (p: { ln: string; name: string; value: string }) => {
+      const rType = type || detectType(p.value);
+      const e = writeErr(acc, info.domain.name, p.name);
       if (e) return false;
-      const rid = await provider.addDomainRecord(name, rType, value, line, ttl, mx, null, remark);
+      const rid = await provider.addDomainRecord(p.name, rType, p.value, line, ttl, mx, null, remark);
       return !!rid;
     });
     const success = results.filter(Boolean).length;
     const fail = results.length - success;
+    const invalidNote = invalid ? `，忽略${invalid}条格式错误的行` : '';
     if (success) await bumpRecordCount(id, success);
-    if (success > 0) return { code: 0, msg: `批量添加解析，成功${success}条，失败${fail}条` };
+    if (success > 0) return { code: 0, msg: `批量添加解析，成功${success}条，失败${fail}条${invalidNote}` };
     return { code: -1, msg: '批量添加失败，' + (provider.getError?.() || '没有可添加的记录') };
   });
 
