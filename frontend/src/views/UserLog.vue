@@ -6,15 +6,15 @@
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="systemEvents" :label="t('common.systemEvents')" tone="info" :icon="ShieldOutline" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="userActions" :label="t('common.userActions')" tone="success" :icon="PersonOutline" /></n-grid-item>
     </n-grid>
-    <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-input v-if="isAdmin" v-model:value="uid" placeholder="UID" style="width: 120px" />
-        <n-input v-model:value="domain" :placeholder="t('userLog.domainPlaceholder')" style="width: 180px" />
-        <n-input v-model:value="kw" :placeholder="t('userLog.searchPlaceholder')" style="width: 220px" @keyup.enter="search" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+    <div class="app-toolbar">
+      <n-input v-if="isAdmin" v-model:value="uid" placeholder="UID" size="small" style="width: 120px" />
+      <n-input v-model:value="domain" :placeholder="t('userLog.domainPlaceholder')" size="small" style="width: 180px" />
+      <n-input v-model:value="kw" :placeholder="t('userLog.searchPlaceholder')" size="small" style="width: 220px" @keyup.enter="search" />
+      <n-button type="primary" size="small" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+      <n-button size="small" @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+    </div>
 
+    <n-card :bordered="false">
       <ResponsiveDataTable
         :columns="columns"
         :data="logs"

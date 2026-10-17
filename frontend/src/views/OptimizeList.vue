@@ -19,15 +19,15 @@
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" /></n-grid-item>
     </n-grid>
-    <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 120px" />
-        <n-input v-model:value="kw" :placeholder="t('optimize.keyword')" style="width: 200px" @keyup.enter="search" />
-        <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('common.status')" style="width: 120px" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+    <div class="app-toolbar">
+      <n-select v-model:value="searchType" :options="searchTypeOptions" size="small" style="width: 120px" />
+      <n-input v-model:value="kw" :placeholder="t('optimize.keyword')" size="small" style="width: 200px" @keyup.enter="search" />
+      <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('common.status')" size="small" style="width: 120px" />
+      <n-button type="primary" size="small" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+      <n-button size="small" @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+    </div>
 
+    <n-card :bordered="false">
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"

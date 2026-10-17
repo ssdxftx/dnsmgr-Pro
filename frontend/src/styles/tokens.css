@@ -319,6 +319,15 @@ a {
 .empty-state--error .empty-state__title {
   color: var(--app-error);
 }
+.empty-state--compact {
+  padding: 24px 16px;
+  gap: 8px;
+}
+.empty-state--compact .empty-state__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
 
 /* ===========================================================================
    移动端数据卡片（ResponsiveDataTable 使用）

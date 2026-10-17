@@ -13,15 +13,15 @@
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" /></n-grid-item>
     </n-grid>
-    <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 130px" />
-        <n-input v-model:value="kw" :placeholder="t('schedule.keyword')" style="width: 200px" @keyup.enter="search" />
-        <n-select v-model:value="stype" :options="stypeOptions" clearable :placeholder="t('schedule.execPlaceholder')" style="width: 130px" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+    <div class="app-toolbar">
+      <n-select v-model:value="searchType" :options="searchTypeOptions" size="small" style="width: 130px" />
+      <n-input v-model:value="kw" :placeholder="t('schedule.keyword')" size="small" style="width: 200px" @keyup.enter="search" />
+      <n-select v-model:value="stype" :options="stypeOptions" clearable :placeholder="t('schedule.execPlaceholder')" size="small" style="width: 130px" />
+      <n-button type="primary" size="small" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+      <n-button size="small" @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+    </div>
 
+    <n-card :bordered="false">
       <ResponsiveDataTable
         v-model:checked-row-keys="checkedRowKeys"
         :columns="columns"
@@ -34,7 +34,7 @@
         @retry="loadTasks"
       />
 
-      <n-space v-if="checkedRowKeys.length" style="margin-top: 12px">
+      <n-space v-if="checkedRowKeys.length" class="mt-3">
         <n-button size="small" @click="batch('open')">{{ t('schedule.batchOpen') }}</n-button>
         <n-button size="small" @click="batch('close')">{{ t('schedule.batchClose') }}</n-button>
         <n-button size="small" type="error" secondary @click="batch('delete')">{{ t('schedule.batchDelete') }}</n-button>

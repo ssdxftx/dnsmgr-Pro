@@ -30,7 +30,7 @@
         </div>
       </div>
       <n-card v-else-if="!loadBusy" :bordered="false">
-        <n-empty :description="t('cdnZone.empty')" />
+        <EmptyState :icon="FolderOpenOutline" :title="t('cdnZone.empty')" />
       </n-card>
     </n-spin>
   </div>
@@ -40,9 +40,11 @@
 import { onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NCard, NEmpty, NSpin, NTag, useMessage } from 'naive-ui';
+import { NButton, NCard, NSpin, NTag, useMessage } from 'naive-ui';
+import { FolderOpenOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import EmptyState from '../components/EmptyState.vue';
 
 const { t } = useI18n();
 const message = useMessage();

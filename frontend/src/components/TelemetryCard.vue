@@ -17,6 +17,7 @@
         <polygon class="spark-area" :points="`${points} 120,36 0,36`" />
         <polyline ref="lineRef" class="spark-line" :points="points" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
       </svg>
+      <span v-else-if="captionText" class="tele-card__caption">{{ captionText }}</span>
     </div>
   </div>
 </template>
@@ -24,6 +25,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch, type Component } from 'vue';
 import { NIcon } from 'naive-ui';
+import { useI18n } from 'vue-i18n';
 
 const props = withDefaults(
   defineProps<{
@@ -35,9 +37,15 @@ const props = withDefaults(
     tone?: 'primary' | 'success' | 'warning' | 'error' | 'info';
     icon?: Component;
     spark?: number[];
+    /** 无 sparkline 时在底部占位区展示的弱化说明，避免约 40px 空白 */
+    caption?: string;
   }>(),
-  { suffix: '', delta: '', deltaDir: 'up', tone: 'primary', icon: undefined, spark: () => [] },
+  { suffix: '', delta: '', deltaDir: 'up', tone: 'primary', icon: undefined, spark: () => [], caption: '' },
 );
+
+const { t } = useI18n();
+// 无 sparkline 时用弱化说明填充底部占位，避免同排卡片出现约 40px 纯空白
+const captionText = computed(() => props.caption || t('common.live'));
 
 const reduce =
   typeof window !== 'undefined' &&
@@ -169,6 +177,13 @@ onMounted(() => {
 .tele-card__spark-wrap {
   height: 40px;
   margin-top: auto;
+  display: flex;
+  align-items: flex-end;
+}
+.tele-card__caption {
+  font-size: 12px;
+  color: var(--app-text-3);
+  letter-spacing: 0.02em;
 }
 .tele-card__spark {
   width: 100%;

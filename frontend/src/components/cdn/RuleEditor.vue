@@ -16,9 +16,9 @@
 
     <!-- ============ 可视化模式 ============ -->
     <template v-if="mode === 'visual'">
-      <div class="zone-panel rule-editor__card">
-        <div class="zone-panel__head">
-          <h3 class="zone-panel__title">{{ t('cdnRules.groupCommon') }}</h3>
+      <div class="app-panel rule-editor__card">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cdnRules.groupCommon') }}</h3>
         </div>
         <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth">
           <n-form-item :label="t('cdnRules.ruleName')" required>
@@ -66,9 +66,9 @@
       </div>
 
       <!-- ESA：行为字段（由官方字段表驱动） -->
-      <div v-if="isEsa" class="zone-panel rule-editor__card">
-        <div class="zone-panel__head">
-          <h3 class="zone-panel__title">{{ t('cdnRules.groupAction') }}</h3>
+      <div v-if="isEsa" class="app-panel rule-editor__card">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cdnRules.groupAction') }}</h3>
         </div>
         <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth">
           <n-form-item
@@ -86,9 +86,9 @@
 
       <!-- EO：官方 IF / ELSE IF / ELSE 分支结构（信号阶梯卡片流） -->
       <template v-else>
-        <div class="zone-panel rule-editor__card">
-          <div class="zone-panel__head">
-            <h3 class="zone-panel__title">{{ t('cdnRules.condTitle') }}</h3>
+        <div class="app-panel rule-editor__card">
+          <div class="app-panel__head">
+            <h3 class="app-panel__title">{{ t('cdnRules.condTitle') }}</h3>
           </div>
 
           <!-- 信号阶梯：分支沿左侧轨道依次排布，表达自上而下判定 -->
@@ -265,7 +265,7 @@
 
     <!-- ============ JSON 源码模式 ============ -->
     <template v-else>
-      <div class="zone-panel rule-editor__card">
+      <div class="app-panel rule-editor__card">
         <n-alert type="info" :show-icon="false" style="margin-bottom: 10px">{{ t('cdnRules.modeJsonHint') }}</n-alert>
         <div class="rule-editor__json-frame">
           <n-input v-model:value="jsonText" type="textarea" :rows="18" spellcheck="false" class="mono-input" />
@@ -754,7 +754,7 @@ watch(
   width: 160px;
 }
 
-/* ---- 分区卡片：编辑器内统一容器，沿用 zone-panel 观感 ---- */
+/* ---- 分区卡片：编辑器内统一容器，沿用 app-panel 观感 ---- */
 .rule-editor__card + .rule-editor__card {
   margin-top: 12px;
 }

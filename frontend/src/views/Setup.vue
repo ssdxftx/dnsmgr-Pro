@@ -44,7 +44,7 @@
 
         <n-space vertical>
           <n-button block :loading="checkBusy" @click="onCheck">{{ t('setup.testConnection') }}</n-button>
-          <n-button type="primary" block :loading="installing" @click="onInstall">{{ t('setup.installNow') }}</n-button>
+          <n-button type="primary" block :loading="installBusy" @click="onInstall">{{ t('setup.installNow') }}</n-button>
         </n-space>
       </n-form>
     </n-card>
@@ -63,7 +63,7 @@ const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
 const checkBusy = ref(false);
-const installing = ref(false);
+const installBusy = ref(false);
 const checked = ref(false);
 const detected = ref(false);
 const form = reactive({
@@ -114,7 +114,7 @@ async function onInstall() {
     message.warning(t('setup.adminRequired'));
     return;
   }
-  installing.value = true;
+  installBusy.value = true;
   try {
     const res = await api<any>('POST', '/setup/install', form);
     if (res.code === 0) {
@@ -126,7 +126,7 @@ async function onInstall() {
   } catch (e: any) {
     message.error(e.message || t('setup.networkError'));
   } finally {
-    installing.value = false;
+    installBusy.value = false;
   }
 }
 

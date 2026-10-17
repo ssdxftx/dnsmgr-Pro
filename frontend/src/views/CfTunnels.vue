@@ -30,11 +30,13 @@
 
     <!-- Token -->
     <n-modal v-model:show="showToken" preset="card" :title="t('cfTunnels.tokenTitle')" class="modal-md" :mask-closable="false">
-      <n-form label-placement="left" label-width="110">
-        <n-form-item label="Tunnel"><n-input :value="tokenName" disabled /></n-form-item>
-        <n-form-item label="Token"><n-input v-model:value="tokenValue" type="textarea" :rows="6" readonly /></n-form-item>
-        <n-form-item :label="t('cfTunnels.runCommand')"><n-input v-model:value="tokenCommand" type="textarea" :rows="2" readonly /></n-form-item>
-      </n-form>
+      <n-spin :show="tokenBusy">
+        <n-form label-placement="left" label-width="110">
+          <n-form-item label="Tunnel"><n-input :value="tokenName" disabled /></n-form-item>
+          <n-form-item label="Token"><n-input v-model:value="tokenValue" type="textarea" :rows="6" readonly /></n-form-item>
+          <n-form-item :label="t('cfTunnels.runCommand')"><n-input v-model:value="tokenCommand" type="textarea" :rows="2" readonly /></n-form-item>
+        </n-form>
+      </n-spin>
       <template #footer>
         <n-space justify="end">
           <n-button @click="copy(tokenCommand)">{{ t('cfTunnels.copyCommand') }}</n-button>
@@ -118,6 +120,7 @@ const showToken = ref(false);
 const tokenName = ref('');
 const tokenValue = ref('');
 const tokenCommand = ref('');
+const tokenBusy = ref(false);
 
 const currentTunnelId = ref('');
 const currentTunnelName = ref('');
@@ -248,12 +251,17 @@ async function showTokenOf(row: any) {
   tokenName.value = `${row.name} [${row.id}]`;
   tokenValue.value = '';
   tokenCommand.value = '';
-  showToken.value = true;
-  const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${row.id}/token`);
-  if (res.code === 0) {
-    tokenValue.value = res.data.token || '';
-    tokenCommand.value = `cloudflared tunnel run --token ${res.data.token}`;
-  } else message.error(res.msg);
+  showToken.value = true; // 先开弹窗，立即给出视觉响应
+  tokenBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${row.id}/token`);
+    if (res.code === 0) {
+      tokenValue.value = res.data.token || '';
+      tokenCommand.value = `cloudflared tunnel run --token ${res.data.token}`;
+    } else message.error(res.msg);
+  } finally {
+    tokenBusy.value = false;
+  }
 }
 
 function copy(text: string) {

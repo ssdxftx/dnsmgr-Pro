@@ -55,7 +55,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showBatch" preset="card" :title="batchTitle" style="max-width:480px" :mask-closable="false">
+    <n-modal v-model:show="showBatch" preset="card" :title="batchTitle" class="modal-sm" :mask-closable="false">
       <n-form v-if="batchAction === 'value'" label-placement="left" label-width="110">
         <n-form-item :label="t('record.recordType')"><n-select v-model:value="batchForm.type" :options="typeOptions" /></n-form-item>
         <n-form-item :label="t('record.recordValue')"><n-input v-model:value="batchForm.value" /></n-form-item>
@@ -77,7 +77,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showValue" preset="card" :title="t('record.valueTitle')" style="max-width:560px" :mask-closable="false">
+    <n-modal v-model:show="showValue" preset="card" :title="t('record.valueTitle')" class="modal-md" :mask-closable="false">
       <n-input type="textarea" :value="valueDetail" :autosize="{ minRows: 2, maxRows: 10 }" readonly />
       <template #footer>
         <n-space justify="end">
@@ -87,7 +87,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showRemark" preset="card" :title="t('record.editRemark')" style="max-width:480px" :mask-closable="false">
+    <n-modal v-model:show="showRemark" preset="card" :title="t('record.editRemark')" class="modal-sm" :mask-closable="false">
       <n-input v-model:value="remarkForm.remark" type="textarea" :rows="3" :placeholder="t('record.remarkContentPlaceholder')" />
       <template #footer>
         <n-space justify="end">
@@ -97,7 +97,7 @@
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showCheck" preset="card" :title="t('record.checkTitle')" style="max-width:460px" :mask-closable="false">
+    <n-modal v-model:show="showCheck" preset="card" :title="t('record.checkTitle')" class="modal-sm" :mask-closable="false">
       <n-space vertical :size="12">
         <n-descriptions :column="1" size="small" label-placement="left" bordered>
           <n-descriptions-item :label="t('record.hostRecord')">{{ checkFullHost }}</n-descriptions-item>
@@ -136,6 +136,7 @@ import { useI18n } from 'vue-i18n';
 import { NButton, NSpace, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from './ResponsiveDataTable.vue';
+import { useAction } from '../composables/useAction';
 
 interface DomainTarget {
   id: number;
@@ -172,6 +173,7 @@ const emit = defineEmits<{ (e: 'refresh'): void }>();
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run } = useAction();
 
 const linesByDid = ref<Record<number, Record<string, string>>>({});
 const currentDid = ref<number | null>(null);
@@ -441,13 +443,36 @@ const columns = computed<any[]>(() => {
       key: 'actions',
       width: 260,
       render(row: any) {
-        const checkBtn = h(NButton, { size: 'tiny', type: 'info', onClick: () => checkRecord(row) }, { default: () => t('record.check') });
+        const checkKey = `check:${row.RecordId}`;
+        const checkBtn = h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: 'info',
+            loading: !!busy[checkKey],
+            disabled: !!busy[checkKey],
+            onClick: () => run(checkKey, () => checkRecord(row)),
+          },
+          { default: () => t('record.check') },
+        );
         if (!rowWritable(row)) return h(NSpace, null, { default: () => [checkBtn] });
+        const toggleKey = `toggle:${row.RecordId}`;
         return h(NSpace, null, {
           default: () => [
-            h(NButton, { size: 'tiny', onClick: () => toggleStatus(row) }, { default: () => (row.Status === '1' ? t('record.paused') : t('common.enable')) }),
-            h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-            h(NButton, { size: 'tiny', type: 'error', onClick: () => delRecord(row) }, { default: () => t('common.delete') }),
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                quaternary: true,
+                loading: !!busy[toggleKey],
+                disabled: !!busy[toggleKey],
+                onClick: () => run(toggleKey, () => toggleStatus(row)),
+              },
+              { default: () => (row.Status === '1' ? t('record.paused') : t('common.enable')) },
+            ),
+            h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+            h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRecord(row) }, { default: () => t('common.delete') }),
             checkBtn,
           ],
         });

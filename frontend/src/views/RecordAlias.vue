@@ -6,11 +6,11 @@
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="LinkOutline" /></n-grid-item>
     </n-grid>
+    <div class="app-toolbar">
+      <n-input v-model:value="alias" :placeholder="t('record.aliasPlaceholder')" size="small" style="width: 320px" />
+      <n-button type="primary" size="small" :loading="saveBusy" @click="add">{{ t('record.aliasAdd') }}</n-button>
+    </div>
     <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-input v-model:value="alias" :placeholder="t('record.aliasPlaceholder')" style="width: 320px" />
-        <n-button type="primary" :loading="saveBusy" @click="add">{{ t('record.aliasAdd') }}</n-button>
-      </n-space>
       <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('common.noData')" />
     </n-card>
   </div>
@@ -46,7 +46,7 @@ const columns = computed(() => [
     title: t('common.actions'),
     key: 'actions',
     width: 120,
-    render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => del(r) }, { default: () => t('common.delete') }),
+    render: (r: any) => h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(r) }, { default: () => t('common.delete') }),
   },
 ]);
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="empty-state" :class="`empty-state--${tone}`">
+  <div class="empty-state" :class="[`empty-state--${tone}`, { 'empty-state--compact': compact }]">
     <div v-if="icon" class="empty-state__icon">
       <n-icon size="30" :component="icon" />
     </div>
@@ -23,8 +23,10 @@ withDefaults(
     description?: string;
     icon?: Component;
     tone?: 'default' | 'error';
+    /** 紧凑模式：用于弹窗/卡片内的小尺寸空态 */
+    compact?: boolean;
   }>(),
-  { title: '', description: '', icon: undefined, tone: 'default' },
+  { title: '', description: '', icon: undefined, tone: 'default', compact: false },
 );
 </script>
 

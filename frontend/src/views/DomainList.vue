@@ -20,21 +20,22 @@
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="queryFailed" :label="t('common.queryFailed')" tone="warning" :icon="AlertCircleOutline" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" /></n-grid-item>
     </n-grid>
+    <div class="app-toolbar">
+      <n-input
+        v-model:value="kw"
+        :placeholder="t('domain.searchPlaceholder')"
+        size="small"
+        style="width: 260px"
+        clearable
+        @keyup.enter="search"
+      />
+      <n-button type="primary" size="small" @click="search">
+        <template #icon><n-icon :component="SearchOutline" /></template>
+        {{ t('common.search') }}
+      </n-button>
+      <n-button size="small" @click="clearSearch">{{ t('common.refresh') }}</n-button>
+    </div>
     <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-input
-          v-model:value="kw"
-          :placeholder="t('domain.searchPlaceholder')"
-          style="width: 260px"
-          clearable
-          @keyup.enter="search"
-        />
-        <n-button type="primary" @click="search">
-          <template #icon><n-icon :component="SearchOutline" /></template>
-          {{ t('common.search') }}
-        </n-button>
-        <n-button @click="clearSearch">{{ t('common.refresh') }}</n-button>
-      </n-space>
       <template v-if="showRecords">
         <n-alert type="info" :show-icon="false" :bordered="false" class="mb-3">{{ t('domain.recordResults') }}</n-alert>
         <RecordTable
@@ -71,14 +72,14 @@
             <n-space vertical v-if="pullDomains.length">
               <n-checkbox v-for="d in pullDomains" :key="d.DomainId" :value="d" :label="d.Domain" />
             </n-space>
-            <n-empty v-else :description="t('domain.pullHint')" size="small" style="width:100%" />
+            <EmptyState v-else compact :icon="FolderOpenOutline" :title="t('domain.pullHint')" />
           </n-checkbox-group>
         </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showImport = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="importing" @click="doImport">{{ t('domain.importSelected') }}</n-button>
+          <n-button type="primary" :loading="importBusy" @click="doImport">{{ t('domain.importSelected') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -121,12 +122,13 @@ import { computed, h, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
-import { CloudDownloadOutline, RefreshOutline, SearchOutline, GlobeOutline, AlertCircleOutline, NotificationsOutline } from '@vicons/ionicons5';
+import { CloudDownloadOutline, RefreshOutline, SearchOutline, GlobeOutline, AlertCircleOutline, NotificationsOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import RecordTable from '../components/RecordTable.vue';
+import EmptyState from '../components/EmptyState.vue';
 import { useAction } from '../composables/useAction';
 
 const router = useRouter();
@@ -160,7 +162,7 @@ const importAid = ref<number | null>(null);
 const showImport = ref(false);
 const showCategory = ref(false);
 const categoryName = ref('');
-const importing = ref(false);
+const importBusy = ref(false);
 const kw = ref('');
 const showEdit = ref(false);
 const editRow = ref<any>(null);
@@ -230,7 +232,7 @@ const columns = computed(() => {
     key: 'actions',
     width: isAdmin.value ? 200 : 120,
     render(row: any) {
-      const btns: any[] = [h(NButton, { size: 'tiny', type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
+      const btns: any[] = [h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
       if (isAdmin.value) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
@@ -299,13 +301,13 @@ async function doImport() {
     message.warning(t('domain.selectAccountDomain'));
     return;
   }
-  importing.value = true;
+  importBusy.value = true;
   const results = await Promise.all(
     checkedDomains.value.map((d: any) =>
       api('POST', '/domains', { aid: importAid.value, domain: d.Domain, thirdid: d.DomainId, recordcount: d.RecordCount || 0 }),
     ),
   );
-  importing.value = false;
+  importBusy.value = false;
   const ok = results.filter((r: any) => r.code === 0).length;
   message.success(t('domain.importSuccess', { count: ok }));
   checkedDomains.value = [];

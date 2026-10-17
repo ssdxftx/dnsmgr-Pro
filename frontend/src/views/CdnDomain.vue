@@ -179,7 +179,7 @@
 
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
     <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" class="modal-md" :mask-closable="false">
-      <n-spin :show="certRunning">
+      <n-spin :show="certRunBusy">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
           {{ t('cdnDomain.certLinkDesc') }}
         </n-alert>
@@ -204,7 +204,7 @@
       </n-spin>
       <template #footer>
         <n-space justify="end" class="cert-actions">
-          <n-button v-if="hasPending" :loading="certRunning" @click="checkPending">{{ t('cdnDomain.checkDeploy') }}</n-button>
+          <n-button v-if="hasPending" :loading="certRunBusy" @click="checkPending">{{ t('cdnDomain.checkDeploy') }}</n-button>
           <n-button @click="showCert = false">{{ t('common.close') }}</n-button>
         </n-space>
       </template>
@@ -396,7 +396,7 @@
               <span class="link-log-time">{{ (l.addtime || '').slice(5, 19) }}</span>
             </div>
           </div>
-          <n-empty v-else size="small" :description="t('cdnDomain.noLog')" />
+          <EmptyState v-else compact :icon="FolderOpenOutline" :title="t('cdnDomain.noLog')" />
         </template>
 
         <!-- 项目申请证书上传绑定 -->
@@ -423,7 +423,7 @@
         <n-space justify="end" class="cert-actions">
           <n-button v-if="certMgrHasPendingFree" :loading="certMgrBusy" @click="checkFreeCertMgr">{{ t('cdnDomain.checkDeploy') }}</n-button>
           <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" :loading="linkLogLoadBusy" @click="loadCertMgrLog">{{ t('cdnDomain.refreshProgress') }}</n-button>
-          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" type="primary" secondary :loading="linkLogRetrying" @click="retryLink">{{ t('cdnDomain.checkDeployNow') }}</n-button>
+          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" type="primary" secondary :loading="linkLogRetryBusy" @click="retryLink">{{ t('cdnDomain.checkDeployNow') }}</n-button>
           <n-button @click="showCertMgr = false">{{ t('common.close') }}</n-button>
           <n-button v-if="certMgrMode === 'freecert'" type="primary" :loading="certMgrBusy" @click="applyFreeCertMgr">{{ t('cdnDomain.applyDeploy') }}</n-button>
           <n-button v-if="certMgrMode === 'certapply'" type="primary" :loading="certMgrBusy" @click="applyCertApplyMgr">{{ t('cdnDomain.applyDeploy') }}</n-button>
@@ -440,11 +440,12 @@ import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NSpace, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { AddOutline, CloudDownloadOutline, GlobeOutline, CloudOutline, CheckmarkCircleOutline } from '@vicons/ionicons5';
+import { AddOutline, CloudDownloadOutline, GlobeOutline, CloudOutline, CheckmarkCircleOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import EmptyState from '../components/EmptyState.vue';
 
 const { t } = useI18n();
 const router = useRouter();
@@ -500,7 +501,7 @@ const form = reactive<any>({
 const checkedIds = ref<number[]>([]);
 const showCert = ref(false);
 const certMode = ref<'free' | 'link'>('free');
-const certRunning = ref(false);
+const certRunBusy = ref(false);
 const certResults = ref<any[]>([]);
 const certSummary = ref('');
 
@@ -530,7 +531,7 @@ const certMgrMismatch = ref(false);
 
 // CDN证书部署进度：实时阶段日志
 const linkLogLoadBusy = ref(false);
-const linkLogRetrying = ref(false);
+const linkLogRetryBusy = ref(false);
 const linkLog = ref<any>(null);
 const linkLogDomainId = ref<number | null>(null);
 let linkLogTimer: any = null;
@@ -750,9 +751,9 @@ async function fetchLinkLog() {
 
 async function retryLink() {
   if (!linkLogDomainId.value) return;
-  linkLogRetrying.value = true;
+  linkLogRetryBusy.value = true;
   const res = await api<any>('POST', `/cdn/domains/${linkLogDomainId.value}/certlink/run`, {});
-  linkLogRetrying.value = false;
+  linkLogRetryBusy.value = false;
   message[res.code === 0 ? 'success' : 'error'](res.msg);
   await fetchLinkLog();
   if (!linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
@@ -856,10 +857,10 @@ const columns = computed<any[]>(() => [
     render(row: any) {
       const btns: any[] = [];
       if (row.can_freecert || row.can_certapply || row.can_certlink) {
-        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => openCertMgr(row) }, { default: () => t('cdnDomain.certMgrTitle') }));
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'info', onClick: () => openCertMgr(row) }, { default: () => t('cdnDomain.certMgrTitle') }));
       }
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
@@ -1143,10 +1144,10 @@ function openCertLink(ids: number[]) {
 }
 
 async function runCert(ids: number[], checkOnly: boolean) {
-  certRunning.value = true;
+  certRunBusy.value = true;
   const base = certMode.value === 'link' ? '/cdn/domains/cert' : '/cdn/domains/freecert';
   const res = await api<any>('POST', checkOnly ? base + '/check' : base, { ids });
-  certRunning.value = false;
+  certRunBusy.value = false;
   if (res.code === 0) {
     certResults.value = res.data || [];
     certSummary.value = res.msg || '';

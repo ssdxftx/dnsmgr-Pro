@@ -41,10 +41,12 @@ import { ListOutline, LayersOutline, LinkOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run } = useAction();
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
@@ -70,8 +72,19 @@ const columns = computed(() => [
     render: (r: any) =>
       h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'info', onClick: () => check(r) }, { default: () => t('cname.check') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(r) }, { default: () => t('common.delete') }),
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              type: 'info',
+              loading: !!busy[`check:${r.id}`],
+              disabled: !!busy[`check:${r.id}`],
+              onClick: () => run(`check:${r.id}`, () => check(r)),
+            },
+            { default: () => t('cname.check') },
+          ),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(r) }, { default: () => t('common.delete') }),
         ],
       }),
   },
