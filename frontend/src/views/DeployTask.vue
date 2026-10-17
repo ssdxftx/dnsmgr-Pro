@@ -8,10 +8,11 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="1 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.deployTasks')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.live')" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" :caption="t('common.live')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="deployedCount" :label="t('deployTask.deployed')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d4"><TelemetryCard :value="failedCount" :label="t('deployTask.failed')" tone="error" :icon="CloseCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
       <div class="app-panel">
@@ -19,9 +20,9 @@
           <h3 class="app-panel__title">{{ t('deployTask.overview') }}</h3>
         </div>
         <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('common.total')">{{ tasks.length }}</n-descriptions-item>
-          <n-descriptions-item :label="t('deployTask.deployed')">{{ deployedCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('deployTask.failed')">{{ failedCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.enable')">{{ activeTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.disabled')">{{ tasks.length - activeTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('deployTask.lastDeploy')">{{ lastDeployAt }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -69,7 +70,7 @@
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { AddOutline, ListOutline, CheckmarkCircleOutline, TimeOutline } from '@vicons/ionicons5';
+import { AddOutline, ListOutline, CheckmarkCircleOutline, TimeOutline, CloseCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
@@ -86,7 +87,11 @@ const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pendingTasks = computed(() => tasks.value.filter((t: any) => Number(t.status) === 0).length);
 const deployedCount = computed(() => tasks.value.filter((t: any) => t.status === 1).length);
-const failedCount = computed(() => tasks.value.filter((t: any) => t.status === -1).length);
+const failedCount = computed(() => tasks.value.filter((t: any) => Number(t.status) === -1).length);
+const lastDeployAt = computed(() => {
+  const times = tasks.value.map((t: any) => t.lasttime).filter(Boolean).sort();
+  return times.length ? times[times.length - 1] : '-';
+});
 const providers = ref<Record<string, any>>({});
 const accounts = ref<any[]>([]);
 const orders = ref<any[]>([]);

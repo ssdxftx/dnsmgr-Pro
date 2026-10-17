@@ -234,6 +234,8 @@ export default {
     emailPlaceholder: '留空使用系统默认收件邮箱',
     resultTitle: '检测结果',
     resultOk: '正常',
+    neverRun: '未检测',
+    lastCheck: '最近一次检测',
     issueCount: '异常 {count} 项',
     issuesFound: '发现 {count} 条异常记录，可能存在劫持！',
     allClear: '检测完成，共 {count} 条记录，未发现异常',
