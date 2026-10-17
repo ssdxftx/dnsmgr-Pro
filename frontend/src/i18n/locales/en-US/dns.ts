@@ -234,6 +234,8 @@ export default {
     emailPlaceholder: 'Leave blank to use the system default mailbox',
     resultTitle: 'Check Result',
     resultOk: 'Normal',
+    neverRun: 'Not Checked',
+    lastCheck: 'Last Check',
     issueCount: '{count} issue(s)',
     issuesFound: 'Found {count} abnormal records, possible hijacking!',
     allClear: 'Check completed, {count} records in total, no issues found',

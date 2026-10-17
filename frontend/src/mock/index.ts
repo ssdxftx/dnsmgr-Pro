@@ -39,7 +39,14 @@ const DOMAINS = [
 ];
 
 // 仅用于 Dashboard 计数（取 length）
-const CDN_DOMAINS = Array.from({ length: 11 }, (_, i) => ({ id: 200 + i, name: `cdn-${i + 1}.example.com` }));
+// cert_mode：none=从未配置；''=用户主动关闭证书管理（不算待配置）；其余为已托管
+const CDN_CERT_MODES = ['none', 'none', 'none', 'none', 'certlink', 'certlink', 'certlink', 'freecert', 'freecert', '', ''];
+const CDN_DOMAINS = CDN_CERT_MODES.map((mode, i) => ({
+  id: 200 + i,
+  name: `cdn-${i + 1}.example.com`,
+  cert_mode: mode,
+  https_enabled: mode === 'none' ? 0 : 1,
+}));
 
 // 解析记录（RecordTable 展示：类型徽章 / 状态 / 等宽值）
 const RECORDS = [
@@ -107,7 +114,7 @@ const OPTIMIZE_TASKS = [
 const DNS_CHECK_TASKS = [
   { id: 1, name: '主站解析', did: 101, domain_name: 'example.com', sub: null, types: 'A,CNAME', cycle: 'daily', interval_min: 0, run_time: '04:00', notice_email: 'ops@example.com', active: 1, last_run: '2026-10-17 04:00:12', next_run: '2026-10-18 04:00:00', last_status: 0, issue_count: 0 },
   { id: 2, name: 'API 网关', did: 101, domain_name: 'example.com', sub: 'api', types: 'A', cycle: 'interval', interval_min: 30, run_time: null, notice_email: '', active: 1, last_run: '2026-10-17 12:30:05', next_run: '2026-10-17 13:00:00', last_status: 1, issue_count: 2 },
-  { id: 3, name: '静态资源', did: 103, domain_name: 'cdn-static.com', sub: null, types: '', cycle: 'daily', interval_min: 0, run_time: '02:00', notice_email: '', active: 0, last_run: '2026-10-15 02:00:08', next_run: null, last_status: 0, issue_count: 0 },
+  { id: 3, name: '静态资源', did: 103, domain_name: 'cdn-static.com', sub: null, types: '', cycle: 'daily', interval_min: 0, run_time: '02:00', notice_email: '', active: 0, last_run: null, next_run: null, last_status: 0, issue_count: 0 },
   { id: 4, name: '图片域名', did: 104, domain_name: 'img-cdn.com', sub: null, types: 'CNAME', cycle: 'interval', interval_min: 60, run_time: null, notice_email: 'ops@example.com', active: 1, last_run: '2026-10-17 12:00:03', next_run: '2026-10-17 13:00:00', last_status: 1, issue_count: 1 },
 ];
 

@@ -786,7 +786,7 @@ const certMgrHasPendingFree = computed(() => certMgrFree.value.some((r) => r.sta
 
 const enabledCount = computed(() => domains.value.filter((d: any) => d.status !== 'offline').length);
 const stoppedCount = computed(() => domains.value.filter((d: any) => d.status === 'offline').length);
-const certPendingCount = computed(() => domains.value.filter((d: any) => !d.cert_mode || d.cert_mode === 'none').length);
+const certPendingCount = computed(() => domains.value.filter((d: any) => d.cert_mode === 'none' && !Number(d.https_enabled)).length);
 const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
 const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
 const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));

@@ -8,17 +8,18 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="1 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.monitorTasks')" tone="primary" :icon="PulseOutline" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.live')" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="issueTasks" :label="t('common.abnormal')" tone="error" :icon="AlertCircleOutline" :caption="t('common.live')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="normalTasks" :label="t('dnsCheck.resultOk')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('dnsCheck.lastCheck')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="issueTasks" :label="t('common.abnormal')" tone="error" :icon="AlertCircleOutline" :caption="t('dnsCheck.lastCheck')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d4"><TelemetryCard :value="neverRunTasks" :label="t('dnsCheck.neverRun')" tone="info" :icon="TimeOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
       <div class="app-panel">
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('dnsCheck.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
+        <n-descriptions :column="4" size="small" label-placement="top">
           <n-descriptions-item :label="t('common.enable')">{{ activeTasks }}</n-descriptions-item>
           <n-descriptions-item :label="t('common.disabled')">{{ tasks.length - activeTasks }}</n-descriptions-item>
           <n-descriptions-item :label="t('dnsCheck.lastRun')">{{ lastRunAt }}</n-descriptions-item>
@@ -110,8 +111,8 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NTag, useMessage, useDialog } from 'naive-ui';
-import { AddOutline, PulseOutline, CheckmarkCircleOutline, AlertCircleOutline } from '@vicons/ionicons5';
+import { NButton, NTag, NDropdown, useMessage, useDialog } from 'naive-ui';
+import { AddOutline, PulseOutline, CheckmarkCircleOutline, AlertCircleOutline, TimeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
@@ -126,7 +127,9 @@ const loadBusy = ref(false);
 const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
-const issueTasks = computed(() => tasks.value.filter((t: any) => Number(t.last_status) === 1).length);
+const issueTasks = computed(() => tasks.value.filter((t: any) => t.last_run && Number(t.last_status) === 1).length);
+const normalTasks = computed(() => tasks.value.filter((t: any) => t.last_run && Number(t.last_status) !== 1).length);
+const neverRunTasks = computed(() => tasks.value.filter((t: any) => !t.last_run).length);
 const lastRunAt = computed(() => {
   const times = tasks.value.map((t: any) => t.last_run).filter(Boolean).sort();
   return times.length ? times[times.length - 1] : '-';
@@ -155,18 +158,18 @@ function normalizeHm(v: any): string {
 }
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 60 },
-  { title: t('dnsCheck.nameCol'), key: 'name', width: 150, render: (row: any) => row.name || '-' },
+  { title: 'ID', key: 'id', width: 56 },
+  { title: t('dnsCheck.nameCol'), key: 'name', width: 130, render: (row: any) => row.name || '-' },
   {
     title: t('dnsCheck.domain'),
     key: 'domain_name',
-    width: 200,
+    width: 190,
     render: (row: any) => (row.sub ? `${row.sub}.${row.domain_name}` : row.domain_name || '-'),
   },
   {
     title: t('dnsCheck.checkType'),
     key: 'types',
-    width: 160,
+    width: 120,
     render: (row: any) => {
       const types = String(row.types || '').trim();
       return types ? types : t('dnsCheck.all');
@@ -175,34 +178,55 @@ const columns = computed(() => [
   {
     title: t('dnsCheck.cycle'),
     key: 'cycle',
-    width: 130,
+    width: 120,
     render: (row: any) => {
       if (row.cycle === 'interval') return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('dnsCheck.everyInterval', { minutes: row.interval_min }) });
       return h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('dnsCheck.everyDay', { time: row.run_time || '-' }) });
     },
   },
-  { title: t('dnsCheck.noticeEmail'), key: 'notice_email', width: 160, render: (row: any) => row.notice_email || t('dnsCheck.systemDefault') },
+  {
+    title: t('dnsCheck.noticeEmail'),
+    key: 'notice_email',
+    width: 110,
+    ellipsis: { tooltip: true },
+    render: (row: any) => row.notice_email || t('dnsCheck.systemDefault'),
+  },
   {
     title: t('common.status'),
     key: 'active',
-    width: 80,
+    width: 76,
     render: (row: any) => h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('common.enable') : t('dnsCheck.stopped')) }),
   },
   {
     title: t('dnsCheck.resultTitle'),
     key: 'last_status',
-    width: 110,
-    render: (row: any) =>
-      Number(row.last_status) === 1
-        ? h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('dnsCheck.issueCount', { count: Number(row.issue_count) || 0 }) })
-        : h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('dnsCheck.resultOk') }),
+    width: 100,
+    render: (row: any) => {
+      if (!row.last_run) return h(NTag, { size: 'small', type: 'default', bordered: false }, { default: () => t('dnsCheck.neverRun') });
+      if (Number(row.last_status) === 1) {
+        return h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('dnsCheck.issueCount', { count: Number(row.issue_count) || 0 }) });
+      }
+      return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('dnsCheck.resultOk') });
+    },
   },
-  { title: t('dnsCheck.lastRun'), key: 'last_run', width: 170, render: (row: any) => row.last_run || '-' },
-  { title: t('dnsCheck.nextRun'), key: 'next_run', width: 170, render: (row: any) => row.next_run || '-' },
+  {
+    title: t('dnsCheck.lastRun'),
+    key: 'last_run',
+    width: 170,
+    render: (row: any) => {
+      if (!row.last_run) return '-';
+      return h('div', { style: 'line-height: 1.35' }, [
+        h('span', null, row.last_run),
+        row.next_run
+          ? h('span', { style: 'display: block; font-size: 11px; color: var(--app-text-3)' }, `${t('dnsCheck.nextRun')} ${row.next_run}`)
+          : null,
+      ]);
+    },
+  },
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 260,
+    width: 150,
     render(row: any) {
       const rKey = `run:${row.id}`;
       const tKey = `toggle:${row.id}`;
@@ -230,8 +254,18 @@ const columns = computed(() => [
           },
           { default: () => (row.active ? t('dnsCheck.stopped') : t('common.enable')) },
         ),
-        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
+        h(
+          NDropdown,
+          {
+            trigger: 'click',
+            options: [
+              { label: t('common.edit'), key: 'edit' },
+              { label: t('common.delete'), key: 'delete' },
+            ],
+            onSelect: (key: string) => (key === 'edit' ? openEdit(row) : del(row)),
+          },
+          { default: () => h(NButton, { size: 'tiny', quaternary: true }, { default: () => t('common.more') }) },
+        ),
       ]);
     },
   },
