@@ -13,13 +13,13 @@
       <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.admins')" :value="adminCount" tone="warning" :icon="ShieldCheckmarkOutline" :spark="sparks[1]" /></n-grid-item>
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.apiEnabled')" :value="apiCount" tone="success" :icon="KeyOutline" :spark="sparks[2]" /></n-grid-item>
     </n-grid>
-    <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-input v-model:value="kw" :placeholder="t('userList.searchPlaceholder')" style="width: 220px" @keyup.enter="search" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+    <div class="app-toolbar">
+      <n-input v-model:value="kw" :placeholder="t('userList.searchPlaceholder')" size="small" style="width: 220px" @keyup.enter="search" />
+      <n-button type="primary" size="small" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+      <n-button size="small" @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+    </div>
 
+    <n-card :bordered="false">
       <ResponsiveDataTable
         :columns="columns"
         :data="users"
@@ -31,6 +31,7 @@
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('userList.editTitle') : t('userList.addTitle')" :style="modalStyle" :mask-closable="false">
+      <n-spin :show="editBusy">
       <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
         <n-form-item :label="t('userList.username')" required>
           <n-input v-model:value="form.username" />
@@ -81,6 +82,7 @@
           </div>
         </n-form-item>
       </n-form>
+      </n-spin>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.close') }}</n-button>
@@ -123,6 +125,7 @@ const pageSize = ref(10);
 const kw = ref('');
 
 const showEdit = ref(false);
+const editBusy = ref(false);
 const editingId = ref<number | null>(null);
 const saveBusy = ref(false);
 const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [] });
@@ -327,21 +330,29 @@ function openAdd() {
 }
 
 async function openEdit(row: any) {
-  const res = await api<any>('GET', `/users/${row.id}`);
-  if (res.code === 0) {
-    editingId.value = row.id;
-    form.username = res.data.username;
-    form.repwd = '';
-    form.is_api = res.data.is_api;
-    form.apikey = res.data.apikey || '';
-    form.level = res.data.level;
-    form.check_whole = res.data.check_whole == 1;
-    form.stat_cache = res.data.stat_cache == 1;
-    form.permission = (res.data.permission || []).map((p: any) =>
-      typeof p === 'string' ? { domain: p, sub: '', readonly: 0, expiretime: null } : { domain: p.domain, sub: p.sub || '', readonly: Number(p.readonly || 0), expiretime: p.expiretime || null },
-    );
-    showEdit.value = true;
-  } else message.error(res.msg);
+  editingId.value = row.id;
+  showEdit.value = true; // 先开弹窗，立即给出视觉响应
+  editBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/users/${row.id}`);
+    if (res.code === 0) {
+      form.username = res.data.username;
+      form.repwd = '';
+      form.is_api = res.data.is_api;
+      form.apikey = res.data.apikey || '';
+      form.level = res.data.level;
+      form.check_whole = res.data.check_whole == 1;
+      form.stat_cache = res.data.stat_cache == 1;
+      form.permission = (res.data.permission || []).map((p: any) =>
+        typeof p === 'string' ? { domain: p, sub: '', readonly: 0, expiretime: null } : { domain: p.domain, sub: p.sub || '', readonly: Number(p.readonly || 0), expiretime: p.expiretime || null },
+      );
+    } else {
+      showEdit.value = false;
+      message.error(res.msg);
+    }
+  } finally {
+    editBusy.value = false;
+  }
 }
 
 async function save() {

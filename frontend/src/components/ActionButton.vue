@@ -15,6 +15,8 @@
 import { ref } from 'vue';
 import { NButton, useMessage } from 'naive-ui';
 
+defineOptions({ name: 'ActionButton', inheritAttrs: false });
+
 const props = withDefaults(
   defineProps<{
     /** 点击后执行的动作；可返回 Promise，也可直接返回 api() 结果 */

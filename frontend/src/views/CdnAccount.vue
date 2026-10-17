@@ -104,8 +104,8 @@ const columns = computed(() => [
       if (caps.zoneManage || caps.rules || caps.security || caps.l4 || caps.tasks || caps.originGroup || caps.loadBalancer) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => goSites(row) }, { default: () => t('cdnSite.goSites') }));
       }
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },

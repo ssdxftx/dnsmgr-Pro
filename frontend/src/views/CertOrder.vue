@@ -64,19 +64,23 @@
 
     <!-- 证书详情 -->
     <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" class="modal-lg" :mask-closable="false">
-      <n-descriptions v-if="info" bordered :column="1" label-placement="left" class="mb-4">
-        <n-descriptions-item :label="t('certOrder.domains')">{{ (info.domains || []).join(', ') }}</n-descriptions-item>
-        <n-descriptions-item :label="t('certOrder.issueTime')">{{ info.issuetime }}</n-descriptions-item>
-        <n-descriptions-item :label="t('certOrder.expireTime')">{{ info.expiretime }}</n-descriptions-item>
-      </n-descriptions>
-      <n-form-item :label="t('certOrder.certLabel')">
-        <n-input v-model:value="info.crt" type="textarea" :rows="8" readonly />
-      </n-form-item>
-      <n-form-item :label="t('certOrder.keyLabel')">
-        <n-input v-model:value="info.key" type="textarea" :rows="8" readonly />
-      </n-form-item>
+      <n-spin :show="infoBusy">
+        <template v-if="info">
+          <n-descriptions bordered :column="1" label-placement="left" class="mb-4">
+            <n-descriptions-item :label="t('certOrder.domains')">{{ (info.domains || []).join(', ') }}</n-descriptions-item>
+            <n-descriptions-item :label="t('certOrder.issueTime')">{{ info.issuetime }}</n-descriptions-item>
+            <n-descriptions-item :label="t('certOrder.expireTime')">{{ info.expiretime }}</n-descriptions-item>
+          </n-descriptions>
+          <n-form-item :label="t('certOrder.certLabel')">
+            <n-input v-model:value="info.crt" type="textarea" :rows="8" readonly />
+          </n-form-item>
+          <n-form-item :label="t('certOrder.keyLabel')">
+            <n-input v-model:value="info.key" type="textarea" :rows="8" readonly />
+          </n-form-item>
+        </template>
+      </n-spin>
       <template #footer>
-        <n-space justify="end">
+        <n-space v-if="info" justify="end">
           <n-button @click="copyText('crt')">{{ t('certOrder.copyCert') }}</n-button>
           <n-button @click="copyText('key')">{{ t('certOrder.copyKey') }}</n-button>
           <n-button @click="downloadCert">{{ t('certOrder.downloadCert') }}</n-button>
@@ -88,7 +92,9 @@
 
     <!-- 日志 -->
     <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" class="modal-lg" :mask-closable="false">
-      <n-input v-model:value="logText" type="textarea" :rows="18" readonly />
+      <n-spin :show="logBusy">
+        <n-input v-model:value="logText" type="textarea" :rows="18" readonly />
+      </n-spin>
     </n-modal>
   </div>
 </template>
@@ -103,9 +109,11 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const router = useRouter();
 const { t } = useI18n();
+const { busy, run } = useAction();
 
 const message = useMessage();
 const dialog = useDialog();
@@ -148,8 +156,10 @@ const form = reactive<any>({ aid: null, keytype: 'RSA', keysize: '2048', domains
 
 const showInfo = ref(false);
 const info = ref<any>(null);
+const infoBusy = ref(false);
 const showLog = ref(false);
 const logText = ref('');
+const logBusy = ref(false);
 
 const keySizeOptions = computed(() =>
   form.keytype === 'RSA'
@@ -209,7 +219,21 @@ const columns = computed(() => [
       const btns: any[] = [];
       // 主操作：按状态唯一（进行中→处理/验证；已签发→详情）
       if (row.status < 3) {
-        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => process(row) }, { default: () => (row.status === 1 ? t('certOrder.verify') : t('certOrder.process')) }));
+        const pKey = `process:${row.id}`;
+        btns.push(
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              type: 'primary',
+              loading: !!busy[pKey],
+              disabled: !!busy[pKey],
+              onClick: () => run(pKey, () => process(row)),
+            },
+            { default: () => (row.status === 1 ? t('certOrder.verify') : t('certOrder.process')) },
+          ),
+        );
       } else if (row.status === 3) {
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => viewInfo(row) }, { default: () => t('common.detail') }));
       }
@@ -312,18 +336,11 @@ async function save() {
   }
 }
 
-// 防重复提交：处理中订单加入集合，忽略重复点击（签发为耗时操作，重复触发会重复下单）
-const processing = new Set<number>();
+// 防重复提交由 useAction 的 busy 键保证（签发为耗时操作，重复触发会重复下单）
 async function process(row: any) {
-  if (processing.has(Number(row.id))) return;
-  processing.add(Number(row.id));
-  try {
-    const res = await api('POST', `/cert/orders/${row.id}/process`, {});
-    if (res.code === 0) message.success(res.msg);
-    else message.error(res.msg);
-  } finally {
-    processing.delete(Number(row.id));
-  }
+  const res = await api('POST', `/cert/orders/${row.id}/process`, {});
+  if (res.code === 0) message.success(res.msg);
+  else message.error(res.msg);
   loadOrders();
 }
 
@@ -370,19 +387,35 @@ async function toggleAuto(row: any) {
 }
 
 async function viewInfo(row: any) {
-  const res = await api<any>('GET', `/cert/orders/${row.id}/info`);
-  if (res.code === 0) {
-    info.value = res.data;
-    showInfo.value = true;
-  } else message.error(res.msg);
+  info.value = null;
+  showInfo.value = true; // 先开弹窗，立即给出视觉响应
+  infoBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/cert/orders/${row.id}/info`);
+    if (res.code === 0) info.value = res.data;
+    else {
+      showInfo.value = false;
+      message.error(res.msg);
+    }
+  } finally {
+    infoBusy.value = false;
+  }
 }
 
 async function viewLog(row: any) {
-  const res = await api<any>('GET', `/cert/orders/${row.id}/log`);
-  if (res.code === 0) {
-    logText.value = res.data;
-    showLog.value = true;
-  } else message.info(res.msg || t('certOrder.noLog'));
+  logText.value = '';
+  showLog.value = true; // 先开弹窗，立即给出视觉响应
+  logBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/cert/orders/${row.id}/log`);
+    if (res.code === 0) logText.value = res.data;
+    else {
+      showLog.value = false;
+      message.info(res.msg || t('certOrder.noLog'));
+    }
+  } finally {
+    logBusy.value = false;
+  }
 }
 
 function copyText(key: 'crt' | 'key') {

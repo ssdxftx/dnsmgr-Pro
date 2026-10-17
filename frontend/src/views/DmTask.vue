@@ -18,15 +18,15 @@
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="SwapHorizontalOutline" /></n-grid-item>
     </n-grid>
-    <n-card :bordered="false">
-      <n-space class="mb-4">
-        <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 140px" />
-        <n-input v-model:value="kw" :placeholder="t('dm.keyword')" style="width: 200px" @keyup.enter="search" />
-        <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('dm.health')" style="width: 130px" />
-        <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
-        <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+    <div class="app-toolbar">
+      <n-select v-model:value="searchType" :options="searchTypeOptions" size="small" style="width: 140px" />
+      <n-input v-model:value="kw" :placeholder="t('dm.keyword')" size="small" style="width: 200px" @keyup.enter="search" />
+      <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('dm.health')" size="small" style="width: 130px" />
+      <n-button type="primary" size="small" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
+      <n-button size="small" @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+    </div>
 
+    <n-card :bordered="false">
       <ResponsiveDataTable
         v-model:checked-row-keys="checkedRowKeys"
         :columns="columns"
@@ -50,11 +50,13 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
+const { busy, run } = useAction();
 const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
@@ -154,11 +156,41 @@ const columns = computed<any[]>(() => [
     width: 240,
     render(row: any) {
       const btns: any[] = [];
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => router.push('/dm-tasks/' + row.id) }, { default: () => t('dm.detail') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => router.push('/dm-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => retry(row) }, { default: () => t('dm.retry') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? t('common.disable') : t('common.enable')) }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => router.push('/dm-tasks/' + row.id) }, { default: () => t('dm.detail') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => router.push('/dm-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
+      {
+        const rKey = `retry:${row.id}`;
+        btns.push(
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              loading: !!busy[rKey],
+              disabled: !!busy[rKey],
+              onClick: () => run(rKey, () => retry(row)),
+            },
+            { default: () => t('dm.retry') },
+          ),
+        );
+      }
+      {
+        const aKey = `active:${row.id}`;
+        btns.push(
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              loading: !!busy[aKey],
+              disabled: !!busy[aKey],
+              onClick: () => run(aKey, () => toggleActive(row)),
+            },
+            { default: () => (row.active ? t('common.disable') : t('common.enable')) },
+          ),
+        );
+      }
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
@@ -242,23 +274,15 @@ async function retry(row: any) {
   loadTasks();
 }
 
-const activePending = new Set<number>();
 async function toggleActive(row: any) {
-  const id = Number(row.id);
-  if (activePending.has(id)) return; // 防双击重复提交
-  activePending.add(id);
   const prev = row.active ? 1 : 0;
   const target = prev ? 0 : 1;
   row.active = target; // 乐观更新
-  try {
-    const res = await api('POST', `/dmonitor/tasks/${row.id}/active`, { active: target });
-    if (res.code === 0) message.success(t('common.success'));
-    else {
-      row.active = prev; // 失败回滚
-      message.error(res.msg);
-    }
-  } finally {
-    activePending.delete(id);
+  const res = await api('POST', `/dmonitor/tasks/${row.id}/active`, { active: target });
+  if (res.code === 0) message.success(t('common.success'));
+  else {
+    row.active = prev; // 失败回滚
+    message.error(res.msg);
   }
 }
 

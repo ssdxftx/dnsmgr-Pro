@@ -11,6 +11,7 @@
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="t('record.weightConfigure')" class="modal-md" :mask-closable="false">
+      <n-spin :show="editBusy">
       <n-space vertical :size="10">
         <n-text depth="3">{{ current?.SubDomain }}</n-text>
         <n-table :bordered="false" :single-line="false" size="small">
@@ -24,6 +25,7 @@
           </tbody>
         </n-table>
       </n-space>
+      </n-spin>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
@@ -44,10 +46,12 @@ import { ListOutline, LayersOutline, BarChartOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const route = useRoute();
 const { t } = useI18n();
 const message = useMessage();
+const { busy, run } = useAction();
 const domainId = Number(route.params.id);
 const domainName = ref('');
 const rows = ref<any[]>([]);
@@ -55,6 +59,7 @@ const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type !=
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const loadBusy = ref(false);
 const showEdit = ref(false);
+const editBusy = ref(false);
 const saveBusy = ref(false);
 const current = ref<any>(null);
 const records = ref<any[]>([]);
@@ -76,8 +81,19 @@ const columns = computed(() => [
     render: (r: any) =>
       h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', type: r.Open === true || r.Open === 'true' ? 'default' : 'success', onClick: () => toggle(r) }, { default: () => (r.Open === true || r.Open === 'true' ? t('record.weightDisable') : t('record.weightEnable')) }),
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(r) }, { default: () => t('record.weightConfigure') }),
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              type: r.Open === true || r.Open === 'true' ? 'default' : 'success',
+              loading: !!busy[`toggle:${r.rr}:${r.Type}:${r.Line}`],
+              disabled: !!busy[`toggle:${r.rr}:${r.Type}:${r.Line}`],
+              onClick: () => run(`toggle:${r.rr}:${r.Type}:${r.Line}`, () => toggle(r)),
+            },
+            { default: () => (r.Open === true || r.Open === 'true' ? t('record.weightDisable') : t('record.weightEnable')) },
+          ),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(r) }, { default: () => t('record.weightConfigure') }),
         ],
       }),
   },
@@ -102,11 +118,17 @@ async function toggle(r: any) {
 
 async function openEdit(r: any) {
   current.value = r;
-  const res = await api<any>('GET', `/domains/${domainId}/records`, { subdomain: r.rr, pagesize: 100 });
-  records.value = res.code === 0 ? res.data?.list || [] : [];
+  records.value = [];
   for (const k of Object.keys(weights)) delete weights[k];
-  for (const rec of records.value) weights[rec.RecordId] = Number(rec.Weight || 1);
-  showEdit.value = true;
+  showEdit.value = true; // 先开弹窗，立即给出视觉响应
+  editBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/domains/${domainId}/records`, { subdomain: r.rr, pagesize: 100 });
+    records.value = res.code === 0 ? res.data?.list || [] : [];
+    for (const rec of records.value) weights[rec.RecordId] = Number(rec.Weight || 1);
+  } finally {
+    editBusy.value = false;
+  }
 }
 
 async function saveWeights() {

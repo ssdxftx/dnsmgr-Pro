@@ -30,7 +30,7 @@
             </div>
           </div>
 
-          <div class="zone-panel" style="margin-top: 12px">
+          <div class="app-panel" style="margin-top: 12px">
             <n-descriptions :column="2" label-placement="left" size="small">
               <n-descriptions-item :label="t('cdnZoneSetting.ovZoneId')">
                 <span class="app-mono">{{ zoneId }}</span>
@@ -45,9 +45,9 @@
             </n-descriptions>
           </div>
 
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnZoneSetting.ovNs') }}</h3>
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnZoneSetting.ovNs') }}</h3>
             </div>
             <n-space v-if="nsList.length" :size="6">
               <n-tag v-for="ns in nsList" :key="ns" size="small" :bordered="false" class="app-mono">{{ ns }}</n-tag>
@@ -58,10 +58,10 @@
 
         <!-- ============ 域名 ============ -->
         <n-tab-pane name="domains" :tab="t('cdnZoneSetting.tabDomains')">
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnZoneSetting.domTitle') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnZoneSetting.domTitle') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ domains.length }}</n-tag>
               </div>
             </div>
@@ -77,10 +77,10 @@
 
         <!-- ============ 源站与负载均衡 ============ -->
         <n-tab-pane name="origin" :tab="t('cdnZoneSetting.tabOrigin')">
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnOrigin.originGroups') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnOrigin.originGroups') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ originGroups.length }}</n-tag>
               </div>
             </div>
@@ -94,10 +94,10 @@
             <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loadBusy" />
           </div>
 
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnOrigin.loadBalancers') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnOrigin.loadBalancers') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ loadBalancers.length }}</n-tag>
               </div>
             </div>
@@ -114,11 +114,11 @@
 
         <!-- ============ 规则引擎 ============ -->
         <n-tab-pane name="rules" :tab="t('cdnZoneSetting.tabRules')">
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnRules.manage') }}</h3>
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnRules.manage') }}</h3>
               <n-tag v-if="isEsa" size="tiny" :bordered="false">{{ kindLabel(ruleKind) }}</n-tag>
-              <div class="zone-panel__extra">
+              <div class="app-panel__extra">
                 <n-select
                   v-if="isEsa"
                   v-model:value="ruleKind"
@@ -145,10 +145,10 @@
 
         <!-- ============ 安全 ============ -->
         <n-tab-pane name="security" :tab="t('cdnZoneSetting.tabSecurity')">
-          <div v-if="caps.securityIpGroup" class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnSecurity.ipGroups') }}</h3>
-              <div class="zone-panel__extra">
+          <div v-if="caps.securityIpGroup" class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnSecurity.ipGroups') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ ipGroups.length }}</n-tag>
               </div>
             </div>
@@ -160,10 +160,10 @@
             <ResponsiveDataTable :columns="ipColumns" :data="ipGroups" size="small" :loading="loadBusy" />
           </div>
 
-          <div v-for="cfg in securityCfgs.filter((c) => caps[c.cap])" :key="cfg.key" class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ cfg.title }}</h3>
-              <div class="zone-panel__extra">
+          <div v-for="cfg in securityCfgs.filter((c) => caps[c.cap])" :key="cfg.key" class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ cfg.title }}</h3>
+              <div class="app-panel__extra">
                 <n-button size="small" :loading="!!busy['secload:' + cfg.key]" :disabled="!!busy['secload:' + cfg.key]" @click="run('secload:' + cfg.key, () => loadSecurityConfig(cfg.key))">{{ t('cdnSecurity.load') }}</n-button>
                 <n-button size="small" type="primary" :loading="!!busy['secsave:' + cfg.key]" :disabled="!!busy['secsave:' + cfg.key]" @click="run('secsave:' + cfg.key, () => saveSecurityConfig(cfg.key))">{{ t('cdnZoneSetting.save') }}</n-button>
               </div>
@@ -181,10 +181,10 @@
 
         <!-- ============ 四层代理 ============ -->
         <n-tab-pane v-if="caps.l4" name="l4" :tab="t('cdnZoneSetting.tabL4')">
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnZoneSetting.tabL4') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnZoneSetting.tabL4') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ l4Proxies.length }}</n-tag>
               </div>
             </div>
@@ -200,38 +200,38 @@
 
         <!-- ============ 任务与统计 ============ -->
         <n-tab-pane v-if="caps.tasks" name="tasks" :tab="t('cdnZoneSetting.tabTasks')">
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnAdvanced.purge') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnAdvanced.purge') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ purgeTasks.length }}</n-tag>
               </div>
             </div>
             <ResponsiveDataTable :columns="taskColumns" :data="purgeTasks" size="small" :loading="loadBusy" />
           </div>
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnAdvanced.prefetch') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnAdvanced.prefetch') }}</h3>
+              <div class="app-panel__extra">
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ prefetchTasks.length }}</n-tag>
               </div>
             </div>
             <ResponsiveDataTable :columns="taskColumns" :data="prefetchTasks" size="small" :loading="loadBusy" />
           </div>
-          <div class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnAdvanced.quota') }}</h3>
-              <div class="zone-panel__extra">
+          <div class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnAdvanced.quota') }}</h3>
+              <div class="app-panel__extra">
                 <n-button size="small" :loading="!!busy['quota']" :disabled="!!busy['quota']" @click="run('quota', loadQuota)">{{ t('cdnAdvanced.load') }}</n-button>
               </div>
             </div>
             <pre v-if="quotaText" class="code-view">{{ quotaText }}</pre>
             <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
           </div>
-          <div v-if="caps.analysis" class="zone-panel">
-            <div class="zone-panel__head">
-              <h3 class="zone-panel__title">{{ t('cdnAdvanced.analysis') }}</h3>
-              <div class="zone-panel__extra">
+          <div v-if="caps.analysis" class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnAdvanced.analysis') }}</h3>
+              <div class="app-panel__extra">
                 <n-button size="small" :loading="!!busy['analysis']" :disabled="!!busy['analysis']" @click="run('analysis', loadTopAnalysis)">{{ t('cdnAdvanced.load') }}</n-button>
               </div>
             </div>
@@ -620,7 +620,17 @@ const ruleColumns = computed(() => {
       h(NSpace, null, {
         default: () => [
           h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRuleEditor(r) }, { default: () => t('cdnZoneSetting.edit') }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => toggleRuleEnabled(r) }, { default: () => (ruleEnabled(r) ? t('cdnRules.disabledTag') : t('cdnRules.enabledTag')) }),
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              loading: !!busy[`rule:${r.ruleId || r.ruleName}`],
+              disabled: !!busy[`rule:${r.ruleId || r.ruleName}`],
+              onClick: () => run(`rule:${r.ruleId || r.ruleName}`, () => toggleRuleEnabled(r)),
+            },
+            { default: () => (ruleEnabled(r) ? t('cdnRules.disabledTag') : t('cdnRules.enabledTag')) },
+          ),
           h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRule(r) }, { default: () => t('cdnZoneSetting.delete') }),
         ],
       }),

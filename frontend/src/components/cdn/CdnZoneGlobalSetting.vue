@@ -1,8 +1,8 @@
 <template>
-  <div class="zone-panel">
-    <div class="zone-panel__head">
-      <span class="zone-panel__title">{{ t('cdnZoneSetting.globalTitle') }}</span>
-      <span class="zone-panel__extra hint-text">{{ t('cdnZone.globalHint') }}</span>
+  <div class="app-panel">
+    <div class="app-panel__head">
+      <span class="app-panel__title">{{ t('cdnZoneSetting.globalTitle') }}</span>
+      <span class="app-panel__extra hint-text">{{ t('cdnZone.globalHint') }}</span>
     </div>
 
     <n-alert v-if="unsupported" type="warning" :show-icon="false">

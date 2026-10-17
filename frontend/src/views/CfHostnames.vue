@@ -150,44 +150,50 @@
         </div>
         <n-select v-model:value="g.domainId" :options="g.options" :placeholder="t('cfHostnames.selectProvider')" size="small" style="max-width:360px" />
       </div>
-      <n-empty v-if="!batchRecord.groups.length" :description="t('cfHostnames.noHostnames')" />
+      <EmptyState v-if="!batchRecord.groups.length" compact :icon="FolderOpenOutline" :title="t('cfHostnames.noHostnames')" />
       <template #footer>
         <n-space justify="end">
           <n-button @click="showBatchRecord = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="batchRecord.running" @click="runBatchRecord">{{ t('cfHostnames.startProcess') }}</n-button>
+          <n-button type="primary" :loading="batchRecord.runBusy" @click="runBatchRecord">{{ t('cfHostnames.startProcess') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- CF 优选 -->
     <n-modal v-model:show="showCfOptimized" preset="card" :title="cfOptimized.single ? t('cfHostnames.cfOptimized') : t('cfHostnames.batchCfOptimized')" class="modal-md" :mask-closable="false">
-      <n-form label-placement="left" label-width="110">
-        <n-form-item :label="t('cfHostnames.bestTarget')">
-          <n-radio-group v-model:value="cfOptimized.targetMode" @update:value="(v: string) => { if (v !== '_custom') cfOptimized.customValue = ''; }">
-            <n-space vertical>
-              <n-radio v-for="t in cfOptimized.targets" :key="t.value" :value="t.value">{{ t.value }} <span class="dim">{{ t.label }}</span></n-radio>
-              <n-radio value="_custom">{{ t('cfHostnames.custom') }}</n-radio>
+      <n-spin :show="cfOptimized.loading">
+        <n-form label-placement="left" label-width="110">
+          <n-form-item :label="t('cfHostnames.bestTarget')">
+            <n-radio-group v-model:value="cfOptimized.targetMode" @update:value="(v: string) => { if (v !== '_custom') cfOptimized.customValue = ''; }">
+              <n-space vertical>
+                <n-radio v-for="t in cfOptimized.targets" :key="t.value" :value="t.value">{{ t.value }} <span class="dim">{{ t.label }}</span></n-radio>
+                <n-radio value="_custom">{{ t('cfHostnames.custom') }}</n-radio>
+              </n-space>
+            </n-radio-group>
+            <n-space v-if="cfOptimized.targetMode === '_custom'" class="mt-2">
+              <n-select v-model:value="cfOptimized.customType" :options="[{label:'CNAME',value:'CNAME'},{label:'A',value:'A'},{label:'AAAA',value:'AAAA'}]" style="width:110px" />
+              <n-input v-model:value="cfOptimized.customValue" :placeholder="t('cfHostnames.targetValuePlaceholder')" style="width:250px" />
             </n-space>
-          </n-radio-group>
-          <n-space v-if="cfOptimized.targetMode === '_custom'" style="margin-top:8px">
-            <n-select v-model:value="cfOptimized.customType" :options="[{label:'CNAME',value:'CNAME'},{label:'A',value:'A'},{label:'AAAA',value:'AAAA'}]" style="width:110px" />
-            <n-input v-model:value="cfOptimized.customValue" :placeholder="t('cfHostnames.targetValuePlaceholder')" style="width:250px" />
+          </n-form-item>
+        </n-form>
+        <n-divider />
+        <div v-for="(g, gi) in cfOptimized.groups" :key="gi" class="bg">
+          <div class="bg-title">{{ t('cfHostnames.dnsDomain', { domain: g.domainName }) }}{{ t('cfHostnames.hostnameCount', { count: g.items.length }) }}</div>
+          <n-space>
+            <n-select v-model:value="g.domainId" :options="g.options" :placeholder="t('cfHostnames.selectProvider')" size="small" style="width:260px" @update:value="() => loadGroupLines(g)" />
+            <n-select v-model:value="g.line" :options="g.lineOptions" size="small" style="width:180px" />
           </n-space>
-        </n-form-item>
-      </n-form>
-      <n-divider />
-      <div v-for="(g, gi) in cfOptimized.groups" :key="gi" class="bg">
-        <div class="bg-title">{{ t('cfHostnames.dnsDomain', { domain: g.domainName }) }}{{ t('cfHostnames.hostnameCount', { count: g.items.length }) }}</div>
-        <n-space>
-          <n-select v-model:value="g.domainId" :options="g.options" :placeholder="t('cfHostnames.selectProvider')" size="small" style="width:260px" @update:value="() => loadGroupLines(g)" />
-          <n-select v-model:value="g.line" :options="g.lineOptions" size="small" style="width:180px" />
-        </n-space>
-      </div>
-      <n-empty v-if="!cfOptimized.groups.length" :description="t('cfHostnames.noHostnames')" />
+        </div>
+        <EmptyState
+          v-if="!cfOptimized.loading && !cfOptimized.groups.length"
+          :icon="FolderOpenOutline"
+          :title="t('cfHostnames.noHostnames')"
+        />
+      </n-spin>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showCfOptimized = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="cfOptimized.running" @click="runCfOptimized">{{ t('cfHostnames.startProcess') }}</n-button>
+          <n-button type="primary" :loading="cfOptimized.runBusy" @click="runCfOptimized">{{ t('cfHostnames.startProcess') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -230,11 +236,12 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { RefreshOutline, ListOutline, LayersOutline, GlobeOutline } from '@vicons/ionicons5';
+import { RefreshOutline, ListOutline, LayersOutline, GlobeOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import EmptyState from '../components/EmptyState.vue';
 import { useAction } from '../composables/useAction';
 
 const route = useRoute();
@@ -500,10 +507,10 @@ function showDetailOf(row: any) {
 // ==================== 批量添加 DNS 记录（DCV / TXT） ====================
 
 interface Group { domainName: string; domainId: string | null; options: any[]; items: any[]; }
-interface BatchRecordState { title: string; warning: string; groups: Group[]; running: boolean; }
+interface BatchRecordState { title: string; warning: string; groups: Group[]; runBusy: boolean; }
 
 const showBatchRecord = ref(false);
-const batchRecord = reactive<BatchRecordState>({ title: '', warning: '', groups: [], running: false });
+const batchRecord = reactive<BatchRecordState>({ title: '', warning: '', groups: [], runBusy: false });
 
 async function resolveTargets(name: string): Promise<any[]> {
   const res = await api<any>('POST', `/cloudflare/domains/${domainId}/hostnames/txt-targets`, { hostname: name });
@@ -537,7 +544,7 @@ async function openBatchDcv() {
   batchRecord.title = t('cfHostnames.batchDcvTitle', { uuid: dcvUuid.value });
   batchRecord.warning = t('cfHostnames.batchDcvWarning');
   batchRecord.groups = groupByDomain(items);
-  batchRecord.running = false;
+  batchRecord.runBusy = false;
   showBatchRecord.value = true;
 }
 
@@ -567,7 +574,7 @@ async function openBatchTxt(kind: 'hostname' | 'cert') {
   batchRecord.title = kind === 'hostname' ? t('cfHostnames.batchHostnameTxtTitle') : t('cfHostnames.batchCertTxtTitle');
   batchRecord.warning = skipped.length ? t('cfHostnames.skippedWarning', { count: skipped.length, list: skipped.join(', ') }) : '';
   batchRecord.groups = groupByDomain(items);
-  batchRecord.running = false;
+  batchRecord.runBusy = false;
   showBatchRecord.value = true;
 }
 
@@ -575,7 +582,7 @@ async function runBatchRecord() {
   for (const g of batchRecord.groups) {
     if (!g.domainId) return message.warning(t('cfHostnames.selectProviderRequired'));
   }
-  batchRecord.running = true;
+  batchRecord.runBusy = true;
   const jobs: any[] = [];
   for (const g of batchRecord.groups) for (const it of g.items) jobs.push({ g, it });
   const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
@@ -595,7 +602,7 @@ async function runBatchRecord() {
       if (r.msg) errors.push(r.msg);
     }
   }
-  batchRecord.running = false;
+  batchRecord.runBusy = false;
   showBatchRecord.value = false;
   dialog.info({ title: t('cfHostnames.processDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
 }
@@ -619,7 +626,7 @@ async function getDefaultLine(targetDomainId: number | string): Promise<string> 
 
 interface CfGroup { domainName: string; domainId: string | null; line: string; options: any[]; lineOptions: any[]; items: any[]; }
 const showCfOptimized = ref(false);
-const cfOptimized = reactive<any>({ single: false, singleHostname: '', targets: [], targetMode: '', customType: 'CNAME', customValue: '', groups: [] as CfGroup[], running: false });
+const cfOptimized = reactive<any>({ single: false, singleHostname: '', targets: [], targetMode: '', customType: 'CNAME', customValue: '', groups: [] as CfGroup[], runBusy: false, loading: false });
 
 async function loadCfOptimizedTargets() {
   const list: any[] = [];
@@ -637,32 +644,41 @@ async function loadCfOptimizedTargets() {
 async function openCfOptimized(single: boolean, hostname?: string) {
   cfOptimized.single = single;
   cfOptimized.singleHostname = hostname || '';
-  cfOptimized.targets = await loadCfOptimizedTargets();
+  cfOptimized.targets = [];
   cfOptimized.targetMode = '';
   cfOptimized.customType = 'CNAME';
   cfOptimized.customValue = '';
   cfOptimized.groups = [];
-  cfOptimized.running = false;
+  cfOptimized.runBusy = false;
+  cfOptimized.loading = true;
+  showCfOptimized.value = true; // 先开弹窗，立即给出视觉响应
 
-  const hostnames = single ? [hostname!] : selection.value.map((id) => rows.value.find((r) => r.id === id)?.hostname).filter(Boolean);
-  const items = await mapPool(hostnames as string[], 5, async (h) => {
-    const candidates = await resolveTargets(h);
-    return { hostname: h, candidates };
-  });
-  const groups: Record<string, CfGroup> = {};
-  for (const it of items) {
-    const domainName = it.candidates.length ? it.candidates[0].domain_name : t('cfHostnames.unknownDomain');
-    if (!groups[domainName]) groups[domainName] = { domainName, domainId: null, line: '', options: [], lineOptions: [], items: [] };
-    groups[domainName].items.push(it);
-    for (const c of it.candidates) {
-      if (!groups[domainName].options.find((o: any) => o.value === c.domain_id)) {
-        groups[domainName].options.push({ label: `${c.domain_name} (${c.account_type_name})`, value: c.domain_id });
+  try {
+    cfOptimized.targets = await loadCfOptimizedTargets();
+    const hostnames = single ? [hostname!] : selection.value.map((id) => rows.value.find((r) => r.id === id)?.hostname).filter(Boolean);
+    const items = await mapPool(hostnames as string[], 5, async (h) => {
+      const candidates = await resolveTargets(h);
+      return { hostname: h, candidates };
+    });
+    const groups: Record<string, CfGroup> = {};
+    for (const it of items) {
+      const domainName = it.candidates.length ? it.candidates[0].domain_name : t('cfHostnames.unknownDomain');
+      if (!groups[domainName]) groups[domainName] = { domainName, domainId: null, line: '', options: [], lineOptions: [], items: [] };
+      groups[domainName].items.push(it);
+      for (const c of it.candidates) {
+        if (!groups[domainName].options.find((o: any) => o.value === c.domain_id)) {
+          groups[domainName].options.push({ label: `${c.domain_name} (${c.account_type_name})`, value: c.domain_id });
+        }
       }
     }
+    cfOptimized.groups = Object.values(groups);
+    if (!cfOptimized.groups.length) {
+      showCfOptimized.value = false;
+      message.warning(t('cfHostnames.noHostnames'));
+    }
+  } finally {
+    cfOptimized.loading = false;
   }
-  cfOptimized.groups = Object.values(groups);
-  if (!cfOptimized.groups.length) return message.warning(t('cfHostnames.noHostnames'));
-  showCfOptimized.value = true;
 }
 
 async function loadGroupLines(g: CfGroup) {
@@ -690,7 +706,7 @@ async function runCfOptimized() {
   for (const g of cfOptimized.groups) {
     if (!g.domainId) return message.warning(t('cfHostnames.selectProviderRequired'));
   }
-  cfOptimized.running = true;
+  cfOptimized.runBusy = true;
   const jobs: any[] = [];
   for (const g of cfOptimized.groups) for (const it of g.items) jobs.push({ g, it });
   const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
@@ -710,7 +726,7 @@ async function runCfOptimized() {
       if (r.msg) errors.push(r.msg);
     }
   }
-  cfOptimized.running = false;
+  cfOptimized.runBusy = false;
   showCfOptimized.value = false;
   dialog.info({ title: t('cfHostnames.optimizeDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
 }

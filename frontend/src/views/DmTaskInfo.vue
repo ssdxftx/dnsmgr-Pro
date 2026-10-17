@@ -28,12 +28,14 @@
         <n-descriptions-item :label="t('dm.infoFailCount24')">{{ task.fail_count }}</n-descriptions-item>
         <n-descriptions-item :label="t('dm.infoSwitchCount24')">{{ task.switch_count }}</n-descriptions-item>
       </n-descriptions>
+    </n-card>
 
-      <n-space class="mb-4">
-        <n-select v-model:value="actionFilter" :options="actionOptions" style="width: 140px" @update:value="loadLogs" />
-        <n-button :loading="loadBusy" :disabled="loadBusy" @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
-      </n-space>
+    <div class="app-toolbar">
+      <n-select v-model:value="actionFilter" :options="actionOptions" size="small" style="width: 140px" @update:value="loadLogs" />
+      <n-button size="small" :loading="loadBusy" :disabled="loadBusy" @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+    </div>
 
+    <n-card :bordered="false">
       <ResponsiveDataTable :columns="logColumns" :data="logs" :loading="loadBusy" :pagination="pagination" :empty-text="t('dm.emptyLogs')" />
     </n-card>
   </div>

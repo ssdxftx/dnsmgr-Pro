@@ -60,10 +60,12 @@ import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run } = useAction();
 const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
@@ -130,10 +132,41 @@ const columns = computed(() => [
     width: 240,
     render(row: any) {
       const btns: any[] = [];
-      if (row.status !== 1) btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => process(row) }, { default: () => t('deployTask.deploy') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => reset(row) }, { default: () => t('deployTask.reset') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? t('common.disable') : t('common.enable')) }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      if (row.status !== 1) {
+        const pKey = `process:${row.id}`;
+        btns.push(
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              type: 'primary',
+              loading: !!busy[pKey],
+              disabled: !!busy[pKey],
+              onClick: () => run(pKey, () => process(row)),
+            },
+            { default: () => t('deployTask.deploy') },
+          ),
+        );
+      }
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => reset(row) }, { default: () => t('deployTask.reset') }));
+      {
+        const aKey = `active:${row.id}`;
+        btns.push(
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              loading: !!busy[aKey],
+              disabled: !!busy[aKey],
+              onClick: () => run(aKey, () => toggleActive(row)),
+            },
+            { default: () => (row.active ? t('common.disable') : t('common.enable')) },
+          ),
+        );
+      }
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },

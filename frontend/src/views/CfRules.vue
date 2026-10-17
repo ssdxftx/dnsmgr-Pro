@@ -15,27 +15,29 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" /></n-grid-item>
     </n-grid>
 
-    <n-card :bordered="false">
-      <n-space align="center" :wrap="true" class="mb-12">
-        <n-select
-          v-model:value="selectedDomain"
-          :options="domainOptions"
-          :placeholder="t('cfRules.selectDomain')"
-          style="width: 260px"
-          filterable
-          @update:value="onDomainChange"
-        />
-        <n-select
-          v-model:value="selectedPhase"
-          :options="phaseOptions"
-          style="width: 220px"
-          @update:value="onPhaseChange"
-        />
-        <n-tag v-if="selectedDomain && credentialSource" size="small" :type="credentialSource === 'dedicated' ? 'success' : 'default'">
-          {{ credentialSource === 'dedicated' ? t('cfRules.dedicatedCredential') : t('cfRules.dnsAccountKey') }}
-        </n-tag>
-      </n-space>
+    <div class="app-toolbar">
+      <n-select
+        v-model:value="selectedDomain"
+        :options="domainOptions"
+        :placeholder="t('cfRules.selectDomain')"
+        size="small"
+        style="width: 260px"
+        filterable
+        @update:value="onDomainChange"
+      />
+      <n-select
+        v-model:value="selectedPhase"
+        :options="phaseOptions"
+        size="small"
+        style="width: 220px"
+        @update:value="onPhaseChange"
+      />
+      <n-tag v-if="selectedDomain && credentialSource" size="small" :type="credentialSource === 'dedicated' ? 'success' : 'default'">
+        {{ credentialSource === 'dedicated' ? t('cfRules.dedicatedCredential') : t('cfRules.dnsAccountKey') }}
+      </n-tag>
+    </div>
 
+    <n-card :bordered="false">
       <n-alert v-if="needCredential" type="warning" class="mb-3" :show-icon="true">
         {{ credentialMessage }}
         <template #action>

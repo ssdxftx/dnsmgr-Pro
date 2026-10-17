@@ -16,6 +16,13 @@
         </n-space>
       </template>
     </PageHeader>
+    <n-card :bordered="false" size="small">
+      <n-descriptions :column="3" size="small" label-placement="left">
+        <n-descriptions-item :label="t('common.name')">{{ displayTitle }}</n-descriptions-item>
+        <n-descriptions-item :label="t('common.type')">{{ accountType || '-' }}</n-descriptions-item>
+        <n-descriptions-item :label="t('common.total')">{{ total }}</n-descriptions-item>
+      </n-descriptions>
+    </n-card>
     <n-card :bordered="false">
       <RecordTable
         ref="recordTable"

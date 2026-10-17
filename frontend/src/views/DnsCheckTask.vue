@@ -100,10 +100,12 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
+const { busy, run } = useAction();
 const loadBusy = ref(false);
 const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
@@ -169,12 +171,35 @@ const columns = computed(() => [
     key: 'actions',
     width: 260,
     render(row: any) {
+      const rKey = `run:${row.id}`;
+      const tKey = `toggle:${row.id}`;
       return h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => runNow(row) }, { default: () => t('dnsCheck.runNow') }),
-          h(NButton, { size: 'tiny', onClick: () => toggle(row) }, { default: () => (row.active ? t('dnsCheck.stopped') : t('common.enable')) }),
-          h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              type: 'primary',
+              loading: !!busy[rKey],
+              disabled: !!busy[rKey],
+              onClick: () => run(rKey, () => runNow(row)),
+            },
+            { default: () => t('dnsCheck.runNow') },
+          ),
+          h(
+            NButton,
+            {
+              size: 'tiny',
+              quaternary: true,
+              loading: !!busy[tKey],
+              disabled: !!busy[tKey],
+              onClick: () => run(tKey, () => toggle(row)),
+            },
+            { default: () => (row.active ? t('dnsCheck.stopped') : t('common.enable')) },
+          ),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
