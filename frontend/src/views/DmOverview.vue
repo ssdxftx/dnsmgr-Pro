@@ -25,7 +25,7 @@
     </n-grid>
 
     <n-card :bordered="false" :title="t('dm.runLog')">
-      <n-alert v-if="info.run_error" type="error" style="margin-bottom: 12px">{{ t('dm.runError') }}{{ info.run_error }}</n-alert>
+      <n-alert v-if="info.run_error" type="error" class="mb-3">{{ t('dm.runError') }}{{ info.run_error }}</n-alert>
       <div class="clean-row">
         <n-input-number v-model:value="days" :min="0" class="days-input" />
         <n-button type="warning" class="clean-btn" @click="clean">{{ t('dm.cleanLog') }}</n-button>

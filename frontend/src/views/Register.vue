@@ -6,11 +6,11 @@
         <p>{{ t('register.subtitle') }}</p>
       </div>
 
-      <n-alert v-if="!loading && !config.enable" type="warning" style="margin-bottom: 16px">
+      <n-alert v-if="!loadBusy && !config.enable" type="warning" class="mb-4">
         {{ t('register.disabled') }}
       </n-alert>
 
-      <template v-else-if="!loading">
+      <template v-else-if="!loadBusy">
         <n-form :model="form" label-placement="top">
           <n-form-item :label="t('register.username')">
             <n-input v-model:value="form.username" :placeholder="t('register.usernamePlaceholder')" size="large" />
@@ -29,8 +29,8 @@
             <n-form-item :label="t('register.emailCode')">
               <n-input-group>
                 <n-input v-model:value="form.code" :placeholder="t('register.emailCodePlaceholder')" size="large" maxlength="6" />
-                <n-button size="large" :disabled="countdown > 0 || sending" @click="onSendCode">
-                  {{ countdown > 0 ? countdown + 's' : sending ? t('register.sending') : t('register.sendCode') }}
+                <n-button size="large" :disabled="countdown > 0 || sendBusy" @click="onSendCode">
+                  {{ countdown > 0 ? countdown + 's' : sendBusy ? t('register.sendBusy') : t('register.sendCode') }}
                 </n-button>
               </n-input-group>
             </n-form-item>
@@ -45,7 +45,7 @@
             </n-form-item>
           </template>
 
-          <n-button type="primary" size="large" block :loading="registering" @click="onRegister">{{ t('register.submit') }}</n-button>
+          <n-button type="primary" size="large" block :loading="registerBusy" @click="onRegister">{{ t('register.submit') }}</n-button>
         </n-form>
         <n-button text style="margin-top: 12px; width: 100%" @click="router.push('/login')">{{ t('register.toLogin') }}</n-button>
       </template>
@@ -64,9 +64,9 @@ import AuthShell from '../components/AuthShell.vue';
 const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
-const loading = ref(true);
-const registering = ref(false);
-const sending = ref(false);
+const loadBusy = ref(true);
+const registerBusy = ref(false);
+const sendBusy = ref(false);
 const countdown = ref(0);
 const config = reactive<{ enable: boolean; mode: string }>({ enable: false, mode: 'email' });
 const form = reactive({ username: '', password: '', password2: '', email: '', code: '', reg_code: '' });
@@ -83,7 +83,7 @@ onMounted(async () => {
   } catch {
     /* ignore */
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 });
 
@@ -96,7 +96,7 @@ async function onSendCode() {
     message.warning(t('register.emailRequired'));
     return;
   }
-  sending.value = true;
+  sendBusy.value = true;
   try {
     const res = await api<any>('POST', '/register/send-code', { email: form.email });
     if (res.code === 0) {
@@ -112,7 +112,7 @@ async function onSendCode() {
   } catch (e: any) {
     message.error(e.message || t('register.networkError'));
   } finally {
-    sending.value = false;
+    sendBusy.value = false;
   }
 }
 
@@ -123,7 +123,7 @@ async function onRegister() {
   if (config.mode === 'email' && !form.code) return message.warning(t('register.emailCodeRequired'));
   if (config.mode === 'code' && !form.reg_code) return message.warning(t('register.regCodeRequired'));
 
-  registering.value = true;
+  registerBusy.value = true;
   try {
     const body: Record<string, string> = { username: form.username, password: form.password };
     if (config.mode === 'email') {
@@ -143,7 +143,7 @@ async function onRegister() {
   } catch (e: any) {
     message.error(e.message || t('register.networkError'));
   } finally {
-    registering.value = false;
+    registerBusy.value = false;
   }
 }
 </script>

@@ -11,10 +11,10 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="LinkOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :empty-text="t('cname.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('cname.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showAdd" preset="card" :title="t('cname.addTitle')" style="max-width:480px" :mask-closable="false">
+    <n-modal v-model:show="showAdd" preset="card" :title="t('cname.addTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cname.domain')"><n-input v-model:value="form.domain" placeholder="sub.example.com" /></n-form-item>
         <n-form-item :label="t('cname.selectDomain')">
@@ -25,7 +25,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showAdd = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="add">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="add">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -48,9 +48,9 @@ const dialog = useDialog();
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
-const loading = ref(false);
+const loadBusy = ref(false);
 const showAdd = ref(false);
-const saving = ref(false);
+const saveBusy = ref(false);
 const domainOptions = ref<any[]>([]);
 const form = reactive<any>({ domain: '', did: null, rr: '' });
 
@@ -78,11 +78,11 @@ const columns = computed(() => [
 ]);
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/cert/cnames');
   rows.value = res.code === 0 ? res.data || [] : [];
   if (res.code !== 0) message.error(res.msg);
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function loadDomains() {
@@ -92,9 +92,9 @@ async function loadDomains() {
 
 async function add() {
   if (!form.domain || !form.did || !form.rr) return message.warning(t('record.fillRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', '/cert/cnames', { domain: form.domain, did: form.did, rr: form.rr });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(t('cname.addSuccess'));
     showAdd.value = false;

@@ -7,11 +7,11 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="LinkOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 14px">
+      <n-space class="mb-4">
         <n-input v-model:value="alias" :placeholder="t('record.aliasPlaceholder')" style="width: 320px" />
-        <n-button type="primary" :loading="saving" @click="add">{{ t('record.aliasAdd') }}</n-button>
+        <n-button type="primary" :loading="saveBusy" @click="add">{{ t('record.aliasAdd') }}</n-button>
       </n-space>
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :empty-text="t('common.noData')" />
+      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('common.noData')" />
     </n-card>
   </div>
 </template>
@@ -36,8 +36,8 @@ const domainName = ref('');
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
-const loading = ref(false);
-const saving = ref(false);
+const loadBusy = ref(false);
+const saveBusy = ref(false);
 const alias = ref('');
 
 const columns = computed(() => [
@@ -51,18 +51,18 @@ const columns = computed(() => [
 ]);
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', `/domains/${domainId}/aliases`);
   rows.value = res.code === 0 ? res.data || [] : [];
   if (res.code !== 0) message.error(res.msg);
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function add() {
   if (!alias.value.trim()) return;
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', `/domains/${domainId}/aliases`, { alias: alias.value.trim() });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     alias.value = '';

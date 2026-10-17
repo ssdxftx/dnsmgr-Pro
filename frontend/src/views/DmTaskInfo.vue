@@ -14,7 +14,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-descriptions v-if="task" bordered :column="2" size="small" style="margin-bottom: 16px">
+      <n-descriptions v-if="task" bordered :column="2" size="small" class="mb-4">
         <n-descriptions-item :label="t('dm.infoDomain')">{{ task.rr }}.{{ task.domain || '' }}</n-descriptions-item>
         <n-descriptions-item :label="t('dm.infoRecord')">{{ task.main_value }}</n-descriptions-item>
         <n-descriptions-item :label="t('dm.infoSwitchSet')">{{ typeLabel }}</n-descriptions-item>
@@ -29,12 +29,12 @@
         <n-descriptions-item :label="t('dm.infoSwitchCount24')">{{ task.switch_count }}</n-descriptions-item>
       </n-descriptions>
 
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-select v-model:value="actionFilter" :options="actionOptions" style="width: 140px" @update:value="loadLogs" />
-        <n-button @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+        <n-button :loading="loadBusy" :disabled="loadBusy" @click="loadLogs"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
       </n-space>
 
-      <ResponsiveDataTable :columns="logColumns" :data="logs" :loading="loading" :pagination="pagination" :empty-text="t('dm.emptyLogs')" />
+      <ResponsiveDataTable :columns="logColumns" :data="logs" :loading="loadBusy" :pagination="pagination" :empty-text="t('dm.emptyLogs')" />
     </n-card>
   </div>
 </template>
@@ -58,7 +58,7 @@ const { t } = useI18n();
 
 const task = ref<any>(null);
 const logs = ref<any[]>([]);
-const loading = ref(false);
+const loadBusy = ref(false);
 const page = ref(1);
 const pageSize = ref(10);
 const actionFilter = ref(0);
@@ -146,7 +146,7 @@ async function loadLogs() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', `/dmonitor/tasks/${id}/logs`, {
       offset: (page.value - 1) * pageSize.value,
@@ -164,7 +164,7 @@ async function loadLogs() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 

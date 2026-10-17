@@ -4,12 +4,12 @@
     <n-card :bordered="false" style="max-width: 560px">
       <n-result v-if="!enabled" status="info" :title="t('totp.notEnabled')" :description="t('totp.notEnabledDesc')">
         <template #footer>
-          <n-button type="primary" :loading="loading" @click="generate">{{ t('totp.enable') }}</n-button>
+          <n-button type="primary" :loading="loadBusy" @click="generate">{{ t('totp.enable') }}</n-button>
         </template>
       </n-result>
 
       <div v-if="step === 'bind'">
-        <n-alert type="info" style="margin-bottom: 16px">{{ t('totp.scanHint') }}</n-alert>
+        <n-alert type="info" class="mb-4">{{ t('totp.scanHint') }}</n-alert>
         <n-space vertical align="center" style="width:100%">
           <div class="qr-box">
             <img v-if="qrcode" :src="qrDataUrl" :alt="t('totp.qrAlt')" />
@@ -23,7 +23,7 @@
           <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.passwordPlaceholder')" style="max-width: 380px" />
           <n-space>
             <n-button @click="step = ''">{{ t('common.cancel') }}</n-button>
-            <n-button type="primary" :loading="loading" @click="bind">{{ t('totp.confirmBind') }}</n-button>
+            <n-button type="primary" :loading="loadBusy" @click="bind">{{ t('totp.confirmBind') }}</n-button>
           </n-space>
         </n-space>
       </div>
@@ -32,7 +32,7 @@
         <template #footer>
           <n-space vertical align="center">
             <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.closePasswordPlaceholder')" style="max-width: 320px" />
-            <n-button type="error" :loading="loading" @click="close">{{ t('totp.close') }}</n-button>
+            <n-button type="error" :loading="loadBusy" @click="close">{{ t('totp.close') }}</n-button>
           </n-space>
         </template>
       </n-result>
@@ -51,7 +51,7 @@ import QRCode from 'qrcode';
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
+const loadBusy = ref(false);
 const step = ref('');
 const enabled = ref(false);
 const secret = ref('');
@@ -66,9 +66,9 @@ async function refreshQr() {
 }
 
 async function generate() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('POST', '/auth/totp-config', { action: 'generate' });
-  loading.value = false;
+  loadBusy.value = false;
   if (res.code === 0) {
     secret.value = res.data.secret;
     qrcode.value = res.data.qrcode;
@@ -81,9 +81,9 @@ async function generate() {
 async function bind() {
   if (!code.value) return message.warning(t('totp.codeRequired'));
   if (!password.value) return message.warning(t('totp.passwordRequired'));
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, code: code.value, password: password.value });
-  loading.value = false;
+  loadBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     enabled.value = true;
@@ -101,9 +101,9 @@ function close() {
     positiveText: t('common.close'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      loading.value = true;
+      loadBusy.value = true;
       const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd });
-      loading.value = false;
+      loadBusy.value = false;
       if (res.code === 0) {
         message.success(res.msg);
         enabled.value = false;

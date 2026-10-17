@@ -7,7 +7,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="DocumentTextOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :pagination="pagination" :empty-text="t('common.noData')" />
+      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :pagination="pagination" :empty-text="t('common.noData')" />
     </n-card>
   </div>
 </template>
@@ -31,7 +31,7 @@ const domainName = ref('');
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
-const loading = ref(false);
+const loadBusy = ref(false);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(20);
@@ -58,7 +58,7 @@ async function load() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', `/domains/${domainId}/recordlog`, { page: page.value, pagesize: pageSize.value }, { signal: ac.signal });
     if (loadAbort !== ac) return;
@@ -69,7 +69,7 @@ async function load() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 

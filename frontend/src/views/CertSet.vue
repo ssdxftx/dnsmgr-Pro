@@ -63,7 +63,7 @@
       <template #footer>
         <n-space justify="end" class="footer-actions">
           <n-button @click="goBack">{{ t('common.back') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-card>
@@ -83,7 +83,7 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 
 const message = useMessage();
-const saving = ref(false);
+const saveBusy = ref(false);
 
 const isMobile = ref(false);
 const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
@@ -146,9 +146,9 @@ async function load() {
 }
 
 async function save() {
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', '/cert/settings', { ...form });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) message.success(res.msg);
   else message.error(res.msg);
 }

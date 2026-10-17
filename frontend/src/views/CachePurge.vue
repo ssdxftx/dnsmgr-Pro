@@ -22,7 +22,7 @@
         />
 
         <n-space align="center">
-          <n-button type="primary" :loading="submitting" @click="submit">{{ t('common.submit') }}</n-button>
+          <n-button type="primary" :loading="submitBusy" @click="submit">{{ t('common.submit') }}</n-button>
           <n-text depth="3" style="font-size:12px">{{ t('cache.hint') }}</n-text>
         </n-space>
 
@@ -36,7 +36,7 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
-        :loading="loadingTasks"
+        :loading="tasksLoadBusy"
         :pagination="{ pageSize: 20 }"
       />
     </n-card>
@@ -56,8 +56,8 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 const { t } = useI18n();
 const opType = ref<'url' | 'dir' | 'preheat'>('url');
 const urlText = ref('');
-const submitting = ref(false);
-const loadingTasks = ref(false);
+const submitBusy = ref(false);
+const tasksLoadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
@@ -104,7 +104,7 @@ async function submit() {
     result.value = { ok: false, msg: t('cache.emptyUrls'), failed: [] };
     return;
   }
-  submitting.value = true;
+  submitBusy.value = true;
   result.value = { ok: true, msg: '', failed: [] };
   try {
     let res: any;
@@ -128,17 +128,17 @@ async function submit() {
     }
     loadTasks();
   } finally {
-    submitting.value = false;
+    submitBusy.value = false;
   }
 }
 
 async function loadTasks() {
-  loadingTasks.value = true;
+  tasksLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/cdn/cache-tasks');
     if (res.code === 0) tasks.value = res.data || [];
   } finally {
-    loadingTasks.value = false;
+    tasksLoadBusy.value = false;
   }
 }
 

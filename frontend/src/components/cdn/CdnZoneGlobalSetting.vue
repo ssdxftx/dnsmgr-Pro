@@ -12,7 +12,7 @@
       </n-button>
     </n-alert>
 
-    <n-spin v-else :show="loading">
+    <n-spin v-else :show="loadBusy">
       <n-form label-placement="left" label-width="110">
         <n-divider class="section" title-placement="left">HTTPS / TLS</n-divider>
         <n-form-item :label="t('cdnZone.forceHttpsLabel')">
@@ -94,7 +94,7 @@
         <n-form-item :label="t('cdnZone.mainlandLabel')"><n-switch v-model:value="zone.accelerateMainland" /></n-form-item>
 
         <div class="global-setting__actions">
-          <n-button type="primary" size="small" :loading="saving" @click="save">{{ t('cdnZone.saveZone') }}</n-button>
+          <n-button type="primary" size="small" :loading="saveBusy" @click="save">{{ t('cdnZone.saveZone') }}</n-button>
         </div>
       </n-form>
     </n-spin>
@@ -115,8 +115,8 @@ const emit = defineEmits<{ (e: 'goRules'): void }>();
 
 const { t } = useI18n();
 const message = useMessage();
-const loading = ref(false);
-const saving = ref(false);
+const loadBusy = ref(false);
+const saveBusy = ref(false);
 const unsupported = ref(false);
 const zoneSetting = ref<Record<string, any>>({});
 
@@ -177,10 +177,10 @@ function loadZone() {
 
 async function load() {
   if (!props.aid || !props.zoneId) return;
-  loading.value = true;
+  loadBusy.value = true;
   unsupported.value = false;
   const res = await api<any>('GET', '/cdn/zones/setting', { aid: props.aid, zone_id: props.zoneId });
-  loading.value = false;
+  loadBusy.value = false;
   if (res.code === 0) {
     zoneSetting.value = res.data.zoneSetting || {};
     loadZone();
@@ -227,9 +227,9 @@ async function save() {
     IPv6: { Switch: zone.ipv6 ? 'on' : 'off' },
     AccelerateMainland: { Switch: zone.accelerateMainland ? 'on' : 'off' },
   };
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api<any>('POST', '/cdn/zones/setting', { aid: props.aid, zone_id: props.zoneId, setting: cfg });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg || t('cdnZoneSetting.saved'));
     load();

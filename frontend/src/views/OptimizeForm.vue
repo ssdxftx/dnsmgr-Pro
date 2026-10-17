@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('optimize.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable remote :loading="domainLoading" @search="loadDomains" style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -50,15 +50,15 @@
           <n-input v-model:value="form.remark" :placeholder="t('optimize.optional')" />
         </n-form-item>
 
-        <n-alert v-show="form.type === 0" type="info" style="margin-bottom: 12px">
+        <n-alert v-show="form.type === 0" type="info" class="mb-3">
           {{ t('optimize.alertType0') }}
         </n-alert>
-        <n-alert v-show="form.type === 1" type="info" style="margin-bottom: 12px">
+        <n-alert v-show="form.type === 1" type="info" class="mb-3">
           {{ t('optimize.alertType1') }}
         </n-alert>
 
         <n-form-item>
-          <n-button type="primary" :loading="saving" @click="submit">{{ t('common.submit') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="submit">{{ t('common.submit') }}</n-button>
         </n-form-item>
       </n-form>
     </n-card>
@@ -82,8 +82,8 @@ const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'))
 const editId = computed(() => Number(route.params.id));
 
 const domainOptions = ref<any[]>([]);
-const domainLoading = ref(false);
-const saving = ref(false);
+const domainLoadBusy = ref(false);
+const saveBusy = ref(false);
 const optimizeIpApi = ref('0');
 const ipTypeSelect = ref<string[]>(['v4']);
 
@@ -117,12 +117,12 @@ function toggleIpType(v: string, checked: boolean) {
 }
 
 async function loadDomains(kw = '') {
-  domainLoading.value = true;
+  domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/optimize/domains', kw ? { kw } : undefined);
     if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id }));
   } finally {
-    domainLoading.value = false;
+    domainLoadBusy.value = false;
   }
 }
 
@@ -152,10 +152,10 @@ async function submit() {
   if (!form.did || !form.rr || !ipTypeSelect.value.length || !form.recordnum || !form.ttl) {
     return message.warning(t('optimize.requiredEmpty'));
   }
-  saving.value = true;
+  saveBusy.value = true;
   const body = { ...form, ip_type: ipTypeSelect.value.join(',') };
   const res = isEdit.value ? await api('PUT', `/optimize/tasks/${editId.value}`, body) : await api('POST', '/optimize/tasks', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     router.push('/optimize-tasks');

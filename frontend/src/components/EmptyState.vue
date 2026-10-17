@@ -1,12 +1,14 @@
 <template>
-  <div class="empty-state">
+  <div class="empty-state" :class="`empty-state--${tone}`">
     <div v-if="icon" class="empty-state__icon">
       <n-icon size="30" :component="icon" />
     </div>
     <div v-if="title" class="empty-state__title">{{ title }}</div>
     <div v-if="description" class="empty-state__desc">{{ description }}</div>
-    <div v-if="$slots.default" class="empty-state__action">
-      <slot />
+    <div v-if="$slots.actions || $slots.default" class="empty-state__action">
+      <slot name="actions">
+        <slot />
+      </slot>
     </div>
   </div>
 </template>
@@ -20,8 +22,9 @@ withDefaults(
     title?: string;
     description?: string;
     icon?: Component;
+    tone?: 'default' | 'error';
   }>(),
-  { title: '', description: '', icon: undefined },
+  { title: '', description: '', icon: undefined, tone: 'default' },
 );
 </script>
 

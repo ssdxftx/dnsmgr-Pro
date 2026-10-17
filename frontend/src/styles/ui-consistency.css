@@ -1,0 +1,89 @@
+/* ===========================================================================
+   UI 一致性补充层（ActionButton / useAction 配套）
+   仅新增通用类，不覆盖既有令牌与页面样式。
+   =========================================================================== */
+
+/* ---- 工具条卡片：筛选/搜索/批量操作独立成条，与内容卡分层但不抢层级 ---- */
+.app-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 16px;
+  margin-bottom: var(--app-page-gap);
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+}
+.app-toolbar__spacer {
+  margin-left: auto;
+}
+
+/* ---- 分区面板：由 .zone-panel 提升为全站可复用的语义分区 ---- */
+.app-panel {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  padding: 16px 18px;
+  transition: border-color 0.2s var(--app-ease);
+}
+.app-panel + .app-panel {
+  margin-top: 12px;
+}
+.app-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.app-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--app-text);
+}
+.app-panel__title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 4px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--app-primary) 40%, transparent);
+}
+.app-panel__extra {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* ---- 弹窗宽度三档：sm=480 / md=640 / lg=800（替代 10+ 种内联 max-width） ---- */
+.modal-sm { max-width: 480px; }
+.modal-md { max-width: 640px; }
+.modal-lg { max-width: 800px; }
+@media (max-width: 767px) {
+  .modal-sm,
+  .modal-md,
+  .modal-lg {
+    max-width: calc(100vw - 32px);
+  }
+}
+
+/* ---- 间距工具类：收敛散落的内联 style（4/8/12/16/24 四档 + 顶部） ---- */
+.mt-1 { margin-top: 4px; }
+.mt-2 { margin-top: 8px; }
+.mt-3 { margin-top: 12px; }
+.mt-4 { margin-top: 16px; }
+.mt-5 { margin-top: 24px; }
+.mb-1 { margin-bottom: 4px; }
+.mb-2 { margin-bottom: 8px; }
+.mb-3 { margin-bottom: 12px; }
+.mb-4 { margin-bottom: 16px; }
+.mb-5 { margin-bottom: 24px; }

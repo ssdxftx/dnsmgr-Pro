@@ -7,7 +7,7 @@
       <template #actions>
         <n-space>
           <n-tag size="small" v-if="dcvUuid">DCV UUID: {{ dcvUuid }}</n-tag>
-          <n-button @click="loadDcvUuid">{{ t('cfHostnames.getDcvUuid') }}</n-button>
+          <n-button :loading="!!busy['dcv']" :disabled="!!busy['dcv']" @click="run('dcv', loadDcvUuid)">{{ t('cfHostnames.getDcvUuid') }}</n-button>
           <n-button @click="openFallback">{{ t('cfHostnames.fallbackOriginBtn') }}</n-button>
         </n-space>
       </template>
@@ -30,22 +30,24 @@
         <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('hostname')">{{ t('cfHostnames.batchHostnameVerify') }}</n-button>
         <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('cert')">{{ t('cfHostnames.batchCertVerify') }}</n-button>
         <n-button size="small" :disabled="!selection.length" @click="openCfOptimized(false)">{{ t('cfHostnames.cfOptimized') }}</n-button>
-        <n-button size="small" @click="load"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
+        <n-button size="small" :loading="!!busy['load']" :disabled="!!busy['load']" @click="run('load', load)"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
       </n-space>
 
       <ResponsiveDataTable
         :columns="columns"
         :data="rows"
-        :loading="loading"
+        :loading="loadBusy"
         :row-key="(row: any) => row.id"
         size="small"
         v-model:checked-row-keys="selection"
         :empty-text="t('cfHostnames.empty')"
+        :error="loadError"
+        @retry="load"
       />
     </n-card>
 
     <!-- 单个添加/编辑 -->
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('cfHostnames.editTitle') : t('cfHostnames.addTitle')" style="max-width:560px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('cfHostnames.editTitle') : t('cfHostnames.addTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item v-if="!editingId" :label="t('cfHostnames.hostname')" required>
           <n-input v-model:value="form.hostname" :placeholder="t('cfHostnames.hostnamePlaceholder')" />
@@ -66,13 +68,13 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 批量添加 -->
-    <n-modal v-model:show="showBatchAdd" preset="card" :title="t('cfHostnames.batchAddTitle')" style="max-width:560px" :mask-closable="false">
+    <n-modal v-model:show="showBatchAdd" preset="card" :title="t('cfHostnames.batchAddTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cfHostnames.hostnameList')" required>
           <n-input v-model:value="batchAddForm.hostnames" type="textarea" :rows="6" :placeholder="t('cfHostnames.eachLineHostname')" />
@@ -90,13 +92,13 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showBatchAdd = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="saveBatchAdd">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveBatchAdd">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 批量编辑 -->
-    <n-modal v-model:show="showBatchEdit" preset="card" :title="t('cfHostnames.batchEditTitle')" style="max-width:560px" :mask-closable="false">
+    <n-modal v-model:show="showBatchEdit" preset="card" :title="t('cfHostnames.batchEditTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cfHostnames.customOrigin')">
           <n-input v-model:value="batchEditForm.custom_origin_server" :placeholder="t('cfHostnames.clearOriginPlaceholder')" />
@@ -111,13 +113,13 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showBatchEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="saveBatchEdit">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveBatchEdit">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- Fallback Origin -->
-    <n-modal v-model:show="showFallback" preset="card" :title="t('cfHostnames.fallbackTitle')" style="max-width:480px" :mask-closable="false">
+    <n-modal v-model:show="showFallback" preset="card" :title="t('cfHostnames.fallbackTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cfHostnames.currentOrigin')">
           <n-input :value="fallbackOrigin || t('cfHostnames.notSet')" disabled />
@@ -130,14 +132,14 @@
         <n-space justify="end">
           <n-button type="error" quaternary @click="clearFallback">{{ t('cfHostnames.clear') }}</n-button>
           <n-button @click="showFallback = false">{{ t('common.close') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="saveFallback">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveFallback">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 批量添加 DNS 记录（DCV/TXT 通用） -->
-    <n-modal v-model:show="showBatchRecord" preset="card" :title="batchRecord.title" style="max-width:640px" :mask-closable="false">
-      <n-alert v-if="batchRecord.warning" type="warning" style="margin-bottom:12px">{{ batchRecord.warning }}</n-alert>
+    <n-modal v-model:show="showBatchRecord" preset="card" :title="batchRecord.title" class="modal-md" :mask-closable="false">
+      <n-alert v-if="batchRecord.warning" type="warning" class="mb-3">{{ batchRecord.warning }}</n-alert>
       <div v-for="(g, gi) in batchRecord.groups" :key="gi" class="bg">
         <div class="bg-title">{{ t('cfHostnames.dnsDomain', { domain: g.domainName }) }}</div>
         <div class="bg-items">
@@ -158,7 +160,7 @@
     </n-modal>
 
     <!-- CF 优选 -->
-    <n-modal v-model:show="showCfOptimized" preset="card" :title="cfOptimized.single ? t('cfHostnames.cfOptimized') : t('cfHostnames.batchCfOptimized')" style="max-width:680px" :mask-closable="false">
+    <n-modal v-model:show="showCfOptimized" preset="card" :title="cfOptimized.single ? t('cfHostnames.cfOptimized') : t('cfHostnames.batchCfOptimized')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cfHostnames.bestTarget')">
           <n-radio-group v-model:value="cfOptimized.targetMode" @update:value="(v: string) => { if (v !== '_custom') cfOptimized.customValue = ''; }">
@@ -191,7 +193,7 @@
     </n-modal>
 
     <!-- 详情 -->
-    <n-modal v-model:show="showDetail" preset="card" :title="t('cfHostnames.verifyDetail', { hostname: detailRow?.hostname })" style="max-width:720px" :mask-closable="false">
+    <n-modal v-model:show="showDetail" preset="card" :title="t('cfHostnames.verifyDetail', { hostname: detailRow?.hostname })" class="modal-lg" :mask-closable="false">
       <n-descriptions v-if="detailRow" :column="1" label-placement="left" bordered size="small">
         <n-descriptions-item :label="t('cfHostnames.hostname')">{{ detailRow.hostname }}</n-descriptions-item>
         <n-descriptions-item :label="t('cfHostnames.customOrigin')">{{ detailRow.custom_origin_server || '-' }}</n-descriptions-item>
@@ -233,19 +235,22 @@ import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const route = useRoute();
 const { t, locale } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run } = useAction();
 const domainId = Number(route.params.id);
 const domainName = ref('');
-const loading = ref(false);
+const loadBusy = ref(false);
+const loadError = ref(false);
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const selection = ref<string[]>([]);
-const saving = ref(false);
+const saveBusy = ref(false);
 
 const dcvUuid = ref('');
 const fallbackOrigin = ref('');
@@ -299,11 +304,11 @@ const columns = computed<any[]>(() => [
     render(row: any) {
       return h(NSpace, { size: 2 }, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', onClick: () => refreshOne(row) }, { default: () => t('cfHostnames.refreshVerify') }),
-          h(NButton, { size: 'tiny', onClick: () => openCfOptimized(true, row.hostname) }, { default: () => t('cfHostnames.optimize') }),
-          h(NButton, { size: 'tiny', onClick: () => showDetailOf(row) }, { default: () => t('common.detail') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => delOne(row) }, { default: () => t('common.delete') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => refreshOne(row) }, { default: () => t('cfHostnames.refreshVerify') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openCfOptimized(true, row.hostname) }, { default: () => t('cfHostnames.optimize') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => showDetailOf(row) }, { default: () => t('common.detail') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delOne(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
@@ -334,11 +339,12 @@ function statusTag(v: string) {
 }
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', `/cloudflare/domains/${domainId}/hostnames`);
+  loadError.value = res.code !== 0;
   if (res.code === 0) rows.value = res.data;
   else message.error(res.msg);
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function loadDomainInfo() {
@@ -376,12 +382,12 @@ function openEdit(row: any) {
 
 async function save() {
   if (!editingId.value && !form.hostname) return message.warning(t('cfHostnames.hostnameRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const body = { custom_origin_server: form.custom_origin_server, ssl_method: form.ssl_method, min_tls_version: form.min_tls_version };
   const res = editingId.value
     ? await api('PUT', `/cloudflare/domains/${domainId}/hostnames/${editingId.value}`, body)
     : await api('POST', `/cloudflare/domains/${domainId}/hostnames`, { ...body, hostname: form.hostname });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;
@@ -396,9 +402,9 @@ function openBatchAdd() {
 
 async function saveBatchAdd() {
   if (!batchAddForm.hostnames.trim()) return message.warning(t('cfHostnames.hostnamesRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_add`, { ...batchAddForm });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showBatchAdd.value = false;
@@ -412,12 +418,12 @@ function openBatchEdit() {
 }
 
 async function saveBatchEdit() {
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_update`, {
     hostname_ids: selection.value.join(','),
     ...batchEditForm,
   });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showBatchEdit.value = false;
@@ -473,9 +479,9 @@ function openFallback() {
 
 async function saveFallback() {
   if (!fallbackForm.origin.trim()) return message.warning(t('cfHostnames.originRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('PUT', `/cloudflare/domains/${domainId}/fallback`, { origin: fallbackForm.origin });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) { message.success(res.msg); fallbackOrigin.value = res.data.origin; showFallback.value = false; } else message.error(res.msg);
 }
 

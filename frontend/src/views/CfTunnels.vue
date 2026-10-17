@@ -12,24 +12,24 @@
     </n-grid>
 
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :row-key="(row: any) => row.id" size="small" :empty-text="t('cfTunnels.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :row-key="(row: any) => row.id" size="small" :empty-text="t('cfTunnels.empty')" />
     </n-card>
 
     <!-- 创建 -->
-    <n-modal v-model:show="showAdd" preset="card" :title="t('cfTunnels.createTunnel')" style="max-width:440px" :mask-closable="false">
+    <n-modal v-model:show="showAdd" preset="card" :title="t('cfTunnels.createTunnel')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('common.name')" required><n-input v-model:value="addName" :placeholder="t('cfTunnels.namePlaceholder')" /></n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
           <n-button @click="showAdd = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="saveAdd">{{ t('common.create') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveAdd">{{ t('common.create') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- Token -->
-    <n-modal v-model:show="showToken" preset="card" :title="t('cfTunnels.tokenTitle')" style="max-width:640px" :mask-closable="false">
+    <n-modal v-model:show="showToken" preset="card" :title="t('cfTunnels.tokenTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item label="Tunnel"><n-input :value="tokenName" disabled /></n-form-item>
         <n-form-item label="Token"><n-input v-model:value="tokenValue" type="textarea" :rows="6" readonly /></n-form-item>
@@ -44,43 +44,43 @@
     </n-modal>
 
     <!-- 公网主机名 -->
-    <n-modal v-model:show="showPublic" preset="card" :title="t('cfTunnels.publicHostnamesTitle', { name: currentTunnelName })" style="max-width:760px" :mask-closable="false">
+    <n-modal v-model:show="showPublic" preset="card" :title="t('cfTunnels.publicHostnamesTitle', { name: currentTunnelName })" class="modal-lg" :mask-closable="false">
       <n-form label-placement="left" label-width="110" inline>
         <n-form-item :label="t('cfTunnels.hostname')"><n-input v-model:value="publicForm.hostname" placeholder="app.example.com" style="width:200px" /></n-form-item>
         <n-form-item :label="t('cfTunnels.service')"><n-input v-model:value="publicForm.service" placeholder="http://localhost:8080" style="width:200px" /></n-form-item>
         <n-form-item :label="t('cfTunnels.path')"><n-input v-model:value="publicForm.path" :placeholder="t('cfTunnels.leaveBlank')" style="width:120px" /></n-form-item>
-        <n-button type="primary" size="small" :loading="publicLoading" @click="savePublic">{{ t('common.save') }}</n-button>
+        <n-button type="primary" size="small" :loading="publicLoadBusy" @click="savePublic">{{ t('common.save') }}</n-button>
       </n-form>
       <n-divider />
-      <ResponsiveDataTable :columns="publicColumns" :data="publicRows" :loading="publicLoading" :row-key="(row: any) => row.hostname + row.path" size="small" />
+      <ResponsiveDataTable :columns="publicColumns" :data="publicRows" :loading="publicLoadBusy" :row-key="(row: any) => row.hostname + row.path" size="small" />
       <template #footer>
         <n-button @click="showPublic = false">{{ t('common.close') }}</n-button>
       </template>
     </n-modal>
 
     <!-- CIDR 路由 -->
-    <n-modal v-model:show="showCidr" preset="card" :title="t('cfTunnels.cidrRoutesTitle', { name: currentTunnelName })" style="max-width:760px" :mask-closable="false">
+    <n-modal v-model:show="showCidr" preset="card" :title="t('cfTunnels.cidrRoutesTitle', { name: currentTunnelName })" class="modal-lg" :mask-closable="false">
       <n-form label-placement="left" label-width="110" inline>
         <n-form-item label="CIDR"><n-input v-model:value="cidrForm.network" placeholder="10.0.0.0/24" style="width:180px" /></n-form-item>
         <n-form-item :label="t('common.remark')"><n-input v-model:value="cidrForm.comment" style="width:200px" /></n-form-item>
-        <n-button type="primary" size="small" :loading="cidrLoading" @click="saveCidr">{{ t('common.add') }}</n-button>
+        <n-button type="primary" size="small" :loading="cidrLoadBusy" @click="saveCidr">{{ t('common.add') }}</n-button>
       </n-form>
       <n-divider />
-      <ResponsiveDataTable :columns="cidrColumns" :data="cidrRows" :loading="cidrLoading" :row-key="(row: any) => row.id" size="small" />
+      <ResponsiveDataTable :columns="cidrColumns" :data="cidrRows" :loading="cidrLoadBusy" :row-key="(row: any) => row.id" size="small" />
       <template #footer>
         <n-button @click="showCidr = false">{{ t('common.close') }}</n-button>
       </template>
     </n-modal>
 
     <!-- 主机名路由 -->
-    <n-modal v-model:show="showRoute" preset="card" :title="t('cfTunnels.hostnameRoutesTitle', { name: currentTunnelName })" style="max-width:760px" :mask-closable="false">
+    <n-modal v-model:show="showRoute" preset="card" :title="t('cfTunnels.hostnameRoutesTitle', { name: currentTunnelName })" class="modal-lg" :mask-closable="false">
       <n-form label-placement="left" label-width="110" inline>
         <n-form-item :label="t('cfTunnels.hostname')"><n-input v-model:value="routeForm.hostname" placeholder="private.example.com" style="width:220px" /></n-form-item>
         <n-form-item :label="t('common.remark')"><n-input v-model:value="routeForm.comment" style="width:200px" /></n-form-item>
-        <n-button type="primary" size="small" :loading="routeLoading" @click="saveRoute">{{ t('common.add') }}</n-button>
+        <n-button type="primary" size="small" :loading="routeLoadBusy" @click="saveRoute">{{ t('common.add') }}</n-button>
       </n-form>
       <n-divider />
-      <ResponsiveDataTable :columns="routeColumns" :data="routeRows" :loading="routeLoading" :row-key="(row: any) => row.id" size="small" />
+      <ResponsiveDataTable :columns="routeColumns" :data="routeRows" :loading="routeLoadBusy" :row-key="(row: any) => row.id" size="small" />
       <template #footer>
         <n-button @click="showRoute = false">{{ t('common.close') }}</n-button>
       </template>
@@ -105,11 +105,11 @@ const message = useMessage();
 const dialog = useDialog();
 const accountId = Number(route.params.id);
 const accountName = ref('');
-const loading = ref(false);
+const loadBusy = ref(false);
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
-const saving = ref(false);
+const saveBusy = ref(false);
 
 const showAdd = ref(false);
 const addName = ref('');
@@ -135,11 +135,11 @@ const columns = computed<any[]>(() => [
     render(row: any) {
       return h(NSpace, { size: 2 }, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => showTokenOf(row) }, { default: () => 'Token' }),
-          h(NButton, { size: 'tiny', onClick: () => openPublic(row) }, { default: () => t('cfTunnels.publicHostnames') }),
-          h(NButton, { size: 'tiny', onClick: () => openCidr(row) }, { default: () => t('cfTunnels.cidrRoutes') }),
-          h(NButton, { size: 'tiny', onClick: () => openRoute(row) }, { default: () => t('cfTunnels.hostnameRoutes') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => delTunnel(row) }, { default: () => t('common.delete') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => showTokenOf(row) }, { default: () => 'Token' }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openPublic(row) }, { default: () => t('cfTunnels.publicHostnames') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openCidr(row) }, { default: () => t('cfTunnels.cidrRoutes') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRoute(row) }, { default: () => t('cfTunnels.hostnameRoutes') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delTunnel(row) }, { default: () => t('common.delete') }),
         ],
       });
     },
@@ -147,7 +147,7 @@ const columns = computed<any[]>(() => [
 ]);
 
 const publicRows = ref<any[]>([]);
-const publicLoading = ref(false);
+const publicLoadBusy = ref(false);
 const showPublic = ref(false);
 const publicForm = reactive<any>({ hostname: '', service: '', path: '' });
 const publicColumns = computed<any[]>(() => [
@@ -159,14 +159,14 @@ const publicColumns = computed<any[]>(() => [
     key: 'actions',
     width: 80,
     render(row: any) {
-      return h(NButton, { size: 'tiny', type: 'error', onClick: () => delPublic(row) }, { default: () => t('common.delete') });
+      return h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delPublic(row) }, { default: () => t('common.delete') });
     },
   },
 ]);
 
 const showCidr = ref(false);
 const cidrRows = ref<any[]>([]);
-const cidrLoading = ref(false);
+const cidrLoadBusy = ref(false);
 const cidrForm = reactive<any>({ network: '', comment: '' });
 const cidrColumns = computed<any[]>(() => [
   { title: 'CIDR', key: 'network', minWidth: 180 },
@@ -177,14 +177,14 @@ const cidrColumns = computed<any[]>(() => [
     key: 'actions',
     width: 80,
     render(row: any) {
-      return h(NButton, { size: 'tiny', type: 'error', onClick: () => delCidr(row) }, { default: () => t('common.delete') });
+      return h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delCidr(row) }, { default: () => t('common.delete') });
     },
   },
 ]);
 
 const showRoute = ref(false);
 const routeRows = ref<any[]>([]);
-const routeLoading = ref(false);
+const routeLoadBusy = ref(false);
 const routeForm = reactive<any>({ hostname: '', comment: '' });
 const routeColumns = computed<any[]>(() => [
   { title: t('cfTunnels.hostname'), key: 'hostname', minWidth: 200 },
@@ -195,7 +195,7 @@ const routeColumns = computed<any[]>(() => [
     key: 'actions',
     width: 80,
     render(row: any) {
-      return h(NButton, { size: 'tiny', type: 'error', onClick: () => delRoute(row) }, { default: () => t('common.delete') });
+      return h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRoute(row) }, { default: () => t('common.delete') });
     },
   },
 ]);
@@ -215,13 +215,13 @@ function statusTag(v: string) {
 }
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels`);
   if (res.code === 0) {
     rows.value = res.data;
     accountName.value = res.account_name || '';
   } else message.error(res.msg);
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 function openAdd() {
@@ -231,9 +231,9 @@ function openAdd() {
 
 async function saveAdd() {
   if (!addName.value.trim()) return message.warning(t('cfTunnels.nameRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels`, { name: addName.value });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) { message.success(res.msg); showAdd.value = false; load(); } else message.error(res.msg);
 }
 
@@ -269,18 +269,18 @@ function openPublic(row: any) {
 }
 
 async function loadPublic() {
-  publicLoading.value = true;
+  publicLoadBusy.value = true;
   const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames`);
   publicRows.value = res.code === 0 ? res.data : [];
   if (res.code !== 0) message.error(res.msg);
-  publicLoading.value = false;
+  publicLoadBusy.value = false;
 }
 
 async function savePublic() {
   if (!publicForm.hostname || !publicForm.service) return message.warning(t('cfTunnels.fillHostnameService'));
-  publicLoading.value = true;
+  publicLoadBusy.value = true;
   const res = await api('PUT', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames`, { ...publicForm });
-  publicLoading.value = false;
+  publicLoadBusy.value = false;
   if (res.code === 0) { message.success(res.msg); Object.assign(publicForm, { hostname: '', service: '', path: '' }); loadPublic(); } else message.error(res.msg);
 }
 
@@ -301,18 +301,18 @@ function openCidr(row: any) {
 }
 
 async function loadCidr() {
-  cidrLoading.value = true;
+  cidrLoadBusy.value = true;
   const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes`);
   cidrRows.value = res.code === 0 ? res.data : [];
   if (res.code !== 0) message.error(res.msg);
-  cidrLoading.value = false;
+  cidrLoadBusy.value = false;
 }
 
 async function saveCidr() {
   if (!cidrForm.network.trim()) return message.warning(t('cfTunnels.cidrRequired'));
-  cidrLoading.value = true;
+  cidrLoadBusy.value = true;
   const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes`, { ...cidrForm });
-  cidrLoading.value = false;
+  cidrLoadBusy.value = false;
   if (res.code === 0) { message.success(res.msg); Object.assign(cidrForm, { network: '', comment: '' }); loadCidr(); } else message.error(res.msg);
 }
 
@@ -332,18 +332,18 @@ function openRoute(row: any) {
 }
 
 async function loadRoute() {
-  routeLoading.value = true;
+  routeLoadBusy.value = true;
   const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes`);
   routeRows.value = res.code === 0 ? res.data : [];
   if (res.code !== 0) message.error(res.msg);
-  routeLoading.value = false;
+  routeLoadBusy.value = false;
 }
 
 async function saveRoute() {
   if (!routeForm.hostname.trim()) return message.warning(t('cfTunnels.hostnameRequired'));
-  routeLoading.value = true;
+  routeLoadBusy.value = true;
   const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes`, { ...routeForm });
-  routeLoading.value = false;
+  routeLoadBusy.value = false;
   if (res.code === 0) { message.success(res.msg); Object.assign(routeForm, { hostname: '', comment: '' }); loadRoute(); } else message.error(res.msg);
 }
 

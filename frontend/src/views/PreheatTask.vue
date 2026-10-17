@@ -17,14 +17,14 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="{ pageSize: 20 }"
         :row-key="(row: any) => row.id"
         :empty-text="t('preheat.empty')"
       />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="t('preheat.modalTitle')" style="max-width: 640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="t('preheat.modalTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('preheat.nameLabel')">
           <n-input v-model:value="form.name" :placeholder="t('preheat.namePlaceholder')" />
@@ -57,7 +57,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -77,8 +77,8 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
-const saving = ref(false);
+const loadBusy = ref(false);
+const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
 const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
@@ -147,12 +147,12 @@ const columns = computed(() => [
 ]);
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/cdn/preheat-tasks');
     if (res.code === 0) tasks.value = res.data || [];
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 }
 
@@ -183,7 +183,7 @@ function openEdit(row: any) {
 async function save() {
   if (!form.urls.trim()) return message.warning(t('preheat.pleaseInputUrls'));
   if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('preheat.pleaseInputInterval'));
-  saving.value = true;
+  saveBusy.value = true;
   try {
     const runTime = form.cycle === 'daily' ? normalizeHm(form.runTime) : null;
     const body: any = { name: form.name, urls: form.urls, op: form.op, cycle: form.cycle, active: form.active ? 1 : 0 };
@@ -198,7 +198,7 @@ async function save() {
       load();
     } else message.error(res.msg);
   } finally {
-    saving.value = false;
+    saveBusy.value = false;
   }
 }
 

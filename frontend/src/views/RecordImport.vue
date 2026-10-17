@@ -18,7 +18,7 @@
       </n-form>
       <n-space justify="end">
         <n-button @click="router.push(`/domains/${domainId}/records`)">{{ t('common.cancel') }}</n-button>
-        <n-button type="primary" :loading="saving" @click="doImport">{{ t('domain.importSelected') }}</n-button>
+        <n-button type="primary" :loading="saveBusy" @click="doImport">{{ t('domain.importSelected') }}</n-button>
       </n-space>
     </n-card>
   </div>
@@ -38,7 +38,7 @@ const { t } = useI18n();
 const message = useMessage();
 const domainId = Number(route.params.id);
 const domainName = ref('');
-const saving = ref(false);
+const saveBusy = ref(false);
 const lines = ref<Record<string, string>>({});
 const form = reactive<any>({ type: null, line: 'default', ttl: 600, mx: 1, remark: '', record: '' });
 const typeOptions = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'REDIRECT_URL', 'FORWARD_URL'].map((v) => ({ label: v, value: v }));
@@ -63,7 +63,7 @@ onMounted(async () => {
 
 async function doImport() {
   if (!String(form.record || '').trim()) return message.warning(t('record.fillRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', `/domains/${domainId}/records/batch-add`, {
     record: form.record,
     type: form.type || '',
@@ -72,7 +72,7 @@ async function doImport() {
     mx: form.mx,
     remark: form.remark,
   });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     router.push(`/domains/${domainId}/records`);

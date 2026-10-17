@@ -3,9 +3,9 @@
     <PageHeader :title="t('domain.title')" :subtitle="t('domain.subtitle')">
       <template #actions>
         <n-space v-if="isAdmin">
-          <n-button v-if="checked.length" size="small" type="success" @click="batchNotice(1)">{{ t('domain.batchNoticeOn') }}</n-button>
-          <n-button v-if="checked.length" size="small" @click="batchNotice(0)">{{ t('domain.batchNoticeOff') }}</n-button>
-          <n-button v-if="checked.length" size="small" type="error" @click="batchDelete">{{ t('domain.batchDelete') }}</n-button>
+          <n-button v-if="checked.length" size="small" type="success" :loading="!!actionBusy['noticeOn']" :disabled="!!actionBusy['noticeOn'] || !!actionBusy['noticeOff']" @click="runAction('noticeOn', () => batchNotice(1))">{{ t('domain.batchNoticeOn') }}</n-button>
+          <n-button v-if="checked.length" size="small" :loading="!!actionBusy['noticeOff']" :disabled="!!actionBusy['noticeOff'] || !!actionBusy['noticeOn']" @click="runAction('noticeOff', () => batchNotice(0))">{{ t('domain.batchNoticeOff') }}</n-button>
+          <n-button v-if="checked.length" size="small" type="error" secondary @click="batchDelete">{{ t('domain.batchDelete') }}</n-button>
           <n-button @click="router.push('/expire-notice')">{{ t('domain.expireNotice') }}</n-button>
           <n-button type="primary" @click="showImport = true">
             <template #icon><n-icon :component="CloudDownloadOutline" /></template>
@@ -21,7 +21,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-input
           v-model:value="kw"
           :placeholder="t('domain.searchPlaceholder')"
@@ -36,10 +36,10 @@
         <n-button @click="clearSearch">{{ t('common.refresh') }}</n-button>
       </n-space>
       <template v-if="showRecords">
-        <n-alert type="info" :show-icon="false" :bordered="false" style="margin-bottom: 12px">{{ t('domain.recordResults') }}</n-alert>
+        <n-alert type="info" :show-icon="false" :bordered="false" class="mb-3">{{ t('domain.recordResults') }}</n-alert>
         <RecordTable
           :records="recordResults"
-          :loading="loading"
+          :loading="loadBusy"
           :show-full-name="true"
           :show-add="false"
           @refresh="loadDomains"
@@ -50,16 +50,18 @@
         v-model:checked-row-keys="checked"
         :columns="columns"
         :data="domains"
-        :loading="loading"
+        :loading="loadBusy"
         :row-key="(row: any) => row._key || row.id"
         :empty-text="t('domain.empty')"
+        :error="loadError"
         :virtual-scroll="domains.length > 200"
         :max-height="620"
+        @retry="loadDomains"
       />
     </n-card>
 
     <!-- 导入域名弹窗 -->
-    <n-modal v-model:show="showImport" preset="card" :title="t('domain.importDomains')" style="max-width:640px" :mask-closable="false">
+    <n-modal v-model:show="showImport" preset="card" :title="t('domain.importDomains')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('nav.dnsAccounts')">
           <n-select v-model:value="importAid" :options="accountOptions" :placeholder="t('domain.selectAccount')" @update:value="loadPullDomains" />
@@ -82,18 +84,18 @@
     </n-modal>
 
     <!-- 添加分类弹窗 -->
-    <n-modal v-model:show="showCategory" preset="card" :title="t('domain.addCategory')" style="max-width:400px" :mask-closable="false">
+    <n-modal v-model:show="showCategory" preset="card" :title="t('domain.addCategory')" class="modal-sm" :mask-closable="false">
       <n-input v-model:value="categoryName" :placeholder="t('domain.categoryName')" />
       <template #footer>
         <n-space justify="end">
           <n-button @click="showCategory = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" @click="doAddCategory">{{ t('common.confirm') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="doAddCategory">{{ t('common.confirm') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 编辑域名弹窗 -->
-    <n-modal v-model:show="showEdit" preset="card" :title="t('domain.editDomain')" style="max-width:480px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="t('domain.editDomain')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('domain.nameCol')"><span>{{ editRow?.name }}</span></n-form-item>
         <n-form-item :label="t('common.remark')"><n-input v-model:value="editForm.remark" /></n-form-item>
@@ -107,7 +109,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" @click="doEdit">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="doEdit">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -125,6 +127,7 @@ import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import RecordTable from '../components/RecordTable.vue';
+import { useAction } from '../composables/useAction';
 
 const router = useRouter();
 const { t } = useI18n();
@@ -139,8 +142,11 @@ function expireTs(val: string): number {
 }
 const message = useMessage();
 const dialog = useDialog();
+const { busy: actionBusy, run: runAction } = useAction();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
-const loading = ref(false);
+const loadBusy = ref(false);
+const loadError = ref(false);
+const saveBusy = ref(false);
 const domains = ref<any[]>([]);
 const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatus === 2).length);
 const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
@@ -227,7 +233,7 @@ const columns = computed(() => {
       const btns: any[] = [h(NButton, { size: 'tiny', type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
       if (isAdmin.value) {
         btns.push(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
-        btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
       }
       return h(NSpace, null, { default: () => btns });
     },
@@ -241,9 +247,10 @@ async function loadDomains() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined, { signal: ac.signal });
+    loadError.value = res.code !== 0;
     const list: any[] = res.code === 0 ? res.data : [];
     // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片
     if (kw.value && list.length === 0) {
@@ -256,9 +263,9 @@ async function loadDomains() {
     }
     domains.value = list;
   } catch (e: any) {
-    if (e?.name !== 'AbortError') throw e;
+    if (e?.name !== 'AbortError') loadError.value = true;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 
@@ -309,7 +316,9 @@ async function doImport() {
 
 async function doAddCategory() {
   if (!categoryName.value) return message.warning(t('domain.categoryNameRequired'));
+  saveBusy.value = true;
   const res = await api('POST', '/domains/categories', { name: categoryName.value });
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(t('domain.addCategorySuccess'));
     showCategory.value = false;
@@ -405,7 +414,9 @@ async function doEdit() {
     ...payload,
     category_name: categories.value.find((c: any) => Number(c.id) === Number(payload.cid))?.name || '',
   });
+  saveBusy.value = true;
   const res = await api('PUT', `/domains/${row.id}`, payload);
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(t('domain.editSuccess'));
     showEdit.value = false;

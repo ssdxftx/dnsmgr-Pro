@@ -4,7 +4,7 @@
       <template #actions>
         <n-space :size="8" align="center">
           <n-tag size="small" :bordered="false">{{ isEsa ? t('cdnRules.vendEsa') : t('cdnRules.vendEo') }}</n-tag>
-          <n-button size="small" :loading="loading" @click="reloadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
+          <n-button size="small" :loading="loadBusy" @click="reloadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
         </n-space>
       </template>
     </PageHeader>
@@ -22,8 +22,8 @@
               <span class="zone-status-strip__sub">{{ zoneId }}</span>
             </div>
             <div class="zone-status-strip__actions">
-              <n-button size="small" @click="verifyOwnership">{{ t('cdnZoneSetting.ovVerify') }}</n-button>
-              <n-button size="small" :type="zoneInfo.paused ? 'primary' : 'warning'" @click="togglePause">
+              <n-button size="small" :loading="!!busy['verify']" :disabled="!!busy['verify']" @click="run('verify', verifyOwnership)">{{ t('cdnZoneSetting.ovVerify') }}</n-button>
+              <n-button size="small" :type="zoneInfo.paused ? 'primary' : 'warning'" :loading="!!busy['pause']" :disabled="!!busy['pause']" @click="run('pause', togglePause)">
                 {{ zoneInfo.paused ? t('cdnZoneSetting.ovResume') : t('cdnZoneSetting.ovPause') }}
               </n-button>
               <n-button size="small" type="error" quaternary @click="deleteZone">{{ t('cdnZoneSetting.ovDelete') }}</n-button>
@@ -69,7 +69,7 @@
               :columns="domainColumns"
               :data="domains"
               size="small"
-              :loading="loading"
+              :loading="loadBusy"
               :empty-text="t('cdnZoneSetting.domEmpty')"
             />
           </div>
@@ -87,11 +87,11 @@
             <div class="zone-form-strip">
               <n-input v-model:value="ogForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
               <n-input v-model:value="ogForm.hostHeader" :placeholder="t('cdnOrigin.hostHeader')" style="width: 180px" size="small" />
-              <n-button size="small" type="primary" :loading="ogSaving" @click="createOriginGroup">{{ t('cdnZoneSetting.create') }}</n-button>
+              <n-button size="small" type="primary" :loading="ogSaveBusy" @click="createOriginGroup">{{ t('cdnZoneSetting.create') }}</n-button>
               <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" class="zone-form-strip__wide mono-input" />
               <n-input v-if="isEsa" v-model:value="ogForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loading" />
+            <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loadBusy" />
           </div>
 
           <div class="zone-panel">
@@ -104,11 +104,11 @@
             <div class="zone-form-strip">
               <n-input v-model:value="lbForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
               <n-select v-model:value="lbForm.type" :options="lbTypeOptions" style="width: 160px" size="small" />
-              <n-button size="small" type="primary" :loading="lbSaving" @click="createLoadBalancer">{{ t('cdnZoneSetting.create') }}</n-button>
+              <n-button size="small" type="primary" :loading="lbSaveBusy" @click="createLoadBalancer">{{ t('cdnZoneSetting.create') }}</n-button>
               <n-select v-model:value="lbForm.originGroups" multiple :options="ogOptions" :placeholder="t('cdnOrigin.originGroupsPick')" size="small" class="zone-form-strip__wide" />
               <n-input v-if="isEsa" v-model:value="lbForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loading" />
+            <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loadBusy" />
           </div>
         </n-tab-pane>
 
@@ -137,7 +137,7 @@
               :columns="ruleColumns"
               :data="ruleList"
               size="small"
-              :loading="ruleLoading"
+              :loading="ruleLoadBusy"
               :empty-text="t('cdnRules.empty')"
             />
           </div>
@@ -154,18 +154,18 @@
             </div>
             <div class="zone-form-strip">
               <n-input v-model:value="ipForm.name" :placeholder="t('cdnSecurity.name')" style="width: 200px" size="small" />
-              <n-button size="small" type="primary" :loading="ipSaving" @click="createIpGroup">{{ t('cdnZoneSetting.create') }}</n-button>
+              <n-button size="small" type="primary" :loading="ipSaveBusy" @click="createIpGroup">{{ t('cdnZoneSetting.create') }}</n-button>
               <n-input v-model:value="ipForm.content" type="textarea" :rows="3" :placeholder="t('cdnSecurity.contentHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="ipColumns" :data="ipGroups" size="small" :loading="loading" />
+            <ResponsiveDataTable :columns="ipColumns" :data="ipGroups" size="small" :loading="loadBusy" />
           </div>
 
           <div v-for="cfg in securityCfgs.filter((c) => caps[c.cap])" :key="cfg.key" class="zone-panel">
             <div class="zone-panel__head">
               <h3 class="zone-panel__title">{{ cfg.title }}</h3>
               <div class="zone-panel__extra">
-                <n-button size="small" @click="loadSecurityConfig(cfg.key)">{{ t('cdnSecurity.load') }}</n-button>
-                <n-button size="small" type="primary" @click="saveSecurityConfig(cfg.key)">{{ t('cdnZoneSetting.save') }}</n-button>
+                <n-button size="small" :loading="!!busy['secload:' + cfg.key]" :disabled="!!busy['secload:' + cfg.key]" @click="run('secload:' + cfg.key, () => loadSecurityConfig(cfg.key))">{{ t('cdnSecurity.load') }}</n-button>
+                <n-button size="small" type="primary" :loading="!!busy['secsave:' + cfg.key]" :disabled="!!busy['secsave:' + cfg.key]" @click="run('secsave:' + cfg.key, () => saveSecurityConfig(cfg.key))">{{ t('cdnZoneSetting.save') }}</n-button>
               </div>
             </div>
             <n-input
@@ -194,7 +194,7 @@
               <n-button size="small" type="primary" :loading="l4Saving" @click="createL4Proxy">{{ t('cdnZoneSetting.create') }}</n-button>
               <n-input v-if="isEsa" v-model:value="l4Form.params" type="textarea" :rows="2" :placeholder="t('cdnAdvanced.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="l4Columns" :data="l4Proxies" size="small" :loading="loading" />
+            <ResponsiveDataTable :columns="l4Columns" :data="l4Proxies" size="small" :loading="loadBusy" />
           </div>
         </n-tab-pane>
 
@@ -207,7 +207,7 @@
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ purgeTasks.length }}</n-tag>
               </div>
             </div>
-            <ResponsiveDataTable :columns="taskColumns" :data="purgeTasks" size="small" :loading="loading" />
+            <ResponsiveDataTable :columns="taskColumns" :data="purgeTasks" size="small" :loading="loadBusy" />
           </div>
           <div class="zone-panel">
             <div class="zone-panel__head">
@@ -216,13 +216,13 @@
                 <n-tag size="tiny" :bordered="false" class="tnum">{{ prefetchTasks.length }}</n-tag>
               </div>
             </div>
-            <ResponsiveDataTable :columns="taskColumns" :data="prefetchTasks" size="small" :loading="loading" />
+            <ResponsiveDataTable :columns="taskColumns" :data="prefetchTasks" size="small" :loading="loadBusy" />
           </div>
           <div class="zone-panel">
             <div class="zone-panel__head">
               <h3 class="zone-panel__title">{{ t('cdnAdvanced.quota') }}</h3>
               <div class="zone-panel__extra">
-                <n-button size="small" @click="loadQuota">{{ t('cdnAdvanced.load') }}</n-button>
+                <n-button size="small" :loading="!!busy['quota']" :disabled="!!busy['quota']" @click="run('quota', loadQuota)">{{ t('cdnAdvanced.load') }}</n-button>
               </div>
             </div>
             <pre v-if="quotaText" class="code-view">{{ quotaText }}</pre>
@@ -232,7 +232,7 @@
             <div class="zone-panel__head">
               <h3 class="zone-panel__title">{{ t('cdnAdvanced.analysis') }}</h3>
               <div class="zone-panel__extra">
-                <n-button size="small" @click="loadTopAnalysis">{{ t('cdnAdvanced.load') }}</n-button>
+                <n-button size="small" :loading="!!busy['analysis']" :disabled="!!busy['analysis']" @click="run('analysis', loadTopAnalysis)">{{ t('cdnAdvanced.load') }}</n-button>
               </div>
             </div>
             <pre v-if="analysisText" class="code-view">{{ analysisText }}</pre>
@@ -265,7 +265,7 @@
         :schema="ruleSchema"
         :initial="ruleInitial"
         :editing="!!ruleEditingId"
-        :saving="ruleSaving"
+        :saving="ruleSaveBusy"
         :domains="siteDomains"
         @save="saveRule"
         @cancel="showRuleEditor = false"
@@ -286,6 +286,7 @@ import RuleEditor from '../components/cdn/RuleEditor.vue';
 import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
 import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
 import CdnZoneGlobalSetting from '../components/cdn/CdnZoneGlobalSetting.vue';
+import { useAction } from '../composables/useAction';
 import { ruleEnabled } from '../lib/cdnSwitch';
 import { EO_RULE_TEMPLATES } from '../lib/eoRuleTemplates';
 import { EO_PRESET_RULES } from '../lib/eoPresetRules';
@@ -293,13 +294,14 @@ import { EO_PRESET_RULES } from '../lib/eoPresetRules';
 const { t, locale } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run } = useAction();
 const route = useRoute();
 const router = useRouter();
 
 const aid = Number(route.params.aid || 0);
 const zoneId = String(route.params.zoneId || '');
 const tab = ref('overview');
-const loading = ref(false);
+const loadBusy = ref(false);
 
 const providers = ref<Record<string, any>>({});
 const zoneInfo = ref<Record<string, any>>({});
@@ -399,15 +401,15 @@ const domainColumns = computed(() => [
     key: 'actions',
     width: 140,
     render: (r: any) =>
-      h(NButton, { size: 'tiny', onClick: () => router.push(`/cdn-domains/${r.id}/setting`) }, { default: () => t('cdnZoneSetting.domOpen') }),
+      h(NButton, { size: 'tiny', quaternary: true, onClick: () => router.push(`/cdn-domains/${r.id}/setting`) }, { default: () => t('cdnZoneSetting.domOpen') }),
   },
 ]);
 
 // ===================== 源站与负载均衡 =====================
 const originGroups = ref<any[]>([]);
 const loadBalancers = ref<any[]>([]);
-const ogSaving = ref(false);
-const lbSaving = ref(false);
+const ogSaveBusy = ref(false);
+const lbSaveBusy = ref(false);
 const ogForm = reactive<any>({ name: '', hostHeader: '', records: '', params: '' });
 const lbForm = reactive<any>({ name: '', type: 'HTTP', originGroups: [], params: '' });
 const lbTypeOptions = [
@@ -425,12 +427,12 @@ const ogColumns = computed(() => [
     minWidth: 200,
     render: (r: any) => (Array.isArray(r.records) ? r.records.map((x: any) => (typeof x === 'string' ? x : x.Record || x.record || x.Address || '')).join(', ') : ''),
   },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => delOriginGroup(r) }, { default: () => t('cdnZoneSetting.delete') }) },
+  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delOriginGroup(r) }, { default: () => t('cdnZoneSetting.delete') }) },
 ]);
 const lbColumns = computed(() => [
   { title: t('cdnOrigin.colName'), key: 'name', minWidth: 140 },
   { title: t('cdnOrigin.colType'), key: 'type', width: 120 },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', type: 'error', onClick: () => delLoadBalancer(r) }, { default: () => t('cdnZoneSetting.delete') }) },
+  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delLoadBalancer(r) }, { default: () => t('cdnZoneSetting.delete') }) },
 ]);
 
 function parseRecords(text: string) {
@@ -468,7 +470,7 @@ async function createOriginGroup() {
   if (!ogForm.name) return message.warning(t('cdnOrigin.needName'));
   const records = parseRecords(ogForm.records);
   if (!records.length) return message.warning(t('cdnOrigin.needRecords'));
-  ogSaving.value = true;
+  ogSaveBusy.value = true;
   const res = await api<any>('POST', `/cdn/accounts/${aid}/origin-groups`, {
     zoneId,
     name: ogForm.name,
@@ -476,7 +478,7 @@ async function createOriginGroup() {
     hostHeader: ogForm.hostHeader || undefined,
     params: parseExtraParams(ogForm.params),
   });
-  ogSaving.value = false;
+  ogSaveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     ogForm.name = '';
@@ -503,7 +505,7 @@ function delOriginGroup(r: any) {
 }
 async function createLoadBalancer() {
   if (!lbForm.name) return message.warning(t('cdnOrigin.needName'));
-  lbSaving.value = true;
+  lbSaveBusy.value = true;
   const originGroupsPayload = (lbForm.originGroups || []).map((gid: string, i: number) => ({ Priority: String(i + 1), OriginGroupId: String(gid) }));
   const res = await api<any>('POST', `/cdn/accounts/${aid}/load-balancers`, {
     zoneId,
@@ -512,7 +514,7 @@ async function createLoadBalancer() {
     originGroups: originGroupsPayload,
     params: parseExtraParams(lbForm.params),
   });
-  lbSaving.value = false;
+  lbSaveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     lbForm.name = '';
@@ -539,8 +541,8 @@ function delLoadBalancer(r: any) {
 
 // ===================== 规则引擎（可视化） =====================
 const ruleList = ref<any[]>([]);
-const ruleLoading = ref(false);
-const ruleSaving = ref(false);
+const ruleLoadBusy = ref(false);
+const ruleSaveBusy = ref(false);
 const ruleKind = ref('RedirectRule');
 const ruleSchema = ref<any>(null);
 const showRuleEditor = ref(false);
@@ -571,7 +573,7 @@ async function loadRuleSchemaForKind() {
   if (res.code === 0) ruleSchema.value = res.data;
 }
 async function loadRules(): Promise<boolean> {
-  ruleLoading.value = true;
+  ruleLoadBusy.value = true;
   let ok = true;
   try {
     if (isEsa.value) await loadRuleSchemaForKind();
@@ -596,7 +598,7 @@ async function loadRules(): Promise<boolean> {
       ruleList.value = ok ? res.data || [] : [];
     }
   } finally {
-    ruleLoading.value = false;
+    ruleLoadBusy.value = false;
   }
   return ok;
 }
@@ -617,9 +619,9 @@ const ruleColumns = computed(() => {
     render: (r: any) =>
       h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', onClick: () => openRuleEditor(r) }, { default: () => t('cdnZoneSetting.edit') }),
-          h(NButton, { size: 'tiny', onClick: () => toggleRuleEnabled(r) }, { default: () => (ruleEnabled(r) ? t('cdnRules.disabledTag') : t('cdnRules.enabledTag')) }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => delRule(r) }, { default: () => t('cdnZoneSetting.delete') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRuleEditor(r) }, { default: () => t('cdnZoneSetting.edit') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => toggleRuleEnabled(r) }, { default: () => (ruleEnabled(r) ? t('cdnRules.disabledTag') : t('cdnRules.enabledTag')) }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRule(r) }, { default: () => t('cdnZoneSetting.delete') }),
         ],
       }),
   });
@@ -674,7 +676,7 @@ async function saveRule(payload: any) {
       .map((f: any) => f.label || f.name);
     if (missing.length) return message.warning(t('cdnRules.requiredMissing', { fields: missing.join('、') }));
   }
-  ruleSaving.value = true;
+  ruleSaveBusy.value = true;
   let res: any;
   if (isEsa.value) {
     res = await api('POST', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, params: payload });
@@ -695,7 +697,7 @@ async function saveRule(payload: any) {
       description: payload.Description,
     });
   }
-  ruleSaving.value = false;
+  ruleSaveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg || t('cdnRules.savedOk'));
     showRuleEditor.value = false;
@@ -746,7 +748,7 @@ function delRule(r: any) {
 
 // ===================== 安全 =====================
 const ipGroups = ref<any[]>([]);
-const ipSaving = ref(false);
+const ipSaveBusy = ref(false);
 const ipForm = reactive<any>({ name: '', content: '' });
 const secJson = reactive<any>({ ddos: '', waf: '', originProtection: '' });
 const securityCfgs = [
@@ -764,8 +766,8 @@ const ipColumns = computed(() => [
     render: (r: any) =>
       h(NSpace, null, {
         default: () => [
-          h(NButton, { size: 'tiny', onClick: () => loadIpContent(r) }, { default: () => t('cdnSecurity.load') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => delIpGroup(r) }, { default: () => t('cdnZoneSetting.delete') }),
+          h(NButton, { size: 'tiny', quaternary: true, onClick: () => loadIpContent(r) }, { default: () => t('cdnSecurity.load') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delIpGroup(r) }, { default: () => t('cdnZoneSetting.delete') }),
         ],
       }),
   },
@@ -812,9 +814,9 @@ async function createIpGroup() {
     .split('\n')
     .map((s) => s.trim())
     .filter(Boolean);
-  ipSaving.value = true;
+  ipSaveBusy.value = true;
   const res = await api<any>('POST', `/cdn/accounts/${aid}/security/ip-groups`, { zoneId, name: ipForm.name, content });
-  ipSaving.value = false;
+  ipSaveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     ipForm.name = '';
@@ -856,7 +858,7 @@ const l4Columns = computed(() => [
     key: 'actions',
     width: 100,
     render: (r: any) =>
-      h(NButton, { size: 'tiny', type: 'error', onClick: () => delL4Proxy(r) }, { default: () => t('cdnZoneSetting.delete') }),
+      h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delL4Proxy(r) }, { default: () => t('cdnZoneSetting.delete') }),
   },
 ]);
 async function loadL4Proxies(): Promise<boolean> {
@@ -957,18 +959,18 @@ async function loadByTab(name: string, force = false) {
 }
 async function reloadAll() {
   loadedTabs.clear();
-  loading.value = true;
+  loadBusy.value = true;
   await Promise.all([loadZoneInfo(), loadDomains(), loadNs()]);
-  loading.value = false;
+  loadBusy.value = false;
   await loadByTab(tab.value, true);
 }
 watch(tab, (v) => loadByTab(v));
 
 onMounted(async () => {
   if (!aid || !zoneId) return;
-  loading.value = true;
+  loadBusy.value = true;
   await loadProviders();
   await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema()]);
-  loading.value = false;
+  loadBusy.value = false;
 });
 </script>

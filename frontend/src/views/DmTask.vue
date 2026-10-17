@@ -19,7 +19,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="SwapHorizontalOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 140px" />
         <n-input v-model:value="kw" :placeholder="t('dm.keyword')" style="width: 200px" @keyup.enter="search" />
         <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('dm.health')" style="width: 130px" />
@@ -31,7 +31,7 @@
         v-model:checked-row-keys="checkedRowKeys"
         :columns="columns"
         :data="tasks"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
         :empty-text="t('dm.empty')"
@@ -55,7 +55,7 @@ const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
-const loading = ref(false);
+const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
@@ -169,7 +169,7 @@ async function loadTasks() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/dmonitor/tasks', {
       offset: (page.value - 1) * pageSize.value,
@@ -189,7 +189,7 @@ async function loadTasks() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 

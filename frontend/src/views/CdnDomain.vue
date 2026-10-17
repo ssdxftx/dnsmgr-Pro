@@ -30,7 +30,7 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="domains"
-        :loading="loading"
+        :loading="loadBusy"
         :row-key="(row: any) => row.id"
         v-model:checked-row-keys="checkedIds"
         :empty-text="t('cdnDomain.empty')"
@@ -40,7 +40,7 @@
     </n-card>
 
     <!-- 接入域名：每步独立弹窗，下一步/上一步切换弹窗 -->
-    <n-modal :show="showAdd && addStep === 1" preset="card" :title="t('cdnDomain.addTitle1')" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 1" preset="card" :title="t('cdnDomain.addTitle1')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.account')">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
@@ -60,7 +60,7 @@
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 2" preset="card" :title="t('cdnDomain.addTitle2')" style="max-width:560px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 2" preset="card" :title="t('cdnDomain.addTitle2')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.accelDomain')">
           <n-input-group v-if="form.zone_name">
@@ -83,7 +83,7 @@
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 3" preset="card" :title="t('cdnDomain.addTitle3')" style="max-width:640px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 3" preset="card" :title="t('cdnDomain.addTitle3')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.origin')">
           <n-input v-model:value="form.origin" :placeholder="t('cdnDomain.originPlaceholder')" />
@@ -130,7 +130,7 @@
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 4" preset="card" :title="t('cdnDomain.addTitle4')" style="max-width:620px" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && addStep === 4" preset="card" :title="t('cdnDomain.addTitle4')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <div class="add-form">
         <n-form-item v-if="certModeOptions.length > 1" :label="t('cdnDomain.certSetting')" label-placement="left" label-width="110">
           <n-radio-group v-model:value="form.cert_mode">
@@ -154,13 +154,13 @@
       <template #footer>
         <n-space justify="space-between" class="cert-actions" style="width:100%">
           <n-button @click="addStep--">{{ t('cdnDomain.prev') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="submitAdd">{{ t('cdnDomain.submitAdd') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="submitAdd">{{ t('cdnDomain.submitAdd') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 同步云端弹窗 -->
-    <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" style="max-width:440px" :mask-closable="false">
+    <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cdnDomain.account')">
           <n-select v-model:value="syncAid" :options="accountOptions" />
@@ -172,13 +172,13 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showSync = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="syncing" @click="doSync">{{ t('cdnDomain.startSync') }}</n-button>
+          <n-button type="primary" :loading="syncBusy" @click="doSync">{{ t('cdnDomain.startSync') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
-    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" style="max-width:680px" :mask-closable="false">
+    <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" class="modal-md" :mask-closable="false">
       <n-spin :show="certRunning">
         <n-alert v-if="certMode === 'link'" type="info" :show-icon="true" class="cert-tip">
           {{ t('cdnDomain.certLinkDesc') }}
@@ -211,8 +211,8 @@
     </n-modal>
 
     <!-- 由本项目管理：证书选择弹窗（选择器） -->
-    <n-modal v-model:show="showLink" preset="card" :title="t('cdnDomain.linkTitle')" style="max-width: 680px" :mask-closable="false" @after-leave="onLinkAfterLeave">
-      <n-spin :show="linkLoading">
+    <n-modal v-model:show="showLink" preset="card" :title="t('cdnDomain.linkTitle')" class="modal-md" :mask-closable="false" @after-leave="onLinkAfterLeave">
+      <n-spin :show="linkLoadBusy">
         <div v-if="linkTarget" class="link-target">{{ t('cdnDomain.targetDomain') }}<b>{{ linkTarget.name }}</b></div>
 
         <template v-if="linkCandidates">
@@ -272,7 +272,7 @@
     </n-modal>
 
     <!-- 证书管理：统一设置证书方式、申请/部署与进度 -->
-    <n-modal v-model:show="showCertMgr" preset="card" :title="t('cdnDomain.certMgrTitle')" style="max-width: 760px" :mask-closable="false" @after-leave="closeCertMgr">
+    <n-modal v-model:show="showCertMgr" preset="card" :title="t('cdnDomain.certMgrTitle')" class="modal-lg" :mask-closable="false" @after-leave="closeCertMgr">
       <n-spin :show="certMgrBusy">
         <div class="link-target">{{ t('cdnDomain.accelDomainLabel') }}<b>{{ certMgrTarget?.name }}</b></div>
 
@@ -280,9 +280,9 @@
         <div class="cloud-cert">
           <div class="cloud-cert-head">
             <span class="cloud-cert-title">{{ t('cdnDomain.cloudCert') }}</span>
-            <n-button size="tiny" quaternary :loading="certMgrCloudLoading" @click="refreshCertStatus">{{ t('cdnDomain.refreshCloudStatus') }}</n-button>
+            <n-button size="tiny" quaternary :loading="certMgrCloudLoadBusy" @click="refreshCertStatus">{{ t('cdnDomain.refreshCloudStatus') }}</n-button>
           </div>
-          <n-spin :show="certMgrCloudLoading">
+          <n-spin :show="certMgrCloudLoadBusy">
             <template v-if="certMgrCloud">
               <n-alert v-if="!certMgrCloud.supported || certMgrCloud.error" :type="certMgrCloud.supported ? 'warning' : 'default'" :show-icon="true" class="cert-tip">
                 {{ certMgrCloud.error }}
@@ -343,7 +343,7 @@
 
         <!-- 由本项目管理 -->
         <template v-else-if="certMgrMode === 'certlink'">
-          <n-spin :show="certMgrLoading">
+          <n-spin :show="certMgrLoadBusy">
             <template v-if="certMgrCandidates">
               <template v-if="certMgrCandidates.exact && certMgrCandidates.exact.length">
                 <n-alert type="success" :show-icon="true" class="cert-tip">{{ t('cdnDomain.exactFound') }}</n-alert>
@@ -422,7 +422,7 @@
       <template #footer>
         <n-space justify="end" class="cert-actions">
           <n-button v-if="certMgrHasPendingFree" :loading="certMgrBusy" @click="checkFreeCertMgr">{{ t('cdnDomain.checkDeploy') }}</n-button>
-          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" :loading="linkLogLoading" @click="loadCertMgrLog">{{ t('cdnDomain.refreshProgress') }}</n-button>
+          <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" :loading="linkLogLoadBusy" @click="loadCertMgrLog">{{ t('cdnDomain.refreshProgress') }}</n-button>
           <n-button v-if="certMgrMode === 'certlink' && linkLog?.order" type="primary" secondary :loading="linkLogRetrying" @click="retryLink">{{ t('cdnDomain.checkDeployNow') }}</n-button>
           <n-button @click="showCertMgr = false">{{ t('common.close') }}</n-button>
           <n-button v-if="certMgrMode === 'freecert'" type="primary" :loading="certMgrBusy" @click="applyFreeCertMgr">{{ t('cdnDomain.applyDeploy') }}</n-button>
@@ -450,7 +450,7 @@ const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
+const loadBusy = ref(false);
 const domains = ref<any[]>([]);
 const sparks = [
   [4, 7, 6, 10, 8, 13, 10, 15, 12],
@@ -472,8 +472,8 @@ const serviceAreaOptions = computed(() => [
 
 const showAdd = ref(false);
 const showSync = ref(false);
-const saving = ref(false);
-const syncing = ref(false);
+const saveBusy = ref(false);
+const syncBusy = ref(false);
 const syncAid = ref<number | null>(null);
 const syncDid = ref<number>(0);
 const addStep = ref(1);
@@ -506,7 +506,7 @@ const certSummary = ref('');
 
 // 由本项目管理：证书选择弹窗（作为选择器返回所选项）
 const showLink = ref(false);
-const linkLoading = ref(false);
+const linkLoadBusy = ref(false);
 const linkCandidates = ref<any>(null);
 const linkChoice = ref('');
 const linkError = ref('');
@@ -518,18 +518,18 @@ const showCertMgr = ref(false);
 const certMgrTarget = ref<any>(null);
 const certMgrMode = ref('');
 const certMgrBusy = ref(false);
-const certMgrLoading = ref(false);
+const certMgrLoadBusy = ref(false);
 const certMgrCandidates = ref<any>(null);
 const certMgrChoice = ref('');
 const certMgrError = ref('');
 const certMgrFree = ref<any[]>([]);
 const certMgrApply = ref<any[]>([]);
 const certMgrCloud = ref<any>(null);
-const certMgrCloudLoading = ref(false);
+const certMgrCloudLoadBusy = ref(false);
 const certMgrMismatch = ref(false);
 
 // CDN证书部署进度：实时阶段日志
-const linkLogLoading = ref(false);
+const linkLogLoadBusy = ref(false);
 const linkLogRetrying = ref(false);
 const linkLog = ref<any>(null);
 const linkLogDomainId = ref<number | null>(null);
@@ -576,7 +576,7 @@ function deployStatusText(s: number) {
 async function openCertMgr(row: any) {
   certMgrTarget.value = row;
   certMgrBusy.value = false;
-  certMgrLoading.value = false;
+  certMgrLoadBusy.value = false;
   certMgrCandidates.value = null;
   certMgrChoice.value = '';
   certMgrError.value = '';
@@ -615,9 +615,9 @@ function cloudSourceType(s: string): 'success' | 'info' | 'default' | 'warning' 
 // 拉取云端证书状态（只读）
 async function fetchCertStatus(): Promise<any | null> {
   if (!certMgrTarget.value) return null;
-  certMgrCloudLoading.value = true;
+  certMgrCloudLoadBusy.value = true;
   const res = await api<any>('GET', `/cdn/domains/${certMgrTarget.value.id}/cert_status`);
-  certMgrCloudLoading.value = false;
+  certMgrCloudLoadBusy.value = false;
   if (res.code !== 0) return null;
   const data = res.data || {};
   certMgrCloud.value = data.cloud || null;
@@ -642,12 +642,12 @@ async function onCertMgrModeChange(mode: string) {
 
 async function loadCertMgrCandidates() {
   if (!certMgrTarget.value) return;
-  certMgrLoading.value = true;
+  certMgrLoadBusy.value = true;
   certMgrCandidates.value = null;
   certMgrChoice.value = '';
   certMgrError.value = '';
   const res = await fetchCandidates(certMgrTarget.value.name);
-  certMgrLoading.value = false;
+  certMgrLoadBusy.value = false;
   if (res.code !== 0) {
     certMgrError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
     return;
@@ -739,9 +739,9 @@ function closeCertMgr() {
 
 async function fetchLinkLog() {
   if (!linkLogDomainId.value) return;
-  linkLogLoading.value = true;
+  linkLogLoadBusy.value = true;
   const res = await api<any>('GET', `/cdn/domains/${linkLogDomainId.value}/certlink/log`);
-  linkLogLoading.value = false;
+  linkLogLoadBusy.value = false;
   if (res.code === 0) {
     linkLog.value = res.data;
     if (res.data?.done || res.data?.failed) stopLinkLogTimer();
@@ -866,10 +866,10 @@ const columns = computed<any[]>(() => [
 ]);
 
 async function loadDomains() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/cdn/domains');
   domains.value = res.code === 0 ? res.data : [];
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function loadAccounts() {
@@ -1035,9 +1035,9 @@ async function submitAdd() {
     cert_mode: form.cert_mode,
   };
   if (form.cert_mode === 'certlink') Object.assign(payload, choiceExtra(form.cert_choice));
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api<any>('POST', '/cdn/domains', payload);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showAdd.value = false;
@@ -1070,13 +1070,13 @@ async function openLinkDialog(target: { id?: number; name: string }): Promise<st
   linkChoice.value = '';
   linkError.value = '';
   showLink.value = true;
-  linkLoading.value = true;
+  linkLoadBusy.value = true;
   // 先挂载 resolve，确保加载期间用户取消弹窗也能正常结束等待（否则 Promise 永不 resolve）
   const done = new Promise<string | null>((resolve) => {
     linkResolve = resolve;
   });
   const res = await fetchCandidates(target.name);
-  linkLoading.value = false;
+  linkLoadBusy.value = false;
   // 弹窗已在加载期间被关闭则不再覆盖状态
   if (linkResolve) {
     if (res.code !== 0) {
@@ -1114,9 +1114,9 @@ function confirmLink() {
 
 async function doSync() {
   if (!syncAid.value) return message.warning(t('cdnDomain.pleaseSelectAccount'));
-  syncing.value = true;
+  syncBusy.value = true;
   const res = await api('POST', '/cdn/sync', { aid: syncAid.value, did: syncDid.value });
-  syncing.value = false;
+  syncBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showSync.value = false;

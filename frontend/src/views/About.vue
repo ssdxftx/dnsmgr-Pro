@@ -41,13 +41,13 @@
             <span>{{ t('about.updates') }}</span>
           </template>
           <template #header-extra>
-            <n-button size="small" secondary :loading="checking" @click="check(true)">
+            <n-button size="small" secondary :loading="checkBusy" @click="check(true)">
               <template #icon><n-icon :component="RefreshOutline" /></template>
               {{ t('about.checkUpdate') }}
             </n-button>
           </template>
 
-          <n-spin :show="loading">
+          <n-spin :show="loadBusy">
             <div class="ver-row">
               <div class="ver-cell">
                 <div class="ver-label">{{ t('about.currentVersion') }}</div>
@@ -170,8 +170,8 @@ const repoFallback = 'https://github.com/ssdxftx/dnsmgr-Pro';
 
 const info = ref<AboutInfo | null>(null);
 const update = ref<UpdateResult | null>(null);
-const loading = ref(false);
-const checking = ref(false);
+const loadBusy = ref(false);
+const checkBusy = ref(false);
 
 const isMobile = ref(false);
 function checkMobile() {
@@ -230,7 +230,7 @@ async function loadInfo() {
 }
 
 async function check(force = false) {
-  checking.value = true;
+  checkBusy.value = true;
   try {
     const res = await api<{ code: number; data: UpdateResult; msg?: string }>('POST', '/about/check-update', { force: force ? 1 : 0 });
     if (res.code === 0) {
@@ -240,13 +240,13 @@ async function check(force = false) {
       message.error(res.msg || t('about.checkFailed'));
     }
   } finally {
-    checking.value = false;
-    loading.value = false;
+    checkBusy.value = false;
+    loadBusy.value = false;
   }
 }
 
 onMounted(async () => {
-  loading.value = true;
+  loadBusy.value = true;
   // 信息加载与更新检查相互独立，并行发起，省一次往返
   await Promise.all([loadInfo(), check(false)]);
 });
