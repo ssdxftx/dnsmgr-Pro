@@ -12,10 +12,12 @@
     <div class="tele-card__value font-mono">
       {{ display }}<span v-if="suffix" class="tele-card__suffix">{{ suffix }}</span>
     </div>
-    <svg v-if="points" class="tele-card__spark" viewBox="0 0 120 36" preserveAspectRatio="none" aria-hidden="true">
-      <polygon class="spark-area" :points="`${points} 120,36 0,36`" />
-      <polyline ref="lineRef" class="spark-line" :points="points" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-    </svg>
+    <div class="tele-card__spark-wrap" aria-hidden="true">
+      <svg v-if="points" class="tele-card__spark" viewBox="0 0 120 36" preserveAspectRatio="none">
+        <polygon class="spark-area" :points="`${points} 120,36 0,36`" />
+        <polyline ref="lineRef" class="spark-line" :points="points" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+      </svg>
+    </div>
   </div>
 </template>
 
@@ -95,6 +97,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-height: 132px;
   padding: 18px 20px;
   background: color-mix(in srgb, var(--app-surface) 88%, transparent);
   border: 1px solid var(--app-border);
@@ -163,10 +166,13 @@ onMounted(() => {
   color: var(--app-text-3);
   margin-left: 3px;
 }
+.tele-card__spark-wrap {
+  height: 40px;
+  margin-top: auto;
+}
 .tele-card__spark {
   width: 100%;
   height: 36px;
-  margin-top: 4px;
   display: block;
 }
 .spark-line {

@@ -14,7 +14,7 @@
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.apiEnabled')" :value="apiCount" tone="success" :icon="KeyOutline" :spark="sparks[2]" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-input v-model:value="kw" :placeholder="t('userList.searchPlaceholder')" style="width: 220px" @keyup.enter="search" />
         <n-button type="primary" @click="search"><template #icon><n-icon :component="SearchOutline" /></template>{{ t('common.search') }}</n-button>
         <n-button @click="clearSearch"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
@@ -23,7 +23,7 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="users"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
         :empty-text="t('userList.empty')"
@@ -68,7 +68,7 @@
           <div class="perm-list">
             <div v-for="(p, idx) in form.permission" :key="idx" class="perm-item">
               <div class="perm-row">
-                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable remote :loading="domainLoading" @search="loadDomains" class="perm-domain" />
+                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" class="perm-domain" />
                 <div class="perm-actions">
                   <n-select v-model:value="p.readonly" :options="modeOptions" class="perm-mode" />
                   <n-button size="small" type="error" quaternary @click="removePerm(idx)">{{ t('common.delete') }}</n-button>
@@ -84,7 +84,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.close') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -101,11 +101,13 @@ import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run: guard } = useAction();
 const { t } = useI18n();
-const loading = ref(false);
+const loadBusy = ref(false);
 const users = ref<any[]>([]);
 // 遥测统计（基于已加载列表计算）
 const adminCount = computed(() => users.value.filter((u) => Number(u.level) === 2 || Number(u.is_super) === 1).length);
@@ -122,10 +124,10 @@ const kw = ref('');
 
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [] });
 const domainOptions = ref<any[]>([]);
-const domainLoading = ref(false);
+const domainLoadBusy = ref(false);
 
 // 统一走 useResponsive（内部已用 passive 监听），避免重复注册 resize 监听
 const { isMobile } = useResponsive();
@@ -194,7 +196,14 @@ const columns = computed<any[]>(() => [
       if (row.level === 2 || Number(row.is_super) === 1) return h('span', { class: 'app-muted' }, '—');
       return h(
         NButton,
-        { size: 'tiny', type: row.stat_cache ? 'success' : 'default', onClick: () => toggleStatCache(row) },
+        {
+          size: 'tiny',
+          quaternary: true,
+          type: row.stat_cache ? 'success' : 'default',
+          loading: !!busy[`stat:${row.id}`],
+          disabled: !!busy[`stat:${row.id}`],
+          onClick: () => guard(`stat:${row.id}`, () => toggleStatCache(row)),
+        },
         { default: () => (row.stat_cache ? t('userList.statCacheOn') : t('userList.statCacheOff')) }
       );
     },
@@ -209,7 +218,14 @@ const columns = computed<any[]>(() => [
       if (Number(row.is_super) === 1) return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('userList.normal') });
       return h(
         NButton,
-        { size: 'tiny', type: row.status ? 'success' : 'error', onClick: () => toggleStatus(row) },
+        {
+          size: 'tiny',
+          quaternary: true,
+          type: row.status ? 'success' : 'error',
+          loading: !!busy[`status:${row.id}`],
+          disabled: !!busy[`status:${row.id}`],
+          onClick: () => guard(`status:${row.id}`, () => toggleStatus(row)),
+        },
         { default: () => (row.status ? t('userList.normal') : t('userList.banned')) }
       );
     },
@@ -224,9 +240,9 @@ const columns = computed<any[]>(() => [
         return h('span', { class: 'app-muted' }, '—');
       }
       const btns: any[] = [];
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
       if (Number(row.id) !== currentUid.value) {
-        btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       }
       return h(NSpace, null, { default: () => btns });
     },
@@ -238,7 +254,7 @@ async function loadUsers() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/users', { offset: (page.value - 1) * pageSize.value, limit: pageSize.value, kw: kw.value || undefined }, { signal: ac.signal });
     if (loadAbort !== ac) return;
@@ -251,17 +267,17 @@ async function loadUsers() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 
 async function loadDomains(kw = '') {
-  domainLoading.value = true;
+  domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/user/domains', kw ? { kw } : undefined);
     if (res.code === 0) domainOptions.value = res.data.map((d: string) => ({ label: d, value: d }));
   } finally {
-    domainLoading.value = false;
+    domainLoadBusy.value = false;
   }
 }
 
@@ -331,7 +347,7 @@ async function openEdit(row: any) {
 async function save() {
   if (!form.username) return message.warning(t('userList.usernameRequired'));
   if (form.is_api === 1 && !form.apikey) return message.warning(t('userList.apiKeyRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   const body: any = { username: form.username, is_api: form.is_api, apikey: form.apikey, level: form.level };
   if (form.level !== 2) body.stat_cache = form.stat_cache ? 1 : 0;
   if (form.level === 1) {
@@ -344,7 +360,7 @@ async function save() {
     body.password = form.password;
   }
   const res = editingId.value ? await api('PUT', `/users/${editingId.value}`, body) : await api('POST', '/users', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;
@@ -352,42 +368,28 @@ async function save() {
   } else message.error(res.msg);
 }
 
-// 状态开关与统计缓存开关各自维护 pending，避免同一行两个开关在请求窗口内互吞点击
-const statusPending = new Set<number>();
-function toggleStatus(row: any) {
-  const id = Number(row.id);
-  if (statusPending.has(id)) return; // 防双击重复提交
-  statusPending.add(id);
+// 状态与统计缓存开关：互斥由 useAction 的 busy 键保证，按钮同时展示转圈与禁用
+async function toggleStatus(row: any) {
   const prev = row.status ? 1 : 0;
   const target = prev ? 0 : 1;
   row.status = target; // 乐观更新：立即反馈，避免整表重拉
-  api('POST', `/users/${row.id}/status`, { status: target })
-    .then((res) => {
-      if (res.code !== 0) {
-        row.status = prev; // 失败回滚
-        message.error(res.msg);
-      }
-    })
-    .finally(() => statusPending.delete(id));
+  const res = await api('POST', `/users/${row.id}/status`, { status: target });
+  if (res.code !== 0) {
+    row.status = prev; // 失败回滚
+    message.error(res.msg);
+  }
 }
 
-const statCachePending = new Set<number>();
-function toggleStatCache(row: any) {
-  const id = Number(row.id);
-  if (statCachePending.has(id)) return; // 防双击重复提交
-  statCachePending.add(id);
+async function toggleStatCache(row: any) {
   const prev = row.stat_cache ? 1 : 0;
   const target = prev ? 0 : 1;
   row.stat_cache = target; // 乐观更新
-  api('POST', `/users/${row.id}/stat-cache`, { stat_cache: target })
-    .then((res) => {
-      if (res.code === 0) message.success(res.msg);
-      else {
-        row.stat_cache = prev; // 失败回滚
-        message.error(res.msg);
-      }
-    })
-    .finally(() => statCachePending.delete(id));
+  const res = await api('POST', `/users/${row.id}/stat-cache`, { stat_cache: target });
+  if (res.code === 0) message.success(res.msg);
+  else {
+    row.stat_cache = prev; // 失败回滚
+    message.error(res.msg);
+  }
 }
 
 function del(row: any) {

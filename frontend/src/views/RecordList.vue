@@ -20,7 +20,7 @@
       <RecordTable
         ref="recordTable"
         :records="records"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="pagination"
         :domain-id="domainId"
         :domain-name="domainName"
@@ -60,7 +60,7 @@ const access = ref<{ admin: boolean; readonly: boolean; writable: boolean }>({ a
 const domainIndex = ref<Record<string, { id: number; sub: string }>>({});
 const recordTable = ref<InstanceType<typeof RecordTable> | null>(null);
 
-const loading = ref(false);
+const loadBusy = ref(false);
 const records = ref<any[]>([]);
 const total = ref(0);
 const page = ref(1);
@@ -81,7 +81,7 @@ async function loadRecords() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', `/domains/${domainId}/records`, { page: page.value, pagesize: pageSize.value, subdomain: subFilter.value || undefined }, { signal: ac.signal });
     if (loadAbort !== ac) return;
@@ -96,7 +96,7 @@ async function loadRecords() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 

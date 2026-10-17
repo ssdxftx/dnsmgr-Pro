@@ -20,7 +20,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 120px" />
         <n-input v-model:value="kw" :placeholder="t('optimize.keyword')" style="width: 200px" @keyup.enter="search" />
         <n-select v-model:value="status" :options="statusOptions" clearable :placeholder="t('common.status')" style="width: 120px" />
@@ -31,7 +31,7 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
         :empty-text="t('optimize.empty')"
@@ -50,12 +50,14 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
-const loading = ref(false);
+const { busy, run: guard } = useAction();
+const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pausedTasks = computed(() => tasks.value.filter((t: any) => !t.active).length);
@@ -144,10 +146,35 @@ const columns = computed<any[]>(() => [
     width: 220,
     render(row: any) {
       const btns: any[] = [];
-      btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => run(row) }, { default: () => t('optimize.runNow') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => router.push('/optimize-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? t('common.disable') : t('common.enable')) }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      btns.push(
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: 'primary',
+            loading: !!busy[`run:${row.id}`],
+            disabled: !!busy[`run:${row.id}`],
+            onClick: () => guard(`run:${row.id}`, () => run(row)),
+          },
+          { default: () => t('optimize.runNow') }
+        )
+      );
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => router.push('/optimize-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
+      btns.push(
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            loading: !!busy[`active:${row.id}`],
+            disabled: !!busy[`active:${row.id}`],
+            onClick: () => guard(`active:${row.id}`, () => toggleActive(row)),
+          },
+          { default: () => (row.active ? t('common.disable') : t('common.enable')) }
+        )
+      );
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
@@ -158,7 +185,7 @@ async function loadTasks() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/optimize/tasks', {
       offset: (page.value - 1) * pageSize.value,
@@ -177,7 +204,7 @@ async function loadTasks() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 
@@ -194,30 +221,21 @@ function clearSearch() {
 }
 
 async function run(row: any) {
-  message.loading(t('optimize.runLoading'));
   const res = await api('POST', `/optimize/tasks/${row.id}/run`, {});
   if (res.code === 0) message.success(res.msg);
   else message.error(res.msg);
   loadTasks();
 }
 
-const activePending = new Set<number>();
 async function toggleActive(row: any) {
-  const id = Number(row.id);
-  if (activePending.has(id)) return; // 防双击重复提交
-  activePending.add(id);
   const prev = row.active ? 1 : 0;
   const target = prev ? 0 : 1;
   row.active = target; // 乐观更新
-  try {
-    const res = await api('POST', `/optimize/tasks/${row.id}/active`, { active: target });
-    if (res.code === 0) message.success(t('common.success'));
-    else {
-      row.active = prev; // 失败回滚
-      message.error(res.msg);
-    }
-  } finally {
-    activePending.delete(id);
+  const res = await api('POST', `/optimize/tasks/${row.id}/active`, { active: target });
+  if (res.code === 0) message.success(t('common.success'));
+  else {
+    row.active = prev; // 失败回滚
+    message.error(res.msg);
   }
 }
 

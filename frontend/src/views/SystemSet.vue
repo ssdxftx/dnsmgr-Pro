@@ -26,8 +26,8 @@
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveMail">{{ t('common.save') }}</n-button>
-                  <n-button @click="testMail">{{ t('systemSet.testMail') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveMail">{{ t('common.save') }}</n-button>
+                  <ActionButton :action="() => api('POST', '/system/mailtest', {})" success-from-result :error-text="t('common.failed')">{{ t('systemSet.testMail') }}</ActionButton>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -38,7 +38,7 @@
               <n-form-item label="appToken"><n-input v-model:value="cfg.wechat_apptoken" /></n-form-item>
               <n-form-item :label="t('systemSet.wxUserUid')"><n-input v-model:value="cfg.wechat_appuid" /></n-form-item>
               <n-form-item>
-                <n-button type="primary" :loading="saving" @click="saveFields(['wechat_apptoken', 'wechat_appuid'])">{{ t('common.save') }}</n-button>
+                <n-button type="primary" :loading="saveBusy" @click="saveFields(['wechat_apptoken', 'wechat_appuid'])">{{ t('common.save') }}</n-button>
               </n-form-item>
             </n-form>
           </n-card>
@@ -56,8 +56,8 @@
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['tgbot_token', 'tgbot_chatid', 'tgbot_topicid', 'tgbot_proxy', 'tgbot_url'])">{{ t('common.save') }}</n-button>
-                  <n-button @click="testTgbot">{{ t('systemSet.testMessage') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveFields(['tgbot_token', 'tgbot_chatid', 'tgbot_topicid', 'tgbot_proxy', 'tgbot_url'])">{{ t('common.save') }}</n-button>
+                  <ActionButton :action="() => api('POST', '/system/tgbottest', {})" success-from-result :error-text="t('common.failed')">{{ t('systemSet.testMessage') }}</ActionButton>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -85,8 +85,8 @@
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['qqbot_appid', 'qqbot_appsecret'])">{{ t('common.save') }}</n-button>
-                  <n-button @click="testQqbot">{{ t('systemSet.testMessage') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveFields(['qqbot_appid', 'qqbot_appsecret'])">{{ t('common.save') }}</n-button>
+                  <ActionButton :action="() => api('POST', '/system/qqbottest', {})" success-from-result :error-text="t('common.failed')">{{ t('systemSet.testMessage') }}</ActionButton>
                   <n-button @click="showQqbotHelp = true">{{ t('systemSet.qqHelp') }}</n-button>
                 </n-space>
               </n-form-item>
@@ -99,8 +99,8 @@
               <n-form-item :label="t('systemSet.webhookUser')"><n-input v-model:value="cfg.webhook_user" :placeholder="t('systemSet.webhookUserPlaceholder')" /></n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['webhook_url', 'webhook_user'])">{{ t('common.save') }}</n-button>
-                  <n-button @click="testWebhook">{{ t('systemSet.testMessage') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveFields(['webhook_url', 'webhook_user'])">{{ t('common.save') }}</n-button>
+                  <ActionButton :action="() => api('POST', '/system/webhooktest', {})" success-from-result :error-text="t('common.failed')">{{ t('systemSet.testMessage') }}</ActionButton>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -128,8 +128,8 @@
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(customWebhookFields)">{{ t('common.save') }}</n-button>
-                  <n-button @click="testCustomWebhook">{{ t('systemSet.testMessage') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveFields(customWebhookFields)">{{ t('common.save') }}</n-button>
+                  <ActionButton :action="() => api('POST', '/system/customwebhooktest', {})" success-from-result :error-text="t('common.failed')">{{ t('systemSet.testMessage') }}</ActionButton>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -158,7 +158,7 @@
                 <n-select v-model:value="cfg.register_mode" :options="registerModeOptions" style="width: 200px" />
               </n-form-item>
               <n-form-item>
-                <n-button type="primary" :loading="saving" @click="saveRegister">{{ t('common.save') }}</n-button>
+                <n-button type="primary" :loading="saveBusy" @click="saveRegister">{{ t('common.save') }}</n-button>
               </n-form-item>
             </n-form>
           </n-card>
@@ -170,7 +170,7 @@
             <ResponsiveDataTable
               :columns="regCodeColumns"
               :data="regCodes"
-              :loading="regCodesLoading"
+              :loading="regCodesLoadBusy"
               :row-key="(row: any) => row.id"
             />
           </n-card>
@@ -189,8 +189,12 @@
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveFields(['proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type'])">{{ t('common.save') }}</n-button>
-                  <n-button @click="testProxy">{{ t('systemSet.testConnectivity') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveFields(['proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type'])">{{ t('common.save') }}</n-button>
+                  <ActionButton
+                    :action="() => api('POST', '/system/proxytest', { proxy_server: cfg.proxy_server, proxy_port: cfg.proxy_port, proxy_user: cfg.proxy_user, proxy_pwd: cfg.proxy_pwd, proxy_type: cfg.proxy_type })"
+                    success-from-result
+                    :error-text="t('common.failed')"
+                  >{{ t('systemSet.testConnectivity') }}</ActionButton>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -238,9 +242,9 @@
               </n-form-item>
               <n-form-item>
                 <n-space>
-                  <n-button type="primary" :loading="saving" @click="saveStatCache">{{ t('common.save') }}</n-button>
-                  <n-button :loading="refreshingCache" @click="refreshStatCache">{{ t('systemSet.refreshNow') }}</n-button>
-                  <n-button :loading="clearingCache" @click="clearStatCache">{{ t('systemSet.clearCache') }}</n-button>
+                  <n-button type="primary" :loading="saveBusy" @click="saveStatCache">{{ t('common.save') }}</n-button>
+                  <n-button :loading="refreshCacheBusy" @click="refreshStatCache">{{ t('systemSet.refreshNow') }}</n-button>
+                  <n-button :loading="clearCacheBusy" @click="clearStatCache">{{ t('systemSet.clearCache') }}</n-button>
                 </n-space>
               </n-form-item>
             </n-form>
@@ -250,7 +254,7 @@
     </n-card>
 
     <!-- 生成注册码弹窗 -->
-    <n-modal v-model:show="showGen" preset="card" :title="t('systemSet.genTitle')" style="max-width:420px" :mask-closable="false">
+    <n-modal v-model:show="showGen" preset="card" :title="t('systemSet.genTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="top">
         <n-form-item :label="t('systemSet.genCount')">
           <n-input-number v-model:value="genForm.count" :min="1" :max="100" style="width: 100%" />
@@ -268,13 +272,13 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showGen = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="genning" @click="doGen">{{ t('systemSet.genBtn') }}</n-button>
+          <n-button type="primary" :loading="genBusy" @click="doGen">{{ t('systemSet.genBtn') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 生成结果弹窗 -->
-    <n-modal v-model:show="showResult" preset="card" :title="t('systemSet.resultTitle')" style="max-width:520px" :mask-closable="false">
+    <n-modal v-model:show="showResult" preset="card" :title="t('systemSet.resultTitle')" class="modal-sm" :mask-closable="false">
       <n-alert type="success" class="mb-12">{{ t('systemSet.resultAlert') }}</n-alert>
       <n-input v-model:value="resultText" type="textarea" :rows="8" readonly />
       <template #footer>
@@ -286,7 +290,7 @@
     </n-modal>
 
     <!-- QQ机器人使用说明 -->
-    <n-modal v-model:show="showQqbotHelp" preset="card" :title="t('systemSet.qqHelpTitle')" style="max-width:560px" :mask-closable="false">
+    <n-modal v-model:show="showQqbotHelp" preset="card" :title="t('systemSet.qqHelpTitle')" class="modal-md" :mask-closable="false">
       <div class="help-body">
         <p><b>{{ t('systemSet.helpStep1') }}</b></p>
         <p>{{ t('systemSet.helpStep1p1') }}</p>
@@ -309,21 +313,24 @@ import { useMessage, useDialog, NButton, NSpace, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import PageHeader from '../components/PageHeader.vue';
+import ActionButton from '../components/ActionButton.vue';
+import { useAction } from '../composables/useAction';
 
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
-const saving = ref(false);
+const { busy, run } = useAction();
+const saveBusy = ref(false);
 const cfg = reactive<Record<string, string>>({});
 const cronKey = ref('');
 
 const showGen = ref(false);
-const genning = ref(false);
+const genBusy = ref(false);
 const showResult = ref(false);
 const resultText = ref('');
 const genForm = reactive({ count: 1, days: 0, maxUse: 0, remark: '' });
 const regCodes = ref<any[]>([]);
-const regCodesLoading = ref(false);
+const regCodesLoadBusy = ref(false);
 
 const registerModeOptions = computed(() => [
   { label: t('systemSet.regModeEmail'), value: 'email' },
@@ -377,9 +384,9 @@ async function loadSettings() {
 async function saveFields(fields: string[]) {
   const body: Record<string, string> = {};
   for (const f of fields) body[f] = cfg[f] ?? '';
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', '/system/settings', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) message.success(t('systemSet.saveSuccess'));
   else message.error(res.msg);
 }
@@ -391,23 +398,8 @@ async function saveMail() {
   await saveFields(fields);
 }
 
-async function testMail() {
-  const res = await api('POST', '/system/mailtest', {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-}
-async function testTgbot() {
-  const res = await api('POST', '/system/tgbottest', {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-}
 const showQqbotHelp = ref(false);
 const qqbotWebhook = computed(() => `${location.origin}/api/qqbot/webhook`);
-async function testQqbot() {
-  const res = await api('POST', '/system/qqbottest', {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-}
 async function copyQqbotWebhook() {
   try {
     await navigator.clipboard.writeText(qqbotWebhook.value);
@@ -416,28 +408,6 @@ async function copyQqbotWebhook() {
     message.error(t('systemSet.copyFailed'));
   }
 }
-async function testWebhook() {
-  const res = await api('POST', '/system/webhooktest', {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-}
-async function testCustomWebhook() {
-  const res = await api('POST', '/system/customwebhooktest', {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-}
-async function testProxy() {
-  const res = await api('POST', '/system/proxytest', {
-    proxy_server: cfg.proxy_server,
-    proxy_port: cfg.proxy_port,
-    proxy_user: cfg.proxy_user,
-    proxy_pwd: cfg.proxy_pwd,
-    proxy_type: cfg.proxy_type,
-  });
-  if (res.code === 0) message.success(res.msg);
-  else message.error(t('systemSet.proxyTestFailed', { msg: res.msg }));
-}
-
 async function setVcode(v: boolean) {
   cfg.vcode = v ? '1' : '2';
   await saveFields(['vcode']);
@@ -460,17 +430,17 @@ async function setStatCache(v: boolean) {
 async function saveStatCache() {
   await saveFields(['cdn_stats_cache', 'cdn_stats_cache_interval']);
 }
-const refreshingCache = ref(false);
+const refreshCacheBusy = ref(false);
 async function refreshStatCache() {
-  refreshingCache.value = true;
+  refreshCacheBusy.value = true;
   const res = await api('POST', '/system/stat-cache-refresh', {});
-  refreshingCache.value = false;
+  refreshCacheBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     await loadSettings();
   } else message.error(res.msg);
 }
-const clearingCache = ref(false);
+const clearCacheBusy = ref(false);
 function clearStatCache() {
   dialog.warning({
     title: t('systemSet.clearCacheTitle'),
@@ -478,9 +448,9 @@ function clearStatCache() {
     positiveText: t('systemSet.clearNow'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      clearingCache.value = true;
+      clearCacheBusy.value = true;
       const res = await api('POST', '/system/stat-cache-clear', {});
-      clearingCache.value = false;
+      clearCacheBusy.value = false;
       if (res.code === 0) {
         message.success(res.msg);
         await loadSettings();
@@ -508,18 +478,29 @@ const regCodeColumns = computed<any[]>(() => [
       h(NSpace, null, () => [
         h(
           NButton,
-          { size: 'tiny', type: row.status === 1 ? 'warning' : 'success', onClick: () => toggleCodeStatus(row) },
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: row.status === 1 ? 'warning' : 'success',
+            loading: !!busy[`regcode:${row.id}:toggle`],
+            disabled: !!busy[`regcode:${row.id}:toggle`],
+            onClick: () => run(`regcode:${row.id}:toggle`, () => toggleCodeStatus(row)),
+          },
           { default: () => (row.status === 1 ? t('systemSet.regCodeStatusDisabled') : t('systemSet.regCodeStatusActive')) }
         ),
-        h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteCode(row) }, { default: () => t('common.delete') }),
+        h(
+          NButton,
+          { size: 'tiny', quaternary: true, type: 'error', onClick: () => deleteCode(row) },
+          { default: () => t('common.delete') }
+        ),
       ]),
   },
 ]);
 
 async function loadRegCodes() {
-  regCodesLoading.value = true;
+  regCodesLoadBusy.value = true;
   const res = await api<any>('GET', '/register/codes', { limit: 500, offset: 0 });
-  regCodesLoading.value = false;
+  regCodesLoadBusy.value = false;
   if (res.code === 0) regCodes.value = res.data.list;
   else message.error(res.msg);
 }
@@ -534,9 +515,9 @@ async function saveRegister() {
 }
 
 async function doGen() {
-  genning.value = true;
+  genBusy.value = true;
   const res = await api<any>('POST', '/register/codes', genForm);
-  genning.value = false;
+  genBusy.value = false;
   if (res.code === 0) {
     showGen.value = false;
     resultText.value = (res.data.codes || []).join('\n');
@@ -564,12 +545,20 @@ async function toggleCodeStatus(row: any) {
   } else message.error(res.msg);
 }
 
-async function deleteCode(row: any) {
-  const res = await api<any>('DELETE', '/register/codes/' + row.id);
-  if (res.code === 0) {
-    message.success(res.msg);
-    loadRegCodes();
-  } else message.error(res.msg);
+function deleteCode(row: any) {
+  dialog.warning({
+    title: t('common.tip'),
+    content: t('common.confirmDelete'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api<any>('DELETE', '/register/codes/' + row.id);
+      if (res.code === 0) {
+        message.success(res.msg);
+        loadRegCodes();
+      } else message.error(res.msg);
+    },
+  });
 }
 
 onMounted(() => {

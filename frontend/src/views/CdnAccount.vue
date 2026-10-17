@@ -14,10 +14,10 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="tunnelAccounts" :label="t('common.tunnelReady')" tone="success" :icon="GlobeOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" :empty-text="t('cdnAccount.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loadBusy" :empty-text="t('cdnAccount.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('cdnAccount.editTitle') : t('cdnAccount.addTitle')" style="max-width:520px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('cdnAccount.editTitle') : t('cdnAccount.addTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cdnAccount.provider')">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
@@ -28,7 +28,7 @@
         <n-form-item :label="t('common.remark')">
           <n-input v-model:value="form.remark" type="textarea" :autosize="{ minRows: 1, maxRows: 3 }" clearable />
         </n-form-item>
-        <n-alert v-if="currentProvider?.note" type="info" style="margin-bottom:12px">{{ currentProvider.note }}</n-alert>
+        <n-alert v-if="currentProvider?.note" type="info" class="mb-3">{{ currentProvider.note }}</n-alert>
         <n-form-item v-for="(field, key) in currentProvider?.config || {}" :key="key" :label="field.name">
           <n-select v-if="field.type === 'select'" v-model:value="form.config[key]" :options="field.options || []" :placeholder="field.placeholder || field.name" clearable />
           <n-input v-else v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
@@ -37,7 +37,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('cdnAccount.saveVerify') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('cdnAccount.saveVerify') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -60,7 +60,7 @@ const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const router = useRouter();
-const loading = ref(false);
+const loadBusy = ref(false);
 const accounts = ref<any[]>([]);
 const providerCount = computed(() => new Set(accounts.value.map((a: any) => a.type)).size);
 const tunnelAccounts = computed(() => accounts.value.filter((a: any) => a.type === 'cloudflare').length);
@@ -69,7 +69,7 @@ const providers = ref<Record<string, any>>({});
 const providerOptions = ref<any[]>([]);
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const currentProvider = ref<any>(null);
 const form = reactive<any>({ type: '', name: '', remark: '', config: {} as Record<string, any> });
 
@@ -132,10 +132,10 @@ async function loadProviders() {
 }
 
 async function loadAccounts() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/cdn/accounts');
   accounts.value = res.code === 0 ? res.data : [];
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 function onTypeChange() {
@@ -167,12 +167,12 @@ function openEdit(row: any) {
 
 async function save() {
   if (!form.type || !form.name) return message.warning(t('cdnAccount.fillWarning'));
-  saving.value = true;
+  saveBusy.value = true;
   const body = { type: form.type, name: form.name, config: form.config, remark: form.remark || '' };
   const res = editingId.value
     ? await api('PUT', `/cdn/accounts/${editingId.value}`, body)
     : await api('POST', '/cdn/accounts', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;

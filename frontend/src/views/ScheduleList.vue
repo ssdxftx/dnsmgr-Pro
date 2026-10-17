@@ -14,7 +14,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-select v-model:value="searchType" :options="searchTypeOptions" style="width: 130px" />
         <n-input v-model:value="kw" :placeholder="t('schedule.keyword')" style="width: 200px" @keyup.enter="search" />
         <n-select v-model:value="stype" :options="stypeOptions" clearable :placeholder="t('schedule.execPlaceholder')" style="width: 130px" />
@@ -26,16 +26,18 @@
         v-model:checked-row-keys="checkedRowKeys"
         :columns="columns"
         :data="tasks"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
         :empty-text="t('schedule.empty')"
+        :error="loadError"
+        @retry="loadTasks"
       />
 
       <n-space v-if="checkedRowKeys.length" style="margin-top: 12px">
         <n-button size="small" @click="batch('open')">{{ t('schedule.batchOpen') }}</n-button>
         <n-button size="small" @click="batch('close')">{{ t('schedule.batchClose') }}</n-button>
-        <n-button size="small" type="error" @click="batch('delete')">{{ t('schedule.batchDelete') }}</n-button>
+        <n-button size="small" type="error" secondary @click="batch('delete')">{{ t('schedule.batchDelete') }}</n-button>
       </n-space>
     </n-card>
   </div>
@@ -51,12 +53,15 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
-const loading = ref(false);
+const { busy, run: guard } = useAction();
+const loadBusy = ref(false);
+const loadError = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pausedTasks = computed(() => tasks.value.filter((t: any) => !t.active).length);
@@ -141,9 +146,21 @@ const columns = computed<any[]>(() => [
     width: 180,
     render(row: any) {
       const btns: any[] = [];
-      btns.push(h(NButton, { size: 'tiny', onClick: () => router.push('/schedule-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
-      btns.push(h(NButton, { size: 'tiny', onClick: () => toggleActive(row) }, { default: () => (row.active ? t('common.disable') : t('common.enable')) }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => router.push('/schedule-tasks/' + row.id + '/edit') }, { default: () => t('common.edit') }));
+      btns.push(
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            loading: !!busy[`active:${row.id}`],
+            disabled: !!busy[`active:${row.id}`],
+            onClick: () => guard(`active:${row.id}`, () => toggleActive(row)),
+          },
+          { default: () => (row.active ? t('common.disable') : t('common.enable')) }
+        )
+      );
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
@@ -154,7 +171,7 @@ async function loadTasks() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/schedule/tasks', {
       offset: (page.value - 1) * pageSize.value,
@@ -164,6 +181,7 @@ async function loadTasks() {
       stype: stype.value === null ? undefined : stype.value,
     }, { signal: ac.signal });
     if (loadAbort !== ac) return;
+    loadError.value = res.code !== 0;
     if (res.code === 0) {
       tasks.value = res.data.list;
       pagination.itemCount = res.data.total;
@@ -171,9 +189,9 @@ async function loadTasks() {
       pagination.pageSize = pageSize.value;
     }
   } catch (e: any) {
-    if (e?.name === 'AbortError') return;
+    if (e?.name !== 'AbortError') loadError.value = true;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 
@@ -210,23 +228,15 @@ function batch(act: string) {
   });
 }
 
-const activePending = new Set<number>();
 async function toggleActive(row: any) {
-  const id = Number(row.id);
-  if (activePending.has(id)) return; // 防双击重复提交
-  activePending.add(id);
   const prev = row.active ? 1 : 0;
   const target = prev ? 0 : 1;
   row.active = target; // 乐观更新
-  try {
-    const res = await api('POST', `/schedule/tasks/${row.id}/active`, { active: target });
-    if (res.code === 0) message.success(t('common.success'));
-    else {
-      row.active = prev; // 失败回滚
-      message.error(res.msg);
-    }
-  } finally {
-    activePending.delete(id);
+  const res = await api('POST', `/schedule/tasks/${row.id}/active`, { active: target });
+  if (res.code === 0) message.success(t('common.success'));
+  else {
+    row.active = prev; // 失败回滚
+    message.error(res.msg);
   }
 }
 

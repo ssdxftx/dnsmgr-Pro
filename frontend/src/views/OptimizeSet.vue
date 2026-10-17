@@ -31,8 +31,13 @@
             </n-form-item>
             <n-form-item :show-feedback="false">
               <n-space class="btn-row">
-                <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
-                <n-button v-if="form.optimize_ip_api !== '2'" @click="queryApi">{{ t('optimize.queryScore') }}</n-button>
+                <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
+                <ActionButton
+                  v-if="form.optimize_ip_api !== '2'"
+                  :action="() => api('POST', '/optimize/queryapi', { optimize_ip_api: Number(form.optimize_ip_api), optimize_ip_key: form.optimize_ip_key })"
+                  success-from-result
+                  :error-text="t('common.failed')"
+                >{{ t('optimize.queryScore') }}</ActionButton>
               </n-space>
             </n-form-item>
           </n-form>
@@ -47,7 +52,7 @@
             </n-form-item>
             <n-form-item :show-feedback="false">
               <n-space class="btn-row">
-                <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+                <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
               </n-space>
             </n-form-item>
           </n-form>
@@ -63,10 +68,11 @@ import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import ActionButton from '../components/ActionButton.vue';
 
 const message = useMessage();
 const { t } = useI18n();
-const saving = ref(false);
+const saveBusy = ref(false);
 
 const isMobile = ref(false);
 const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
@@ -108,17 +114,10 @@ async function load() {
 }
 
 async function save() {
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', '/optimize/settings', { ...form });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) message.success(t('optimize.savedMsg'));
-  else message.error(res.msg);
-}
-
-async function queryApi() {
-  message.loading(t('optimize.queryLoading'));
-  const res = await api('POST', '/optimize/queryapi', { optimize_ip_api: Number(form.optimize_ip_api), optimize_ip_key: form.optimize_ip_key });
-  if (res.code === 0) message.success(res.msg);
   else message.error(res.msg);
 }
 

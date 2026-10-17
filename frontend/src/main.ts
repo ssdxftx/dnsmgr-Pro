@@ -10,6 +10,7 @@ import { isAdminUser, requiresAdmin } from './lib/admin';
 import { getUser } from './api';
 import './styles/tokens.css';
 import './styles/responsive.css';
+import './styles/ui-consistency.css';
 
 // 静态预览构建时启用 Mock（正式构建为空操作）
 installMock();

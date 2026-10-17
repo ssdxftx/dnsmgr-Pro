@@ -222,6 +222,7 @@ a {
   display: flex;
   align-items: center;
   gap: 14px;
+  min-height: 132px;
   padding: 18px 20px;
   background: var(--app-surface);
   border: 1px solid var(--app-divider);
@@ -266,9 +267,9 @@ a {
   margin-bottom: 2px;
 }
 .stat-card__value {
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 1.2;
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.05;
   color: var(--app-text);
   font-variant-numeric: tabular-nums;
   word-break: break-word;
@@ -310,6 +311,13 @@ a {
 .empty-state__desc {
   font-size: 13px;
   max-width: 380px;
+}
+.empty-state--error .empty-state__icon {
+  background: var(--app-error-weak);
+  color: var(--app-error);
+}
+.empty-state--error .empty-state__title {
+  color: var(--app-error);
 }
 
 /* ===========================================================================

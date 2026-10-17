@@ -18,11 +18,11 @@
       <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :spark="sparks[3]" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="orders" :loading="loading" :empty-text="t('certOrder.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="orders" :loading="loadBusy" :empty-text="t('certOrder.empty')" />
     </n-card>
 
     <!-- 添加/编辑弹窗 -->
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('certOrder.editTitle') : t('certOrder.applyTitle')" style="max-width:640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('certOrder.editTitle') : t('certOrder.applyTitle')" class="modal-md" :mask-closable="false">
       <n-tabs v-model:value="tab" type="line">
         <n-tab-pane name="apply" :tab="t('certOrder.tabApply')">
           <n-form label-placement="left" label-width="110">
@@ -57,14 +57,14 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 证书详情 -->
-    <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" style="max-width:720px" :mask-closable="false">
-      <n-descriptions v-if="info" bordered :column="1" label-placement="left" style="margin-bottom:16px">
+    <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" class="modal-lg" :mask-closable="false">
+      <n-descriptions v-if="info" bordered :column="1" label-placement="left" class="mb-4">
         <n-descriptions-item :label="t('certOrder.domains')">{{ (info.domains || []).join(', ') }}</n-descriptions-item>
         <n-descriptions-item :label="t('certOrder.issueTime')">{{ info.issuetime }}</n-descriptions-item>
         <n-descriptions-item :label="t('certOrder.expireTime')">{{ info.expiretime }}</n-descriptions-item>
@@ -87,7 +87,7 @@
     </n-modal>
 
     <!-- 日志 -->
-    <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" style="max-width:720px" :mask-closable="false">
+    <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" class="modal-lg" :mask-closable="false">
       <n-input v-model:value="logText" type="textarea" :rows="18" readonly />
     </n-modal>
   </div>
@@ -97,7 +97,7 @@
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NDropdown, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ShieldCheckmarkOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -109,7 +109,7 @@ const { t } = useI18n();
 
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
+const loadBusy = ref(false);
 const orders = ref<any[]>([]);
 // 遥测统计（基于完整订单列表，单次遍历计算）
 const orderStats = computed(() => {
@@ -142,7 +142,7 @@ const accountOptions = ref<any[]>([]);
 
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const tab = ref('apply');
 const form = reactive<any>({ aid: null, keytype: 'RSA', keysize: '2048', domains: [], fullchain: '', privatekey: '' });
 
@@ -204,33 +204,54 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 260,
+    width: 220,
     render(row: any) {
       const btns: any[] = [];
+      // 主操作：按状态唯一（进行中→处理/验证；已签发→详情）
       if (row.status < 3) {
-        btns.push(h(NButton, { size: 'tiny', type: 'primary', onClick: () => process(row) }, { default: () => (row.status === 1 ? t('certOrder.verify') : t('certOrder.process')) }));
-        btns.push(h(NButton, { size: 'tiny', onClick: () => reset(row) }, { default: () => t('certOrder.reset') }));
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => process(row) }, { default: () => (row.status === 1 ? t('certOrder.verify') : t('certOrder.process')) }));
+      } else if (row.status === 3) {
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => viewInfo(row) }, { default: () => t('common.detail') }));
       }
+      // 行内弱操作
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => viewLog(row) }, { default: () => t('certOrder.log') }));
+      // 其余状态相关操作收进「更多」，避免按钮墙换行
+      const more: any[] = [];
+      if (row.status < 3) more.push({ label: t('certOrder.reset'), key: 'reset' });
       if (row.status === 3) {
-        btns.push(h(NButton, { size: 'tiny', type: 'info', onClick: () => viewInfo(row) }, { default: () => t('common.detail') }));
-        btns.push(h(NButton, { size: 'tiny', type: 'warning', onClick: () => revoke(row) }, { default: () => t('certOrder.revoke') }));
-        btns.push(h(NButton, { size: 'tiny', onClick: () => toggleAuto(row) }, { default: () => (row.isauto ? t('certOrder.autoOff') : t('certOrder.autoOn')) }));
+        more.push({ label: t('certOrder.revoke'), key: 'revoke' });
+        more.push({ label: row.isauto ? t('certOrder.autoOff') : t('certOrder.autoOn'), key: 'auto' });
       }
-      btns.push(h(NButton, { size: 'tiny', onClick: () => viewLog(row) }, { default: () => t('certOrder.log') }));
-      btns.push(h(NButton, { size: 'tiny', type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
+      if (more.length) {
+        btns.push(
+          h(
+            NDropdown,
+            {
+              options: more,
+              onSelect: (key: string) => {
+                if (key === 'reset') reset(row);
+                else if (key === 'revoke') revoke(row);
+                else if (key === 'auto') toggleAuto(row);
+              },
+            },
+            { default: () => h(NButton, { size: 'tiny', quaternary: true }, { default: () => t('common.more') }) }
+          )
+        );
+      }
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h(NSpace, null, { default: () => btns });
     },
   },
 ]);
 
 async function loadOrders() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/cert/orders', { limit: 200 });
   if (res.code === 0) {
     orders.value = res.data;
     statusLabel.value = res.status_label || {};
   } else orders.value = [];
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function loadAccounts() {
@@ -276,7 +297,7 @@ async function save() {
     if (!domains.length) return message.warning(t('certOrder.domainsWarning'));
     body = { aid: form.aid, keytype: form.keytype, keysize: form.keysize, domains };
   }
-  saving.value = true;
+  saveBusy.value = true;
   try {
     const res = editingId.value
       ? await api('PUT', `/cert/orders/${editingId.value}`, body)
@@ -287,7 +308,7 @@ async function save() {
       loadOrders();
     } else message.error(res.msg);
   } finally {
-    saving.value = false;
+    saveBusy.value = false;
   }
 }
 

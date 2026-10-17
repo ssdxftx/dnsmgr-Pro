@@ -14,10 +14,10 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="tunnelAccounts" :label="t('common.tunnelReady')" tone="success" :icon="GlobeOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" :empty-text="t('dnsAccount.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loadBusy" :empty-text="t('dnsAccount.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('dnsAccount.editTitle') : t('dnsAccount.addTitle')" style="max-width:560px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('dnsAccount.editTitle') : t('dnsAccount.addTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('dnsAccount.provider')">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
@@ -26,7 +26,7 @@
           <n-input v-model:value="form.name" :placeholder="t('dnsAccount.remarkPlaceholder')" />
         </n-form-item>
         <template v-if="currentProvider">
-          <n-alert v-if="!currentProvider.implemented" type="warning" style="margin-bottom:12px">
+          <n-alert v-if="!currentProvider.implemented" type="warning" class="mb-3">
             {{ t('dnsAccount.pendingProvider') }}
           </n-alert>
           <n-form-item v-for="(field, key) in currentProvider.config" :key="key" :label="field.name">
@@ -41,7 +41,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('dnsAccount.saveVerify') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('dnsAccount.saveVerify') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -65,7 +65,7 @@ const { t } = useI18n();
 
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
+const loadBusy = ref(false);
 const accounts = ref<any[]>([]);
 const providerCount = computed(() => new Set(accounts.value.map((a: any) => a.type)).size);
 const tunnelAccounts = computed(() => accounts.value.filter((a: any) => a.type === 'cloudflare').length);
@@ -73,7 +73,7 @@ const providers = ref<Record<string, any>>({});
 
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const form = reactive<any>({ type: '', name: '', config: {} });
 const currentProvider = ref<any>(null);
 
@@ -136,10 +136,10 @@ async function loadProviders() {
 }
 
 async function loadAccounts() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/dns/accounts');
   accounts.value = res.code === 0 ? res.data : [];
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 function onTypeChange() {
@@ -182,12 +182,12 @@ function safeJson(s: string) {
 async function save() {
   if (!form.type || !form.name) return message.warning(t('dnsAccount.fillWarning'));
   if (!currentProvider.value?.implemented) return message.warning(t('dnsAccount.providerUnsupported'));
-  saving.value = true;
+  saveBusy.value = true;
   const body = { type: form.type, name: form.name, config: form.config };
   const res = editingId.value
     ? await api('PUT', `/dns/accounts/${editingId.value}`, body)
     : await api('POST', '/dns/accounts', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;

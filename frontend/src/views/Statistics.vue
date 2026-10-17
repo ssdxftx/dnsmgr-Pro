@@ -2,14 +2,14 @@
   <div class="app-stack">
     <PageHeader :title="t('statistics.title')" :subtitle="t('statistics.subtitle')">
       <template #actions>
-        <n-button @click="load" :loading="loading">
+        <n-button @click="load" :loading="loadBusy">
           <template #icon><n-icon :component="RefreshOutline" /></template>
           {{ t('common.refresh') }}
         </n-button>
       </template>
     </PageHeader>
     <n-card :bordered="false">
-      <n-alert v-if="!isAdmin" type="info" :show-icon="false" style="margin-bottom: 16px">
+      <n-alert v-if="!isAdmin" type="info" :show-icon="false" class="mb-4">
         {{ t('statistics.cacheDataHint') }}
       </n-alert>
       <div class="filters">
@@ -81,7 +81,7 @@
         />
       </div>
 
-      <n-alert v-if="errors.length" type="warning" :show-icon="false" style="margin-bottom: 16px">
+      <n-alert v-if="errors.length" type="warning" :show-icon="false" class="mb-4">
         {{ t('statistics.partialFail', { errors: errors.join(', ') }) }}
       </n-alert>
 
@@ -150,7 +150,7 @@ const { isMobile } = useResponsive();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const { t } = useI18n();
 const { isDark } = useThemeMode();
-const loading = ref(false);
+const loadBusy = ref(false);
 const range = ref('24h');
 const rangeOptions = computed(() => [
   { label: t('statistics.range24h'), value: '24h' },
@@ -358,7 +358,7 @@ function renderCharts() {
 }
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const { startTime, endTime } = computeRange();
     const res = await api<any>('GET', '/cdn/statistics', {
@@ -385,7 +385,7 @@ async function load() {
   } catch (e: any) {
     errors.value = [e?.message || String(e)];
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 }
 

@@ -50,7 +50,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="saveRecord">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveRecord">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -92,7 +92,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showRemark = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="savingRemark" @click="saveRemark">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveRemarkBusy" @click="saveRemark">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -181,7 +181,7 @@ const batchAction = ref<'' | 'value' | 'line' | 'remark' | 'group'>('');
 const batchForm = reactive<any>({ type: 'A', value: '', line: '', remark: '', groupid: null });
 const groups = ref<any[]>([]);
 
-const saving = ref(false);
+const saveBusy = ref(false);
 const showEdit = ref(false);
 const editingId = ref<string | null>(null);
 const editingDid = ref<number | null>(null);
@@ -198,7 +198,7 @@ const showValue = ref(false);
 const valueDetail = ref('');
 const showRemark = ref(false);
 const remarkForm = reactive<any>({ did: null, recordId: '', remark: '' });
-const savingRemark = ref(false);
+const saveRemarkBusy = ref(false);
 
 const showCheck = ref(false);
 const checkResult = ref<any>({ status: '', name: '', domainName: '', type: '', value: '', actual: [], expected: '' });
@@ -480,9 +480,9 @@ function openRemark(row: any) {
 
 async function saveRemark() {
   if (!remarkForm.did) return;
-  savingRemark.value = true;
+  saveRemarkBusy.value = true;
   const res = await api('POST', `/domains/${remarkForm.did}/records/${remarkForm.recordId}/remark`, { remark: remarkForm.remark || null });
-  savingRemark.value = false;
+  saveRemarkBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showRemark.value = false;
@@ -513,12 +513,12 @@ async function saveRecord() {
   if (!form.name || !form.value) return message.warning(t('record.fillRequired'));
   const did = editingId.value ? editingDid.value : props.domainId;
   if (!did) return;
-  saving.value = true;
+  saveBusy.value = true;
   const body = { ...form };
   const res = editingId.value
     ? await api('PUT', `/domains/${did}/records/${editingId.value}`, body)
     : await api('POST', `/domains/${did}/records`, body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;

@@ -3,8 +3,8 @@
     <PageHeader :title="t('cfRules.title')" :subtitle="t('cfRules.subtitle')" back="/cdn-domains">
       <template #actions>
         <n-space>
-          <n-button :loading="loading" @click="loadRules">{{ t('common.refresh') }}</n-button>
-          <n-button :disabled="!selectedDomain" @click="openCredential">{{ t('cfRules.credentialSettings') }}</n-button>
+          <n-button :loading="loadBusy" @click="loadRules">{{ t('common.refresh') }}</n-button>
+          <n-button :disabled="!selectedDomain" :loading="!!busy['cred']" @click="run('cred', openCredential)">{{ t('cfRules.credentialSettings') }}</n-button>
           <n-button type="primary" :disabled="!selectedDomain" @click="openAdd">{{ t('cfRules.addRule') }}</n-button>
         </n-space>
       </template>
@@ -36,24 +36,24 @@
         </n-tag>
       </n-space>
 
-      <n-alert v-if="needCredential" type="warning" style="margin-bottom: 12px" :show-icon="true">
+      <n-alert v-if="needCredential" type="warning" class="mb-3" :show-icon="true">
         {{ credentialMessage }}
         <template #action>
-          <n-button size="small" type="primary" @click="openCredential">{{ t('cfRules.fillDedicatedCredential') }}</n-button>
+          <n-button size="small" type="primary" :loading="!!busy['cred']" @click="run('cred', openCredential)">{{ t('cfRules.fillDedicatedCredential') }}</n-button>
         </template>
       </n-alert>
 
       <ResponsiveDataTable
         :columns="columns"
         :data="rules"
-        :loading="loading"
+        :loading="loadBusy"
         :row-key="(row: any) => row.id"
         :empty-text="t('cfRules.empty')"
       />
     </n-card>
 
     <!-- 规则编辑 -->
-    <n-modal v-model:show="showRule" preset="card" :title="editingId ? t('cfRules.editTitle') : t('cfRules.addTitle')" style="max-width: 640px" :mask-closable="false">
+    <n-modal v-model:show="showRule" preset="card" :title="editingId ? t('cfRules.editTitle') : t('cfRules.addTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cfRules.ruleType')">
           <n-tag size="small" type="info">{{ currentPhaseLabel }}</n-tag>
@@ -159,14 +159,14 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showRule = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="submitRule">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="submitRule">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
     <!-- 专用凭证 -->
-    <n-modal v-model:show="showCred" preset="card" :title="t('cfRules.credTitle')" style="max-width: 540px" :mask-closable="false">
-      <n-alert type="info" style="margin-bottom: 12px">
+    <n-modal v-model:show="showCred" preset="card" :title="t('cfRules.credTitle')" class="modal-sm" :mask-closable="false">
+      <n-alert type="info" class="mb-3">
         {{ t('cfRules.credHint') }}
       </n-alert>
       <n-form label-placement="left" label-width="110">
@@ -188,10 +188,10 @@
       </n-form>
       <template #footer>
         <n-space justify="space-between" style="width: 100%">
-          <n-button v-if="hasDedicated" type="error" ghost @click="removeCredential">{{ t('cfRules.removeCredential') }}</n-button>
+          <n-button v-if="hasDedicated" type="error" quaternary @click="removeCredential">{{ t('cfRules.removeCredential') }}</n-button>
           <n-space justify="end" style="margin-left: auto">
             <n-button @click="showCred = false">{{ t('common.cancel') }}</n-button>
-            <n-button type="primary" :loading="savingCred" @click="saveCredential">{{ t('cfRules.verifyAndSave') }}</n-button>
+            <n-button type="primary" :loading="saveCredBusy" @click="saveCredential">{{ t('cfRules.verifyAndSave') }}</n-button>
           </n-space>
         </n-space>
       </template>
@@ -209,11 +209,13 @@ import { ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useAction } from '../composables/useAction';
 
 const route = useRoute();
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const { busy, run } = useAction();
 
 interface DomainItem {
   id: number;
@@ -229,7 +231,7 @@ const selectedPhase = ref('http_request_origin');
 const rules = ref<any[]>([]);
 const typeCount = computed(() => new Set(rules.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rules.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
-const loading = ref(false);
+const loadBusy = ref(false);
 const needCredential = ref(false);
 const credentialMessage = ref('');
 const credentialSource = ref<'dns' | 'dedicated' | ''>('');
@@ -314,7 +316,7 @@ const advancedPlaceholder = computed(() => {
 
 const showRule = ref(false);
 const editingId = ref<string | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const ruleForm = reactive<any>({
   matchType: 'hostname',
   subdomain: '',
@@ -343,7 +345,7 @@ const ruleForm = reactive<any>({
 
 // 专用凭证
 const showCred = ref(false);
-const savingCred = ref(false);
+const saveCredBusy = ref(false);
 const hasDedicated = ref(false);
 const credForm = reactive<any>({ auth: 1, email: '', apikey: '', account_id: '' });
 
@@ -389,8 +391,8 @@ const columns = computed<any[]>(() => [
     render: (row: any) =>
       h(NSpace, { size: 2 }, {
         default: () => [
-          h(NButton, { size: 'tiny', type: 'primary', onClick: () => openEditRule(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', type: 'error', onClick: () => confirmDelete(row) }, { default: () => t('common.delete') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEditRule(row) }, { default: () => t('common.edit') }),
+          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => confirmDelete(row) }, { default: () => t('common.delete') }),
         ],
       }),
   },
@@ -426,10 +428,10 @@ async function loadRules() {
     rules.value = [];
     return;
   }
-  loading.value = true;
+  loadBusy.value = true;
   needCredential.value = false;
   const res = await api<any>('GET', `/cf-rules/rules?domainId=${selectedDomain.value}&phase=${selectedPhase.value}`);
-  loading.value = false;
+  loadBusy.value = false;
   if (res.code === 0) {
     rules.value = res.data?.rules || [];
     credentialSource.value = res.data?.credential_source || '';
@@ -642,11 +644,11 @@ async function submitRule() {
     action_parameters: built.action_parameters,
     description: ruleForm.description || undefined,
   };
-  saving.value = true;
+  saveBusy.value = true;
   const res = editingId.value
     ? await api<any>('PUT', `/cf-rules/rules/${editingId.value}`, payload)
     : await api<any>('POST', '/cf-rules/rules', payload);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg || t('common.saved'));
     showRule.value = false;
@@ -692,7 +694,7 @@ async function openCredential() {
 
 async function saveCredential() {
   if (!selectedAid.value) return;
-  savingCred.value = true;
+  saveCredBusy.value = true;
   const res = await api<any>('POST', '/cf-rules/credential', {
     aid: selectedAid.value,
     domain_id: selectedDomain.value,
@@ -701,7 +703,7 @@ async function saveCredential() {
     apikey: credForm.apikey,
     account_id: credForm.account_id,
   });
-  savingCred.value = false;
+  saveCredBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg || t('cfRules.credSaved'));
     hasDedicated.value = true;
@@ -712,18 +714,26 @@ async function saveCredential() {
   }
 }
 
-async function removeCredential() {
+function removeCredential() {
   if (!selectedAid.value) return;
-  const res = await api<any>('DELETE', `/cf-rules/credential?aid=${selectedAid.value}`);
-  if (res.code === 0) {
-    message.success(res.msg || t('cfRules.removed'));
-    hasDedicated.value = false;
-    credForm.apikey = '';
-    showCred.value = false;
-    await loadRules();
-  } else {
-    message.error(res.msg);
-  }
+  dialog.warning({
+    title: t('cfRules.removeCredential'),
+    content: t('common.confirmDelete'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api<any>('DELETE', `/cf-rules/credential?aid=${selectedAid.value}`);
+      if (res.code === 0) {
+        message.success(res.msg || t('cfRules.removed'));
+        hasDedicated.value = false;
+        credForm.apikey = '';
+        showCred.value = false;
+        await loadRules();
+      } else {
+        message.error(res.msg);
+      }
+    },
+  });
 }
 
 onMounted(async () => {

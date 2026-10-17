@@ -2,11 +2,11 @@
   <div class="app-stack">
     <PageHeader :title="t('cdnZone.title')" :subtitle="t('cdnZone.subtitle')" back="/cdn-domains">
       <template #actions>
-        <n-button size="small" :loading="loading" @click="loadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
+        <n-button size="small" :loading="loadBusy" @click="loadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
       </template>
     </PageHeader>
 
-    <n-spin :show="loading && !zoneList.length">
+    <n-spin :show="loadBusy && !zoneList.length">
       <div v-if="zoneList.length" class="zone-grid">
         <div v-for="row in zoneList" :key="row.key" class="zone-tile" @click="openSetting(row)">
           <div class="zone-tile__head">
@@ -29,7 +29,7 @@
           </div>
         </div>
       </div>
-      <n-card v-else-if="!loading" :bordered="false">
+      <n-card v-else-if="!loadBusy" :bordered="false">
         <n-empty :description="t('cdnZone.empty')" />
       </n-card>
     </n-spin>
@@ -49,7 +49,7 @@ const message = useMessage();
 const route = useRoute();
 const router = useRouter();
 
-const loading = ref(false);
+const loadBusy = ref(false);
 const zoneList = ref<any[]>([]);
 const accounts = ref<any[]>([]);
 
@@ -90,7 +90,7 @@ async function loadAccounts() {
 }
 
 async function loadAll() {
-  loading.value = true;
+  loadBusy.value = true;
   zoneList.value = [];
   try {
     if (!accounts.value.length) await loadAccounts();
@@ -123,7 +123,7 @@ async function loadAll() {
     );
     zoneList.value = results.flat();
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 }
 

@@ -7,10 +7,10 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="BarChartOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loading" :empty-text="t('common.noData')" />
+      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('common.noData')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="t('record.weightConfigure')" style="max-width:640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="t('record.weightConfigure')" class="modal-md" :mask-closable="false">
       <n-space vertical :size="10">
         <n-text depth="3">{{ current?.SubDomain }}</n-text>
         <n-table :bordered="false" :single-line="false" size="small">
@@ -27,7 +27,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="saveWeights">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveWeights">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -53,9 +53,9 @@ const domainName = ref('');
 const rows = ref<any[]>([]);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
-const loading = ref(false);
+const loadBusy = ref(false);
 const showEdit = ref(false);
-const saving = ref(false);
+const saveBusy = ref(false);
 const current = ref<any>(null);
 const records = ref<any[]>([]);
 const weights = reactive<Record<string, number>>({});
@@ -84,11 +84,11 @@ const columns = computed(() => [
 ]);
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', `/domains/${domainId}/weight`, { pagesize: 100 });
   rows.value = res.code === 0 ? res.data?.list || [] : [];
   if (res.code !== 0) message.error(res.msg);
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function toggle(r: any) {
@@ -111,7 +111,7 @@ async function openEdit(r: any) {
 
 async function saveWeights() {
   if (!current.value) return;
-  saving.value = true;
+  saveBusy.value = true;
   const res = await api('POST', `/domains/${domainId}/weight`, {
     act: 'update',
     subdomain: current.value.rr,
@@ -120,7 +120,7 @@ async function saveWeights() {
     line: current.value.Line,
     weight: { ...weights },
   });
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;

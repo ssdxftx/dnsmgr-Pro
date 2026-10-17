@@ -7,7 +7,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="userActions" :label="t('common.userActions')" tone="success" :icon="PersonOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-space style="margin-bottom: 16px">
+      <n-space class="mb-4">
         <n-input v-if="isAdmin" v-model:value="uid" placeholder="UID" style="width: 120px" />
         <n-input v-model:value="domain" :placeholder="t('userLog.domainPlaceholder')" style="width: 180px" />
         <n-input v-model:value="kw" :placeholder="t('userLog.searchPlaceholder')" style="width: 220px" @keyup.enter="search" />
@@ -18,7 +18,7 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="logs"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="pagination"
         :row-key="(row: any) => row.id"
         :empty-text="t('userLog.empty')"
@@ -39,7 +39,7 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 
 const message = useMessage();
 const { t } = useI18n();
-const loading = ref(false);
+const loadBusy = ref(false);
 const logs = ref<any[]>([]);
 const systemEvents = computed(() => logs.value.filter((l: any) => (l.uid ?? 1) <= 0).length);
 const userActions = computed(() => logs.value.filter((l: any) => (l.uid ?? 1) > 0).length);
@@ -89,7 +89,7 @@ async function loadLogs() {
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/logs', {
       offset: (page.value - 1) * pageSize.value,
@@ -108,7 +108,7 @@ async function loadLogs() {
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
   } finally {
-    if (loadAbort === ac) loading.value = false;
+    if (loadAbort === ac) loadBusy.value = false;
   }
 }
 

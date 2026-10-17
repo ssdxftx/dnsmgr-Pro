@@ -17,20 +17,20 @@
       <ResponsiveDataTable
         :columns="columns"
         :data="tasks"
-        :loading="loading"
+        :loading="loadBusy"
         :pagination="{ pageSize: 20 }"
         :row-key="(row: any) => row.id"
         :empty-text="t('dnsCheck.empty')"
       />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="t('dnsCheck.taskTitle')" style="max-width: 640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="t('dnsCheck.taskTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('dnsCheck.taskName')">
           <n-input v-model:value="form.name" :placeholder="t('dnsCheck.namePlaceholder')" />
         </n-form-item>
         <n-form-item :label="t('dnsCheck.domain')">
-          <n-select v-model:value="form.did" :options="domainOptions" filterable remote :loading="domainLoading" @search="loadDomains" :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
+          <n-select v-model:value="form.did" :options="domainOptions" filterable remote :loading="domainLoadBusy" @search="loadDomains" :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
         </n-form-item>
         <n-form-item :label="t('dnsCheck.subdomain')">
           <n-select v-model:value="form.sub" :options="subOptions" filterable clearable :placeholder="t('dnsCheck.subPlaceholder')" :disabled="!form.did" />
@@ -64,12 +64,12 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
 
-    <n-modal v-model:show="showResult" preset="card" :title="t('dnsCheck.resultTitle')" style="max-width: 560px" :mask-closable="false">
+    <n-modal v-model:show="showResult" preset="card" :title="t('dnsCheck.resultTitle')" class="modal-md" :mask-closable="false">
       <n-alert
         :type="runningResult.total === 0 || runningResult.issues.length ? 'warning' : 'success'"
         :show-icon="false"
@@ -104,13 +104,13 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
-const loading = ref(false);
-const saving = ref(false);
+const loadBusy = ref(false);
+const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const issueTasks = computed(() => tasks.value.filter((t: any) => t.status && t.status !== 'ok').length);
 const domainOptions = ref<any[]>([]);
-const domainLoading = ref(false);
+const domainLoadBusy = ref(false);
 const subOptions = ref<any[]>([]);
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
@@ -199,24 +199,24 @@ const issueColumns = computed(() => [
 ]);
 
 async function load() {
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/dns-check/tasks');
     if (res.code === 0) tasks.value = res.data || [];
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 }
 
 async function loadDomains(kw = '') {
-  domainLoading.value = true;
+  domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/dns-check/domains', kw ? { kw } : undefined);
     if (res.code === 0) {
       domainOptions.value = (res.data || []).map((d: any) => ({ label: d.name, value: d.id }));
     }
   } finally {
-    domainLoading.value = false;
+    domainLoadBusy.value = false;
   }
 }
 
@@ -259,7 +259,7 @@ function openEdit(row: any) {
 async function save() {
   if (!form.did) return message.warning(t('dnsCheck.selectDomain'));
   if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('dnsCheck.intervalRequired'));
-  saving.value = true;
+  saveBusy.value = true;
   try {
     const runTime = form.cycle === 'daily' ? normalizeHm(form.runTime) : null;
     const body: any = {
@@ -282,7 +282,7 @@ async function save() {
       load();
     } else message.error(res.msg);
   } finally {
-    saving.value = false;
+    saveBusy.value = false;
   }
 }
 

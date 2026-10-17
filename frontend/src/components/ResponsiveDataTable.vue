@@ -16,9 +16,43 @@
       :max-height="virtualScroll ? maxHeight : undefined"
       :checked-row-keys="hasSelection ? checkedRowKeys : undefined"
       @update:checked-row-keys="onUpdateChecked"
-    />
+    >
+      <template #empty>
+        <slot name="empty">
+          <EmptyState
+            v-if="error"
+            :icon="AlertCircleOutline"
+            :title="t('common.loadFailed')"
+            :description="t('common.loadFailedHint')"
+            tone="error"
+          >
+            <template #actions>
+              <n-button size="small" type="primary" @click="$emit('retry')">{{ t('common.retry') }}</n-button>
+            </template>
+          </EmptyState>
+          <EmptyState
+            v-else
+            :icon="FolderOpenOutline"
+            :title="emptyText || t('common.noData')"
+            :description="emptyDescription"
+            :tone="emptyTone"
+          />
+        </slot>
+      </template>
+    </n-data-table>
     <n-spin v-else :show="!!loading">
-      <EmptyState v-if="!data.length && !loading" :icon="FolderOpenOutline" :title="emptyText || t('common.noData')" />
+      <EmptyState
+        v-if="!loading && !data.length && error"
+        :icon="AlertCircleOutline"
+        :title="t('common.loadFailed')"
+        :description="t('common.loadFailedHint')"
+        tone="error"
+      >
+        <template #actions>
+          <n-button size="small" type="primary" @click="$emit('retry')">{{ t('common.retry') }}</n-button>
+        </template>
+      </EmptyState>
+      <EmptyState v-else-if="!data.length && !loading" :icon="FolderOpenOutline" :title="emptyText || t('common.noData')" :description="emptyDescription" :tone="emptyTone" />
       <div v-else class="m-table-cards">
         <div
           v-for="(row, index) in data"
@@ -60,8 +94,8 @@
 
 <script setup lang="ts">
 import { computed, h } from 'vue';
-import { NCheckbox, NDataTable, NPagination, NSpin } from 'naive-ui';
-import { FolderOpenOutline } from '@vicons/ionicons5';
+import { NButton, NCheckbox, NDataTable, NPagination, NSpin } from 'naive-ui';
+import { AlertCircleOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
 import EmptyState from './EmptyState.vue';
@@ -81,6 +115,10 @@ const props = withDefaults(
     scrollX?: number;
     titleKey?: string;
     emptyText?: string;
+    emptyDescription?: string;
+    emptyTone?: 'default' | 'error';
+    /** 拉取失败：空态切换为错误态并提供重试入口 */
+    error?: boolean;
     virtualScroll?: boolean;
     maxHeight?: number;
   }>(),
@@ -95,12 +133,18 @@ const props = withDefaults(
     scrollX: undefined,
     titleKey: undefined,
     emptyText: '',
+    emptyDescription: '',
+    emptyTone: 'default',
+    error: false,
     virtualScroll: false,
     maxHeight: undefined,
   },
 );
 
-const emit = defineEmits<{ (e: 'update:checkedRowKeys', keys: any[]): void }>();
+const emit = defineEmits<{
+  (e: 'update:checkedRowKeys', keys: any[]): void;
+  (e: 'retry'): void;
+}>();
 const { isMobile } = useResponsive();
 const { t } = useI18n();
 

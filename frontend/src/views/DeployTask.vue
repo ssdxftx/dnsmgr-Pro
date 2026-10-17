@@ -14,10 +14,10 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loading" :empty-text="t('deployTask.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loadBusy" :empty-text="t('deployTask.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployTask.editTitle') : t('deployTask.addTitle')" style="max-width:640px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployTask.editTitle') : t('deployTask.addTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('deployTask.account')">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
@@ -29,7 +29,7 @@
           <n-input v-model:value="form.remark" :placeholder="t('deployTask.optional')" />
         </n-form-item>
         <template v-if="currentProvider">
-          <n-alert v-if="currentProvider.tasknote" type="info" style="margin-bottom:12px" :show-icon="false">{{ currentProvider.tasknote }}</n-alert>
+          <n-alert v-if="currentProvider.tasknote" type="info" class="mb-3" :show-icon="false">{{ currentProvider.tasknote }}</n-alert>
           <n-form-item v-for="(field, key) in currentProvider.taskinputs" v-show="fieldVisible(field.show, form.config)" :key="key" :label="field.name" :required="field.required">
             <n-input v-if="field.type === 'input'" v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
             <n-input v-else-if="field.type === 'textarea'" v-model:value="form.config[key]" type="textarea" :rows="3" :placeholder="field.placeholder || field.name" />
@@ -43,7 +43,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -64,7 +64,7 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
+const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pendingTasks = computed(() => tasks.value.filter((t: any) => t.status !== 1).length);
@@ -74,7 +74,7 @@ const orders = ref<any[]>([]);
 
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const form = reactive<any>({ aid: null, oid: null, remark: '', config: {} });
 const currentProvider = ref<any>(null);
 
@@ -149,10 +149,10 @@ function fieldVisible(show: string | undefined, config: Record<string, any>): bo
 }
 
 async function loadTasks() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/deploy/tasks', { limit: 200 });
   tasks.value = res.code === 0 ? res.data : [];
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 async function loadProviders() {
@@ -213,10 +213,10 @@ function safeJson(s: string) {
 
 async function save() {
   if (!form.aid || !form.oid) return message.warning(t('deployTask.fillWarning'));
-  saving.value = true;
+  saveBusy.value = true;
   const body = { aid: form.aid, oid: form.oid, config: form.config, remark: form.remark };
   const res = editingId.value ? await api('PUT', `/deploy/tasks/${editingId.value}`, body) : await api('POST', '/deploy/tasks', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;

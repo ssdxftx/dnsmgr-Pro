@@ -12,16 +12,16 @@
         <n-form-item :label="t('login.password')">
           <n-input v-model:value="form.password" type="password" show-password-on="click" :placeholder="t('login.passwordPlaceholder')" size="large" />
         </n-form-item>
-        <n-button type="primary" size="large" block :loading="loading" @click="onLogin">{{ t('login.submit') }}</n-button>
+        <n-button type="primary" size="large" block :loading="loadBusy" @click="onLogin">{{ t('login.submit') }}</n-button>
         <n-button text style="margin-top: 12px; width: 100%" @click="router.push('/register')">{{ t('login.toRegister') }}</n-button>
       </n-form>
       <div v-else>
-        <n-alert type="info" style="margin-bottom: 16px">{{ t('login.totpAlert') }}</n-alert>
+        <n-alert type="info" class="mb-4">{{ t('login.totpAlert') }}</n-alert>
         <n-form @keyup.enter="onTotp">
           <n-form-item :label="t('login.totp')">
             <n-input v-model:value="totpCode" :placeholder="t('login.totpPlaceholder')" size="large" maxlength="6" />
           </n-form-item>
-          <n-button type="primary" size="large" block :loading="loading" @click="onTotp">{{ t('login.verify') }}</n-button>
+          <n-button type="primary" size="large" block :loading="loadBusy" @click="onTotp">{{ t('login.verify') }}</n-button>
         </n-form>
         <n-button style="margin-top: 12px" text @click="resetLogin">{{ t('login.backToLogin') }}</n-button>
       </div>
@@ -42,7 +42,7 @@ const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
 const auth = useAuthStore();
-const loading = ref(false);
+const loadBusy = ref(false);
 const form = reactive({ username: '', password: '' });
 const needTotp = ref(false);
 const preToken = ref('');
@@ -61,7 +61,7 @@ async function onLogin() {
     message.warning(t('login.requiredInput'));
     return;
   }
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('POST', '/auth/login', form);
     if (res.code === 0) {
@@ -76,7 +76,7 @@ async function onLogin() {
   } catch (e: any) {
     message.error(e.message || t('login.networkError'));
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 }
 
@@ -85,7 +85,7 @@ async function onTotp() {
     message.warning(t('login.totpRequired'));
     return;
   }
-  loading.value = true;
+  loadBusy.value = true;
   try {
     const res = await api<any>('POST', '/auth/totp', { pre_token: preToken.value, code: totpCode.value });
     if (res.code === 0) {
@@ -96,7 +96,7 @@ async function onTotp() {
   } catch (e: any) {
     message.error(e.message || t('login.networkError'));
   } finally {
-    loading.value = false;
+    loadBusy.value = false;
   }
 }
 

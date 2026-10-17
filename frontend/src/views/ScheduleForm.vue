@@ -7,14 +7,14 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('schedule.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable remote :loading="domainLoading" @search="loadDomains" @update:value="onDomainChange" style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainChange" style="flex: 1" />
           </n-space>
         </n-form-item>
 
         <n-form-item :label="t('schedule.recordSelect')" required>
           <n-space style="width: 100%">
             <n-select v-model:value="form.recordid" :options="recordOptions" :placeholder="t('schedule.recordSelect')" filterable style="flex: 1" @update:value="onRecordChange" />
-            <n-button @click="getRecordList" :loading="loadingRecords">{{ t('schedule.fetch') }}</n-button>
+            <n-button @click="getRecordList" :loading="recordsLoadBusy">{{ t('schedule.fetch') }}</n-button>
           </n-space>
         </n-form-item>
 
@@ -65,7 +65,7 @@
         </n-form-item>
 
         <n-form-item>
-          <n-button type="primary" :loading="saving" @click="submit">{{ t('common.submit') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="submit">{{ t('common.submit') }}</n-button>
         </n-form-item>
       </n-form>
     </n-card>
@@ -89,11 +89,11 @@ const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'))
 const editId = computed(() => Number(route.params.id));
 
 const domainOptions = ref<any[]>([]);
-const domainLoading = ref(false);
+const domainLoadBusy = ref(false);
 const recordOptions = ref<any[]>([]);
 const dnstype = ref<string | null>(null);
-const loadingRecords = ref(false);
-const saving = ref(false);
+const recordsLoadBusy = ref(false);
+const saveBusy = ref(false);
 const switchdateNum = ref<number | null>(null);
 
 const form = reactive<any>({
@@ -127,12 +127,12 @@ const weekdayOptions = computed(() => [
 ]);
 
 async function loadDomains(kw = '') {
-  domainLoading.value = true;
+  domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/schedule/domains', kw ? { kw } : undefined);
     if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id, type: d.type }));
   } finally {
-    domainLoading.value = false;
+    domainLoadBusy.value = false;
   }
 }
 
@@ -144,9 +144,9 @@ function onDomainChange() {
 async function getRecordList() {
   if (!form.did) return message.warning(t('schedule.selectDomainFirst'));
   if (!form.rr) return message.warning(t('schedule.hostRequired'));
-  loadingRecords.value = true;
+  recordsLoadBusy.value = true;
   const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
-  loadingRecords.value = false;
+  recordsLoadBusy.value = false;
   if (res.code === 0) {
     const list = res.data.list || [];
     recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
@@ -197,9 +197,9 @@ async function submit() {
   if (!form.did || !form.rr || !form.recordid) return message.warning(t('schedule.requiredEmpty'));
   const body: any = { ...form };
   if (form.type === 1 && form.cycle === 2) body.switchdate = String(switchdateNum.value ?? 1);
-  saving.value = true;
+  saveBusy.value = true;
   const res = isEdit.value ? await api('PUT', `/schedule/tasks/${editId.value}`, body) : await api('POST', '/schedule/tasks', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     router.push('/schedule-tasks');

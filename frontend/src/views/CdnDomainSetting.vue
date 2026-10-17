@@ -42,7 +42,7 @@
               <n-input-number v-model:value="originForm.https_port" :min="1" style="width:120px" placeholder="HTTPS" />
             </n-space>
           </n-form-item>
-          <n-button type="primary" size="small" @click="saveOrigin">{{ t('cdnSetting.saveOrigin') }}</n-button>
+          <n-button type="primary" size="small" :loading="saveOriginBusy" @click="saveOrigin">{{ t('cdnSetting.saveOrigin') }}</n-button>
         </n-form>
       </n-card>
 
@@ -55,7 +55,7 @@
           </div>
           <n-space>
             <n-button size="small" dashed @click="addRule">{{ t('cdnSetting.addRule') }}</n-button>
-            <n-button type="primary" size="small" :loading="savingCache" @click="saveCache">{{ t('cdnSetting.saveCache') }}</n-button>
+            <n-button type="primary" size="small" :loading="saveCacheBusy" @click="saveCache">{{ t('cdnSetting.saveCache') }}</n-button>
           </n-space>
           <n-text depth="3" style="font-size: 12px">{{ t('cdnSetting.cacheHint') }}</n-text>
         </n-space>
@@ -71,7 +71,7 @@
             <span style="width:120px">{{ t('cdnSetting.forceHttps') }}</span>
             <n-switch v-model:value="httpsForm.force_redirect" :disabled="!httpsForm.https_enabled" />
           </n-space>
-          <n-button type="primary" size="small" :loading="savingHttps" @click="saveHttps">{{ t('cdnSetting.saveHttps') }}</n-button>
+          <n-button type="primary" size="small" :loading="saveHttpsBusy" @click="saveHttps">{{ t('cdnSetting.saveHttps') }}</n-button>
           <n-text depth="3" style="font-size: 12px">{{ t('cdnSetting.httpsHint') }}</n-text>
         </n-space>
       </n-card>
@@ -109,7 +109,7 @@
             <n-dynamic-tags v-model:value="accessForm.ua_list" style="margin-top:8px" />
             <n-text depth="3" style="font-size:12px">{{ t('cdnSetting.uaHint') }}</n-text>
           </n-form-item>
-          <n-button type="primary" size="small" :loading="savingAccess" @click="saveAccess">{{ t('cdnSetting.saveAccess') }}</n-button>
+          <n-button type="primary" size="small" :loading="saveAccessBusy" @click="saveAccess">{{ t('cdnSetting.saveAccess') }}</n-button>
         </n-form>
       </n-card>
     </n-space>
@@ -131,10 +131,11 @@ const domainId = Number(route.params.id);
 
 const info = ref<any>(null);
 const cacheRules = ref<any[]>([]);
-const savingCache = ref(false);
-const savingHttps = ref(false);
-const savingAccess = ref(false);
+const saveCacheBusy = ref(false);
+const saveHttpsBusy = ref(false);
+const saveAccessBusy = ref(false);
 const statusBusy = ref(false);
+const saveOriginBusy = ref(false);
 
 const protoOptions = computed(() => [
   { label: t('cdnSetting.protoFollow'), value: 'follow' },
@@ -191,7 +192,7 @@ function removeRule(idx: number) {
 }
 
 async function saveCache() {
-  savingCache.value = true;
+  saveCacheBusy.value = true;
   try {
     const rules = cacheForm.rules.filter((r) => (r.path || '').trim() !== '');
     const res = await api('POST', `/cdn/domains/${domainId}/cache`, { rules });
@@ -200,12 +201,12 @@ async function saveCache() {
       load();
     } else message.error(res.msg);
   } finally {
-    savingCache.value = false;
+    saveCacheBusy.value = false;
   }
 }
 
 async function saveHttps() {
-  savingHttps.value = true;
+  saveHttpsBusy.value = true;
   try {
     const res = await api('POST', `/cdn/domains/${domainId}/https`, {
       https_enabled: httpsForm.https_enabled,
@@ -216,12 +217,12 @@ async function saveHttps() {
       load();
     } else message.error(res.msg);
   } finally {
-    savingHttps.value = false;
+    saveHttpsBusy.value = false;
   }
 }
 
 async function saveAccess() {
-  savingAccess.value = true;
+  saveAccessBusy.value = true;
   try {
     const res = await api('POST', `/cdn/domains/${domainId}/access`, accessForm);
     if (res.code === 0) {
@@ -229,7 +230,7 @@ async function saveAccess() {
       loadAccess();
     } else message.error(res.msg);
   } finally {
-    savingAccess.value = false;
+    saveAccessBusy.value = false;
   }
 }
 
@@ -252,7 +253,9 @@ function toggleStatus() {
 
 async function saveOrigin() {
   if (!originForm.origin) return message.warning(t('cdnSetting.originRequired'));
+  saveOriginBusy.value = true;
   const res = await api('POST', `/cdn/domains/${domainId}/origin`, originForm);
+  saveOriginBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     load();

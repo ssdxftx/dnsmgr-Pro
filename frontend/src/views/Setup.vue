@@ -6,10 +6,10 @@
         <p>{{ t('setup.subtitle') }}</p>
       </div>
 
-      <n-alert v-if="detected" type="info" style="margin-bottom: 16px">
+      <n-alert v-if="detected" type="info" class="mb-4">
         {{ t('setup.dbDetected') }}
       </n-alert>
-      <n-alert v-else-if="checked" type="success" style="margin-bottom: 16px">
+      <n-alert v-else-if="checked" type="success" class="mb-4">
         {{ t('setup.dbConnected') }}
       </n-alert>
 
@@ -43,7 +43,7 @@
         </n-form-item>
 
         <n-space vertical>
-          <n-button block :loading="checking" @click="onCheck">{{ t('setup.testConnection') }}</n-button>
+          <n-button block :loading="checkBusy" @click="onCheck">{{ t('setup.testConnection') }}</n-button>
           <n-button type="primary" block :loading="installing" @click="onInstall">{{ t('setup.installNow') }}</n-button>
         </n-space>
       </n-form>
@@ -62,7 +62,7 @@ import AuthShell from '../components/AuthShell.vue';
 const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
-const checking = ref(false);
+const checkBusy = ref(false);
 const installing = ref(false);
 const checked = ref(false);
 const detected = ref(false);
@@ -86,7 +86,7 @@ async function onCheck() {
     message.warning(t('setup.dbInfoRequired'));
     return;
   }
-  checking.value = true;
+  checkBusy.value = true;
   try {
     const res = await api<any>('POST', '/setup/check', form);
     if (res.code === 0) {
@@ -101,7 +101,7 @@ async function onCheck() {
   } catch (e: any) {
     message.error(e.message || t('setup.networkError'));
   } finally {
-    checking.value = false;
+    checkBusy.value = false;
   }
 }
 

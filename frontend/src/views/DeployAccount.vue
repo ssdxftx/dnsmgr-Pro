@@ -14,10 +14,10 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="CloudOutline" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loading" :empty-text="t('deployAccount.empty')" />
+      <ResponsiveDataTable :columns="columns" :data="accounts" :loading="loadBusy" :empty-text="t('deployAccount.empty')" />
     </n-card>
 
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployAccount.editTitle') : t('deployAccount.addTitle')" style="max-width:600px" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('deployAccount.editTitle') : t('deployAccount.addTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('deployAccount.deployType')">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
@@ -29,8 +29,8 @@
           <n-input v-model:value="form.remark" :placeholder="t('deployAccount.optional')" />
         </n-form-item>
         <template v-if="currentProvider">
-          <n-alert v-if="!currentProvider.implemented" type="warning" style="margin-bottom:12px">{{ t('deployAccount.pending') }}</n-alert>
-          <n-alert v-if="currentProvider.desc || currentProvider.note" type="info" style="margin-bottom:12px" :show-icon="false">
+          <n-alert v-if="!currentProvider.implemented" type="warning" class="mb-3">{{ t('deployAccount.pending') }}</n-alert>
+          <n-alert v-if="currentProvider.desc || currentProvider.note" type="info" class="mb-3" :show-icon="false">
             {{ currentProvider.desc || currentProvider.note }}
           </n-alert>
           <n-form-item v-for="(field, key) in currentProvider.inputs" v-show="fieldVisible(field.show, form.config)" :key="key" :label="field.name" :required="field.required">
@@ -46,7 +46,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
-          <n-button type="primary" :loading="saving" @click="save">{{ t('deployAccount.saveVerify') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('deployAccount.saveVerify') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -67,7 +67,7 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
-const loading = ref(false);
+const loadBusy = ref(false);
 const accounts = ref<any[]>([]);
 const typeCount = computed(() => new Set(accounts.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(accounts.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
@@ -76,7 +76,7 @@ const classConfig = ref<Record<string, string>>({});
 
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
-const saving = ref(false);
+const saveBusy = ref(false);
 const form = reactive<any>({ type: '', name: '', remark: '', config: {} });
 const currentProvider = ref<any>(null);
 const providerOptions = ref<any[]>([]);
@@ -147,11 +147,11 @@ async function loadProviders() {
 }
 
 async function loadAccounts() {
-  loading.value = true;
+  loadBusy.value = true;
   const res = await api<any>('GET', '/cert/accounts', { deploy: 1, limit: 200 });
   const rows = res.code === 0 ? res.data : [];
   accounts.value = rows.map((r: any) => ({ ...r, typename: r.typename || providers.value[r.type]?.name || r.type }));
-  loading.value = false;
+  loadBusy.value = false;
 }
 
 function onTypeChange() {
@@ -196,12 +196,12 @@ function safeJson(s: string) {
 async function save() {
   if (!form.type || !form.name) return message.warning(t('deployAccount.fillWarning'));
   if (currentProvider.value && !currentProvider.value.implemented) return message.warning(t('deployAccount.unsupported'));
-  saving.value = true;
+  saveBusy.value = true;
   const body = { type: form.type, name: form.name, remark: form.remark, config: form.config, deploy: 1 };
   const res = editingId.value
     ? await api('PUT', `/cert/accounts/${editingId.value}`, body)
     : await api('POST', '/cert/accounts', body);
-  saving.value = false;
+  saveBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);
     showEdit.value = false;
