@@ -6,13 +6,27 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="GlobeOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
 
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :row-key="(row: any) => row.id" size="small" :empty-text="t('cfTunnels.empty')" />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cfTunnels.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('common.total')">{{ rows.length }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cfTunnels.connectionCount')">{{ totalConnections }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cfTunnels.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :row-key="(row: any) => row.id" size="small" :empty-text="t('cfTunnels.empty')" />
+      </div>
     </n-card>
 
     <!-- 创建 -->
@@ -109,6 +123,7 @@ const accountId = Number(route.params.id);
 const accountName = ref('');
 const loadBusy = ref(false);
 const rows = ref<any[]>([]);
+const totalConnections = computed(() => rows.value.reduce((sum: number, r: any) => sum + (Number(r.connection_count) || 0), 0));
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const saveBusy = ref(false);

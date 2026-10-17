@@ -118,6 +118,8 @@ export default {
   userList: {
     title: '用户管理',
     subtitle: '管理平台用户、权限与 API 接口',
+    overview: '用户概览',
+    listTitle: '用户列表',
     addUser: '添加用户',
     empty: '暂无用户',
     searchPlaceholder: 'UID或用户名',

@@ -30,7 +30,7 @@
               <n-input-group>
                 <n-input v-model:value="form.code" :placeholder="t('register.emailCodePlaceholder')" size="large" maxlength="6" />
                 <n-button size="large" :disabled="countdown > 0 || sendBusy" @click="onSendCode">
-                  {{ countdown > 0 ? countdown + 's' : sendBusy ? t('register.sendBusy') : t('register.sendCode') }}
+                  {{ countdown > 0 ? countdown + 's' : sendBusy ? t('register.sending') : t('register.sendCode') }}
                 </n-button>
               </n-input-group>
             </n-form-item>

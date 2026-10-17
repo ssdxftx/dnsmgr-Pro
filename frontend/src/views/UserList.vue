@@ -9,9 +9,9 @@
       </template>
     </PageHeader>
     <n-grid :cols="isMobile ? 1 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="pagination.itemCount" tone="primary" :icon="PeopleOutline" :spark="sparks[0]" /></n-grid-item>
-      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.admins')" :value="adminCount" tone="warning" :icon="ShieldCheckmarkOutline" :spark="sparks[1]" /></n-grid-item>
-      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.apiEnabled')" :value="apiCount" tone="success" :icon="KeyOutline" :spark="sparks[2]" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="pagination.itemCount" tone="primary" :icon="PeopleOutline" :spark="sparks[0]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.admins')" :value="adminCount" tone="warning" :icon="ShieldCheckmarkOutline" :spark="sparks[1]" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.apiEnabled')" :value="apiCount" tone="success" :icon="KeyOutline" :spark="sparks[2]" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
       <n-input v-model:value="kw" :placeholder="t('userList.searchPlaceholder')" size="small" style="width: 220px" @keyup.enter="search" />
@@ -20,14 +20,29 @@
     </div>
 
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="users"
-        :loading="loadBusy"
-        :pagination="pagination"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('userList.empty')"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('userList.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('userList.normal')">{{ normalCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('userList.banned')">{{ users.length - normalCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.apiEnabled')">{{ apiCount }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('userList.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="users"
+          :loading="loadBusy"
+          :pagination="pagination"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('userList.empty')"
+        />
+      </div>
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('userList.editTitle') : t('userList.addTitle')" :style="modalStyle" :mask-closable="false">
@@ -97,7 +112,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, PeopleOutline, ShieldCheckmarkOutline, KeyOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -114,6 +129,7 @@ const users = ref<any[]>([]);
 // 遥测统计（基于已加载列表计算）
 const adminCount = computed(() => users.value.filter((u) => Number(u.level) === 2 || Number(u.is_super) === 1).length);
 const apiCount = computed(() => users.value.filter((u) => Number(u.is_api) === 1).length);
+const normalCount = computed(() => users.value.filter((u) => u.status).length);
 const sparks = [
   [4, 7, 6, 10, 8, 12, 10, 14, 12],
   [3, 5, 4, 7, 6, 9, 8, 11, 10],
@@ -247,7 +263,7 @@ const columns = computed<any[]>(() => [
       if (Number(row.id) !== currentUid.value) {
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       }
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

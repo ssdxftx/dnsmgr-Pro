@@ -10,9 +10,9 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rules.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rules.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
 
     <div class="app-toolbar">
@@ -38,20 +38,35 @@
     </div>
 
     <n-card :bordered="false">
-      <n-alert v-if="needCredential" type="warning" class="mb-3" :show-icon="true">
-        {{ credentialMessage }}
-        <template #action>
-          <n-button size="small" type="primary" :loading="!!busy['cred']" @click="run('cred', openCredential)">{{ t('cfRules.fillDedicatedCredential') }}</n-button>
-        </template>
-      </n-alert>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cfRules.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('common.total')">{{ rules.length }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cfRules.statusOn')">{{ enabledCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('cfRules.statusOff')">{{ rules.length - enabledCount }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('cfRules.listTitle') }}</h3>
+        </div>
+        <n-alert v-if="needCredential" type="warning" class="mb-3" :show-icon="true">
+          {{ credentialMessage }}
+          <template #action>
+            <n-button size="small" type="primary" :loading="!!busy['cred']" @click="run('cred', openCredential)">{{ t('cfRules.fillDedicatedCredential') }}</n-button>
+          </template>
+        </n-alert>
 
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="rules"
-        :loading="loadBusy"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('cfRules.empty')"
-      />
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="rules"
+          :loading="loadBusy"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('cfRules.empty')"
+        />
+      </div>
     </n-card>
 
     <!-- 规则编辑 -->
@@ -231,6 +246,7 @@ const domains = ref<DomainItem[]>([]);
 const selectedDomain = ref<number | null>(null);
 const selectedPhase = ref('http_request_origin');
 const rules = ref<any[]>([]);
+const enabledCount = computed(() => rules.value.filter((r: any) => r.enabled).length);
 const typeCount = computed(() => new Set(rules.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rules.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const loadBusy = ref(false);

@@ -22,6 +22,7 @@ export default {
   certOrder: {
     title: '证书订单',
     subtitle: '管理证书申请、签发与续期',
+    listTitle: '订单列表',
     settings: '计划任务设置',
     apply: '申请证书',
     empty: '暂无证书订单',
@@ -129,6 +130,8 @@ export default {
   deployTask: {
     title: '自动部署任务',
     subtitle: '管理证书自动部署任务',
+    overview: '部署概览',
+    listTitle: '任务列表',
     add: '添加任务',
     empty: '暂无部署任务',
     editTitle: '编辑任务',

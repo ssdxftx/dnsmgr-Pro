@@ -2,6 +2,8 @@ export default {
   cfHostnames: {
     title: 'Cloudflare 自定义主机名 · {domain}',
     subtitle: '管理 Cloudflare 自定义主机名与证书验证',
+    batchPanel: '批量操作',
+    listTitle: '主机名列表',
     getDcvUuid: '获取 DCV UUID',
     fallbackOriginBtn: 'Fallback 源站',
     fallbackTitle: 'Fallback 源站',
@@ -91,6 +93,8 @@ export default {
   cfRules: {
     title: 'Cloudflare 规则引擎',
     subtitle: '管理 Cloudflare 域名的边缘规则（Rulesets）',
+    overview: '规则概览',
+    listTitle: '规则列表',
     credentialSettings: '凭证设置',
     addRule: '添加规则',
     selectDomain: '选择 Cloudflare 域名',
@@ -188,6 +192,8 @@ export default {
     title: 'Cloudflare Tunnel · {name}',
     accountFallback: '账户 #{id}',
     subtitle: '管理 Cloudflare Tunnel 及其路由规则',
+    overview: '隧道概览',
+    listTitle: '隧道列表',
     createTunnel: '创建 Tunnel',
     empty: '暂无 Tunnel',
     namePlaceholder: 'Tunnel 名称',

@@ -2,6 +2,8 @@ export default {
   cfHostnames: {
     title: 'Cloudflare Custom Hostnames · {domain}',
     subtitle: 'Manage Cloudflare custom hostnames and certificate validation',
+    batchPanel: 'Batch Operations',
+    listTitle: 'Hostname List',
     getDcvUuid: 'Get DCV UUID',
     fallbackOriginBtn: 'Fallback Origin',
     fallbackTitle: 'Fallback Origin',
@@ -91,6 +93,8 @@ export default {
   cfRules: {
     title: 'Cloudflare Rules Engine',
     subtitle: 'Manage edge rules (Rulesets) for Cloudflare domains',
+    overview: 'Rule Overview',
+    listTitle: 'Rule List',
     credentialSettings: 'Credential Settings',
     addRule: 'Add Rule',
     selectDomain: 'Select a Cloudflare domain',
@@ -188,6 +192,8 @@ export default {
     title: 'Cloudflare Tunnel · {name}',
     accountFallback: 'Account #{id}',
     subtitle: 'Manage Cloudflare tunnels and their routes',
+    overview: 'Tunnel Overview',
+    listTitle: 'Tunnel List',
     createTunnel: 'Create Tunnel',
     empty: 'No tunnels',
     namePlaceholder: 'Tunnel name',

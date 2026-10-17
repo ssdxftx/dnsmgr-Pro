@@ -46,6 +46,7 @@ Entries discovered by the Agent during task execution should follow this format:
   - 后端业务路由仅在“已安装”状态注册；本环境验证需先安装并启动 MariaDB（`apt-get install -y mariadb-server`，`service mariadb start`），再走安装向导 `POST /api/setup/install` 初始化（会执行 `migrate.ts` 建表）
   - 可用环境变量 `DNSMGR_CF_API_BASE` 覆盖 Cloudflare API 基址，指向本地 Mock 即可离线验证规则引擎与凭证降级
   - 后端类型检查 `cd backend && npx tsc --noEmit`；前端 `cd frontend && npx vue-tsc --noEmit && npx vite build`
+  - 前端 i18n 一致性校验 `cd frontend && npm run check:i18n`（脚本 `scripts/check-i18n.mjs`，检查源码引用缺失与 zh/en key 对称）
 
 [Project Knowledge Summary]
 - Date: 2026-09-30

@@ -118,6 +118,8 @@ export default {
   cache: {
     title: '缓存刷新',
     subtitle: '刷新或预热 CDN 缓存，并查看任务历史',
+    overview: '任务概览',
+    listTitle: '任务记录',
     urlRefresh: 'URL 刷新',
     dirRefresh: '目录刷新',
     preheat: '缓存预热',

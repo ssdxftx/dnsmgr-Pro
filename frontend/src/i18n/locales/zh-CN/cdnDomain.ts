@@ -2,6 +2,8 @@ export default {
   cdnDomain: {
     title: 'CDN 域名',
     subtitle: '管理各厂商 CDN 加速域名、证书与缓存策略',
+    overview: '域名概览',
+    listTitle: '域名列表',
     empty: '暂无 CDN 加速域名',
     freeCert: '平台免费证书',
     certLink: '项目申请证书',
@@ -154,6 +156,8 @@ export default {
   preheat: {
     title: '自动预热',
     subtitle: '自动预热或清除 CDN 缓存资源',
+    overview: '预热概览',
+    listTitle: '预热列表',
     add: '添加任务',
     empty: '暂无预热任务，点击「添加任务」配置自动预热',
     modalTitle: '预热任务',

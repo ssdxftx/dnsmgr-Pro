@@ -2,9 +2,9 @@
   <div class="app-stack">
     <PageHeader :title="t('userLog.title')" :subtitle="t('userLog.subtitle')" />
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="systemEvents" :label="t('common.systemEvents')" tone="info" :icon="ShieldOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="userActions" :label="t('common.userActions')" tone="success" :icon="PersonOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="systemEvents" :label="t('common.systemEvents')" tone="info" :icon="ShieldOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="userActions" :label="t('common.userActions')" tone="success" :icon="PersonOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
       <n-input v-if="isAdmin" v-model:value="uid" placeholder="UID" size="small" style="width: 120px" />

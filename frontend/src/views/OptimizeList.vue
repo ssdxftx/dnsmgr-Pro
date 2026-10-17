@@ -15,9 +15,9 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
       <n-select v-model:value="searchType" :options="searchTypeOptions" size="small" style="width: 120px" />
@@ -28,14 +28,29 @@
     </div>
 
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        :columns="columns"
-        :data="tasks"
-        :loading="loadBusy"
-        :pagination="pagination"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('optimize.empty')"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('optimize.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('optimize.recordCount')">{{ recordTotal }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.active')">{{ activeTasks }}</n-descriptions-item>
+          <n-descriptions-item :label="t('common.disabled')">{{ pausedTasks }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('optimize.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="tasks"
+          :loading="loadBusy"
+          :pagination="pagination"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('optimize.empty')"
+        />
+      </div>
     </n-card>
   </div>
 </template>
@@ -44,7 +59,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, SettingsOutline, ListOutline, CheckmarkCircleOutline, PauseOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -61,6 +76,7 @@ const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const pausedTasks = computed(() => tasks.value.filter((t: any) => !t.active).length);
+const recordTotal = computed(() => tasks.value.reduce((sum: number, t: any) => sum + (Number(t.recordnum) || 0), 0));
 const page = ref(1);
 const pageSize = ref(10);
 
@@ -175,7 +191,7 @@ const columns = computed<any[]>(() => [
         )
       );
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

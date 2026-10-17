@@ -85,6 +85,10 @@ export default {
     monitorTasks: 'Monitor Tasks',
     deployTasks: 'Deploy Tasks',
     scheduleTasks: 'Policies',
+    live: 'Live',
+    cumulative: 'Total',
+    last24h: 'Last 24h',
+    last30d: 'Last 30 days',
   },
   nav: {
     dashboard: 'Dashboard',

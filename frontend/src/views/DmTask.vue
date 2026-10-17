@@ -14,9 +14,9 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="SwapHorizontalOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="SwapHorizontalOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
       <n-select v-model:value="searchType" :options="searchTypeOptions" size="small" style="width: 140px" />
@@ -27,15 +27,30 @@
     </div>
 
     <n-card :bordered="false">
-      <ResponsiveDataTable
-        v-model:checked-row-keys="checkedRowKeys"
-        :columns="columns"
-        :data="tasks"
-        :loading="loadBusy"
-        :pagination="pagination"
-        :row-key="(row: any) => row.id"
-        :empty-text="t('dm.empty')"
-      />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('dm.overview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('dm.running')">{{ runningCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('dm.stopped')">{{ tasks.length - runningCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('dm.abnormal')">{{ abnormalCount }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('dm.listTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable
+          v-model:checked-row-keys="checkedRowKeys"
+          :columns="columns"
+          :data="tasks"
+          :loading="loadBusy"
+          :pagination="pagination"
+          :row-key="(row: any) => row.id"
+          :empty-text="t('dm.empty')"
+        />
+      </div>
     </n-card>
   </div>
 </template>
@@ -44,7 +59,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, ChevronDownOutline, ListOutline, LayersOutline, SwapHorizontalOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -61,6 +76,8 @@ const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
 const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
+const runningCount = computed(() => tasks.value.filter((r: any) => r.active).length);
+const abnormalCount = computed(() => tasks.value.filter((r: any) => r.status).length);
 const total = ref(0);
 const page = ref(1);
 const pageSize = ref(10);
@@ -191,7 +208,7 @@ const columns = computed<any[]>(() => [
         );
       }
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h(NSpace, null, { default: () => btns });
+      return h('div', { class: 'row-actions' }, btns);
     },
   },
 ]);

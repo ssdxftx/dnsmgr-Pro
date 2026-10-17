@@ -2,12 +2,26 @@
   <div class="app-stack">
     <PageHeader :title="t('record.weightTitle', { name: domainName || '#' + domainId })" :subtitle="t('record.weightSubtitle')" :back="`/domains/${domainId}/records`" />
     <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="BarChartOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="BarChartOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('common.noData')" />
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('record.weightOverview') }}</h3>
+        </div>
+        <n-descriptions :column="3" size="small" label-placement="top">
+          <n-descriptions-item :label="t('record.weightOn')">{{ onCount }}</n-descriptions-item>
+          <n-descriptions-item :label="t('record.weightOff')">{{ rows.length - onCount }}</n-descriptions-item>
+        </n-descriptions>
+      </div>
+      <div class="app-panel">
+        <div class="app-panel__head">
+          <h3 class="app-panel__title">{{ t('record.weightListTitle') }}</h3>
+        </div>
+        <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('common.noData')" />
+      </div>
     </n-card>
 
     <n-modal v-model:show="showEdit" preset="card" :title="t('record.weightConfigure')" class="modal-md" :mask-closable="false">
@@ -55,6 +69,7 @@ const { busy, run } = useAction();
 const domainId = Number(route.params.id);
 const domainName = ref('');
 const rows = ref<any[]>([]);
+const onCount = computed(() => rows.value.filter((r: any) => r.Open === true || r.Open === 'true').length);
 const typeCount = computed(() => new Set(rows.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
 const statusCount = computed(() => new Set(rows.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
 const loadBusy = ref(false);

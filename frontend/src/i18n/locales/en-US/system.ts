@@ -118,6 +118,8 @@ export default {
   userList: {
     title: 'User Management',
     subtitle: 'Manage platform users, permissions and API access',
+    overview: 'User Overview',
+    listTitle: 'User List',
     addUser: 'Add User',
     empty: 'No users',
     searchPlaceholder: 'UID or username',

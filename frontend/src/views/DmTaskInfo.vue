@@ -9,9 +9,9 @@
       </template>
     </PageHeader>
     <n-grid v-if="task" class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="task.fail_count || 0" :label="t('dm.infoFailCount24')" tone="error" :icon="AlertCircleOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="task.switch_count || 0" :label="t('dm.infoSwitchCount24')" tone="warning" :icon="SwapHorizontalOutline" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="task.fail_count || 0" :label="t('dm.infoFailCount24')" tone="error" :icon="AlertCircleOutline" :caption="t('common.last24h')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="task.switch_count || 0" :label="t('dm.infoSwitchCount24')" tone="warning" :icon="SwapHorizontalOutline" :caption="t('common.last24h')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
       <n-descriptions v-if="task" bordered :column="2" size="small" class="mb-4">

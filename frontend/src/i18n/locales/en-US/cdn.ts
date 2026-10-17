@@ -118,6 +118,8 @@ export default {
   cache: {
     title: 'Cache Purge',
     subtitle: 'Purge or preheat CDN cache and view task history',
+    overview: 'Task Overview',
+    listTitle: 'Task History',
     urlRefresh: 'URL Purge',
     dirRefresh: 'Directory Purge',
     preheat: 'Cache Preheat',
