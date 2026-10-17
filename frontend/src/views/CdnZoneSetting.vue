@@ -277,7 +277,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { useDialog, useMessage, NButton, NSpace, NTag } from 'naive-ui';
+import { useDialog, useMessage, NButton, NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -617,23 +617,21 @@ const ruleColumns = computed(() => {
     key: 'actions',
     width: 200,
     render: (r: any) =>
-      h(NSpace, null, {
-        default: () => [
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRuleEditor(r) }, { default: () => t('cdnZoneSetting.edit') }),
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              loading: !!busy[`rule:${r.ruleId || r.ruleName}`],
-              disabled: !!busy[`rule:${r.ruleId || r.ruleName}`],
-              onClick: () => run(`rule:${r.ruleId || r.ruleName}`, () => toggleRuleEnabled(r)),
-            },
-            { default: () => (ruleEnabled(r) ? t('cdnRules.disabledTag') : t('cdnRules.enabledTag')) },
-          ),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRule(r) }, { default: () => t('cdnZoneSetting.delete') }),
-        ],
-      }),
+      h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRuleEditor(r) }, { default: () => t('cdnZoneSetting.edit') }),
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            loading: !!busy[`rule:${r.ruleId || r.ruleName}`],
+            disabled: !!busy[`rule:${r.ruleId || r.ruleName}`],
+            onClick: () => run(`rule:${r.ruleId || r.ruleName}`, () => toggleRuleEnabled(r)),
+          },
+          { default: () => (ruleEnabled(r) ? t('cdnRules.disabledTag') : t('cdnRules.enabledTag')) },
+        ),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRule(r) }, { default: () => t('cdnZoneSetting.delete') }),
+      ]),
   });
   return cols;
 });
@@ -774,12 +772,10 @@ const ipColumns = computed(() => [
     key: 'actions',
     width: 160,
     render: (r: any) =>
-      h(NSpace, null, {
-        default: () => [
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => loadIpContent(r) }, { default: () => t('cdnSecurity.load') }),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delIpGroup(r) }, { default: () => t('cdnZoneSetting.delete') }),
-        ],
-      }),
+      h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => loadIpContent(r) }, { default: () => t('cdnSecurity.load') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delIpGroup(r) }, { default: () => t('cdnZoneSetting.delete') }),
+      ]),
   },
 ]);
 function secRoute(key: string) {

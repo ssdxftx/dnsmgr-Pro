@@ -12,10 +12,10 @@
       </template>
     </PageHeader>
     <n-grid cols="1 s:2 m:4" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :spark="sparks[0]" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :spark="sparks[1]" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :spark="sparks[2]" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :spark="sparks[3]" :caption="t('common.last30d')" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :caption="t('common.last30d')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
       <div class="app-panel">
@@ -143,12 +143,6 @@ const orderStats = computed(() => {
 const issuedCount = computed(() => orderStats.value.issued);
 const inProgressCount = computed(() => orderStats.value.inProgress);
 const expiringCount = computed(() => orderStats.value.expiring);
-const sparks = [
-  [4, 6, 8, 7, 11, 9, 13, 11, 15],
-  [3, 5, 4, 8, 6, 10, 8, 12, 10],
-  [2, 4, 3, 6, 5, 8, 6, 9, 7],
-  [1, 3, 2, 5, 4, 7, 5, 8, 6],
-];
 const statusLabel = ref<Record<string, string>>({});
 const accounts = ref<any[]>([]);
 const accountOptions = ref<any[]>([]);
@@ -211,9 +205,11 @@ const columns = computed(() => [
   {
     title: t('certOrder.expireCol'),
     key: 'expiretime',
-    width: 130,
+    width: 178,
     render(row: any) {
-      return row.expiretime ? `${row.expiretime}${row.end_day != null ? `（${t('certOrder.remainingDays', { days: row.end_day })}）` : ''}` : '-';
+      if (!row.expiretime) return '-';
+      const days = row.end_day != null ? `（${t('certOrder.remainingDays', { days: row.end_day })}）` : '';
+      return h('span', { style: 'white-space: nowrap' }, `${row.expiretime}${days}`);
     },
   },
   {

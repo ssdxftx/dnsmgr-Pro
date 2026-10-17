@@ -108,7 +108,7 @@
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ListOutline, LayersOutline, GlobeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -151,15 +151,13 @@ const columns = computed<any[]>(() => [
     key: 'actions',
     width: 340,
     render(row: any) {
-      return h(NSpace, { size: 2 }, {
-        default: () => [
-          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => showTokenOf(row) }, { default: () => 'Token' }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openPublic(row) }, { default: () => t('cfTunnels.publicHostnames') }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openCidr(row) }, { default: () => t('cfTunnels.cidrRoutes') }),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRoute(row) }, { default: () => t('cfTunnels.hostnameRoutes') }),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delTunnel(row) }, { default: () => t('common.delete') }),
-        ],
-      });
+      return h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => showTokenOf(row) }, { default: () => 'Token' }),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openPublic(row) }, { default: () => t('cfTunnels.publicHostnames') }),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openCidr(row) }, { default: () => t('cfTunnels.cidrRoutes') }),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRoute(row) }, { default: () => t('cfTunnels.hostnameRoutes') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delTunnel(row) }, { default: () => t('common.delete') }),
+      ]);
     },
   },
 ]);

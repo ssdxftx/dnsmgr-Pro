@@ -155,6 +155,7 @@ export default {
     readOnlyView: 'View Only',
     addTime: 'Added At',
     lastLogin: 'Last Login',
+    neverLogin: 'Never Signed In',
     normal: 'Normal',
     banned: 'Banned',
     deleteTitle: 'Delete User',

@@ -56,7 +56,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NEllipsis, NTag, useMessage, useDialog } from 'naive-ui';
+import { NButton, NEllipsis, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ListOutline, LayersOutline, CloudOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { evalShow, isSecretField } from '../lib/safe';
@@ -114,12 +114,10 @@ const columns = computed(() => [
     key: 'actions',
     width: 160,
     render(row: any) {
-      return h(NSpace, null, {
-        default: () => [
-          h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
-        ],
-      });
+      return h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
+      ]);
     },
   },
 ]);

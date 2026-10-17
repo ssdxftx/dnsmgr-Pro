@@ -109,7 +109,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, NTag, useMessage, useDialog } from 'naive-ui';
+import { NButton, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, PulseOutline, CheckmarkCircleOutline, AlertCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -188,35 +188,33 @@ const columns = computed(() => [
     render(row: any) {
       const rKey = `run:${row.id}`;
       const tKey = `toggle:${row.id}`;
-      return h(NSpace, null, {
-        default: () => [
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              type: 'primary',
-              loading: !!busy[rKey],
-              disabled: !!busy[rKey],
-              onClick: () => run(rKey, () => runNow(row)),
-            },
-            { default: () => t('dnsCheck.runNow') },
-          ),
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              loading: !!busy[tKey],
-              disabled: !!busy[tKey],
-              onClick: () => run(tKey, () => toggle(row)),
-            },
-            { default: () => (row.active ? t('dnsCheck.stopped') : t('common.enable')) },
-          ),
-          h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
-          h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
-        ],
-      });
+      return h('div', { class: 'row-actions' }, [
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: 'primary',
+            loading: !!busy[rKey],
+            disabled: !!busy[rKey],
+            onClick: () => run(rKey, () => runNow(row)),
+          },
+          { default: () => t('dnsCheck.runNow') },
+        ),
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            loading: !!busy[tKey],
+            disabled: !!busy[tKey],
+            onClick: () => run(tKey, () => toggle(row)),
+          },
+          { default: () => (row.active ? t('dnsCheck.stopped') : t('common.enable')) },
+        ),
+        h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
+      ]);
     },
   },
 ]);

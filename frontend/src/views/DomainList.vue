@@ -43,7 +43,7 @@
         <n-descriptions :column="3" size="small" label-placement="top">
           <n-descriptions-item :label="t('domain.recordCountCol')">{{ recordTotal }}</n-descriptions-item>
           <n-descriptions-item :label="t('domain.categoryCol')">{{ categoryCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('domain.noticeOff')">{{ domains.length - noticeOn }}</n-descriptions-item>
+          <n-descriptions-item :label="t('domain.expired')">{{ expiredCount }}</n-descriptions-item>
         </n-descriptions>
       </div>
       <div class="app-panel">
@@ -169,6 +169,13 @@ const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatu
 const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
 const recordTotal = computed(() => domains.value.reduce((sum: number, d: any) => sum + (d._count_error ? 0 : Number(d.recordcount) || 0), 0));
 const categoryCount = computed(() => new Set(domains.value.map((d: any) => d.category_name).filter(Boolean)).size);
+const expiredCount = computed(() => {
+  const now = Date.now();
+  return domains.value.filter((d: any) => {
+    const ts = d.expiretime ? new Date(d.expiretime).getTime() : NaN;
+    return Number.isFinite(ts) && ts < now;
+  }).length;
+});
 const recordResults = ref<any[]>([]);
 const showRecords = ref(false);
 const checked = ref<string[]>([]);

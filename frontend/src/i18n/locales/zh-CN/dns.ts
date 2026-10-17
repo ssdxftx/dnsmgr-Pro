@@ -26,6 +26,7 @@ export default {
     subtitle: '管理已接入的域名、分类与到期提醒',
     overview: '域名概览',
     listTitle: '域名列表',
+    expired: '已过期',
     batchNoticeOn: '开启提醒',
     batchNoticeOff: '关闭提醒',
     expireNotice: '到期提醒设置',

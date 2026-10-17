@@ -11,16 +11,16 @@
         />
       </n-grid-item>
       <n-grid-item v-reveal class="d2">
-        <TelemetryCard :label="t('dm.runCount')" :value="Number(info.run_count) || 0" tone="primary" :icon="SyncOutline" :spark="sparks[0]" :caption="t('common.live')" />
+        <TelemetryCard :label="t('dm.runCount')" :value="Number(info.run_count) || 0" tone="primary" :icon="SyncOutline" :caption="t('common.live')" />
       </n-grid-item>
       <n-grid-item v-reveal class="d3">
         <StatCard :label="t('dm.lastRunTime')" :value="info.run_time || t('common.none')" tone="info" :icon="TimeOutline" />
       </n-grid-item>
       <n-grid-item v-reveal class="d4">
-        <TelemetryCard :label="t('dm.switchCount24')" :value="Number(info.switch_count) || 0" tone="warning" :icon="SwapHorizontalOutline" :spark="sparks[1]" :caption="t('common.last24h')" />
+        <TelemetryCard :label="t('dm.switchCount24')" :value="Number(info.switch_count) || 0" tone="warning" :icon="SwapHorizontalOutline" :caption="t('common.last24h')" />
       </n-grid-item>
       <n-grid-item v-reveal class="d5">
-        <TelemetryCard :label="t('dm.failCount24')" :value="Number(info.fail_count) || 0" tone="error" :icon="CloseCircleOutline" :spark="sparks[2]" :caption="t('common.last24h')" />
+        <TelemetryCard :label="t('dm.failCount24')" :value="Number(info.fail_count) || 0" tone="error" :icon="CloseCircleOutline" :caption="t('common.last24h')" />
       </n-grid-item>
     </n-grid>
 
@@ -50,11 +50,6 @@ const dialog = useDialog();
 const { t } = useI18n();
 const info = ref<any>({ run_count: 0, run_time: '', run_state: 0, run_error: null, switch_count: 0, fail_count: 0 });
 const days = ref(30);
-const sparks = [
-  [3, 6, 5, 9, 7, 11, 9, 13, 11],
-  [2, 5, 4, 7, 6, 9, 8, 11, 10],
-  [1, 2, 4, 3, 6, 5, 8, 7, 10],
-];
 
 async function load() {
   const res = await api<any>('GET', '/dmonitor/overview');

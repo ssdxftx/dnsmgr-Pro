@@ -96,6 +96,7 @@ export default {
     overview: 'Rule Overview',
     listTitle: 'Rule List',
     credentialSettings: 'Credential Settings',
+    credentialSource: 'Credential Source',
     addRule: 'Add Rule',
     selectDomain: 'Select a Cloudflare domain',
     dedicatedCredential: 'Dedicated Credential',
