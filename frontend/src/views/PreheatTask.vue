@@ -123,6 +123,7 @@ const columns = computed(() => [
   {
     title: t('preheat.linksCol'),
     key: 'urls',
+    width: 120,
     ellipsis: { tooltip: true },
     render: (row: any) => {
       const list = String(row.urls || '').split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);

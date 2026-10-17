@@ -8,7 +8,7 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.monitorTasks')" tone="primary" :icon="PulseOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="normalTasks" :label="t('dnsCheck.resultOk')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('dnsCheck.lastCheck')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="issueTasks" :label="t('common.abnormal')" tone="error" :icon="AlertCircleOutline" :caption="t('dnsCheck.lastCheck')" /></n-grid-item>
@@ -19,7 +19,7 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('dnsCheck.overview') }}</h3>
         </div>
-        <n-descriptions :column="4" size="small" label-placement="top">
+        <n-descriptions :column="isMobile ? 2 : 4" size="small" label-placement="top">
           <n-descriptions-item :label="t('common.enable')">{{ activeTasks }}</n-descriptions-item>
           <n-descriptions-item :label="t('common.disabled')">{{ tasks.length - activeTasks }}</n-descriptions-item>
           <n-descriptions-item :label="t('dnsCheck.lastRun')">{{ lastRunAt }}</n-descriptions-item>
@@ -118,10 +118,12 @@ import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import { useAction } from '../composables/useAction';
+import { useResponsive } from '../composables/useResponsive';
 
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
+const { isMobile } = useResponsive();
 const { busy, run } = useAction();
 const loadBusy = ref(false);
 const saveBusy = ref(false);
