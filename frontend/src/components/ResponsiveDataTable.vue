@@ -1,5 +1,5 @@
 <template>
-  <div class="rdt">
+  <div ref="wrapRef" class="rdt" :class="{ 'rdt--scrollable': scrollable && !isMobile }">
     <n-data-table
       v-if="!isMobile"
       :columns="columns"
@@ -93,7 +93,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue';
 import { NButton, NCheckbox, NDataTable, NPagination, NSpin } from 'naive-ui';
 import { AlertCircleOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { useResponsive } from '../composables/useResponsive';
@@ -171,16 +171,30 @@ const titleColumn = computed(() => {
 });
 const restColumns = computed(() => dataColumns.value.filter((c) => c !== titleColumn.value));
 
-// 未显式传 scroll-x 时按列宽合计兜底，避免固定列总和超出容器后表格直接溢出、
-// 操作列被裁且无法横向滚动（naive-ui 仅在设置 scroll-x 时才生成可滚动表体）。
+const wrapRef = ref<HTMLElement | null>(null);
+const wrapW = ref(0);
+let ro: ResizeObserver | null = null;
+onMounted(() => {
+  if (!wrapRef.value) return;
+  ro = new ResizeObserver(([entry]) => {
+    wrapW.value = entry.contentRect.width;
+  });
+  ro.observe(wrapRef.value);
+});
+onBeforeUnmount(() => ro?.disconnect());
+
+// 未显式传 scroll-x 时按列宽合计兜底：仅在确实放不下时生成滚动容器，
+// 留 5% 压缩余量并忽略 12px 以内的差异，避免「差 6px」也长出滚动条。
 const resolvedScrollX = computed(() => {
   if (props.scrollX != null) return props.scrollX;
   const total = props.columns.reduce((sum: number, col: any) => {
     if (isSystemColumn(col)) return sum + 40;
     return sum + (Number(col?.width) || 140);
   }, 0);
-  return total || undefined;
+  if (!wrapW.value) return total > 1300 ? total : undefined;
+  return total > wrapW.value * 1.05 && total - wrapW.value > 12 ? total : undefined;
 });
+const scrollable = computed(() => resolvedScrollX.value != null);
 
 const checkedSet = computed(() => new Set(props.checkedRowKeys || []));
 
@@ -243,6 +257,22 @@ function onMobilePage(page: number) {
 </script>
 
 <style scoped>
+.rdt {
+  position: relative;
+}
+
+/* 横向可滚动时在右缘留一条渐隐，提示还有内容；不拦截指针事件 */
+.rdt--scrollable::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 12px;
+  pointer-events: none;
+  background: linear-gradient(to right, transparent, var(--app-surface));
+}
+
 .rdt__pager {
   display: flex;
   justify-content: center;

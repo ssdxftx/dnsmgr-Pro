@@ -203,27 +203,27 @@ const columns = computed(() => {
   cols.push({
     title: t('domain.nameCol'),
     key: 'name',
-    width: 260,
+    width: 200,
     render: (row: any) =>
       h(NSpace, { size: 6, align: 'center', wrap: false }, {
         default: () =>
           [
-            h(NEllipsis, { style: 'max-width:220px' }, { default: () => row.name }),
+            h(NEllipsis, { style: 'max-width:160px' }, { default: () => row.name }),
             !isAdmin.value && row._readonly === 1 ? h(NTag, { size: 'tiny', type: 'warning', bordered: false }, { default: () => t('domain.readonly') }) : null,
           ].filter(Boolean),
       }),
   });
-  cols.push({ title: t('domain.categoryCol'), key: 'category_name', width: 120 });
+  cols.push({ title: t('domain.categoryCol'), key: 'category_name', width: 90 });
   cols.push({
     title: t('common.remark'),
     key: 'remark',
-    width: 160,
-    render: (row: any) => h(NEllipsis, { style: 'max-width:160px' }, { default: () => row.remark || '' }),
+    width: 120,
+    render: (row: any) => h(NEllipsis, { style: 'max-width:110px' }, { default: () => row.remark || '' }),
   });
   cols.push({
     title: t('domain.recordCountCol'),
     key: 'recordcount',
-    width: 90,
+    width: 70,
     render: (row: any) => (row._count_error ? '—' : row.recordcount),
   });
   cols.push({
@@ -239,22 +239,29 @@ const columns = computed(() => {
       if (isAdmin.value) {
         children.push(h(NButton, { size: 'tiny', quaternary: true, title: t('domain.refreshExpire'), onClick: () => updateDate(row) }, { icon: () => h(RefreshOutline) }));
       }
-      return h(NSpace, { size: 4, align: 'center' }, { default: () => children });
+      // 到期提醒开关并入本格，避免单独占一列
+      children.push(
+        h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: row.is_notice == 1 ? 'success' : 'default',
+            title: row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff'),
+            disabled: !isAdmin.value,
+            onClick: isAdmin.value ? () => toggleNotice(row) : undefined,
+          },
+          { icon: () => h(NotificationsOutline) },
+        ),
+      );
+      return h(NSpace, { size: 4, align: 'center', wrap: false }, { default: () => children });
     },
   });
-  cols.push({
-    title: t('domain.noticeCol'),
-    key: 'is_notice',
-    width: 100,
-    render(row: any) {
-      return h(NTag, { size: 'small', type: row.is_notice == 1 ? 'success' : 'default', bordered: false, onClick: isAdmin.value ? () => toggleNotice(row) : undefined, style: isAdmin.value ? 'cursor:pointer' : undefined }, { default: () => (row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff')) });
-    },
-  });
-  cols.push({ title: t('domain.addTimeCol'), key: 'addtime', width: 170 });
+  cols.push({ title: t('domain.addTimeCol'), key: 'addtime', width: 120 });
   cols.push({
     title: t('common.actions'),
     key: 'actions',
-    width: isAdmin.value ? 200 : 120,
+    width: isAdmin.value ? 150 : 120,
     render(row: any) {
       const btns: any[] = [h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
       if (isAdmin.value) {
