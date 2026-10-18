@@ -208,6 +208,7 @@ export default {
     partialFail: 'Failed to fetch statistics for some providers: {errors}',
     fluxLabel: 'Traffic',
     bwLabel: 'Peak Bandwidth',
+    bwDailyLabel: 'Daily Avg Bandwidth',
     bsFluxLabel: 'Origin Traffic',
     reqLabel: 'Total Requests',
     hitRateLabel: 'Cache Hit Rate',

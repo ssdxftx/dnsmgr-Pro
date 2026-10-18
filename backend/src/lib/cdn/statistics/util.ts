@@ -76,12 +76,13 @@ export function parseValueSeries(items: any[] | undefined, key = 'Value'): numbe
 
 export function emptyResource(len: number): ResourceStatistics {
   return {
-    resource_summary: { bw: 0, bs_bw: 0, flux: 0, bs_flux: 0 },
+    resource_summary: { bw: 0, bs_bw: 0, flux: 0, bs_flux: 0, out_flux: 0 },
     resource_detail: {
       bw: new Array(len).fill(0),
       bs_bw: new Array(len).fill(0),
       flux: new Array(len).fill(0),
       bs_flux: new Array(len).fill(0),
+      out_flux: new Array(len).fill(0),
     },
   };
 }
@@ -130,17 +131,19 @@ function mergeResource(base: ResourceStatistics, add: ResourceStatistics, len: n
       bs_bw: Math.max(base.resource_summary?.bs_bw || 0, add.resource_summary?.bs_bw || 0),
       flux: (base.resource_summary?.flux || 0) + (add.resource_summary?.flux || 0),
       bs_flux: (base.resource_summary?.bs_flux || 0) + (add.resource_summary?.bs_flux || 0),
+      out_flux: (base.resource_summary?.out_flux || 0) + (add.resource_summary?.out_flux || 0),
+      bw_interval: base.resource_summary?.bw_interval,
     },
     resource_detail: {
       bw: sumSeries(d?.bw, a?.bw, len),
       bs_bw: sumSeries(d?.bs_bw, a?.bs_bw, len),
       flux: sumSeries(d?.flux, a?.flux, len),
       bs_flux: sumSeries(d?.bs_flux, a?.bs_flux, len),
+      out_flux: sumSeries(d?.out_flux, a?.out_flux, len),
     },
   };
-  // 带宽曲线合并后以逐点求和展示，重新计算峰值
-  out.resource_summary.bw = max(out.resource_detail.bw);
-  out.resource_summary.bs_bw = max(out.resource_detail.bs_bw);
+  // 峰值取各账户 summary 的最大值：EO 的 summary 是 5min 峰值，
+  // 用合并后的逐点曲线重算会退回小时平均
   return out;
 }
 

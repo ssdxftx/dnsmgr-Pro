@@ -25,7 +25,7 @@ import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
-import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS } from '../lib/cdn/statistics/cacheService.js';
+import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS, EO_DATA_DELAY_MS } from '../lib/cdn/statistics/cacheService.js';
 import { checkLevel } from '../auth.js';
 import { decryptConfig } from '../lib/secret.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
@@ -1662,6 +1662,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const start = parseStatTime(q.startTime);
       const end = parseStatTime(q.endTime);
       if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
+      // 厂商统计有约 10 分钟延迟：结束时间统一回退，避免最后一个桶被截断
+      const latest = Date.now() - EO_DATA_DELAY_MS;
+      // 起始时间也落在延迟窗口内时（如刚过零点查「今天」）不再回退，避免区间为空
+      if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
 
       const domainNames = String(q.domains || '')

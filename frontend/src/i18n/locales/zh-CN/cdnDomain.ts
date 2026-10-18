@@ -208,6 +208,7 @@ export default {
     partialFail: '部分服务商统计获取失败：{errors}',
     fluxLabel: '加速流量',
     bwLabel: '峰值带宽',
+    bwDailyLabel: '日均带宽',
     bsFluxLabel: '回源流量',
     reqLabel: '请求总数',
     hitRateLabel: '缓存命中率',

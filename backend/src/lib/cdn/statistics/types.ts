@@ -1,10 +1,14 @@
 export interface ResourceSummary {
-  /** 访问带宽峰值 */
+  /** 访问带宽峰值（小时粒度取 5min 峰值；天粒度为日均带宽） */
   bw: number;
+  /** 带宽统计粒度：day 时卡片文案应显示「日均带宽」 */
+  bw_interval?: 'hour' | 'day';
   /** 回源带宽峰值 */
   bs_bw: number;
-  /** 访问流量 */
+  /** 访问流量（响应 + 客户端请求） */
   flux: number;
+  /** 响应下行流量（与缓存命中流量同源，用于命中率分母） */
+  out_flux?: number;
   /** 回源流量 */
   bs_flux: number;
 }
@@ -14,6 +18,7 @@ export interface ResourceDetail {
   bs_bw: number[];
   flux: number[];
   bs_flux: number[];
+  out_flux?: number[];
 }
 
 export interface ResourceStatistics {

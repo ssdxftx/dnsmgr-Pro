@@ -90,7 +90,7 @@
         <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
       </n-grid-item>
       <n-grid-item v-reveal class="d2">
-        <StatCard :label="t('statistics.bwLabel')" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
+        <StatCard :label="bwLabel" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
       </n-grid-item>
       <n-grid-item v-reveal class="d3">
         <StatCard :label="t('statistics.bsFluxLabel')" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
@@ -228,12 +228,19 @@ function formatBitRate(bps: number): string {
   return mbps >= 100 ? `${mbps.toFixed(0)} Mbps` : `${mbps.toFixed(2)} Mbps`;
 }
 
+// 天粒度的带宽是日均值，卡片文案随之变化，避免与「峰值」混淆
+const bwLabel = computed(() =>
+  resource.value?.resource_summary?.bw_interval === 'day' ? t('statistics.bwDailyLabel') : t('statistics.bwLabel'),
+);
+
 const summary = computed(() => {
   const rs = resource.value?.resource_summary || {};
   const vs = visits.value?.visits_summary || {};
   const flux = Number(rs.flux || 0);
   const hitFlux = Number(vs.hit_flux || 0);
-  const hitRate = flux > 0 ? (hitFlux / flux) * 100 : 0;
+  // 分母用响应下行流量（与命中流量同源）；旧缓存无该字段时回退总流量
+  const hitDenom = Number(rs.out_flux || 0) || flux;
+  const hitRate = hitDenom > 0 ? (hitFlux / hitDenom) * 100 : 0;
   return {
     fluxText: formatBytes(flux),
     bwText: formatBitRate(Number(rs.bw || 0)),
@@ -334,11 +341,16 @@ function renderCharts() {
     ],
   }, null);
 
+  // EO 不提供请求命中次数，全 0 时隐藏该曲线，避免看起来「命中数恒为 0」
+  const hitNum = vs.hit_num || [];
+  const hitSeries = hitNum.some((v: number) => Number(v) > 0)
+    ? [{ name: t('statistics.seriesHit'), type: 'line', smooth: true, data: hitNum }]
+    : [];
   renderChart(reqRef.value, {
     ...baseOption(),
     series: [
       { name: t('statistics.seriesReq'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: vs.req_num || [] },
-      { name: t('statistics.seriesHit'), type: 'line', smooth: true, data: vs.hit_num || [] },
+      ...hitSeries,
       { name: t('statistics.seriesBsReq'), type: 'line', smooth: true, data: vs.bs_num || [] },
     ],
   }, null);

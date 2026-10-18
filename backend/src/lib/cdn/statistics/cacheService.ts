@@ -6,6 +6,7 @@ import { buildLabels } from './util.js';
 
 interface BucketData {
   flux: number;
+  out_flux: number;
   bs_flux: number;
   bw: number;
   bs_bw: number;
@@ -31,7 +32,7 @@ function maxOf(arr: number[]): number {
 }
 
 function emptyBucket(): BucketData {
-  return { flux: 0, bs_flux: 0, bw: 0, bs_bw: 0, req_num: 0, hit_flux: 0, hit_num: 0, bs_num: 0, status: [0, 0, 0, 0], bs_status: [0, 0, 0, 0] };
+  return { flux: 0, out_flux: 0, bs_flux: 0, bw: 0, bs_bw: 0, req_num: 0, hit_flux: 0, hit_num: 0, bs_num: 0, status: [0, 0, 0, 0], bs_status: [0, 0, 0, 0] };
 }
 
 function pad(n: number): string {
@@ -50,6 +51,9 @@ function safeConfig(s: any): Record<string, any> {
   if (s && typeof s === 'object') return s as Record<string, any>;
   return decryptConfig(s) || {};
 }
+
+// 腾讯云 EO 统计接口数据约 10 分钟延迟
+export const EO_DATA_DELAY_MS = 10 * 60 * 1000;
 
 export const STAT_RETENTION_DAYS = 30;
 export const STAT_COVER_MS = 30 * 86400000;
@@ -88,6 +92,7 @@ async function storeResult(
   for (let i = 0; i < labels.length; i++) {
     const data: BucketData = {
       flux: num(rd.flux?.[i]),
+      out_flux: num(rd.out_flux?.[i]),
       bs_flux: num(rd.bs_flux?.[i]),
       bw: num(rd.bw?.[i]),
       bs_bw: num(rd.bs_bw?.[i]),
@@ -128,7 +133,8 @@ export async function refreshAllStatCache(): Promise<{ accounts: number; errors:
   // 小时缓存窗口需保持在 1 天内：buildLabels 以跨度 >1 天切换为「天」标签，
   // 若窗口超过 1 天，小时粒度会写入按天聚合的数据导致图表错乱
   const hourStart = new Date(startOfHour(now).getTime() - 23 * 3600000);
-  const hourEnd = now;
+  // EO 数据约 10 分钟延迟，结束时间回退，避免最后一个桶只有部分数据
+  const hourEnd = new Date(now.getTime() - EO_DATA_DELAY_MS);
 
   const errors: string[] = [];
   const jobs = accounts.filter((acct) => {
@@ -179,14 +185,26 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
   const { labels } = buildLabels(start, end);
   if (!labels.length) return null;
 
-  const params: any[] = [granularity, fmt(start), fmt(end)];
+  // 缓存桶按整点/整日写入，查询起点先对齐到桶边界再构造索引表，
+  // 否则非整点起点会与所有桶都对不上，整条曲线被平移。
+  // 天视图标签是日期，必须从 start 当天开始；小时视图在桶数超出标签数时
+  // 后移起点，保证最新一小时不被截掉。
+  const stepMs = granularity === 'day' ? 86400000 : 3600000;
+  let alignedStart = granularity === 'hour' ? startOfHour(start) : startOfDay(start);
+  if (granularity === 'hour') {
+    const buckets = Math.floor((end.getTime() - alignedStart.getTime()) / stepMs) + 1;
+    const shift = Math.max(0, buckets - labels.length);
+    if (shift > 0) alignedStart = new Date(alignedStart.getTime() + shift * stepMs);
+  }
+  const alignedEnd = new Date(alignedStart.getTime() + labels.length * stepMs);
+  const params: any[] = [granularity, fmt(alignedStart), fmt(alignedEnd)];
   let aidClause = '';
   if (aids && aids.length) {
     aidClause = ` AND aid IN (${aids.map(() => '?').join(',')})`;
     params.push(...aids);
   }
   const rows: any[] = await query(
-    `SELECT ts, data FROM ${table('cdn_stat_data')} WHERE granularity = ? AND ts >= ? AND ts <= ?${aidClause} ORDER BY ts ASC`,
+    `SELECT ts, data FROM ${table('cdn_stat_data')} WHERE granularity = ? AND ts >= ? AND ts < ?${aidClause} ORDER BY ts ASC`,
     params,
   );
   if (!rows.length) return null;
@@ -206,6 +224,7 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
       continue;
     }
     b.flux += num(d.flux);
+    b.out_flux += num(d.out_flux);
     b.bs_flux += num(d.bs_flux);
     b.bw += num(d.bw);
     b.bs_bw += num(d.bs_bw);
@@ -220,9 +239,8 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
   }
 
   // 按绝对时间戳把缓存桶对齐到标签：避免「缺右端」（最近时段尚未刷新）时整体右移错配
-  const stepMs = granularity === 'day' ? 86400000 : 3600000;
   const idxByTs = new Map<string, number>();
-  for (let i = 0; i < labels.length; i++) idxByTs.set(fmt(new Date(start.getTime() + i * stepMs)), i);
+  for (let i = 0; i < labels.length; i++) idxByTs.set(fmt(new Date(alignedStart.getTime() + i * stepMs)), i);
   const aligned = new Array<BucketData | null>(labels.length).fill(null);
   let matched = 0;
   for (const [k, b] of map) {
@@ -232,32 +250,21 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
       matched++;
     }
   }
-  let series: (pick: (b: BucketData) => number) => number[];
-  if (matched > 0) {
-    series = (pick) => aligned.map((b) => (b ? pick(b) : 0));
-  } else {
-    // 时间戳无法对齐时回退为右对齐（旧行为），避免图表全空
-    let tsList = [...map.keys()].sort();
-    if (tsList.length > labels.length) tsList = tsList.slice(tsList.length - labels.length);
-    const offset = labels.length - tsList.length;
-    series = (pick) => {
-      const arr = new Array(labels.length).fill(0);
-      tsList.forEach((k, idx) => {
-        arr[offset + idx] = pick(map.get(k)!);
-      });
-      return arr;
-    };
-  }
+  // 桶时间戳全部无法对齐时不再静默右移（会把曲线整体平移），
+  // 返回 null 让调用方走实时查询或提示「暂未缓存」
+  if (matched === 0) return null;
+  const series = (pick: (b: BucketData) => number) => aligned.map((b) => (b ? pick(b) : 0));
 
   const result: any = { labels };
   if (type === 'Resource' || type === 'All') {
     const flux = series((b) => b.flux);
+    const out_flux = series((b) => b.out_flux);
     const bs_flux = series((b) => b.bs_flux);
     const bw = series((b) => b.bw);
     const bs_bw = series((b) => b.bs_bw);
     result.resource = {
-      resource_detail: { bw, bs_bw, flux, bs_flux },
-      resource_summary: { bw: maxOf(bw), bs_bw: maxOf(bs_bw), flux: sum(flux), bs_flux: sum(bs_flux) },
+      resource_detail: { bw, bs_bw, flux, bs_flux, out_flux },
+      resource_summary: { bw: maxOf(bw), bs_bw: maxOf(bs_bw), flux: sum(flux), bs_flux: sum(bs_flux), out_flux: sum(out_flux), bw_interval: granularity },
     };
   }
   if (type === 'Visits' || type === 'All') {
