@@ -15,7 +15,7 @@
         </n-space>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="domains.length" :label="t('common.total')" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="queryFailed" :label="t('common.queryFailed')" tone="warning" :icon="AlertCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -199,7 +199,7 @@ const categoryOptions = computed(() => categories.value.map((c) => ({ label: c.n
 const columns = computed(() => {
   const cols: any[] = [];
   if (isAdmin.value) cols.push({ type: 'selection', width: 40 });
-  cols.push({ title: 'ID', key: 'id', width: 60 });
+  cols.push({ title: 'ID', key: 'id', width: 60, mobile: 'hide' });
   cols.push({
     title: t('domain.nameCol'),
     key: 'name',
@@ -218,6 +218,7 @@ const columns = computed(() => {
     title: t('common.remark'),
     key: 'remark',
     width: 112,
+    mobile: 'hide',
     render: (row: any) => h(NEllipsis, { style: 'max-width:102px' }, { default: () => row.remark || '' }),
   });
   cols.push({
@@ -261,6 +262,7 @@ const columns = computed(() => {
     title: t('domain.addTimeCol'),
     key: 'addtime',
     width: 120,
+    mobile: 'hide',
     render: (row: any) => h('span', { style: 'white-space: nowrap' }, row.addtime ? String(row.addtime).slice(0, 10) : '-'),
   });
   cols.push({

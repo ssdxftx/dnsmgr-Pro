@@ -8,7 +8,7 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.scheduleTasks')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="activeTasks" :label="t('common.active')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="pausedTasks" :label="t('common.disabled')" tone="warning" :icon="PauseOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -133,7 +133,7 @@ const pagination = reactive({
 
 const columns = computed<any[]>(() => [
   { type: 'selection' },
-  { title: 'ID', key: 'id', width: 60 },
+  { title: 'ID', key: 'id', width: 60, mobile: 'hide' },
   {
     title: t('schedule.searchDomain'),
     key: 'rr',

@@ -8,7 +8,7 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="accounts.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="KeyOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -81,7 +81,7 @@ const currentProvider = ref<any>(null);
 const providerOptions = ref<any[]>([]);
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 60 },
+  { title: 'ID', key: 'id', width: 60, mobile: 'hide' },
   {
     title: t('certAccount.providerCol'),
     key: 'typename',

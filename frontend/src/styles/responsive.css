@@ -73,3 +73,100 @@
     touch-action: manipulation;
   }
 }
+/* ===========================================================================
+   移动端表单：左标签改为上标签，单选组换行（标签 110px 会把控件压到 210px）
+   =========================================================================== */
+@media (max-width: 767px) {
+  .n-form-item--left-labelled {
+    grid-template-columns: 1fr !important;
+  }
+  .n-form-item--left-labelled > .n-form-item-label {
+    width: auto !important;
+    justify-content: flex-start;
+    text-align: left;
+    padding: 0 0 4px;
+  }
+  .n-radio-group {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    white-space: normal !important;
+    gap: 8px;
+  }
+  .n-radio-group .n-radio-group__splitor {
+    display: none;
+  }
+  .n-radio-button {
+    white-space: nowrap;
+  }
+}
+
+/* 移动端触控尺寸与字号：输入 16px 避免 iOS 聚焦放大，按钮不小于 36px */
+@media (max-width: 767px) {
+  .n-input .n-input__input-el,
+  .n-input .n-input__textarea-el,
+  .n-input-number .n-input__input-el,
+  .n-base-selection .n-base-selection-label,
+  .n-base-selection .n-base-selection-placeholder,
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  .m-card__actions {
+    padding: 8px 12px;
+    gap: 4px;
+  }
+  .m-card__actions .n-button {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+  .app-toolbar .n-button,
+  .n-dialog .n-button {
+    min-height: 36px;
+  }
+  .n-pagination .n-pagination-item {
+    min-width: 36px;
+    min-height: 36px;
+  }
+}
+
+/* 移动端信息架构：应用栏标题与页面头重复，隐藏只留汉堡与头像 */
+@media (max-width: 767px) {
+  .app-header__titles {
+    display: none;
+  }
+  .n-tabs {
+    position: relative;
+  }
+  .n-tabs::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 16px;
+    height: 44px;
+    pointer-events: none;
+    background: linear-gradient(to right, transparent, var(--app-surface-2));
+  }
+}
+
+/* 刘海与底部手势条安全区 */
+@supports (padding: env(safe-area-inset-top)) {
+  .app-header {
+    padding-top: env(safe-area-inset-top);
+    height: calc(var(--app-header-h) + env(safe-area-inset-top));
+  }
+  .app-content {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+  .app-drawer .n-drawer-content {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+@media (max-width: 767px) {
+  .app-content {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  }
+}

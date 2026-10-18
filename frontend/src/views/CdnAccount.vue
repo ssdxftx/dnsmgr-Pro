@@ -8,7 +8,7 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="accounts.length" :label="t('common.cdnAccounts')" tone="primary" :icon="CloudOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="providerCount" :label="t('common.providers')" tone="info" :icon="PeopleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="tunnelAccounts" :label="t('common.tunnelReady')" tone="success" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -74,7 +74,7 @@ const currentProvider = ref<any>(null);
 const form = reactive<any>({ type: '', name: '', remark: '', config: {} as Record<string, any> });
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 60 },
+  { title: 'ID', key: 'id', width: 60, mobile: 'hide' },
   { title: t('cdnAccount.providerCol'), key: 'typename', width: 140 },
   {
     title: t('cdnAccount.nameCol'),

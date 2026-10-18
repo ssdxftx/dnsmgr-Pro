@@ -130,7 +130,7 @@ const route = useRoute();
 const router = useRouter();
 const auth = useAuthStore();
 const user = computed(() => auth.user);
-const { isMobile } = useResponsive();
+const { isMobile, isTablet } = useResponsive();
 const { isDark, toggle: toggleTheme } = useThemeMode();
 const { t } = useI18n();
 const { setLocale } = useLocale();
@@ -138,6 +138,14 @@ const { setLocale } = useLocale();
 const version = __APP_VERSION__;
 const collapsed = ref(false);
 const drawerShow = ref(false);
+// 平板竖屏（768–1023）侧栏收为图标栏，把宽度让给表格
+watch(
+  isTablet,
+  (v) => {
+    if (v) collapsed.value = true;
+  },
+  { immediate: true },
+);
 // 高频列表页缓存：返回列表零请求、零重渲（组件名由 SFC 文件名推断，带参详情页不缓存）
 const keepAliveViews = ['DomainList', 'CdnDomain', 'UserList', 'CertOrder'];
 

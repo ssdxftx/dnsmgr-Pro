@@ -160,7 +160,7 @@ function normalizeHm(v: any): string {
 }
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 48 },
+  { title: 'ID', key: 'id', width: 48, mobile: 'hide' },
   { title: t('dnsCheck.nameCol'), key: 'name', width: 110, render: (row: any) => row.name || '-' },
   {
     title: t('dnsCheck.domain'),

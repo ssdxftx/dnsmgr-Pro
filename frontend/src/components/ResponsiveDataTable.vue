@@ -169,7 +169,10 @@ const titleColumn = computed(() => {
   if (preferred) return preferred;
   return cols.find((c) => String(c.key) !== 'id') || cols[0];
 });
-const restColumns = computed(() => dataColumns.value.filter((c) => c !== titleColumn.value));
+// 移动端卡片只保留主字段：列可声明 mobile: 'hide' 排除在卡片行之外
+const restColumns = computed(() =>
+  dataColumns.value.filter((c) => c !== titleColumn.value && (c as any).mobile !== 'hide'),
+);
 
 const wrapRef = ref<HTMLElement | null>(null);
 const wrapW = ref(0);

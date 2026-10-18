@@ -829,7 +829,7 @@ const linkCanConfirm = computed(() => !!linkChoice.value && !!linkCandidates.val
 
 const columns = computed<any[]>(() => [
   { type: 'selection', width: 40 },
-  { title: 'ID', key: 'id', width: 60 },
+  { title: 'ID', key: 'id', width: 60, mobile: 'hide' },
   {
     title: t('cdnDomain.accelDomain'),
     key: 'name',
@@ -850,6 +850,7 @@ const columns = computed<any[]>(() => [
   {
     title: 'CNAME',
     key: 'cname',
+    mobile: 'hide',
     width: 200,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.cname || '' });

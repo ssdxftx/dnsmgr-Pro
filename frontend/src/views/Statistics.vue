@@ -85,7 +85,7 @@
         {{ t('statistics.partialFail', { errors: errors.join(', ') }) }}
       </n-alert>
 
-      <n-grid cols="1 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
+      <n-grid cols="2 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
       <n-grid-item v-reveal class="d1">
         <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
       </n-grid-item>

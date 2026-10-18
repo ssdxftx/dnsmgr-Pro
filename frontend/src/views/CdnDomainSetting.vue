@@ -3,7 +3,7 @@
     <PageHeader :title="info?.name || t('cdnSetting.title')" :subtitle="t('cdnSetting.subtitle')" back="/cdn-domains">
       <template #actions>
         <n-space align="center">
-          <n-tag size="small">{{ info?.routename || info?.route }}</n-tag>
+          <n-tag v-if="info?.routename || info?.route" size="small">{{ info?.routename || info?.route }}</n-tag>
           <n-tag size="small" :type="info?.status === 'offline' ? 'default' : 'success'">{{ t('cdnSetting.statusLabel') }}{{ info?.status === 'offline' ? t('cdnSetting.statusDisabled') : t('cdnSetting.statusEnabled') }}</n-tag>
           <span class="cname">{{ t('cdnSetting.cnameLabel') }}{{ info?.cname || t('cdnSetting.cnameNone') }}</span>
         </n-space>
@@ -37,9 +37,11 @@
             <n-select v-model:value="originForm.origin_protocol" :options="protoOptions" style="width:200px" />
           </n-form-item>
           <n-form-item :label="t('cdnSetting.originPortLabel')">
-            <n-space>
-              <n-input-number v-model:value="originForm.http_port" :min="1" style="width:120px" placeholder="HTTP" />
-              <n-input-number v-model:value="originForm.https_port" :min="1" style="width:120px" placeholder="HTTPS" />
+            <n-space align="center" :size="8">
+              <span class="app-muted">HTTP</span>
+              <n-input-number v-model:value="originForm.http_port" :min="1" style="width:110px" />
+              <span class="app-muted">HTTPS</span>
+              <n-input-number v-model:value="originForm.https_port" :min="1" style="width:110px" />
             </n-space>
           </n-form-item>
           <n-button type="primary" size="small" :loading="saveOriginBusy" @click="saveOrigin">{{ t('cdnSetting.saveOrigin') }}</n-button>

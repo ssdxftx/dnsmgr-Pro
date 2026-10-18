@@ -11,7 +11,7 @@
         </n-space>
       </template>
     </PageHeader>
-    <n-grid cols="1 s:2 m:4" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
+    <n-grid cols="2 s:2 m:4" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
       <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -176,11 +176,12 @@ function statusType(s: number): any {
 }
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 60 },
+  { title: 'ID', key: 'id', width: 60, mobile: 'hide' },
   {
     title: t('certOrder.typeCol'),
     key: 'typename',
     width: 100,
+    mobile: 'hide',
     render(row: any) {
       return h(NTag, { size: 'small', bordered: false }, { default: () => row.typename || t('certOrder.manualImport') });
     },

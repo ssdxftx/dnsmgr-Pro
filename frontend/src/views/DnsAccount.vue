@@ -8,7 +8,7 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="1 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="accounts.length" :label="t('common.total')" tone="primary" :icon="ServerOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="providerCount" :label="t('common.providers')" tone="info" :icon="PeopleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="tunnelAccounts" :label="t('common.tunnelReady')" tone="success" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -80,7 +80,7 @@ const currentProvider = ref<any>(null);
 const providerOptions = ref<any[]>([]);
 
 const columns = computed(() => [
-  { title: 'ID', key: 'id', width: 60 },
+  { title: 'ID', key: 'id', width: 60, mobile: 'hide' },
   { title: t('dnsAccount.provider'), key: 'type', width: 120 },
   {
     title: t('dnsAccount.accountName'),
