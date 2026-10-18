@@ -10,6 +10,8 @@ export interface OverviewAccount {
   id: number;
   config: Record<string, any>;
   domains: StatisticsDomain[];
+  /** 账户配置为密文但无法解密：跳过上游调用，仅返回可读错误 */
+  configError?: boolean;
 }
 
 export interface OverviewInput {
@@ -106,22 +108,29 @@ export async function buildProviderCard(
 
   const parts = await Promise.all(
     input.accounts.map((acct) =>
-      withTimeout(
-        fetchDetail(catalog, {
-          config: acct.config,
-          domains: acct.domains,
-          timeline,
-          groups: new Set(['overview']),
-          filters: {},
-          top: [],
-        }),
-        8000,
-      ).catch((e: any) => ({
-        series: [],
-        breakdowns: [],
-        errors: [String(e?.message || e)],
-        requests: 0,
-      })),
+      acct.configError
+        ? Promise.resolve({
+            series: [],
+            breakdowns: [],
+            errors: [`账户 #${acct.id} 配置无法解密，请在「CDN 账户」中重新填写凭证`],
+            requests: 0,
+          })
+        : withTimeout(
+            fetchDetail(catalog, {
+              config: acct.config,
+              domains: acct.domains,
+              timeline,
+              groups: new Set(['overview']),
+              filters: {},
+              top: [],
+            }),
+            8000,
+          ).catch((e: any) => ({
+            series: [],
+            breakdowns: [],
+            errors: [String(e?.message || e)],
+            requests: 0,
+          })),
     ),
   );
 

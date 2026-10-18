@@ -93,6 +93,8 @@ export default {
     deleteConfirm: 'Delete account "{name}"?',
     deleteSuccess: 'Deleted successfully',
     configDecryptError: 'This account configuration cannot be decrypted (the system key may have changed). Please re-enter all credentials before saving.',
+    configStatusCol: 'Config Status',
+    configErrorTag: 'Config error',
     addTimeCol: 'Added At',
   },
   record: {

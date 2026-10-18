@@ -102,6 +102,16 @@ const columns = computed(() => [
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.remark || '' });
     },
   },
+  {
+    title: t('dnsAccount.configStatusCol'),
+    key: 'config_error',
+    width: 110,
+    mobile: 'hide',
+    render: (row: any) =>
+      row.config_error
+        ? h(NTag, { type: 'error', size: 'small', bordered: false }, { default: () => t('dnsAccount.configErrorTag') })
+        : h('span', { style: 'color:var(--app-text-3)' }, '—'),
+  },
   { title: t('dnsAccount.addTimeCol'), key: 'addtime', width: 170 },
   {
     title: t('common.actions'),

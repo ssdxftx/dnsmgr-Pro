@@ -93,6 +93,8 @@ export default {
     deleteConfirm: '确定删除账户 {name} 吗？',
     deleteSuccess: '删除成功',
     configDecryptError: '该账户配置已无法解密（系统密钥可能变更），请重新填写全部凭证后再保存。',
+    configStatusCol: '配置状态',
+    configErrorTag: '配置异常',
     addTimeCol: '添加时间',
   },
   record: {

@@ -59,6 +59,14 @@ export function isEncryptedConfig(raw: unknown): boolean {
   return typeof raw === 'string' && raw.startsWith(ENC_PREFIX);
 }
 
+// 聚合场景读取配置：不抛错，用 configError 标记「密文无法解密」，便于单账户隔离
+export function readConfigSafe(raw: any): { config: Record<string, any>; configError: boolean } {
+  if (raw && typeof raw === 'object') return { config: raw as Record<string, any>, configError: false };
+  const cfg = decryptConfig(raw);
+  if (cfg) return { config: cfg, configError: false };
+  return { config: {}, configError: isEncryptedConfig(raw) };
+}
+
 // 解析存储的配置：兼容历史明文与新版密文
 export function decryptConfig(raw: string | null | undefined): Record<string, any> | null {
   const text = decryptText(raw);

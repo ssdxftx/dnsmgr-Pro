@@ -34,7 +34,7 @@ import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } fro
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
-import { ConfigDecryptError, decryptConfig, isEncryptedConfig } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readConfigSafe } from '../lib/secret.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
 import { EO_CONDITION_SCHEMA } from '../lib/cdn/ruleCondition.js';
 
@@ -1653,7 +1653,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const exact = await findExactCertOrders(raw);
     const accts = await query(`SELECT * FROM ${table('cert_account')} WHERE deploy = 0 ORDER BY id ASC`);
     const providers = (accts as any[])
-      .filter((a) => providerReady(a.type, safeJson(a.config)))
+      .filter((a) => {
+        const { config, configError } = readConfigSafe(a.config);
+        return !configError && providerReady(a.type, config);
+      })
       .map((a) => ({ aid: Number(a.id), type: a.type, typename: certConfig[a.type]?.name || a.type, name: a.name }));
     let defaultLe: any = null;
     if (!providers.length) {
@@ -1947,7 +1950,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
           .filter((a) => a.type === catalog.route)
           .map((a) => ({
             id: Number(a.id),
-            config: safeJson(a.config),
+            ...readConfigSafe(a.config),
             domains: domRows
               .filter((d) => Number(d.aid) === Number(a.id) && d.route === catalog.route)
               .map((d) => ({
@@ -2065,7 +2068,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         }
         const acct = accountCache.get(accountId);
         if (!acct) continue;
-        if (!accounts.has(accountId)) accounts.set(accountId, { id: accountId, config: safeJson(acct.config), domains: [] });
+        if (!accounts.has(accountId)) accounts.set(accountId, { id: accountId, ...readConfigSafe(acct.config), domains: [] });
         accounts.get(accountId)!.domains.push({
           name: row.name,
           route: row.route,
@@ -2078,9 +2081,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const parts = await runPool(
         [...accounts.values()].map(
           (acct) => () =>
-            fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }).catch(
-              (e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 }),
-            ),
+            acct.configError
+              ? Promise.resolve({
+                  series: [],
+                  breakdowns: [],
+                  errors: [`账户 #${acct.id} 配置无法解密，请在「CDN 账户」中重新填写凭证`],
+                  requests: 0,
+                })
+              : fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }).catch(
+                  (e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 }),
+                ),
         ),
         4,
       );
@@ -2172,14 +2182,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (!rows.length) return { code: 0, data: { labels: [] } };
 
       const accounts: Record<number, any> = {};
-      const groups: Record<string, { route: string; config: Record<string, any>; domains: StatisticsDomain[] }> = {};
+      const groups: Record<
+        string,
+        { route: string; aid: number; config: Record<string, any>; configError: boolean; domains: StatisticsDomain[] }
+      > = {};
       for (const row of rows as any[]) {
         if (!hasCdnStatistics(row.route)) continue;
         if (!accounts[row.aid]) accounts[row.aid] = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [row.aid]);
         const acct = accounts[row.aid];
         if (!acct) continue;
         const groupKey = `${row.route}#${row.aid}`;
-        if (!groups[groupKey]) groups[groupKey] = { route: row.route, config: safeJson(acct.config), domains: [] };
+        if (!groups[groupKey]) {
+          groups[groupKey] = { route: row.route, aid: Number(row.aid), ...readConfigSafe(acct.config), domains: [] };
+        }
         groups[groupKey].domains.push({ name: row.name, route: row.route, zoneId: row.zone_id, serviceArea: row.service_area });
       }
 
@@ -2187,6 +2202,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const errors: string[] = [];
       for (const key of Object.keys(groups)) {
         const group = groups[key];
+        if (group.configError) {
+          errors.push(`账户 #${group.aid} 配置无法解密，请在「CDN 账户」中重新填写凭证`);
+          continue;
+        }
         try {
           const part = await queryByRoute(group.route, group.config, group.domains, start, end, type);
           if (!part.labels.length) continue;
