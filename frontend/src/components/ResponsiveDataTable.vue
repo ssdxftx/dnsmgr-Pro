@@ -184,15 +184,16 @@ onMounted(() => {
 onBeforeUnmount(() => ro?.disconnect());
 
 // 未显式传 scroll-x 时按列宽合计兜底：仅在确实放不下时生成滚动容器，
-// 留 5% 压缩余量并忽略 12px 以内的差异，避免「差 6px」也长出滚动条。
+// 留 5% 压缩余量并忽略 20px 以内的差异，避免「差 6px」也长出滚动条。
 const resolvedScrollX = computed(() => {
   if (props.scrollX != null) return props.scrollX;
+  // 24px 为表格自身边框与单元格内边距的固定开销，纯列宽合计会低估实际宽度
   const total = props.columns.reduce((sum: number, col: any) => {
     if (isSystemColumn(col)) return sum + 40;
     return sum + (Number(col?.width) || 140);
-  }, 0);
+  }, 24);
   if (!wrapW.value) return total > 1300 ? total : undefined;
-  return total > wrapW.value * 1.05 && total - wrapW.value > 12 ? total : undefined;
+  return total > wrapW.value * 1.05 && total - wrapW.value > 20 ? total : undefined;
 });
 const scrollable = computed(() => resolvedScrollX.value != null);
 
@@ -270,7 +271,7 @@ function onMobilePage(page: number) {
   bottom: 0;
   width: 12px;
   pointer-events: none;
-  background: linear-gradient(to right, transparent, var(--app-surface));
+  background: linear-gradient(to right, transparent, var(--app-surface-2));
 }
 
 .rdt__pager {

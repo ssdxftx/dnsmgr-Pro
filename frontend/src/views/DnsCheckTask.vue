@@ -165,13 +165,13 @@ const columns = computed(() => [
   {
     title: t('dnsCheck.domain'),
     key: 'domain_name',
-    width: 170,
+    width: 162,
     render: (row: any) => (row.sub ? `${row.sub}.${row.domain_name}` : row.domain_name || '-'),
   },
   {
     title: t('dnsCheck.checkType'),
     key: 'types',
-    width: 96,
+    width: 90,
     render: (row: any) => {
       const types = String(row.types || '').trim();
       return types ? types : t('dnsCheck.all');
@@ -214,13 +214,13 @@ const columns = computed(() => [
   {
     title: t('dnsCheck.lastRun'),
     key: 'last_run',
-    width: 150,
+    width: 164,
     render: (row: any) => {
       if (!row.last_run) return '-';
       return h('div', { style: 'line-height: 1.35' }, [
-        h('span', null, row.last_run),
+        h('span', { style: 'white-space: nowrap; font-size: 12px' }, row.last_run),
         row.next_run
-          ? h('span', { style: 'display: block; font-size: 11px; color: var(--app-text-3)' }, `${t('dnsCheck.nextRun')} ${row.next_run}`)
+          ? h('span', { style: 'display: block; white-space: nowrap; font-size: 11px; color: var(--app-text-3)' }, `${t('dnsCheck.nextRun')} ${row.next_run}`)
           : null,
       ]);
     },

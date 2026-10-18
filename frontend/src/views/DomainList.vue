@@ -233,9 +233,9 @@ const columns = computed(() => {
     render(row: any) {
       const val = row.expiretime || '';
       const expired = val && expireTs(val) < Date.now();
-      const text = val ? String(val).slice(0, 19) : (row.checkstatus === 2 ? t('domain.queryFailed') : t('domain.notQueried'));
+      const text = val ? String(val).slice(0, 10) : (row.checkstatus === 2 ? t('domain.queryFailed') : t('domain.notQueried'));
       const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
-      const children: any[] = [h('span', { style: color ? { color } : undefined }, text || '-')];
+      const children: any[] = [h('span', { style: { whiteSpace: 'nowrap', ...(color ? { color } : {}) } }, text || '-')];
       if (isAdmin.value) {
         children.push(h(NButton, { size: 'tiny', quaternary: true, title: t('domain.refreshExpire'), onClick: () => updateDate(row) }, { icon: () => h(RefreshOutline) }));
       }
@@ -257,7 +257,12 @@ const columns = computed(() => {
       return h(NSpace, { size: 4, align: 'center', wrap: false }, { default: () => children });
     },
   });
-  cols.push({ title: t('domain.addTimeCol'), key: 'addtime', width: 120 });
+  cols.push({
+    title: t('domain.addTimeCol'),
+    key: 'addtime',
+    width: 120,
+    render: (row: any) => h('span', { style: 'white-space: nowrap' }, row.addtime ? String(row.addtime).slice(0, 10) : '-'),
+  });
   cols.push({
     title: t('common.actions'),
     key: 'actions',
