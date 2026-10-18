@@ -248,3 +248,34 @@
     scroll-snap-type: x proximity;
   }
 }
+
+/* 移动端隐藏图标后 tone 只剩图标底色，用左缘色条恢复语义（异常/警告/正常） */
+@media (max-width: 767px) {
+  .tele-card--success::after,
+  .tele-card--warning::after,
+  .tele-card--error::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+  }
+  .tele-card--success::after {
+    background: var(--app-success);
+  }
+  .tele-card--warning::after {
+    background: var(--app-warning);
+  }
+  .tele-card--error::after {
+    background: var(--app-error);
+  }
+  /* 3 张 KPI 卡时排满一行，避免第三张独占一行留下半屏空位 */
+  .telemetry-row:has(> div:nth-child(3):last-child) {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  .m-card__value .n-button {
+    min-width: 32px;
+  }
+}

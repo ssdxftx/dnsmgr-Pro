@@ -38,10 +38,14 @@
           </n-form-item>
           <n-form-item :label="t('cdnSetting.originPortLabel')">
             <n-space align="center" :size="8">
-              <span class="app-muted">HTTP</span>
-              <n-input-number v-model:value="originForm.http_port" :min="1" class="port-input" style="width:110px" />
-              <span class="app-muted">HTTPS</span>
-              <n-input-number v-model:value="originForm.https_port" :min="1" class="port-input" style="width:110px" />
+              <n-space align="center" :size="6" :wrap="false">
+                <span class="app-muted">HTTP</span>
+                <n-input-number v-model:value="originForm.http_port" :min="1" class="port-input" style="width:110px" />
+              </n-space>
+              <n-space align="center" :size="6" :wrap="false">
+                <span class="app-muted">HTTPS</span>
+                <n-input-number v-model:value="originForm.https_port" :min="1" class="port-input" style="width:110px" />
+              </n-space>
             </n-space>
           </n-form-item>
           <n-button type="primary" size="small" :loading="saveOriginBusy" @click="saveOrigin">{{ t('cdnSetting.saveOrigin') }}</n-button>

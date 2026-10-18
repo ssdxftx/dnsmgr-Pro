@@ -160,7 +160,10 @@ export function installMock() {
     if (method === 'GET') {
       // 域名下的解析记录
       const recMatch = path.match(/^\/api\/domains\/(\d+)\/records$/);
-      if (recMatch) return json(RECORDS.map((r) => ({ ...r, did: Number(recMatch[1]) })));
+      if (recMatch) {
+        const list = RECORDS.map((r) => ({ ...r, did: Number(recMatch[1]) }));
+        return json({ list, total: list.length, _access: { admin: true, readonly: false, writable: true } });
+      }
       // 单个域名信息
       const domMatch = path.match(/^\/api\/domains\/(\d+)$/);
       if (domMatch) return json(DOMAINS.find((d) => d.id === Number(domMatch[1])) || DOMAINS[0]);
