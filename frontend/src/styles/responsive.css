@@ -368,3 +368,23 @@
     min-height: 36px;
   }
 }
+
+/* KPI 卡窄列（桌面 5 列 / 平板 3 列）：按容器宽度压缩字号，避免长数值折行 */
+.stat-card {
+  container-type: inline-size;
+}
+@media (min-width: 768px) {
+  @container (max-width: 250px) {
+    .stat-card__value {
+      font-size: clamp(15px, 7cqw, 18px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .stat-card__label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+}

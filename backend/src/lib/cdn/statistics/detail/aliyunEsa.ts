@@ -2,6 +2,7 @@ import { Aliyun } from '../../../clients/Aliyun.js';
 import type { ProviderCatalog } from '../catalog/types.js';
 import type { MetricSeries } from '../catalog/result.js';
 import {
+  aggregate,
   alignByTimestamp,
   bucketMaxByTimestamp,
   combineSeries,
@@ -97,14 +98,14 @@ export async function fetchAliyunEsaDetail(
 
     const fluxSite = alignByTimestamp(pickPoints(data, 'Traffic', timeline), timeline);
     add('flux', fluxSite);
-    let bwSite = need('bw') ? alignByTimestamp(pickPoints(data, 'Bandwidth', timeline), timeline) : null;
+    let bwSite = need('bw') ? alignByTimestamp(pickPoints(data, 'Bandwidth', timeline), timeline, 'max') : null;
     if (need('req')) add('req', alignByTimestamp(pickPoints(data, 'Requests', timeline), timeline));
-    if (need('qps')) add('qps', alignByTimestamp(pickPoints(data, 'Qps', timeline), timeline));
+    if (need('qps')) add('qps', alignByTimestamp(pickPoints(data, 'Qps', timeline), timeline, 'avg'));
     if (need('bs_flux')) add('bs_flux', alignByTimestamp(pickPoints(data, 'OriginTraffic', timeline), timeline));
-    if (need('origin_bw')) add('origin_bw', alignByTimestamp(pickPoints(data, 'OriginBandwidth', timeline), timeline));
+    if (need('origin_bw')) add('origin_bw', alignByTimestamp(pickPoints(data, 'OriginBandwidth', timeline), timeline, 'max'));
 
     if (need('hit_rate') || need('hit_flux')) {
-      const raw = alignByTimestamp(pickPoints(data, 'HitRate', timeline), timeline);
+      const raw = alignByTimestamp(pickPoints(data, 'HitRate', timeline), timeline, 'avg');
       const max = raw.reduce((m: number, v) => (v == null ? m : Math.max(m, v)), 0);
       const asRatio = max <= 1.5;
       rateParts.push({
@@ -153,10 +154,12 @@ export async function fetchAliyunEsaDetail(
   );
 
   const series: MetricSeries[] = [];
+  const fluxWeight = aggregate(flux, 'sum') ?? 0;
   const push = (key: string, values: (number | null)[]) => {
     const def = catalog.metrics.find((m) => m.key === key);
     if (!def || !isBasicWanted(ctx.groups, def)) return;
-    series.push(makeSeries(def, values));
+    const s = makeSeries(def, values);
+    series.push(def.agg === 'rate' ? { ...s, weight: fluxWeight } : s);
   };
   push('flux', flux);
   if (acc.has('bw')) push('bw', acc.get('bw')!);

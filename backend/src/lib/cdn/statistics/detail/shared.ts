@@ -59,18 +59,32 @@ export function buildTimeline(start: Date, end: Date, forced?: TimeInterval): Ti
   return { start: alignedStart, end, interval, stepMs, labels };
 }
 
-/** 按绝对时间戳把点落到标签桶；无数据的桶为 null（不做左右对齐兜底） */
-export function alignByTimestamp(points: TimePoint[], timeline: Timeline): (number | null)[] {
-  const out = new Array<number | null>(timeline.labels.length).fill(null);
+/**
+ * 按绝对时间戳把点落到标签桶；无数据的桶为 null（不做左右对齐兜底）。
+ * 均值类指标（耗时/QPS）在同一桶内取均值，避免上游忽略粒度时被求和放大。
+ */
+export function alignByTimestamp(
+  points: TimePoint[],
+  timeline: Timeline,
+  agg: 'sum' | 'max' | 'avg' = 'sum',
+): (number | null)[] {
+  const len = timeline.labels.length;
+  const sums = new Array<number | null>(len).fill(null);
+  const counts = new Array<number>(len).fill(0);
+  const maxes = new Array<number | null>(len).fill(null);
   const startMs = timeline.start.getTime();
   const stepMs = timeline.stepMs;
   for (const p of points) {
     if (!Number.isFinite(p.ts) || !Number.isFinite(p.value)) continue;
     const idx = Math.floor((p.ts - startMs) / stepMs);
-    if (idx < 0 || idx >= out.length) continue;
-    out[idx] = (out[idx] ?? 0) + p.value;
+    if (idx < 0 || idx >= len) continue;
+    sums[idx] = (sums[idx] ?? 0) + p.value;
+    counts[idx]++;
+    maxes[idx] = Math.max(maxes[idx] ?? -Infinity, p.value);
   }
-  return out;
+  if (agg === 'sum') return sums;
+  if (agg === 'max') return maxes.map((v) => (v == null || v === -Infinity ? null : v));
+  return sums.map((v, i) => (v == null || !counts[i] ? null : v / counts[i]));
 }
 
 /** 同上，但同桶取最大值（带宽 5min → 小时峰值） */
@@ -200,6 +214,27 @@ export function mergeSeries(base: MetricSeries, add: MetricSeries): MetricSeries
       base.agg === 'rate'
         ? base.summary
         : aggregate(combineSeries([base.values, add.values], base.agg, len), base.agg),
+  };
+}
+
+/**
+ * 合并两条百分比序列：汇总值按各账户权重加权，曲线优先保留已有值。
+ * 权重由 provider 在生成命中率时写入 MetricSeries.weight。
+ */
+export function mergeRateSeries(prev: MetricSeries, cur: MetricSeries): MetricSeries {
+  const prevW = prev.weight ?? 0;
+  const curW = cur.weight ?? 0;
+  const prevRate = prev.summary;
+  const curRate = cur.summary;
+  let summary: number | null;
+  if (prevRate == null) summary = curRate;
+  else if (curRate == null) summary = prevRate;
+  else summary = (prevRate * prevW + curRate * curW) / (prevW + curW || 1);
+  return {
+    ...prev,
+    values: prev.values.map((v, i) => v ?? cur.values[i] ?? null),
+    summary,
+    weight: prevW + curW,
   };
 }
 

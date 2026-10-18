@@ -191,7 +191,7 @@ const kpiItems = computed<KpiItem[]>(() => {
     hit_rate: 'primary',
   };
   return ['flux', 'bw', 'bs_flux', 'req', 'hit_rate'].map((key) => {
-    const s = seriesMap.value.get(key);
+    const s = seriesMap.value.get(key) || (key === 'hit_rate' ? seriesMap.value.get('hit_rate_flux') : undefined);
     return {
       key,
       label:
@@ -251,7 +251,7 @@ async function loadGroup(group: string) {
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     const data = res.data as DetailData;
     detail.value = { ...data, series: [...(detail.value?.series || [])], breakdowns: [...(detail.value?.breakdowns || [])] };
-    const overviewKeys = new Set(['flux', 'bw', 'bs_flux', 'req', 'hit_rate']);
+    const overviewKeys = new Set(['flux', 'bw', 'bs_flux', 'req', 'hit_rate', 'hit_rate_flux']);
     const nextSeries = new Map(seriesByGroup.value);
     for (const g of groups) {
       nextSeries.set(

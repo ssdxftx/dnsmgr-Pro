@@ -196,6 +196,7 @@ export default {
     title: '数据统计',
     subtitle: '查看 CDN 加速流量、带宽与请求统计',
     cacheDataHint: '数据来自系统缓存（由管理员定时刷新），仅展示汇总统计，不支持按账户/域名筛选。',
+    cacheDataHintShort: '缓存汇总数据',
     range24h: '近24小时',
     rangeToday: '今天',
     range7d: '近7天',

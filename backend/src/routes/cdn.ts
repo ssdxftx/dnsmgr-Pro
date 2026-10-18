@@ -30,7 +30,7 @@ import { getCatalog, listCatalogs } from '../lib/cdn/statistics/catalog/index.js
 import type { DetailResponse, MetricSeries, ProviderCard, BreakdownItem } from '../lib/cdn/statistics/catalog/result.js';
 import { buildOverview, type OverviewAccount } from '../lib/cdn/statistics/overview.js';
 import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
-import { aggregate, buildTimeline, combineSeries } from '../lib/cdn/statistics/detail/shared.js';
+import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
@@ -174,16 +174,7 @@ function mergeDetailSeries(list: MetricSeries[]): MetricSeries[] {
     }
     const len = prev.values.length;
     if (s.agg === 'rate') {
-      const weight = map.get(s.key === 'hit_rate_req' ? 'req' : 'flux')?.values;
-      const values = new Array<number | null>(len).fill(null);
-      for (let i = 0; i < len; i++) {
-        const a = prev.values[i];
-        const b = s.values[i];
-        if (a == null && b == null) continue;
-        const wa = weight?.[i] ?? 1;
-        values[i] = a == null ? b : b == null ? a : (a * wa + b * wa) / (2 * wa);
-      }
-      map.set(s.key, { ...prev, values, summary: aggregate(values, 'avg') });
+      map.set(s.key, mergeRateSeries(prev, s));
       continue;
     }
     const values = combineSeries([prev.values, s.values], s.agg, len);
@@ -1887,6 +1878,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         const accounts: OverviewAccount[] = acctRows
           .filter((a) => a.type === catalog.route)
           .map((a) => ({
+            id: Number(a.id),
             config: safeJson(a.config),
             domains: domRows
               .filter((d) => Number(d.aid) === Number(a.id) && d.route === catalog.route)
@@ -2005,7 +1997,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         }
         const acct = accountCache.get(accountId);
         if (!acct) continue;
-        if (!accounts.has(accountId)) accounts.set(accountId, { config: safeJson(acct.config), domains: [] });
+        if (!accounts.has(accountId)) accounts.set(accountId, { id: accountId, config: safeJson(acct.config), domains: [] });
         accounts.get(accountId)!.domains.push({
           name: row.name,
           route: row.route,
@@ -2015,12 +2007,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
       }
 
       const started = Date.now();
-      const parts = await Promise.all(
-        [...accounts.values()].map((acct) =>
-          fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }).catch(
-            (e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 }),
-          ),
+      const parts = await runPool(
+        [...accounts.values()].map(
+          (acct) => () =>
+            fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }).catch(
+              (e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 }),
+            ),
         ),
+        4,
       );
       const series = mergeDetailSeries(parts.flatMap((p) => p.series));
       const breakdowns = mergeBreakdowns(parts.flatMap((p) => p.breakdowns));

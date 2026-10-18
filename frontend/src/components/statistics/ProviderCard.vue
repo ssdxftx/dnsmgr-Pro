@@ -4,7 +4,10 @@
       <span class="pcard__logo"><n-icon size="20" :component="icon" /></span>
       <div class="pcard__title">
         <h3>{{ data.name }}</h3>
-        <p>{{ t('statistics.cardMeta', { accounts: data.accountCount, domains: data.domainCount }) }}</p>
+        <p v-if="data.accountCount || data.domainCount">
+          {{ t('statistics.cardMeta', { accounts: data.accountCount, domains: data.domainCount }) }}
+        </p>
+        <p v-else>{{ t('statistics.cacheDataHintShort') }}</p>
       </div>
       <span class="pcard__dot" :class="`is-${data.status}`" :title="t(`statistics.status.${data.status}`)" />
     </header>

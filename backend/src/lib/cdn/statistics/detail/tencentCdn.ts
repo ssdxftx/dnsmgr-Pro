@@ -141,7 +141,11 @@ export async function fetchTencentCdnDetail(
         : def.agg === 'rate'
           ? aggregate(values, 'avg')
           : aggregate(values, def.agg);
-    series.push(makeSeries(def, values, summary));
+    const weight =
+      def.agg === 'rate'
+        ? aggregate(collected.get(def.key === 'hit_rate_req' ? 'req' : 'flux') || [], 'sum') ?? 0
+        : undefined;
+    series.push({ ...makeSeries(def, values, summary), ...(weight === undefined ? {} : { weight }) });
   }
 
   const breakdowns: BreakdownItem[] = [];

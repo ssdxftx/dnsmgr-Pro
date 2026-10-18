@@ -197,7 +197,7 @@ export async function fetchEdgeOneDetail(
           {
             ...base,
             MetricNames: ['l7Cache_outFlux', 'l7Cache_request'],
-            Filters: [{ Key: 'cacheType', Operator: 'equals', Value: [cacheType] }],
+            Filters: [...filters, { Key: 'cacheType', Operator: 'equals', Value: [cacheType] }],
           },
           `缓存指标(${cacheType})`,
           zoneId,
@@ -218,7 +218,7 @@ export async function fetchEdgeOneDetail(
           {
             ...base,
             MetricNames: ['l7Flow_outFlux'],
-            Filters: [{ Key: 'cacheType', Operator: 'equals', Value: ['hit'] }],
+            Filters: [...filters, { Key: 'cacheType', Operator: 'equals', Value: ['hit'] }],
           },
           '缓存命中(降级)',
           zoneId,
@@ -234,7 +234,7 @@ export async function fetchEdgeOneDetail(
       for (const code of ['2XX', '3XX', '4XX', '5XX']) {
         const resp = await call(
           'DescribeTimingL7AnalysisData',
-          { ...base, MetricNames: ['l7Flow_request'], Filters: [{ Key: 'statusCode', Operator: 'equals', Value: [code] }] },
+          { ...base, MetricNames: ['l7Flow_request'], Filters: [...filters, { Key: 'statusCode', Operator: 'equals', Value: [code] }] },
           `状态码 ${code}`,
           zoneId,
         );
@@ -244,7 +244,7 @@ export async function fetchEdgeOneDetail(
         }
         const originResp = await call(
           'DescribeTimingL7OriginPullData',
-          { ...base, MetricNames: ['l7Flow_request_hy'], Filters: [{ Key: 'originStatusCode', Operator: 'equals', Value: [code] }] },
+          { ...base, MetricNames: ['l7Flow_request_hy'], Filters: [...filters, { Key: 'originStatusCode', Operator: 'equals', Value: [code] }] },
           `回源状态码 ${code}`,
           zoneId,
         );
@@ -263,7 +263,9 @@ export async function fetchEdgeOneDetail(
     const wanted = def && (isBasicWanted(ctx.groups, def) || (ctx.groups.has('overview') && overviewExtras.has(key)));
     if (!def || !wanted) return null;
     const values = points?.length
-      ? (aggOverride === 'max' ? bucketMaxByTimestamp(points, timeline) : alignByTimestamp(points, timeline))
+      ? aggOverride === 'max'
+        ? bucketMaxByTimestamp(points, timeline)
+        : alignByTimestamp(points, timeline, def.agg === 'avg' ? 'avg' : 'sum')
       : new Array<number | null>(timeline.labels.length).fill(null);
     return makeSeries(def, values);
   };
@@ -326,6 +328,11 @@ export async function fetchEdgeOneDetail(
     if (!def || !isBasicWanted(ctx.groups, def)) return;
     series.push(makeSeries(def, values, summary));
   };
+  const pushRate = (key: string, values: (number | null)[], summary: number | null, weight: number) => {
+    const def = catalog.metrics.find((m) => m.key === key);
+    if (!def || !isBasicWanted(ctx.groups, def)) return;
+    series.push({ ...makeSeries(def, values, summary), weight });
+  };
 
   if (wantCache) {
     pushCache('cache_flux_hit', hitFluxValues);
@@ -340,9 +347,10 @@ export async function fetchEdgeOneDetail(
     if (h == null || t == null || t === 0) return null;
     return (h / t) * 100;
   };
-  pushCache('hit_rate_flux', hitRateFlux, rateSummary(hitFluxValues, totalFluxValues));
-  pushCache('hit_rate_req', hitRateReq, rateSummary(hitReqValues, totalReqValues));
-  pushCache('hit_rate', hitRateFlux, rateSummary(hitFluxValues, totalFluxValues));
+  const fluxWeight = aggregate(totalFluxValues, 'sum') ?? 0;
+  const reqWeight = aggregate(totalReqValues, 'sum') ?? 0;
+  pushRate('hit_rate_flux', hitRateFlux, rateSummary(hitFluxValues, totalFluxValues), fluxWeight);
+  pushRate('hit_rate_req', hitRateReq, rateSummary(hitReqValues, totalReqValues), reqWeight);
 
   if (wantStatus) {
     for (const code of ['2XX', '3XX', '4XX', '5XX']) {

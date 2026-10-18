@@ -1,6 +1,6 @@
 <template>
   <div>
-    <div v-if="charts.length" class="chart-grid">
+    <div v-if="charts.length" class="chart-grid" :class="{ 'chart-grid--single': charts.length === 1 }">
       <n-card
         v-for="(cfg, idx) in charts"
         :key="idx"
@@ -106,7 +106,8 @@ const shownBreakdowns = computed(() => {
 .chart-grid :deep(.n-card) {
   min-width: 0;
 }
-.chart-card--wide {
+.chart-card--wide,
+.chart-grid--single > :deep(.n-card) {
   grid-column: 1 / -1;
 }
 .breakdown-grid {

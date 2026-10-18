@@ -196,6 +196,7 @@ export default {
     title: 'Statistics',
     subtitle: 'View CDN acceleration traffic, bandwidth and request statistics',
     cacheDataHint: 'Data comes from the system cache (refreshed periodically by administrators) and only shows summary statistics. Filtering by account/domain is not supported.',
+    cacheDataHintShort: 'Cached summary',
     range24h: 'Last 24h',
     rangeToday: 'Today',
     range7d: 'Last 7 days',

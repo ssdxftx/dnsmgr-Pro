@@ -130,7 +130,7 @@ export async function fetchAliyunCdnDetail(
     if (need('bw')) {
       tasks.push(async () => {
         const pts = await usage(d.name, 'bps', peakIntervalSec);
-        addTo(bw, peakIntervalSec !== intervalSec ? bucketMaxByTimestamp(pts, timeline) : alignByTimestamp(pts, timeline));
+        addTo(bw, peakIntervalSec !== intervalSec ? bucketMaxByTimestamp(pts, timeline) : alignByTimestamp(pts, timeline, 'max'));
       });
     }
     if (need('hit_rate') || need('hit_flux')) {
@@ -145,7 +145,7 @@ export async function fetchAliyunCdnDetail(
             EndTime: formatIso(timeline.end),
           });
           const pts = toPoints(modulesOf(resp, 'HitRatePerInterval'), 'HitRate', timeline);
-          hitRateParts.push(alignByTimestamp(pts, timeline));
+          hitRateParts.push(alignByTimestamp(pts, timeline, 'avg'));
         } catch (e: any) {
           errors.push(`${d.name} 命中率: ${e?.message || e}`);
         }
@@ -163,7 +163,7 @@ export async function fetchAliyunCdnDetail(
             EndTime: formatIso(timeline.end),
           });
           const pts = toPoints(modulesOf(resp, 'QpsDataPerInterval.DataModule'), 'Value', timeline);
-          addTo(qps, alignByTimestamp(pts, timeline));
+          addTo(qps, alignByTimestamp(pts, timeline, 'avg'));
         } catch (e: any) {
           errors.push(`${d.name} QPS: ${e?.message || e}`);
         }
@@ -223,7 +223,7 @@ export async function fetchAliyunCdnDetail(
             EndTime: formatIso(timeline.end),
           });
           const pts = toPoints(modulesOf(resp, 'SrcBpsDataPerInterval.DataModule'), 'Value', timeline);
-          addTo(originBw, peakIntervalSec !== intervalSec ? bucketMaxByTimestamp(pts, timeline) : alignByTimestamp(pts, timeline));
+          addTo(originBw, peakIntervalSec !== intervalSec ? bucketMaxByTimestamp(pts, timeline) : alignByTimestamp(pts, timeline, 'max'));
         } catch (e: any) {
           errors.push(`${d.name} 回源带宽: ${e?.message || e}`);
         }
@@ -300,10 +300,12 @@ export async function fetchAliyunCdnDetail(
   );
 
   const series: MetricSeries[] = [];
+  const fluxWeight = aggregate(flux, 'sum') ?? 0;
   const push = (key: string, values: (number | null)[]) => {
     const def = catalog.metrics.find((m) => m.key === key);
     if (!def || !isBasicWanted(ctx.groups, def)) return;
-    series.push(makeSeries(def, values));
+    const s = makeSeries(def, values);
+    series.push(def.agg === 'rate' ? { ...s, weight: fluxWeight } : s);
   };
   push('flux', flux);
   push('bw', bw);

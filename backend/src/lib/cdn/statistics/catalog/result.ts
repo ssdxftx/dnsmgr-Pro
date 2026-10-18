@@ -18,6 +18,8 @@ export interface MetricSeries {
   summary: number | null;
   /** 堆叠分组名，同组堆叠 */
   stack?: string;
+  /** 合并权重（如该账户的流量/请求总量），仅 agg='rate' 使用 */
+  weight?: number;
 }
 
 export interface ProviderCard {

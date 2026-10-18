@@ -3,10 +3,11 @@ import type { MetricSeries, ProviderCard } from './catalog/result.js';
 import type { StatisticsDomain } from './types.js';
 import { getCatalog, listCatalogs } from './catalog/index.js';
 import { fetchDetail } from './detail/index.js';
-import { buildTimeline, combineSeries, aggregate } from './detail/shared.js';
+import { buildTimeline, combineSeries, aggregate, mergeRateSeries } from './detail/shared.js';
 import { BASIC_KEYS, basicUnit } from './validate.js';
 
 export interface OverviewAccount {
+  id: number;
   config: Record<string, any>;
   domains: StatisticsDomain[];
 }
@@ -16,6 +17,12 @@ export interface OverviewInput {
   accountCount: number;
   accounts: OverviewAccount[];
 }
+
+/** 基础 5 项的历史 key 与服务商实际 key 的别名（按顺序取第一个有值的） */
+const BASIC_ALIAS: Record<string, string[]> = {
+  bs_flux: ['bs_flux', 'origin_flux'],
+  hit_rate: ['hit_rate', 'hit_rate_flux'],
+};
 
 const cache = new Map<string, { at: number; data: ProviderCard }>();
 const CACHE_TTL_MS = 120_000;
@@ -39,17 +46,7 @@ function mergeSeriesList(list: MetricSeries[]): MetricSeries[] {
     }
     const len = prev.values.length;
     if (s.agg === 'rate') {
-      const weightKey = s.key === 'hit_rate_req' ? 'req' : 'flux';
-      const weight = map.get(weightKey)?.values;
-      const values = new Array<number | null>(len).fill(null);
-      for (let i = 0; i < len; i++) {
-        const a = prev.values[i];
-        const b = s.values[i];
-        if (a == null && b == null) continue;
-        const wa = weight?.[i] ?? 1;
-        values[i] = a == null ? b : b == null ? a : (a * wa + b * wa) / (2 * wa);
-      }
-      map.set(s.key, { ...prev, values, summary: aggregate(values, 'avg') });
+      map.set(s.key, mergeRateSeries(prev, s));
       continue;
     }
     const values = combineSeries([prev.values, s.values], s.agg as MetricAgg, len);
@@ -78,7 +75,11 @@ export async function buildProviderCard(
   end: Date,
 ): Promise<ProviderCard> {
   const catalog = getCatalog(input.route) as ProviderCatalog;
-  const key = `${input.route}|${formatTime(start)}|${formatTime(end)}|${input.accountCount}|${input.accounts.reduce((a, b) => a + b.domains.length, 0)}`;
+  const acctIds = input.accounts
+    .map((a) => a.id)
+    .sort((x, y) => x - y)
+    .join(',');
+  const key = `${input.route}|${formatTime(start)}|${formatTime(end)}|${acctIds}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
 
@@ -128,7 +129,8 @@ export async function buildProviderCard(
   const byKey = new Map(merged.map((s) => [s.key, s]));
   const errors = parts.flatMap((p) => p.errors);
   card.basics = BASIC_KEYS.map((key) => {
-    const s = byKey.get(key);
+    const alias = BASIC_ALIAS[key] || [key];
+    const s = alias.map((k) => byKey.get(k)).find((x) => x != null);
     return { key, unit: basicUnit(key), value: s?.summary ?? null };
   });
 
