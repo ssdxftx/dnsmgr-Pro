@@ -1,6 +1,10 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="t('cfRules.title')" :subtitle="t('cfRules.subtitle')" back="/cdn-domains">
+    <PageHeader
+      :title="accountName ? `${t('cfRules.title')} · ${accountName}` : t('cfRules.title')"
+      :subtitle="t('cfRules.subtitle')"
+      back="/cdn-zones"
+    >
       <template #actions>
         <n-space>
           <n-button :loading="loadBusy" @click="loadRules">{{ t('common.refresh') }}</n-button>
@@ -9,13 +13,13 @@
         </n-space>
       </template>
     </PageHeader>
-    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid v-if="!emptyAccount" class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rules.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
 
-    <div class="app-toolbar">
+    <div v-if="!emptyAccount" class="app-toolbar">
       <n-select
         v-model:value="selectedDomain"
         :options="domainOptions"
@@ -37,7 +41,7 @@
       </n-tag>
     </div>
 
-    <n-card :bordered="false">
+    <n-card v-if="!emptyAccount" :bordered="false">
       <div class="app-panel">
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('cfRules.overview') }}</h3>
@@ -67,6 +71,10 @@
           :empty-text="t('cfRules.empty')"
         />
       </div>
+    </n-card>
+
+    <n-card v-if="emptyAccount" :bordered="false">
+      <n-empty :description="t('cfRules.noDomainInAccount')" />
     </n-card>
 
     <!-- 规则编辑 -->
@@ -242,7 +250,14 @@ interface DomainItem {
   account_name: string;
 }
 
+const presetAid = Number(route.query.aid || 0);
 const domains = ref<DomainItem[]>([]);
+const domainsLoaded = ref(false);
+const scopedDomains = computed(() =>
+  presetAid ? domains.value.filter((d: any) => Number(d.aid) === presetAid) : domains.value,
+);
+const emptyAccount = computed(() => presetAid > 0 && domainsLoaded.value && !scopedDomains.value.length);
+const accountName = computed(() => scopedDomains.value[0]?.account_name || '');
 const selectedDomain = ref<number | null>(null);
 const selectedPhase = ref('http_request_origin');
 const rules = ref<any[]>([]);
@@ -273,7 +288,7 @@ const phasesMeta = ref<Array<{ value: string; label: string; scope: string; perm
 
 const phaseOptions = computed(() => phasesMeta.value.map((p) => ({ label: p.label, value: p.value })));
 const currentPhaseLabel = computed(() => phasesMeta.value.find((p) => p.value === selectedPhase.value)?.label || selectedPhase.value);
-const domainOptions = computed(() => domains.value.map((d) => ({ label: `${d.account_name} · ${d.name}`, value: d.id })));
+const domainOptions = computed(() => scopedDomains.value.map((d: any) => ({ label: d.name, value: d.id })));
 
 const selectedAid = computed(() => domains.value.find((d) => d.id === selectedDomain.value)?.aid || 0);
 const selectedDomainName = computed(() => domains.value.find((d) => d.id === selectedDomain.value)?.name || '');
@@ -428,9 +443,12 @@ async function loadDomains() {
   const res = await api<any>('GET', '/cf-rules/domains');
   if (res.code === 0) {
     domains.value = res.data || [];
+    domainsLoaded.value = true;
     const preset = Number(route.query.domain || 0);
-    if (preset && domains.value.some((d) => d.id === preset)) selectedDomain.value = preset;
-    else if (domains.value.length) selectedDomain.value = domains.value[0].id;
+    const pool = presetAid ? domains.value.filter((d: any) => Number(d.aid) === presetAid) : domains.value;
+    if (preset && pool.some((d) => d.id === preset)) selectedDomain.value = preset;
+    else if (pool.length) selectedDomain.value = pool[0].id;
+    else selectedDomain.value = null;
   } else {
     message.error(res.msg);
   }

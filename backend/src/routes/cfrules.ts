@@ -133,6 +133,41 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
     return { code: 0, data };
   });
 
+  // CF 账户聚合：供「站点设置」页渲染账户卡片
+  app.get('/api/cf-rules/accounts', auth, async () => {
+    const rows: any[] = await query(
+      `SELECT B.id AS aid, B.name AS account_name,
+              COUNT(A.id) AS domain_count,
+              COUNT(DISTINCT A.thirdid) AS zone_count
+         FROM ${table('domain')} A
+         JOIN ${table('account')} B ON A.aid = B.id
+        WHERE B.type = 'cloudflare'
+          AND A.thirdid IS NOT NULL AND A.thirdid <> ''
+        GROUP BY B.id, B.name
+        ORDER BY B.id DESC`,
+    );
+    const data: any[] = [];
+    for (const r of rows) {
+      let credential = 'missing';
+      try {
+        const { config } = await resolveCredential(Number(r.aid));
+        const key = String(config?.apikey || '').trim();
+        const authType = config?.auth !== undefined ? Number(config.auth) : /^[0-9a-f]+$/i.test(key) ? 0 : 1;
+        if (key && (authType === 0 || String(config?.email || '').trim())) credential = 'ready';
+      } catch {
+        /* 无可用凭证 */
+      }
+      data.push({
+        aid: Number(r.aid),
+        name: r.account_name,
+        domainCount: Number(r.domain_count),
+        zoneCount: Number(r.zone_count),
+        credential,
+      });
+    }
+    return { code: 0, data };
+  });
+
   // 查询某账户凭证状态
   app.get('/api/cf-rules/credential', auth, async (req: any) => {
     const aid = Number(req.query?.aid || 0);

@@ -91,6 +91,7 @@ export default {
     selectCnameTarget: 'Please select a CNAME target',
   },
   cfRules: {
+    noDomainInAccount: 'No available domains under this Cloudflare account',
     title: 'Cloudflare Rules Engine',
     subtitle: 'Manage edge rules (Rulesets) for Cloudflare domains',
     overview: 'Rule Overview',

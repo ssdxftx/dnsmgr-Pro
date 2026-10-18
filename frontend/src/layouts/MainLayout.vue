@@ -116,7 +116,7 @@
 import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
-import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, OptionsOutline, InformationCircleOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
+import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { clearToken } from '../api';
 import { isAdminUser, requiresAdmin } from '../lib/admin';
@@ -193,7 +193,6 @@ const menuOptions = computed<MenuOption[]>(() => [
       { label: t('nav.cdnAccounts'), key: 'cdn-accounts', icon: renderIcon(CloudOutline) },
       { label: t('nav.cdnDomains'), key: 'cdn-domains', icon: renderIcon(GlobeOutline) },
       { label: t('nav.cdnZones'), key: 'cdn-zones', icon: renderIcon(FolderOutline) },
-      { label: t('nav.cfRules'), key: 'cf-rules', icon: renderIcon(OptionsOutline) },
       { label: t('nav.cacheRefresh'), key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
       { label: t('nav.preheatTasks'), key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
       { label: t('nav.statistics'), key: 'statistics', icon: renderIcon(BarChartOutline) },

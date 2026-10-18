@@ -91,6 +91,7 @@ export default {
     selectCnameTarget: '请选择 CNAME 目标',
   },
   cfRules: {
+    noDomainInAccount: '该 Cloudflare 账户下暂无可用域名',
     title: 'Cloudflare 规则引擎',
     subtitle: '管理 Cloudflare 域名的边缘规则（Rulesets）',
     overview: '规则概览',

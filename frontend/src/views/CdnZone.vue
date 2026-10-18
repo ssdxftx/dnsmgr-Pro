@@ -33,16 +33,44 @@
         <EmptyState :icon="FolderOpenOutline" :title="t('cdnZone.empty')" />
       </n-card>
     </n-spin>
+
+    <n-card v-if="isAdmin && cfAccounts.length" :bordered="false" class="cf-section">
+      <template #header>
+        <div class="cf-section__head">
+          <span>{{ t('cdnZone.cfRulesTitle') }}</span>
+          <span class="cf-section__hint">{{ t('cdnZone.cfRulesHint') }}</span>
+        </div>
+      </template>
+      <div class="cf-grid">
+        <div v-for="a in cfAccounts" :key="a.aid" class="cf-tile" @click="openCfRules(a)">
+          <div class="cf-tile__head">
+            <span class="cf-tile__name">{{ a.name }}</span>
+            <n-tag size="tiny" :type="a.credential === 'ready' ? 'success' : 'warning'" :bordered="false">
+              {{ a.credential === 'ready' ? t('cdnZone.cfCredReady') : t('cdnZone.cfCredMissing') }}
+            </n-tag>
+          </div>
+          <div class="cf-tile__meta">
+            <span>{{ t('cdnZone.cfDomains', { n: a.domainCount }) }}</span>
+            <span class="cf-tile__dot">·</span>
+            <span>{{ t('cdnZone.cfZones', { n: a.zoneCount }) }}</span>
+          </div>
+          <div class="cf-tile__foot">
+            <span class="cf-tile__label">{{ t('cdnZone.cfRulesEntry') }}</span>
+            <n-button size="tiny" type="primary" @click.stop="openCfRules(a)">{{ t('cdnZone.cfEnter') }}</n-button>
+          </div>
+        </div>
+      </div>
+    </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NCard, NSpin, NTag, useMessage } from 'naive-ui';
 import { FolderOpenOutline } from '@vicons/ionicons5';
-import { api } from '../api';
+import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 
@@ -54,6 +82,8 @@ const router = useRouter();
 const loadBusy = ref(false);
 const zoneList = ref<any[]>([]);
 const accounts = ref<any[]>([]);
+const cfAccounts = ref<any[]>([]);
+const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 
 function statusLabel(row: any) {
   if (row.paused) return t('cdnSite.statusPaused');
@@ -129,7 +159,20 @@ async function loadAll() {
   }
 }
 
-onMounted(loadAll);
+async function loadCfAccounts() {
+  if (!isAdmin.value) return;
+  const res = await api<any>('GET', '/cf-rules/accounts').catch(() => ({ code: -1, data: [] }));
+  cfAccounts.value = res.code === 0 ? res.data || [] : [];
+}
+
+function openCfRules(a: any) {
+  router.push({ path: '/cf-rules', query: { aid: String(a.aid) } });
+}
+
+onMounted(() => {
+  loadAll();
+  loadCfAccounts();
+});
 </script>
 
 <style scoped>
@@ -224,5 +267,76 @@ onMounted(loadAll);
   font-family: var(--app-font-mono);
   font-size: 12px;
   color: var(--app-text-3);
+}
+
+.cf-section {
+  margin-top: 16px;
+}
+.cf-section__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.cf-section__hint {
+  font-size: 12px;
+  color: var(--app-text-3);
+}
+.cf-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+}
+.cf-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 18px;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-surface-2);
+  cursor: pointer;
+  transition: border-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+}
+.cf-tile:hover {
+  border-color: color-mix(in srgb, #f6821f 40%, var(--app-border));
+  transform: translateY(-2px);
+  box-shadow: var(--app-shadow);
+}
+.cf-tile__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.cf-tile__name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.cf-tile__meta {
+  font-size: 12px;
+  color: var(--app-text-3);
+  display: flex;
+  gap: 6px;
+}
+.cf-tile__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed var(--app-divider);
+}
+.cf-tile__label {
+  font-size: 12px;
+  color: var(--app-text-3);
+}
+@media (max-width: 767px) {
+  .cf-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .cf-tile__foot :deep(.n-button) {
+    min-height: 36px;
+  }
 }
 </style>

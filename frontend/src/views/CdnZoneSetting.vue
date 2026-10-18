@@ -22,7 +22,14 @@
               <span class="zone-status-strip__sub">{{ zoneId }}</span>
             </div>
             <div class="zone-status-strip__actions">
-              <n-tag v-if="zoneInfo.ownershipVerified" type="success" :bordered="false" size="medium" class="ov-verified">
+              <n-tag
+                v-if="zoneInfo.ownershipVerified"
+                type="success"
+                :bordered="false"
+                size="medium"
+                class="ov-verified"
+                :title="`identification=${zoneInfo.identificationStatus || '-'}, status=${zoneInfo.status || '-'}`"
+              >
                 <n-icon :component="CheckmarkCircleOutline" size="14" />
                 {{ t('cdnZoneSetting.ovVerifiedBadge') }}
               </n-tag>

@@ -43,16 +43,26 @@ export class TencentEdgeOne implements CdnProvider {
     const zones = await this.listAllZones();
     if (zones === false) return [];
 
-    // 站点归属验证状态：一次拉全量后按 ZoneName 合并，避免逐站查询
+    // DescribeIdentifications 的 Filters 必填且 Values 上限 20：按站点名分批查询
     const identMap = new Map<string, string>();
-    const idents = await this.send('DescribeIdentifications', { Limit: 1000 });
-    for (const it of idents?.Identifications || []) {
-      if (it?.ZoneName) identMap.set(String(it.ZoneName), String(it.Status || '').toLowerCase());
+    const names = zones.map((z: any) => String(z.ZoneName || '')).filter(Boolean);
+    for (let i = 0; i < names.length; i += 20) {
+      const batch = names.slice(i, i + 20);
+      const resp = await this.send('DescribeIdentifications', {
+        Offset: 0,
+        Limit: 100,
+        Filters: [{ Name: 'zone-name', Values: batch }],
+      });
+      if (!resp) continue; // 单批失败不影响其他批次
+      for (const it of resp.Identifications || []) {
+        if (it?.ZoneName) identMap.set(String(it.ZoneName), String(it.Status || '').toLowerCase());
+      }
     }
 
     return zones.map((z: any) => {
       const ident = identMap.get(String(z.ZoneName)) || '';
       const status = String(z.Status || '').toLowerCase();
+      const ns = (z.NSDetail?.NameServers ?? z.NameServers ?? []).map((x: any) => String(x).toLowerCase());
       return {
         zoneId: z.ZoneId,
         zoneName: z.ZoneName,
@@ -61,8 +71,13 @@ export class TencentEdgeOne implements CdnProvider {
         // DescribeZones 本身已返回 Paused，这里一并带出，避免调用方逐站再查一次（N+1）
         paused: z.Paused === true,
         identificationStatus: ident,
-        // finished/verified 为已验证；active（NS 已生效）必然已验证
-        ownershipVerified: ident === 'finished' || ident === 'verified' || status === 'active',
+        // 三路判定：识别接口明确完成 / 站点已生效 / NS 已切换到 EdgeOne
+        ownershipVerified:
+          ident === 'finished' ||
+          ident === 'verified' ||
+          ident === 'success' ||
+          status === 'active' ||
+          ns.some((x: string) => x.includes('teodns')),
       };
     });
   }

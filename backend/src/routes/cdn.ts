@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { domainToASCII } from 'node:url';
 import { query, queryOne, table, withTransaction } from '../db.js';
-import { configGet } from '../config.js';
+import { configGet, configSet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
@@ -442,6 +442,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
     const localByKey = new Map<string, any>();
     for (const r of rows as any[]) localByKey.set(`${r.aid}::${r.zone_id}`, r);
+    let verifiedMap: Record<string, string> = {};
+    try {
+      verifiedMap = JSON.parse((await configGet('cdn_zone_verified', '{}')) || '{}');
+    } catch {
+      verifiedMap = {};
+    }
     const data = (zones as any[]).map((z: any) => {
       const loc = localByKey.get(`${aid}::${String(z.zoneId)}`);
       return {
@@ -457,7 +463,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         area: z.area,
         paused: z.paused === true,
         identificationStatus: z.identificationStatus,
-        ownershipVerified: z.ownershipVerified === true,
+        ownershipVerified: z.ownershipVerified === true || !!verifiedMap[`${aid}:${String(z.zoneId)}`],
         cloud: true,
       };
     });
@@ -579,6 +585,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.verifyOwnership !== 'function') return { code: -1, msg: '该 CDN 类型不支持归属验证' };
     const r = await provider.verifyOwnership(zoneId, b.domain ? String(b.domain) : undefined);
     if (r === false) return { code: -1, msg: '验证失败，' + provider.getError() };
+    // 记录本地确认，避免云端状态延迟导致按钮再次出现
+    try {
+      const raw = (await configGet('cdn_zone_verified', '{}')) || '{}';
+      const map = JSON.parse(raw);
+      map[`${aid}:${zoneId}`] = new Date().toISOString();
+      await configSet('cdn_zone_verified', JSON.stringify(map));
+    } catch {
+      /* 记录失败不影响验证结果 */
+    }
     return { code: 0, data: r };
   });
 
