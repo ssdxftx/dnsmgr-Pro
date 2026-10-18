@@ -213,12 +213,12 @@ const columns = computed(() => {
           ].filter(Boolean),
       }),
   });
-  cols.push({ title: t('domain.categoryCol'), key: 'category_name', width: 90 });
+  cols.push({ title: t('domain.categoryCol'), key: 'category_name', width: 96 });
   cols.push({
     title: t('common.remark'),
     key: 'remark',
-    width: 120,
-    render: (row: any) => h(NEllipsis, { style: 'max-width:110px' }, { default: () => row.remark || '' }),
+    width: 112,
+    render: (row: any) => h(NEllipsis, { style: 'max-width:102px' }, { default: () => row.remark || '' }),
   });
   cols.push({
     title: t('domain.recordCountCol'),
