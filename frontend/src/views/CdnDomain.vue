@@ -21,7 +21,7 @@
         </n-space>
       </template>
     </PageHeader>
-    <n-grid cols="2 s:3 m:3" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
+    <n-grid class="telemetry-row" cols="2 s:3 m:3" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
       <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>

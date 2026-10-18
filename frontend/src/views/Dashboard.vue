@@ -3,7 +3,7 @@
     <PageHeader :title="t('dashboard.title')" :subtitle="t('dashboard.subtitle')" />
 
     <!-- 遥测卡：计数动画 + 曲线描边 -->
-    <n-grid :cols="isMobile ? 1 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
+    <n-grid class="telemetry-row" :cols="3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
       <n-grid-item span="1" v-reveal class="d1">
         <TelemetryCard :label="t('dashboard.statDomains')" :value="stats.domains" tone="primary" :icon="ServerOutline" :caption="t('common.cumulative')" />
       </n-grid-item>

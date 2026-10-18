@@ -170,6 +170,27 @@ export function installMock() {
 
       if (path === '/api/domains') return json(DOMAINS);
       if (path === '/api/dns/accounts') return json(DNS_ACCOUNTS);
+      const cdnDomMatch = path.match(/^\/api\/cdn\/domains\/(\d+)$/);
+      if (cdnDomMatch) {
+        const d = CDN_DOMAINS.find((x) => x.id === Number(cdnDomMatch[1])) || CDN_DOMAINS[0];
+        return json({
+          info: {
+            ...d,
+            origin: '1.1.1.1',
+            origin_type: 'ipaddr',
+            origin_host: '',
+            origin_protocol: 'follow',
+            http_port: 80,
+            https_port: 443,
+            https_enabled: true,
+            force_redirect: false,
+          },
+          cacheRules: [{ path: '/static', ttl: 86400 }],
+        });
+      }
+      if (path.match(/^\/api\/cdn\/domains\/(\d+)\/access$/)) {
+        return json({ referer_mode: 'off', referer_list: [], ip_mode: 'off', ip_list: [], ua_list: [] });
+      }
       if (path === '/api/cdn/domains') return json(CDN_DOMAINS);
       if (path === '/api/domains/categories') return json(CATEGORIES);
       if (path === '/api/records/search') return json(RECORDS);

@@ -8,7 +8,7 @@
         </n-button>
       </template>
     </PageHeader>
-    <n-grid :cols="isMobile ? 2 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
+    <n-grid class="telemetry-row" :cols="isMobile ? 2 : 3" :x-gap="14" :y-gap="14" responsive="screen" item-responsive>
       <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="pagination.itemCount" tone="primary" :icon="PeopleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.admins')" :value="adminCount" tone="warning" :icon="ShieldCheckmarkOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.apiEnabled')" :value="apiCount" tone="success" :icon="KeyOutline" :caption="t('common.cumulative')" /></n-grid-item>

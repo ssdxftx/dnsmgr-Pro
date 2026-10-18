@@ -1,7 +1,7 @@
 <template>
   <div class="app-stack">
     <PageHeader :title="t('dm.title')" :subtitle="t('dm.subtitle')" />
-    <n-grid cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+    <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="d1">
         <TelemetryCard :label="t('dm.runCount')" :value="Number(info.run_count) || 0" tone="primary" :icon="SyncOutline" :caption="t('common.live')" />
       </n-grid-item>
