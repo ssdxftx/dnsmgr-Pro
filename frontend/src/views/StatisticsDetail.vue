@@ -29,7 +29,7 @@
           @change="reload"
         />
         <n-select
-          v-if="isAdmin"
+          v-if="isAdmin && accountOptions.length > 1"
           v-model:value="selectedAid"
           :options="accountOptions"
           :placeholder="t('statistics.allAccounts')"

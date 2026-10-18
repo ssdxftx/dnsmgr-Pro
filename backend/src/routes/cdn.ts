@@ -1812,10 +1812,32 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const routeFilter = String(q.route || '').trim();
       const dataUntil = fmtStatTime(end);
 
+      // 各服务商的接入规模：用于「只展示已接入」与卡片副标题（不读取、不解密 config）
+      const routeStats = new Map<string, { accounts: number; domains: number }>();
+      const acctCountRows: any[] = await query(
+        `SELECT type, COUNT(*) c FROM ${table('cdn_account')} GROUP BY type`,
+      );
+      for (const r of acctCountRows) {
+        routeStats.set(String(r.type), { accounts: Number(r.c), domains: 0 });
+      }
+      const domCountRows: any[] = await query(
+        `SELECT route, COUNT(*) c, COUNT(DISTINCT aid) a FROM ${table('cdn_domain')} GROUP BY route`,
+      );
+      for (const r of domCountRows) {
+        const st = routeStats.get(String(r.route)) || { accounts: 0, domains: 0 };
+        st.domains = Number(r.c);
+        if (!st.accounts) st.accounts = Number(r.a);
+        routeStats.set(String(r.route), st);
+      }
+      /** 已接入 = 至少一个加速域名（站点） */
+      const isConnected = (route: string) => (routeStats.get(route)?.domains ?? 0) > 0;
+
       if (!isAdmin) {
         const providers: ProviderCard[] = [];
         for (const catalog of listCatalogs()) {
           if (routeFilter && catalog.route !== routeFilter) continue;
+          if (!isConnected(catalog.route)) continue;
+          const st = routeStats.get(catalog.route)!;
           let basics: ProviderCard['basics'] = [];
           let status: ProviderCard['status'] = 'empty';
           if (cacheEnabled) {
@@ -1834,8 +1856,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
             name: catalog.name,
             tone: catalog.tone,
             status,
-            accountCount: 0,
-            domainCount: 0,
+            accountCount: st.accounts,
+            domainCount: st.domains,
             basics,
             dataUntil,
             cached: true,
@@ -1874,7 +1896,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
         domParams,
       );
 
-      const inputs = listCatalogs().map((catalog) => {
+      const inputs = listCatalogs()
+        .filter((catalog) => isConnected(catalog.route))
+        .map((catalog) => {
         const accounts: OverviewAccount[] = acctRows
           .filter((a) => a.type === catalog.route)
           .map((a) => ({

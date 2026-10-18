@@ -165,5 +165,6 @@ export async function buildOverview(
       ),
     ),
   );
-  return cards;
+  // 只返回真正接入过（有已接入域名）的服务商
+  return cards.filter((c) => c.domainCount > 0);
 }

@@ -22,15 +22,6 @@
           @update:custom-range="customRange = $event"
           @change="load"
         />
-        <n-select
-          v-if="isAdmin"
-          v-model:value="selectedAid"
-          :options="accountOptions"
-          :placeholder="t('statistics.allAccounts')"
-          clearable
-          class="filter-aid"
-          @update:value="load"
-        />
       </div>
     </n-card>
 
@@ -48,7 +39,17 @@
       />
     </div>
 
-    <p class="data-note">{{ t('statistics.dataNote', { time: dataUntil || '—' }) }}</p>
+    <div v-if="!busy && !errors.length && !providers.length" class="empty-state">
+      <n-empty :description="t('statistics.noProviders')">
+        <template #extra>
+          <n-button type="primary" @click="router.push('/cdn-accounts')">
+            {{ t('statistics.goConnect') }}
+          </n-button>
+        </template>
+      </n-empty>
+    </div>
+
+    <p v-if="providers.length" class="data-note">{{ t('statistics.dataNote', { time: dataUntil || '—' }) }}</p>
   </div>
 </template>
 
@@ -56,7 +57,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { NAlert, NButton, NCard, NIcon, NSelect } from 'naive-ui';
+import { NAlert, NButton, NCard, NEmpty, NIcon } from 'naive-ui';
 import { RefreshOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -69,8 +70,6 @@ const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 
 const range = ref('24h');
 const customRange = ref<[number, number] | null>(null);
-const selectedAid = ref<number | null>(null);
-const accountOptions = ref<Array<{ label: string; value: number }>>([]);
 const providers = ref<ProviderCardData[]>([]);
 const busy = ref(false);
 const errors = ref<string[]>([]);
@@ -105,11 +104,7 @@ async function load() {
   busy.value = true;
   try {
     const { startTime, endTime } = computeRange();
-    const res = await api<any>('GET', '/cdn/statistics/overview', {
-      startTime,
-      endTime,
-      aid: selectedAid.value || undefined,
-    });
+    const res = await api<any>('GET', '/cdn/statistics/overview', { startTime, endTime });
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     providers.value = res.data?.providers || [];
     dataUntil.value = res.data?.dataUntil || '';
@@ -123,21 +118,11 @@ async function load() {
   }
 }
 
-async function loadOptions() {
-  if (!isAdmin.value) return;
-  const res = await api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] }));
-  accountOptions.value = (res.data || []).map((x: any) => ({
-    label: `${x.name}（${x.typename || x.type}）`,
-    value: x.id,
-  }));
-}
-
 function goDetail(route: string) {
   router.push(`/statistics/${route}`);
 }
 
 onMounted(() => {
-  loadOptions();
   load();
 });
 </script>
@@ -149,12 +134,10 @@ onMounted(() => {
   align-items: center;
   gap: 10px;
 }
-.filter-aid {
-  width: 200px;
-}
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(340px, 420px));
+  justify-content: start;
   gap: 16px;
 }
 .data-note {
@@ -162,16 +145,24 @@ onMounted(() => {
   font-size: 12px;
   color: var(--app-text-3);
 }
+.empty-state {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+}
 .mb-3 {
   margin-bottom: 12px;
 }
 @media (max-width: 767px) {
-  .filter-aid {
-    width: 100%;
-  }
   .provider-grid {
     grid-template-columns: 1fr;
     gap: 12px;
+  }
+  .empty-state {
+    padding: 32px 0;
   }
 }
 </style>
