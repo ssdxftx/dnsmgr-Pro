@@ -284,11 +284,11 @@
 /* 移动端剩余触控目标：开关轨道不变形，靠外层 padding 扩大热区 */
 @media (max-width: 767px) {
   .n-switch {
-    padding: 7px 0;
+    min-height: 36px !important;
   }
   .n-base-close {
-    width: 36px;
-    height: 36px;
+    width: 36px !important;
+    height: 36px !important;
   }
   .perm-add {
     min-height: 36px;
