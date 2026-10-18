@@ -5,6 +5,9 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 const ENC_PREFIX = 'enc:v1:';
 export const SECRET_MASK = '**********';
 
+/** 账户配置存在且为密文，但无法解密（系统密钥变更或密文损坏） */
+export class ConfigDecryptError extends Error {}
+
 let secretKey = '';
 let derivedKey: Buffer | null = null;
 
@@ -45,7 +48,15 @@ export function decryptText(raw: string | null | undefined): string | null {
 }
 
 export function encryptConfig(config: any): string {
+  if (typeof config === 'string' && config.startsWith(ENC_PREFIX)) {
+    throw new Error('检测到重复加密：请检查调用方是否传入了已加密的配置');
+  }
   return encryptText(JSON.stringify(config ?? {}));
+}
+
+/** 是否为加密存储的配置串（用于区分「空配置」与「解密失败」） */
+export function isEncryptedConfig(raw: unknown): boolean {
+  return typeof raw === 'string' && raw.startsWith(ENC_PREFIX);
 }
 
 // 解析存储的配置：兼容历史明文与新版密文
@@ -86,25 +97,32 @@ export function maskConfig(config: any): any {
   return config;
 }
 
-// 更新配置时，敏感字段为掩码/空值时沿用原值，避免前端未改密钥却把它覆盖为空（递归处理嵌套对象）
+// 更新配置时，以原配置为底：敏感字段缺失/掩码/空值一律沿用原值，避免前端未改密钥却把它覆盖为空
 export function mergeMaskedConfig(input: any, existing: any): any {
   if (input === null || input === undefined) return input;
   if (Array.isArray(input)) {
     const ex = Array.isArray(existing) ? existing : [];
     return input.map((v, i) => mergeMaskedConfig(v, ex[i]));
   }
-  if (typeof input === 'object') {
-    const next: Record<string, any> = { ...input };
-    const ex = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
-    for (const k of Object.keys(next)) {
-      const v = next[k];
-      if (isSecretKey(k) && (v === SECRET_MASK || v === '' || v === null || v === undefined)) {
-        if (ex[k] !== undefined) next[k] = ex[k];
-      } else if (v && typeof v === 'object') {
-        next[k] = mergeMaskedConfig(v, ex[k]);
-      }
+  if (typeof input !== 'object') return input;
+
+  const ex = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
+  const next: Record<string, any> = { ...input };
+
+  // 敏感字段：请求里缺失、掩码或空值时一律沿用原值（遍历原配置，避免缺键即丢值）
+  for (const k of Object.keys(ex)) {
+    if (!isSecretKey(k)) continue;
+    const v = next[k];
+    if (v === undefined || v === SECRET_MASK || v === '' || v === null) {
+      next[k] = ex[k];
     }
-    return next;
   }
-  return input;
+  // 非敏感字段递归合并
+  for (const k of Object.keys(next)) {
+    const v = next[k];
+    if (v && typeof v === 'object' && !isSecretKey(k)) {
+      next[k] = mergeMaskedConfig(v, ex[k]);
+    }
+  }
+  return next;
 }

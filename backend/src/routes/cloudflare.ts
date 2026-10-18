@@ -13,10 +13,16 @@ import { fmtDateTime } from '../lib/util.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
-import { decryptConfig, encryptConfig } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, encryptConfig, isEncryptedConfig } from '../lib/secret.js';
 
-function safeJson(s: string): Record<string, any> {
-  return decryptConfig(s) || {};
+function safeJson(s: any): Record<string, any> {
+  if (s && typeof s === 'object') return s as Record<string, any>;
+  const cfg = decryptConfig(s);
+  if (cfg) return cfg;
+  if (isEncryptedConfig(s)) {
+    throw new ConfigDecryptError('账户配置无法解密（系统密钥可能已变更），请重新填写账户凭证');
+  }
+  return {};
 }
 
 interface DomainCtx {

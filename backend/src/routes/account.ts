@@ -3,7 +3,7 @@ import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
-import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, encryptConfig, isEncryptedConfig, isSecretKey, maskConfig, mergeMaskedConfig, SECRET_MASK } from '../lib/secret.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
@@ -23,7 +23,13 @@ export default async function accountRoutes(app: FastifyInstance) {
   app.get('/api/dns/accounts', auth, async (req: any) => {
     if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const rows = await query(`SELECT id, type, name, config, remark, addtime FROM ${table('account')} ORDER BY id DESC`);
-    return { code: 0, data: rows.map((r: any) => ({ ...r, config: maskConfig(decryptConfig(r.config)) })) };
+    return {
+      code: 0,
+      data: rows.map((r: any) => {
+        const cfg = decryptConfig(r.config);
+        return { ...r, config: maskConfig(cfg), config_error: !cfg && isEncryptedConfig(r.config) };
+      }),
+    };
   });
 
   app.post('/api/dns/accounts', auth, async (req: any) => {
@@ -32,6 +38,8 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
     const exists = await queryOne(`SELECT id FROM ${table('account')} WHERE type = ? AND name = ?`, [type, name]);
     if (exists) return { code: -1, msg: '账户已存在' };
+    const missing = missingRequiredSecret(type, config);
+    if (missing.length) return { code: -1, msg: `请填写：${missing.join('、')}` };
     const provider = getDnsProvider(type, config, '', null);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const ok = await provider.check();
@@ -51,6 +59,8 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!row) return { code: -1, msg: '账户不存在' };
     // 前端回显的是掩码，敏感字段保持不变
     const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    const missing = missingRequiredSecret(type, merged);
+    if (missing.length) return { code: -1, msg: `请填写：${missing.join('、')}` };
     const provider = getDnsProvider(type, merged, '', null);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const ok = await provider.check();
@@ -146,8 +156,27 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 }
 
-function safeJson(s: string): Record<string, any> {
-  return decryptConfig(s) || {};
+function safeJson(s: any): Record<string, any> {
+  if (s && typeof s === 'object') return s as Record<string, any>;
+  const cfg = decryptConfig(s);
+  if (cfg) return cfg;
+  if (isEncryptedConfig(s)) {
+    throw new ConfigDecryptError('账户配置无法解密（系统密钥可能已变更），请重新填写账户凭证');
+  }
+  return {};
+}
+
+/** 必填敏感字段校验：缺失或仍是掩码时拒绝保存，避免写入残缺配置 */
+function missingRequiredSecret(type: string, config: any): string[] {
+  const meta = dnsProviders[type];
+  if (!meta) return [];
+  return Object.entries(meta.config)
+    .filter(([k, f]: any) => f.required && isSecretKey(k))
+    .filter(([k]: any) => {
+      const v = config?.[k];
+      return v === undefined || v === null || v === '' || v === SECRET_MASK;
+    })
+    .map(([, f]: any) => f.name);
 }
 
 async function insertAndGetId(sql: string, params: any[]): Promise<number> {

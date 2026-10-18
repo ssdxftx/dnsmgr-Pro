@@ -9,7 +9,7 @@ import { randomBytes } from 'node:crypto';
 import { getSysKey } from './config.js';
 import { isInstalled, getInstallState } from './installer.js';
 import { findUserById } from './auth.js';
-import { setSecretKey } from './lib/secret.js';
+import { ConfigDecryptError, setSecretKey } from './lib/secret.js';
 import { migrate } from './migrate.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/account.js';
@@ -86,6 +86,14 @@ const app = Fastify({
 });
 
 applySecurityHeaders(app);
+
+// 账户配置无法解密时返回可操作的中文提示，避免被云端「Authentication error」掩盖
+app.setErrorHandler((err: any, _req: any, reply: any) => {
+  if (err instanceof ConfigDecryptError) {
+    return reply.send({ code: -1, msg: err.message });
+  }
+  reply.send(err);
+});
 
 // 响应压缩：统计数据集、证书详情（含 base64 PFX）等大 JSON 明文传输体积降 60–80%
 // 仅压缩 >= 1KB 的响应，避免小响应增加 CPU 开销

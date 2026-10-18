@@ -19,6 +19,9 @@
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('dnsAccount.editTitle') : t('dnsAccount.addTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
+        <n-alert v-if="editingConfigError" type="error" :show-icon="true" class="mb-3">
+          {{ t('dnsAccount.configDecryptError') }}
+        </n-alert>
         <n-form-item :label="t('dnsAccount.provider')">
           <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
         </n-form-item>
@@ -74,6 +77,7 @@ const providers = ref<Record<string, any>>({});
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
 const saveBusy = ref(false);
+const editingConfigError = ref(false);
 const form = reactive<any>({ type: '', name: '', config: {} });
 const currentProvider = ref<any>(null);
 
@@ -159,6 +163,7 @@ function openAdd() {
   form.name = '';
   form.config = {};
   currentProvider.value = null;
+  editingConfigError.value = false;
   showEdit.value = true;
 }
 
@@ -168,6 +173,7 @@ function openEdit(row: any) {
   form.name = row.name;
   form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
   currentProvider.value = providers.value[form.type] || null;
+  editingConfigError.value = !!row.config_error;
   showEdit.value = true;
 }
 

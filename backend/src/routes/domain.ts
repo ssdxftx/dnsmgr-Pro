@@ -4,14 +4,18 @@ import { query, queryOne, table } from '../db.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
-import { decryptConfig } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, isEncryptedConfig } from '../lib/secret.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
-// 兼容历史明文与新版加密存储的账户配置
 function safeJson(s: any): Record<string, any> {
   if (s && typeof s === 'object') return s as Record<string, any>;
-  return decryptConfig(s) || {};
+  const cfg = decryptConfig(s);
+  if (cfg) return cfg;
+  if (isEncryptedConfig(s)) {
+    throw new ConfigDecryptError('账户配置无法解密（系统密钥可能已变更），请重新填写账户凭证');
+  }
+  return {};
 }
 
 /** 并发工作池：按 limit 并发执行，保持结果与输入同序，避免批量操作串行 await 拉长请求时长 */

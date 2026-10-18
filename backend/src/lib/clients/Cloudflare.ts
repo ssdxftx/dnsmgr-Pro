@@ -11,6 +11,12 @@ export class Cloudflare {
     params?: Record<string, any>,
     body?: Record<string, any>,
   ): Promise<any> {
+    if (!this.apiKey) {
+      throw new CloudflareError('Cloudflare 凭证缺失：账户配置无法解密或未填写 API 密钥，请在 DNS 账户中重新填写');
+    }
+    if (this.auth !== 1 && !this.email) {
+      throw new CloudflareError('Cloudflare 凭证缺失：使用 API 密钥认证时必须填写邮箱地址');
+    }
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (this.auth === 1) {
       headers.Authorization = 'Bearer ' + this.apiKey;

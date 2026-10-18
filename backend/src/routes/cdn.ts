@@ -34,7 +34,7 @@ import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } fro
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
-import { decryptConfig } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, isEncryptedConfig } from '../lib/secret.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
 import { EO_CONDITION_SCHEMA } from '../lib/cdn/ruleCondition.js';
 
@@ -72,10 +72,14 @@ function dedupe(list: string[]): string[] {
   return [...new Set(list.map((s) => String(s).trim()).filter(Boolean))];
 }
 
-// 兼容历史明文与新版加密存储的账户配置
 function safeJson(s: any): Record<string, any> {
   if (s && typeof s === 'object') return s as Record<string, any>;
-  return decryptConfig(s) || {};
+  const cfg = decryptConfig(s);
+  if (cfg) return cfg;
+  if (isEncryptedConfig(s)) {
+    throw new ConfigDecryptError('账户配置无法解密（系统密钥可能已变更），请重新填写账户凭证');
+  }
+  return {};
 }
 
 function calcRecordName(accelDomain: string, dnsDomain: string): string {
