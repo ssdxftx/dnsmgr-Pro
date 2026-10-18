@@ -38,6 +38,12 @@ for (const [name, input, expected] of cases) {
     console.error(`${name}(${input}) => ${actual}，期望 ${expected}`);
   }
 }
+const ms0 = f.msAxisFormatter(0);
+const ms1 = f.msAxisFormatter(1);
+if (ms0(150) !== '150 ms' || ms1(90) !== '90.0 ms' || ms1(1500) !== '1.50 s') {
+  failed++;
+  console.error('msAxisFormatter 输出异常');
+}
 if (f.formatMetric(1024, 'byte') !== '1.00 KB') {
   failed++;
   console.error('formatMetric(1024, byte) 输出异常');

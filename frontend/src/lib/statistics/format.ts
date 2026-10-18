@@ -65,6 +65,12 @@ export function formatMetric(value: number | null | undefined, unit: MetricUnit)
   }
 }
 
+/** 坐标轴专用：按量级固定小数位，保证同一轴刻度对齐（避免 150 ms 与 90.0 ms 混排） */
+export function msAxisFormatter(digits: number): (value: number) => string {
+  return (value: number) =>
+    Math.abs(value) >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(digits)} ms`;
+}
+
 /** 图表 y 轴用同一套换算，避免卡片与图表单位不一致 */
 export function axisFormatter(unit: MetricUnit): (value: number) => string {
   return (value: number) => {

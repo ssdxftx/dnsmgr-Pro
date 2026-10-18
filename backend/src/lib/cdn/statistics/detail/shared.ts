@@ -229,7 +229,9 @@ export function mergeRateSeries(prev: MetricSeries, cur: MetricSeries): MetricSe
   let summary: number | null;
   if (prevRate == null) summary = curRate;
   else if (curRate == null) summary = prevRate;
-  else summary = (prevRate * prevW + curRate * curW) / (prevW + curW || 1);
+  // 无权重时退化为算术平均，避免 (90*0 + 50*0)/1 = 0
+  else if (prevW + curW <= 0) summary = (prevRate + curRate) / 2;
+  else summary = (prevRate * prevW + curRate * curW) / (prevW + curW);
   return {
     ...prev,
     values: prev.values.map((v, i) => v ?? cur.values[i] ?? null),

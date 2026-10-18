@@ -3,13 +3,13 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import * as echarts from 'echarts/core';
 import { LineChart, BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { useThemeMode } from '../../composables/useThemeMode';
-import { formatMetric, type MetricUnit } from '../../lib/statistics/format';
+import { formatMetric, msAxisFormatter, type MetricUnit } from '../../lib/statistics/format';
 
 echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
@@ -33,6 +33,17 @@ const props = withDefaults(
 );
 
 const { isDark } = useThemeMode();
+
+// 毫秒轴按当前轴最大值统一小数位：≥100 取整，≥10 一位，其余两位
+const msDigits = computed(() => {
+  const maxAbs = props.series.reduce(
+    (m, s) => Math.max(m, ...s.values.map((v) => Math.abs(v ?? 0))),
+    0,
+  );
+  return maxAbs >= 100 ? 0 : maxAbs >= 10 ? 1 : 2;
+});
+const axisFmt = (unit: MetricUnit) =>
+  unit === 'ms' ? msAxisFormatter(msDigits.value) : (v: number) => formatMetric(v, unit);
 const el = ref<HTMLDivElement>();
 let chart: echarts.ECharts | null = null;
 let observer: ResizeObserver | null = null;
@@ -62,18 +73,18 @@ function option(): any {
     ? [
         {
           type: 'value',
-          axisLabel: { color: tk.faint, formatter: (v: number) => formatMetric(v, firstUnit) },
+          axisLabel: { color: tk.faint, formatter: axisFmt(firstUnit) },
           splitLine: { lineStyle: { type: 'dashed', color: tk.line, opacity: 0.6 } },
         },
         {
           type: 'value',
-          axisLabel: { color: tk.faint, formatter: (v: number) => formatMetric(v, secondUnit) },
+          axisLabel: { color: tk.faint, formatter: axisFmt(secondUnit) },
           splitLine: { show: false },
         },
       ]
     : {
         type: 'value',
-        axisLabel: { color: tk.faint, formatter: (v: number) => formatMetric(v, firstUnit) },
+        axisLabel: { color: tk.faint, formatter: axisFmt(firstUnit) },
         splitLine: { lineStyle: { type: 'dashed', color: tk.line, opacity: 0.6 } },
       };
   return {
