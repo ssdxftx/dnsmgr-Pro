@@ -248,7 +248,7 @@ const columns = computed<any[]>(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 150,
+    width: 144,
     render(row: any) {
       // 超级管理员不可被其他管理员修改，仅其本人可编辑自身资料
       if (Number(row.is_super) === 1 && Number(row.id) !== currentUid.value) {

@@ -216,14 +216,16 @@ const columns = computed(() => [
     key: 'last_run',
     width: 164,
     render: (row: any) => {
-      if (!row.last_run) return '-';
+      const muted = 'display: block; white-space: nowrap; font-size: 11px; color: var(--app-text-3)';
+      if (!row.last_run) {
+        return h('div', { style: 'line-height: 1.35' }, [
+          h('span', { style: 'white-space: nowrap; font-size: 12px; color: var(--app-text-3)' }, t('dnsCheck.neverRun')),
+          h('span', { style: muted }, '\u00A0'),
+        ]);
+      }
       return h('div', { style: 'line-height: 1.35' }, [
         h('span', { style: 'white-space: nowrap; font-size: 12px' }, row.last_run),
-        h(
-          'span',
-          { style: 'display: block; white-space: nowrap; font-size: 11px; color: var(--app-text-3)' },
-          row.next_run ? `${t('dnsCheck.nextRun')} ${row.next_run}` : '\u00A0',
-        ),
+        h('span', { style: muted }, row.next_run ? `${t('dnsCheck.nextRun')} ${row.next_run}` : '\u00A0'),
       ]);
     },
   },
