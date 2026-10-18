@@ -77,14 +77,24 @@
    移动端表单：左标签改为上标签，单选组换行（标签 110px 会把控件压到 210px）
    =========================================================================== */
 @media (max-width: 767px) {
+  /* 左标签改为上标签：只改 grid-template-columns 会被 areas 的隐式第二列挤成竖排，
+     因此整块改用 flex，不受 naive 的 grid 声明影响 */
   .n-form-item--left-labelled {
-    grid-template-columns: 1fr !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    grid-template-columns: none !important;
   }
   .n-form-item--left-labelled > .n-form-item-label {
     width: auto !important;
-    justify-content: flex-start;
+    align-self: flex-start !important;
+    justify-content: flex-start !important;
     text-align: left;
+    white-space: normal !important;
     padding: 0 0 4px;
+  }
+  .n-form-item--left-labelled > .n-form-item-blank {
+    width: 100% !important;
   }
   .n-radio-group {
     display: flex !important;
@@ -130,6 +140,26 @@
     min-width: 36px;
     min-height: 36px;
   }
+  /* 页面级按钮补足触控高度；表格行内 tiny 按钮与步进器单独控制 */
+  .app-content .n-button {
+    min-height: 36px;
+  }
+  .n-data-table .n-button {
+    min-height: 22px;
+  }
+  .n-input-number .n-button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+  .n-radio,
+  .n-checkbox {
+    min-height: 36px;
+    align-items: center;
+  }
+  .n-dialog__close {
+    width: 36px;
+    height: 36px;
+  }
 }
 
 /* 移动端信息架构：应用栏标题与页面头重复，隐藏只留汉堡与头像 */
@@ -145,28 +175,44 @@
     position: absolute;
     top: 0;
     right: 0;
-    width: 16px;
+    width: 12px;
     height: 44px;
     pointer-events: none;
+    opacity: 0.6;
     background: linear-gradient(to right, transparent, var(--app-surface-2));
+  }
+  /* naive 把滚动宽度写在 nav 上，wrapper 却 overflow:hidden，导致 tabs 无法滑动；
+     把横滚交给 .n-tabs-nav，并放开 wrapper */
+  .n-tabs .n-tabs-nav {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .n-tabs .n-tabs-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .n-tabs .n-tabs-nav-scroll-wrapper {
+    overflow: visible !important;
   }
 }
 
 /* 刘海与底部手势条安全区 */
+/* MainLayout 的 scoped 样式特异性更高，必须用 !important 才能生效 */
 @supports (padding: env(safe-area-inset-top)) {
   .app-header {
-    padding-top: env(safe-area-inset-top);
-    height: calc(var(--app-header-h) + env(safe-area-inset-top));
+    padding-top: env(safe-area-inset-top) !important;
+    height: calc(var(--app-header-h) + env(safe-area-inset-top)) !important;
   }
   .app-content {
-    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important;
   }
   .app-drawer .n-drawer-content {
-    padding-bottom: env(safe-area-inset-bottom);
+    padding-bottom: env(safe-area-inset-bottom) !important;
   }
 }
 @media (max-width: 767px) {
   .app-content {
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
   }
 }

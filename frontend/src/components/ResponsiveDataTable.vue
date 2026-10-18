@@ -164,7 +164,7 @@ const actionColumn = computed(() => props.columns.find(isActionColumn));
 const TITLE_KEYS = ['name', 'domain', 'title', 'label', 'hostname', 'routename', 'username', 'email', 'subject', 'remark'];
 const titleColumn = computed(() => {
   if (props.titleKey) return props.columns.find((c) => c.key === props.titleKey);
-  const cols = dataColumns.value;
+  const cols = dataColumns.value.filter((c: any) => c.mobile !== 'hide');
   const preferred = cols.find((c) => TITLE_KEYS.includes(String(c.key)));
   if (preferred) return preferred;
   return cols.find((c) => String(c.key) !== 'id') || cols[0];

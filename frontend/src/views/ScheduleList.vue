@@ -160,9 +160,9 @@ const columns = computed<any[]>(() => [
       return h(NTag, { size: 'small', type: row.active ? 'success' : 'default', bordered: false }, { default: () => (row.active ? t('dm.running') : t('dm.stopped')) });
     },
   },
-  { title: t('schedule.nextRun'), key: 'nexttimestr', width: 160 },
-  { title: t('schedule.lastRun'), key: 'updatetimestr', width: 160 },
-  { title: t('common.remark'), key: 'remark', minWidth: 100, render: (row: any) => row.remark || '-' },
+  { title: t('schedule.nextRun'), key: 'nexttimestr', width: 160, mobile: 'hide' },
+  { title: t('schedule.lastRun'), key: 'updatetimestr', width: 160, mobile: 'hide' },
+  { title: t('common.remark'), key: 'remark', minWidth: 100, mobile: 'hide', render: (row: any) => row.remark || '-' },
   {
     title: t('common.actions'),
     key: 'actions',
