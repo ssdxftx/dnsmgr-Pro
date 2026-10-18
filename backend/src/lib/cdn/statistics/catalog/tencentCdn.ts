@@ -1,0 +1,33 @@
+import type { ProviderCatalog } from './types.js';
+
+export const tencentCdnCatalog: ProviderCatalog = {
+  route: 'tencent_cdn',
+  name: '腾讯云 CDN',
+  icon: 'tencent',
+  tone: 'info',
+  delayMinutes: 5,
+  siteScoped: false,
+  groups: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status'],
+  filters: ['domain'],
+  metrics: [
+    { key: 'flux', group: 'traffic', unit: 'byte', agg: 'sum', chart: 'area', basic: true, api: { action: 'DescribeCdnData', metric: 'flux' } },
+    { key: 'bw', group: 'bandwidth', unit: 'bps', agg: 'max', chart: 'line', basic: true, api: { action: 'DescribeCdnData', metric: 'bandwidth', interval: '5min' } },
+    { key: 'bs_flux', group: 'origin', unit: 'byte', agg: 'sum', chart: 'area', basic: true, api: { action: 'DescribeOriginData', metric: 'flux' } },
+    { key: 'req', group: 'request', unit: 'count', agg: 'sum', chart: 'line', basic: true, api: { action: 'DescribeCdnData', metric: 'request' } },
+    { key: 'hit_rate', group: 'cache', unit: 'percent', agg: 'rate', chart: 'line', basic: true, api: { action: 'DescribeCdnData', metric: 'fluxHitRate' } },
+    { key: 'hit_rate_req', group: 'cache', unit: 'percent', agg: 'rate', chart: 'line', api: { action: 'DescribeCdnData', metric: 'requestHitRate' } },
+    { key: 'hit_flux', group: 'cache', unit: 'byte', agg: 'sum', chart: 'bar', stack: 'cache', api: { action: 'DescribeCdnData', metric: 'hitFlux' } },
+    { key: 'hit_req', group: 'cache', unit: 'count', agg: 'sum', chart: 'line', api: { action: 'DescribeCdnData', metric: 'hitRequest' } },
+    { key: 'origin_bw', group: 'origin', unit: 'bps', agg: 'max', chart: 'line', api: { action: 'DescribeOriginData', metric: 'bandwidth', interval: '5min' } },
+    { key: 'origin_req', group: 'origin', unit: 'count', agg: 'sum', chart: 'line', api: { action: 'DescribeOriginData', metric: 'request' } },
+    { key: 'sc_2xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'edge', api: { action: 'DescribeCdnData', metric: '2xx' } },
+    { key: 'sc_3xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'edge', api: { action: 'DescribeCdnData', metric: '3xx' } },
+    { key: 'sc_4xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'edge', api: { action: 'DescribeCdnData', metric: '4xx' } },
+    { key: 'sc_5xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'edge', api: { action: 'DescribeCdnData', metric: '5xx' } },
+    { key: 'origin_sc_2xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'origin', api: { action: 'DescribeOriginData', metric: '2xx' } },
+    { key: 'origin_sc_3xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'origin', api: { action: 'DescribeOriginData', metric: '3xx' } },
+    { key: 'origin_sc_4xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'origin', api: { action: 'DescribeOriginData', metric: '4xx' } },
+    { key: 'origin_sc_5xx', group: 'status', unit: 'count', agg: 'sum', chart: 'bar', stack: 'origin', api: { action: 'DescribeOriginData', metric: '5xx' } },
+  ],
+  breakdowns: [{ key: 'domain', titleKey: 'statistics.top.domain', metricName: 'flux', unit: 'byte', limit: 10 }],
+};

@@ -26,6 +26,13 @@ import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
 import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS, EO_DATA_DELAY_MS } from '../lib/cdn/statistics/cacheService.js';
+import { getCatalog, listCatalogs } from '../lib/cdn/statistics/catalog/index.js';
+import type { DetailResponse, MetricSeries, ProviderCard, BreakdownItem } from '../lib/cdn/statistics/catalog/result.js';
+import { buildOverview, type OverviewAccount } from '../lib/cdn/statistics/overview.js';
+import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
+import { aggregate, buildTimeline, combineSeries } from '../lib/cdn/statistics/detail/shared.js';
+import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
+import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
 import { decryptConfig } from '../lib/secret.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
@@ -148,6 +155,149 @@ function summarizeResults(list: any[], pendingLabel: string): string {
   const pending = list.filter((r) => r.status === 'pending').length;
   const failed = list.filter((r) => r.status === 'failed').length;
   return `成功 ${applied} 个，${pendingLabel} ${pending} 个，失败 ${failed} 个`;
+}
+
+
+function fmtStatTime(d: Date): string {
+  const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+/** 跨账户合并同一指标的序列：sum 累加、max 取大、rate 按流量/请求加权 */
+function mergeDetailSeries(list: MetricSeries[]): MetricSeries[] {
+  const map = new Map<string, MetricSeries>();
+  for (const s of list) {
+    const prev = map.get(s.key);
+    if (!prev) {
+      map.set(s.key, { ...s, values: [...s.values] });
+      continue;
+    }
+    const len = prev.values.length;
+    if (s.agg === 'rate') {
+      const weight = map.get(s.key === 'hit_rate_req' ? 'req' : 'flux')?.values;
+      const values = new Array<number | null>(len).fill(null);
+      for (let i = 0; i < len; i++) {
+        const a = prev.values[i];
+        const b = s.values[i];
+        if (a == null && b == null) continue;
+        const wa = weight?.[i] ?? 1;
+        values[i] = a == null ? b : b == null ? a : (a * wa + b * wa) / (2 * wa);
+      }
+      map.set(s.key, { ...prev, values, summary: aggregate(values, 'avg') });
+      continue;
+    }
+    const values = combineSeries([prev.values, s.values], s.agg, len);
+    map.set(s.key, { ...prev, values, summary: aggregate(values, s.agg) });
+  }
+  return [...map.values()];
+}
+
+/** 合并多账户的 Top 表：同标签求和后重算占比 */
+function mergeBreakdowns(list: BreakdownItem[]): BreakdownItem[] {
+  const map = new Map<string, BreakdownItem>();
+  for (const item of list) {
+    const prev = map.get(item.key);
+    if (!prev) {
+      map.set(item.key, { ...item, rows: item.rows.map((r) => ({ ...r })) });
+      continue;
+    }
+    const rows = new Map(prev.rows.map((r) => [r.label, r.value]));
+    for (const row of item.rows) rows.set(row.label, (rows.get(row.label) || 0) + row.value);
+    const total = [...rows.values()].reduce((a, b) => a + b, 0);
+    prev.rows = [...rows.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([label, value]) => ({ label, value, percent: total > 0 ? (value / total) * 100 : 0 }));
+  }
+  return [...map.values()];
+}
+
+/** 旧缓存结构 → 新详情结构（非管理员只读缓存） */
+function detailFromCache(route: string, cached: any, start: Date, end: Date, delayMinutes: number): DetailResponse {
+  const catalog = getCatalog(route);
+  const labels: string[] = cached?.labels || [];
+  const isDay = end.getTime() - start.getTime() > 86400000;
+  const interval: 'hour' | 'day' = isDay ? 'day' : 'hour';
+  const len = labels.length;
+  const rs = cached?.resource?.resource_detail || {};
+  const rsum = cached?.resource?.resource_summary || {};
+  const vs = cached?.visits?.visits_detail || {};
+  const vsum = cached?.visits?.visits_summary || {};
+  const series: MetricSeries[] = [];
+  const push = (key: string, values: (number | null)[], summary?: number | null) => {
+    const def = catalog?.metrics.find((m) => m.key === key);
+    if (!def) return;
+    series.push({
+      key: def.key,
+      group: def.group,
+      unit: def.unit,
+      agg: def.agg,
+      chart: def.chart,
+      values,
+      summary: summary === undefined ? aggregate(values, def.agg) : summary,
+      stack: def.stack,
+    });
+  };
+  const outFlux = rs.out_flux || rs.flux || [];
+  const hitFlux = vs.hit_flux || [];
+  const hitRate = hitFlux.map((h: number, i: number) => {
+    const den = Number(outFlux[i] || 0);
+    return den > 0 ? (Number(h || 0) / den) * 100 : null;
+  });
+  const fluxVals = rs.flux || new Array(len).fill(null);
+  push('flux', fluxVals, rsum.flux ?? null);
+  push('flux_out', rs.out_flux || new Array(len).fill(null), rsum.out_flux ?? null);
+  push('bw', rs.bw || new Array(len).fill(null), rsum.bw ?? null);
+  push('bs_flux', rs.bs_flux || new Array(len).fill(null), rsum.bs_flux ?? null);
+  push('req', vs.req_num || new Array(len).fill(null), vsum.req_num ?? null);
+  push('hit_rate', hitRate, aggregate(hitRate, 'avg'));
+  push('hit_rate_flux', hitRate, aggregate(hitRate, 'avg'));
+  push('hit_flux', hitFlux, vsum.hit_flux ?? null);
+  push('hit_req', vs.hit_num || new Array(len).fill(null), vsum.hit_num ?? null);
+  const status = cached?.status;
+  if (status?.status_detail) {
+    (['sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx'] as const).forEach((key, i) => {
+      const vals = status.status_detail[i] || new Array(len).fill(null);
+      push(key, vals, status.status_summary?.[i] ?? null);
+    });
+  }
+  if (status?.bs_status_detail) {
+    (['origin_sc_2xx', 'origin_sc_3xx', 'origin_sc_4xx', 'origin_sc_5xx'] as const).forEach((key, i) => {
+      const vals = status.bs_status_detail[i] || new Array(len).fill(null);
+      push(key, vals, status.bs_status_summary?.[i] ?? null);
+    });
+  }
+  return {
+    route,
+    labels,
+    interval,
+    series,
+    breakdowns: [],
+    meta: {
+      status: series.length ? 'ok' : 'empty',
+      dataUntil: fmtStatTime(end),
+      delayMinutes,
+      cached: true,
+      tookMs: 0,
+    },
+    ...(series.length ? {} : { _errors: ['该时间范围暂未缓存，请稍后再试'] }),
+  };
+}
+
+function basicsFromCache(cached: any): Array<{ key: string; unit: any; value: number | null }> {
+  const rs = cached?.resource?.resource_summary || {};
+  const vs = cached?.visits?.visits_summary || {};
+  const den = Number(rs.out_flux || 0) || Number(rs.flux || 0);
+  const hit = Number(vs.hit_flux || 0);
+  const hitRate = den > 0 ? (hit / den) * 100 : null;
+  const values: Record<string, number | null> = {
+    flux: rs.flux ?? null,
+    bw: rs.bw ?? null,
+    bs_flux: rs.bs_flux ?? null,
+    req: vs.req_num ?? null,
+    hit_rate: hitRate,
+  };
+  return BASIC_KEYS.map((key) => ({ key, unit: basicUnit(key), value: values[key] ?? null }));
 }
 
 export default async function cdnRoutes(app: FastifyInstance) {
@@ -1652,6 +1802,250 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!Object.keys(diff).length) return { code: 0, msg: '未检测到配置变化' };
     if (!(await provider.updateZoneSetting(row.zone_id, diff))) return { code: -1, msg: '站点配置更新失败，' + provider.getError() };
     return { code: 0, msg: '站点配置更新成功' };
+  });
+
+  // CDN 统计概览：每服务商一张卡片（4 个服务商总是返回）
+  app.get('/api/cdn/statistics/overview', statAuth, async (req: any) => {
+    try {
+      const q = req.query || {};
+      const start = parseStatTime(q.startTime);
+      const end = parseStatTime(q.endTime);
+      if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
+      const latest = Date.now() - 5 * 60 * 1000;
+      if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
+      if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
+
+      const isAdmin = checkLevel(req.user, 2);
+      const cacheEnabled = await isStatCacheEnabled();
+      const aid = Number(q.aid || 0);
+      const routeFilter = String(q.route || '').trim();
+      const dataUntil = fmtStatTime(end);
+
+      if (!isAdmin) {
+        const providers: ProviderCard[] = [];
+        for (const catalog of listCatalogs()) {
+          if (routeFilter && catalog.route !== routeFilter) continue;
+          let basics: ProviderCard['basics'] = [];
+          let status: ProviderCard['status'] = 'empty';
+          if (cacheEnabled) {
+            const accts = await query(`SELECT id FROM ${table('cdn_account')} WHERE type = ?`, [catalog.route]);
+            const ids = (accts as any[]).map((a) => Number(a.id));
+            const cached = ids.length
+              ? await loadCachedStatistics(start, end, 'All', ids).catch(() => null)
+              : null;
+            if (cached?.labels?.length) {
+              basics = basicsFromCache(cached);
+              status = 'ok';
+            }
+          }
+          providers.push({
+            route: catalog.route,
+            name: catalog.name,
+            tone: catalog.tone,
+            status,
+            accountCount: 0,
+            domainCount: 0,
+            basics,
+            dataUntil,
+            cached: true,
+            tookMs: 0,
+          });
+        }
+        return { code: 0, data: { dataUntil, providers } };
+      }
+
+      const acctWhere: string[] = [];
+      const acctParams: any[] = [];
+      if (aid) {
+        acctWhere.push('id = ?');
+        acctParams.push(aid);
+      }
+      if (routeFilter) {
+        acctWhere.push('type = ?');
+        acctParams.push(routeFilter);
+      }
+      const acctRows: any[] = await query(
+        `SELECT * FROM ${table('cdn_account')}` + (acctWhere.length ? ` WHERE ${acctWhere.join(' AND ')}` : ''),
+        acctParams,
+      );
+      const domWhere: string[] = [];
+      const domParams: any[] = [];
+      if (aid) {
+        domWhere.push('aid = ?');
+        domParams.push(aid);
+      }
+      if (routeFilter) {
+        domWhere.push('route = ?');
+        domParams.push(routeFilter);
+      }
+      const domRows: any[] = await query(
+        `SELECT * FROM ${table('cdn_domain')}` + (domWhere.length ? ` WHERE ${domWhere.join(' AND ')}` : ''),
+        domParams,
+      );
+
+      const inputs = listCatalogs().map((catalog) => {
+        const accounts: OverviewAccount[] = acctRows
+          .filter((a) => a.type === catalog.route)
+          .map((a) => ({
+            config: safeJson(a.config),
+            domains: domRows
+              .filter((d) => Number(d.aid) === Number(a.id) && d.route === catalog.route)
+              .map((d) => ({
+                name: d.name,
+                route: d.route,
+                zoneId: d.zone_id,
+                serviceArea: d.service_area,
+              })),
+          }))
+          .filter((a) => a.domains.length);
+        return {
+          route: catalog.route,
+          accountCount: acctRows.filter((a) => a.type === catalog.route).length,
+          accounts,
+        };
+      });
+
+      const providers = await buildOverview(inputs, start, end);
+      return { code: 0, data: { dataUntil, providers } };
+    } catch (e: any) {
+      return { code: -1, msg: '统计概览异常：' + (e?.message || e) };
+    }
+  });
+
+  // CDN 统计详情：按服务商能力目录返回指标序列与 Top 表
+  app.get('/api/cdn/statistics/detail', statAuth, async (req: any) => {
+    try {
+      const q = req.query || {};
+      const route = String(q.route || '').trim();
+      const catalog = getCatalog(route);
+      if (!catalog) return { code: -1, msg: '未知的服务商' };
+      const start = parseStatTime(q.startTime);
+      const end = parseStatTime(q.endTime);
+      if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
+      const latest = Date.now() - catalog.delayMinutes * 60 * 1000;
+      if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
+      if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
+
+      const isAdmin = checkLevel(req.user, 2);
+      const cacheEnabled = await isStatCacheEnabled();
+      const domainNames = String(q.domains || '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      const aid = Number(q.aid || 0);
+      const groups = parseGroups(q.groups, catalog.groups);
+      const timeline = buildTimeline(start, end);
+
+      const emptyDetail = (msg: string): DetailResponse => ({
+        route,
+        labels: timeline.labels,
+        interval: timeline.interval,
+        series: [],
+        breakdowns: [],
+        meta: {
+          status: 'empty',
+          dataUntil: fmtStatTime(end),
+          delayMinutes: catalog.delayMinutes,
+          cached: !isAdmin,
+          tookMs: 0,
+        },
+        _errors: [msg],
+      });
+
+      if (!isAdmin) {
+        if (!cacheEnabled) return { code: -1, msg: '数据统计缓存未开启，暂无法查看统计' };
+        if (aid || domainNames.length || q.filters) return { code: -1, msg: '普通用户不支持筛选' };
+        if (start.getTime() < Date.now() - STAT_COVER_MS) return { code: 0, data: emptyDetail('该时间范围暂未缓存，请稍后再试') };
+        const accts: any[] = await query(`SELECT id FROM ${table('cdn_account')} WHERE type = ?`, [route]);
+        const ids = accts.map((a) => Number(a.id));
+        const cached = ids.length
+          ? await loadCachedStatistics(start, end, 'All', ids).catch(() => null)
+          : null;
+        if (!cached?.labels?.length) return { code: 0, data: emptyDetail('该时间范围暂未缓存，请稍后再试') };
+        return { code: 0, data: detailFromCache(route, cached, start, end, catalog.delayMinutes) };
+      }
+
+      const filters = parseFilters(q.filters, catalog.filters);
+      const top = parseTop(q.top, catalog.breakdowns.map((b) => b.key));
+      const cacheKey = JSON.stringify([
+        route,
+        fmtStatTime(start),
+        fmtStatTime(end),
+        aid,
+        domainNames,
+        [...groups].sort(),
+        filters,
+        top,
+      ]);
+      const cachedDetail = getCachedDetail(cacheKey);
+      if (cachedDetail) return { code: 0, data: cachedDetail };
+
+      const where: string[] = ['route = ?'];
+      const params: any[] = [route];
+      if (aid) {
+        where.push('aid = ?');
+        params.push(aid);
+      }
+      if (domainNames.length) {
+        where.push(`name IN (${domainNames.map(() => '?').join(',')})`);
+        params.push(...domainNames);
+      }
+      const rows: any[] = await query(
+        `SELECT * FROM ${table('cdn_domain')} WHERE ${where.join(' AND ')}`,
+        params,
+      );
+      if (!rows.length) return { code: 0, data: emptyDetail('没有匹配的加速域名') };
+
+      const accountCache = new Map<number, any>();
+      const accounts = new Map<number, OverviewAccount>();
+      for (const row of rows) {
+        const accountId = Number(row.aid);
+        if (!accountCache.has(accountId)) {
+          accountCache.set(accountId, await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [accountId]));
+        }
+        const acct = accountCache.get(accountId);
+        if (!acct) continue;
+        if (!accounts.has(accountId)) accounts.set(accountId, { config: safeJson(acct.config), domains: [] });
+        accounts.get(accountId)!.domains.push({
+          name: row.name,
+          route: row.route,
+          zoneId: row.zone_id,
+          serviceArea: row.service_area,
+        });
+      }
+
+      const started = Date.now();
+      const parts = await Promise.all(
+        [...accounts.values()].map((acct) =>
+          fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }).catch(
+            (e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 }),
+          ),
+        ),
+      );
+      const series = mergeDetailSeries(parts.flatMap((p) => p.series));
+      const breakdowns = mergeBreakdowns(parts.flatMap((p) => p.breakdowns));
+      const errors = parts.flatMap((p) => p.errors);
+      const status = series.length ? (errors.length ? 'partial' : 'ok') : errors.length ? 'error' : 'empty';
+      const data: DetailResponse = {
+        route,
+        labels: timeline.labels,
+        interval: timeline.interval,
+        series,
+        breakdowns,
+        meta: {
+          status,
+          dataUntil: fmtStatTime(end),
+          delayMinutes: catalog.delayMinutes,
+          cached: false,
+          tookMs: Date.now() - started,
+        },
+        ...(errors.length ? { _errors: errors.slice(0, 20) } : {}),
+      };
+      if (status === 'ok' || status === 'partial') setCachedDetail(cacheKey, data);
+      return { code: 0, data };
+    } catch (e: any) {
+      return { code: -1, msg: '统计详情异常：' + (e?.message || e) };
+    }
   });
 
   // CDN 数据统计（加速流量 / 带宽 / 请求数 / 缓存命中 / 状态码）

@@ -360,4 +360,11 @@
   .stat-grid > div:nth-child(5) {
     grid-column: 1 / -1 !important;
   }
+  /* 统计详情页：底部安全区 + Tab 触控热区 */
+  .detail-page {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+  .n-tabs .n-tabs-tab {
+    min-height: 36px;
+  }
 }

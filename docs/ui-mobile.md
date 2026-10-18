@@ -23,6 +23,12 @@
 
 `ResponsiveDataTable.vue`：列宽合计（系统列 40、无宽度列 140、固定开销 24）> 容器 × 1.05 且差值 > 20px 时才设 `scroll-x`，同时加 `rdt--scrollable` 右缘渐隐。
 
+## 统计页结构（v1.20）
+
+- 列表页 `/statistics`：`provider-grid` 桌面 `minmax(340px,1fr)` 自适应，移动端单列；卡片 5 项指标固定 2 列栅格，数值 `17px/16px` 等宽字体，触控按钮 ≥36px。
+- 详情页 `/statistics/:route`：KPI 复用 `stat-grid`（桌面 5 列 / 平板 3+2 / 移动 2 列且第 5 张跨列）；图表桌面 2 列、移动 1 列且高度 210px；Tab 可横滑、触控高度 36px；页面底部加安全区。
+- 图表用 `MetricChart`（`ResizeObserver` + `dispose`），缺失点传 `null` 形成断点，卡片与轴共用 `formatMetric`。
+
 ## 基线数值
 
 | 指标 | 基线 |
@@ -35,6 +41,7 @@
 | 横向溢出 | 45 条路由均为 0 |
 | 首屏体积 | ≈318 KB gzip |
 | 统计页 StatCard | 移动端卡高 69px、末卡跨两列、图表 210px |
+| 统计服务商卡片 | 移动端单列、指标 2 列、详情按钮 36px |
 
 改动后若任一指标偏离 ±5%，需复查 `responsive.css` 与对应页面。
 

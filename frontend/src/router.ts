@@ -22,6 +22,7 @@ const routes = [
       { path: 'cdn-accounts', component: () => import('./views/CdnAccount.vue'), meta: { titleKey: 'route.cdnAccounts' } },
       { path: 'cdn-domains', component: () => import('./views/CdnDomain.vue'), meta: { titleKey: 'route.cdnDomains' } },
       { path: 'statistics', component: () => import('./views/Statistics.vue'), meta: { titleKey: 'route.statistics' } },
+      { path: 'statistics/:route', component: () => import('./views/StatisticsDetail.vue'), meta: { titleKey: 'route.statistics' } },
       { path: 'cache-refresh', component: () => import('./views/CachePurge.vue'), meta: { titleKey: 'route.cacheRefresh' } },
       { path: 'preheat-tasks', component: () => import('./views/PreheatTask.vue'), meta: { titleKey: 'route.preheatTasks' } },
       { path: 'dns-check', component: () => import('./views/DnsCheckTask.vue'), meta: { titleKey: 'route.dnsCheck' } },

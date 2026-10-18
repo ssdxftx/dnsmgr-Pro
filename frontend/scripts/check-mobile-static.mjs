@@ -5,15 +5,24 @@
  * 2. 使用 StatCard 的页面必须给网格加 class="stat-grid"
  * 3. 不再出现移动端单列的旧 KPI 写法 cols="1 ..."
  */
-import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative } from 'node:path';
 
 const viewsDir = new URL('../src/views/', import.meta.url).pathname;
-const files = readdirSync(viewsDir).filter((f) => f.endsWith('.vue'));
+function walk(dir, out = []) {
+  for (const name of readdirSync(dir)) {
+    const full = join(dir, name);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (name.endsWith('.vue')) out.push(full);
+  }
+  return out;
+}
+const files = walk(viewsDir);
 
 const problems = [];
-for (const file of files) {
-  const src = readFileSync(join(viewsDir, file), 'utf8');
+for (const full of files) {
+  const file = relative(viewsDir, full);
+  const src = readFileSync(full, 'utf8');
   if (src.includes('TelemetryCard') && !src.includes('telemetry-row')) {
     problems.push(`${file}: 使用 TelemetryCard 但 KPI 网格缺少 class="telemetry-row"`);
   }

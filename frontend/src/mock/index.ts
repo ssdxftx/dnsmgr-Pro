@@ -134,6 +134,126 @@ const CERT_ACCOUNTS = [
   { id: 3, type: 'manual', name: '手动导入' },
 ];
 
+
+// ---- CDN 统计（/cdn/statistics/overview & /detail）----
+const STAT_LABELS = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
+
+function statValues(base: number, amp: number, len = 24): number[] {
+  return Array.from({ length: len }, (_, i) => Math.max(0, Math.round(base + Math.sin(i / 3) * amp + (i % 5) * amp * 0.12)));
+}
+
+const STAT_METRIC_UNITS: Record<string, string> = {
+  flux: 'byte', flux_out: 'byte', flux_in: 'byte', bs_flux: 'byte', origin_flux: 'byte', origin_flux_out: 'byte',
+  hit_flux: 'byte', cache_flux_hit: 'byte', cache_flux_miss: 'byte', cache_flux_dynamic: 'byte',
+  bw: 'bps', bw_out: 'bps', bw_in: 'bps', origin_bw: 'bps', origin_bw_in: 'bps', origin_bw_out: 'bps',
+  req: 'count', req_rate: 'qps', qps: 'qps', hit_req: 'count', cache_req_hit: 'count', cache_req_miss: 'count', origin_req: 'count',
+  hit_rate: 'percent', hit_rate_flux: 'percent', hit_rate_req: 'percent',
+  resp_time: 'ms', ttfb: 'ms',
+  sc_2xx: 'count', sc_3xx: 'count', sc_4xx: 'count', sc_5xx: 'count',
+  origin_sc_2xx: 'count', origin_sc_3xx: 'count', origin_sc_4xx: 'count', origin_sc_5xx: 'count',
+};
+
+const STAT_KEYS: Record<string, string[]> = {
+  tencent_edgeone: ['flux', 'flux_out', 'flux_in', 'bw', 'bw_out', 'bw_in', 'req', 'req_rate', 'hit_rate', 'hit_rate_flux', 'hit_rate_req', 'cache_flux_hit', 'cache_flux_miss', 'cache_flux_dynamic', 'cache_req_hit', 'cache_req_miss', 'bs_flux', 'origin_flux_out', 'origin_bw_in', 'origin_bw_out', 'origin_req', 'sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx', 'origin_sc_2xx', 'origin_sc_3xx', 'origin_sc_4xx', 'origin_sc_5xx', 'resp_time', 'ttfb'],
+  tencent_cdn: ['flux', 'bw', 'bs_flux', 'req', 'hit_rate', 'hit_rate_req', 'hit_flux', 'hit_req', 'origin_bw', 'origin_req', 'sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx', 'origin_sc_2xx', 'origin_sc_3xx', 'origin_sc_4xx', 'origin_sc_5xx'],
+  aliyun_cdn: ['flux', 'bw', 'req', 'qps', 'hit_rate', 'hit_flux', 'origin_flux', 'origin_bw', 'sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx'],
+  aliyun_esa: ['flux', 'bw', 'req', 'qps', 'hit_rate', 'hit_flux', 'bs_flux', 'origin_bw'],
+};
+
+const STAT_GROUPS: Record<string, string[]> = {
+  tencent_edgeone: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status', 'performance', 'top'],
+  tencent_cdn: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status'],
+  aliyun_cdn: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status', 'top'],
+  aliyun_esa: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin'],
+};
+
+const STAT_GROUP_OF: Record<string, string> = {
+  flux: 'traffic', flux_out: 'traffic', flux_in: 'traffic',
+  bw: 'bandwidth', bw_out: 'bandwidth', bw_in: 'bandwidth',
+  req: 'request', req_rate: 'request', qps: 'request',
+  hit_rate: 'cache', hit_rate_flux: 'cache', hit_rate_req: 'cache', hit_flux: 'cache', hit_req: 'cache',
+  cache_flux_hit: 'cache', cache_flux_miss: 'cache', cache_flux_dynamic: 'cache', cache_req_hit: 'cache', cache_req_miss: 'cache',
+  bs_flux: 'origin', origin_flux: 'origin', origin_flux_out: 'origin', origin_bw: 'origin', origin_bw_in: 'origin', origin_bw_out: 'origin', origin_req: 'origin',
+  resp_time: 'performance', ttfb: 'performance',
+};
+
+function statSeries(key: string): { key: string; group: string; unit: string; agg: string; chart: string; values: (number | null)[]; summary: number; stack?: string } {
+  const unit = STAT_METRIC_UNITS[key] || 'count';
+  const group = STAT_GROUP_OF[key] || 'status';
+  const rate = unit === 'percent';
+  const base = rate ? 88 : unit === 'byte' ? 3.2e9 : unit === 'bps' ? 5.2e7 : unit === 'ms' ? 120 : 120000;
+  const values = statValues(base, rate ? 4 : base * 0.18).map((v) => (key === 'cache_flux_dynamic' ? Math.round(v * 0.2) : v));
+  const summary = rate ? Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1)) : values.reduce((a, b) => a + b, 0);
+  return {
+    key,
+    group,
+    unit,
+    agg: unit === 'bps' ? 'max' : rate ? 'rate' : unit === 'ms' ? 'avg' : 'sum',
+    chart: key.startsWith('sc_') || key.startsWith('cache_flux') || key === 'hit_flux' ? 'bar' : key === 'flux' || key === 'bs_flux' || key === 'origin_flux' ? 'area' : 'line',
+    values,
+    summary,
+    ...(key.startsWith('sc_') ? { stack: key.startsWith('origin_') ? 'origin' : 'edge' } : key.startsWith('cache_flux') ? { stack: 'cache' } : {}),
+  };
+}
+
+function buildStatOverview() {
+  const values: Record<string, Array<[string, string, number | null]>> = {
+    tencent_edgeone: [['flux', 'byte', 2.6e12], ['bw', 'bps', 8.4e7], ['bs_flux', 'byte', 2.1e11], ['req', 'count', 2841937], ['hit_rate', 'percent', 92.4]],
+    tencent_cdn: [['flux', 'byte', 1.2e12], ['bw', 'bps', 4.1e7], ['bs_flux', 'byte', 9.8e10], ['req', 'count', 1284930], ['hit_rate', 'percent', 88.1]],
+    aliyun_cdn: [['flux', 'byte', 6.4e11], ['bw', 'bps', 2.2e7], ['bs_flux', 'byte', 5.2e10], ['req', 'count', null], ['hit_rate', 'percent', 90.7]],
+    aliyun_esa: [['flux', 'byte', null], ['bw', 'bps', null], ['bs_flux', 'byte', null], ['req', 'count', null], ['hit_rate', 'percent', null]],
+  };
+  const names: Record<string, string> = { tencent_edgeone: '腾讯云 EdgeOne', tencent_cdn: '腾讯云 CDN', aliyun_cdn: '阿里云 CDN', aliyun_esa: '阿里云 ESA' };
+  const tones: Record<string, string> = { tencent_edgeone: 'primary', tencent_cdn: 'info', aliyun_cdn: 'success', aliyun_esa: 'warning' };
+  return {
+    dataUntil: '2026-10-18 17:50:00',
+    providers: Object.keys(names).map((route) => {
+      const basics = values[route];
+      const empty = route === 'aliyun_esa';
+      return {
+        route,
+        name: names[route],
+        tone: tones[route],
+        status: empty ? 'empty' : route === 'tencent_cdn' ? 'partial' : 'ok',
+        accountCount: empty ? 0 : route === 'tencent_edgeone' ? 1 : 2,
+        domainCount: empty ? 0 : route === 'tencent_edgeone' ? 3 : 5,
+        basics: basics.map(([key, unit, value]) => ({ key, unit, value })),
+        ...(route === 'tencent_cdn' ? { error: '部分站点查询超时' } : {}),
+        dataUntil: '2026-10-18 17:50:00',
+        cached: false,
+        tookMs: 412,
+      };
+    }),
+  };
+}
+
+function buildStatDetail(route: string, groups: string, top: string) {
+  const keys = STAT_KEYS[route] || STAT_KEYS.tencent_edgeone;
+  const wanted = groups ? groups.split(',') : [];
+  const series = keys
+    .filter((key) => !wanted.length || wanted.includes('overview') && ['flux', 'bw', 'bs_flux', 'req', 'hit_rate'].includes(key) || wanted.includes(STAT_GROUP_OF[key] || 'status'))
+    .map(statSeries);
+  const breakdowns: any[] = [];
+  const dims = (top ? top.split(',') : []).filter(Boolean);
+  const titles: Record<string, string> = { domain: 'statistics.top.domain', url: 'statistics.top.url', referer: 'statistics.top.referer', statusCode: 'statistics.top.statusCode' };
+  for (const dim of dims) {
+    const rows = dim === 'statusCode'
+      ? ['2xx', '3xx', '4xx', '5xx'].map((label, i) => ({ label, value: 1000000 / (i + 1), percent: 0 }))
+      : ['cdn-1.example.com', 'cdn-2.example.com', 'img.example.com'].map((label, i) => ({ label, value: 2.6e11 / (i + 1), percent: 0 }));
+    const total = rows.reduce((a, b) => a + b.value, 0);
+    for (const row of rows) row.percent = (row.value / total) * 100;
+    breakdowns.push({ key: dim, titleKey: titles[dim] || 'statistics.top.domain', unit: dim === 'statusCode' ? 'count' : 'byte', rows });
+  }
+  return {
+    route,
+    labels: STAT_LABELS,
+    interval: 'hour',
+    series,
+    breakdowns,
+    meta: { status: 'ok', dataUntil: '2026-10-18 17:50:00', delayMinutes: route === 'tencent_edgeone' ? 10 : 5, cached: false, tookMs: 838 },
+  };
+}
+
 export function installMock() {
   if (import.meta.env.VITE_MOCK !== 'true') return;
 
@@ -168,6 +288,11 @@ export function installMock() {
       const domMatch = path.match(/^\/api\/domains\/(\d+)$/);
       if (domMatch) return json(DOMAINS.find((d) => d.id === Number(domMatch[1])) || DOMAINS[0]);
 
+      if (path === '/api/cdn/statistics/overview') return json(buildStatOverview());
+      if (path === '/api/cdn/statistics/detail') {
+        const q = new URLSearchParams(url.split('?')[1] || '');
+        return json(buildStatDetail(String(q.get('route') || 'tencent_edgeone'), String(q.get('groups') || ''), String(q.get('top') || '')));
+      }
       if (path === '/api/domains') return json(DOMAINS);
       if (path === '/api/dns/accounts') return json(DNS_ACCOUNTS);
       const cdnDomMatch = path.match(/^\/api\/cdn\/domains\/(\d+)$/);

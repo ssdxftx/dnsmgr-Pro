@@ -2,65 +2,26 @@
   <div class="app-stack">
     <PageHeader :title="t('statistics.title')" :subtitle="t('statistics.subtitle')">
       <template #actions>
-        <n-button @click="load" :loading="loadBusy">
+        <n-button @click="load" :loading="busy">
           <template #icon><n-icon :component="RefreshOutline" /></template>
           {{ t('common.refresh') }}
         </n-button>
       </template>
     </PageHeader>
-    <n-card :bordered="false">
-      <n-alert v-if="!isAdmin" type="info" :show-icon="false" class="mb-4">
+
+    <n-card :bordered="false" class="filter-card">
+      <n-alert v-if="!isAdmin" type="info" :show-icon="false" class="mb-3">
         {{ t('statistics.cacheDataHint') }}
       </n-alert>
       <div class="filters">
-        <n-radio-group v-if="!isMobile" v-model:value="range" class="filter-range" @update:value="onRangeChange">
-          <n-radio-button value="24h">{{ t('statistics.range24h') }}</n-radio-button>
-          <n-radio-button value="today">{{ t('statistics.rangeToday') }}</n-radio-button>
-          <n-radio-button value="7d">{{ t('statistics.range7d') }}</n-radio-button>
-          <n-radio-button value="30d">{{ t('statistics.range30d') }}</n-radio-button>
-          <n-radio-button v-if="isAdmin" value="custom">{{ t('statistics.rangeCustom') }}</n-radio-button>
-        </n-radio-group>
-        <div v-else class="range-pills">
-          <n-button
-            v-for="opt in visibleRangeOptions"
-            :key="opt.value"
-            size="small"
-            :type="range === opt.value ? 'primary' : 'default'"
-            :secondary="range !== opt.value"
-            @click="setRange(opt.value)"
-          >
-            {{ opt.label }}
-          </n-button>
-        </div>
-        <n-date-picker
-          v-if="range === 'custom' && !isMobile"
-          v-model:value="customRange"
-          type="datetimerange"
-          format="yyyy-MM-dd HH:mm:ss"
-          class="filter-datetime"
-          clearable
-          @update:value="onRangeChange"
+        <RangeFilter
+          :range="range"
+          :custom-range="customRange"
+          :is-admin="isAdmin"
+          @update:range="range = $event"
+          @update:custom-range="customRange = $event"
+          @change="load"
         />
-        <template v-else-if="range === 'custom' && isMobile">
-          <n-date-picker
-            v-model:value="customStart"
-            type="datetime"
-            format="yyyy-MM-dd HH:mm:ss"
-            class="filter-datetime"
-            :placeholder="t('statistics.startTime')"
-            clearable
-            @update:value="onCustomPart"
-          />
-          <n-date-picker
-            v-model:value="customEnd"
-            type="datetime"
-            format="yyyy-MM-dd HH:mm:ss"
-            class="filter-datetime"
-            :placeholder="t('statistics.endTime')"
-            clearable
-            @update:value="onCustomPart"
-          />
-        </template>
         <n-select
           v-if="isAdmin"
           v-model:value="selectedAid"
@@ -68,117 +29,52 @@
           :placeholder="t('statistics.allAccounts')"
           clearable
           class="filter-aid"
-        />
-        <n-select
-          v-if="isAdmin"
-          v-model:value="selectedDomains"
-          :options="domainOptions"
-          :placeholder="t('statistics.allDomains')"
-          multiple
-          clearable
-          filterable
-          class="filter-domains"
+          @update:value="load"
         />
       </div>
-
-      <n-alert v-if="errors.length" type="warning" :show-icon="false" class="mb-4">
-        {{ t('statistics.partialFail', { errors: errors.join(', ') }) }}
-      </n-alert>
-
-      <n-grid class="stat-grid" cols="2 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
-      <n-grid-item v-reveal class="d1">
-        <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
-      </n-grid-item>
-      <n-grid-item v-reveal class="d2">
-        <StatCard :label="bwLabel" :value="summary.bwText" tone="info" :icon="SpeedometerOutline" />
-      </n-grid-item>
-      <n-grid-item v-reveal class="d3">
-        <StatCard :label="t('statistics.bsFluxLabel')" :value="summary.bsFluxText" tone="success" :icon="CloudDownloadOutline" />
-      </n-grid-item>
-      <n-grid-item v-reveal class="d4">
-        <StatCard :label="t('statistics.reqLabel')" :value="summary.reqText" tone="warning" :icon="BarChartOutline" />
-      </n-grid-item>
-      <n-grid-item v-reveal class="d5">
-        <StatCard :label="t('statistics.hitRateLabel')" :value="summary.hitRateText" tone="primary" :icon="FlashOutline" />
-      </n-grid-item>
-      </n-grid>
     </n-card>
 
-    <n-grid cols="1 m:2" responsive="screen" :x-gap="14" :y-gap="14">
-      <n-grid-item>
-        <n-card :title="t('statistics.fluxTrend')" size="small" :bordered="false">
-          <div ref="fluxRef" class="chart"></div>
-        </n-card>
-      </n-grid-item>
-      <n-grid-item>
-        <n-card :title="t('statistics.bwTrend')" size="small" :bordered="false">
-          <div ref="bwRef" class="chart"></div>
-        </n-card>
-      </n-grid-item>
-      <n-grid-item>
-        <n-card :title="t('statistics.reqTrend')" size="small" :bordered="false">
-          <div ref="reqRef" class="chart"></div>
-        </n-card>
-      </n-grid-item>
-      <n-grid-item>
-        <n-card :title="t('statistics.statusDist')" size="small" :bordered="false">
-          <div ref="statusRef" class="chart"></div>
-        </n-card>
-      </n-grid-item>
-    </n-grid>
+    <n-alert v-if="errors.length" type="warning" :show-icon="false">
+      {{ t('statistics.partialFail', { errors: errors.join('; ') }) }}
+    </n-alert>
+
+    <div class="provider-grid">
+      <ProviderCard
+        v-for="p in providers"
+        :key="p.route"
+        :data="p"
+        :loading="busy"
+        @detail="goDetail"
+      />
+    </div>
+
+    <p class="data-note">{{ t('statistics.dataNote', { time: dataUntil || '—' }) }}</p>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { CloudOutline, RefreshOutline, SpeedometerOutline, CloudDownloadOutline, BarChartOutline, FlashOutline } from '@vicons/ionicons5';
-import * as echarts from 'echarts/core';
-import { LineChart, BarChart } from 'echarts/charts';
-import { GridComponent, TooltipComponent, LegendComponent } from 'echarts/components';
-import { CanvasRenderer } from 'echarts/renderers';
+import { useRouter } from 'vue-router';
+import { NAlert, NButton, NCard, NIcon, NSelect } from 'naive-ui';
+import { RefreshOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
-import { useResponsive } from '../composables/useResponsive';
-import { useThemeMode } from '../composables/useThemeMode';
 import PageHeader from '../components/PageHeader.vue';
-import StatCard from '../components/StatCard.vue';
+import RangeFilter from '../components/statistics/RangeFilter.vue';
+import ProviderCard, { type ProviderCardData } from '../components/statistics/ProviderCard.vue';
 
-echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
-
-// 统一走 useResponsive（内部 passive 监听）；本页仅额外保留图表 resize（rAF 合并）
-const { isMobile } = useResponsive();
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const { t } = useI18n();
-const { isDark } = useThemeMode();
-const loadBusy = ref(false);
+const router = useRouter();
+const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+
 const range = ref('24h');
-const rangeOptions = computed(() => [
-  { label: t('statistics.range24h'), value: '24h' },
-  { label: t('statistics.rangeToday'), value: 'today' },
-  { label: t('statistics.range7d'), value: '7d' },
-  { label: t('statistics.range30d'), value: '30d' },
-  { label: t('statistics.rangeCustom'), value: 'custom' },
-]);
 const customRange = ref<[number, number] | null>(null);
-const visibleRangeOptions = computed(() => (isAdmin.value ? rangeOptions.value : rangeOptions.value.filter((o) => o.value !== 'custom')));
-const customStart = ref<number | null>(null);
-const customEnd = ref<number | null>(null);
-const accountOptions = ref<{ label: string; value: number }[]>([]);
-const domainOptions = ref<{ label: string; value: string }[]>([]);
 const selectedAid = ref<number | null>(null);
-const selectedDomains = ref<string[]>([]);
+const accountOptions = ref<Array<{ label: string; value: number }>>([]);
+const providers = ref<ProviderCardData[]>([]);
+const busy = ref(false);
 const errors = ref<string[]>([]);
-
-const fluxRef = ref<HTMLDivElement>();
-const bwRef = ref<HTMLDivElement>();
-const reqRef = ref<HTMLDivElement>();
-const statusRef = ref<HTMLDivElement>();
-const charts: echarts.ECharts[] = [];
-
-const resource = ref<any>(null);
-const visits = ref<any>(null);
-const status = ref<any>(null);
-const labels = ref<string[]>([]);
+const dataUntil = ref('');
 
 function pad(n: number) {
   return n < 10 ? `0${n}` : String(n);
@@ -189,317 +85,93 @@ function fmt(d: Date) {
 
 function computeRange(): { startTime: string; endTime: string } {
   const now = new Date();
-  const t = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   if (range.value === 'today') {
-    const tomorrow = new Date(t.getTime() + 86400000);
-    return { startTime: fmt(t), endTime: fmt(tomorrow) };
+    return { startTime: fmt(t0), endTime: fmt(new Date(t0.getTime() + 86400000)) };
   }
   if (range.value === '7d') {
-    const start = new Date(t.getTime() - 6 * 86400000);
-    const end = new Date(t.getTime() + 86400000);
-    return { startTime: fmt(start), endTime: fmt(end) };
+    return { startTime: fmt(new Date(t0.getTime() - 6 * 86400000)), endTime: fmt(new Date(t0.getTime() + 86400000)) };
   }
   if (range.value === '30d') {
-    const start = new Date(t.getTime() - 29 * 86400000);
-    const end = new Date(t.getTime() + 86400000);
-    return { startTime: fmt(start), endTime: fmt(end) };
+    return { startTime: fmt(new Date(t0.getTime() - 29 * 86400000)), endTime: fmt(new Date(t0.getTime() + 86400000)) };
   }
-  if (range.value === 'custom' && customRange.value && customRange.value.length === 2) {
+  if (range.value === 'custom' && customRange.value?.length === 2) {
     return { startTime: fmt(new Date(customRange.value[0])), endTime: fmt(new Date(customRange.value[1])) };
   }
   return { startTime: fmt(new Date(now.getTime() - 86400000)), endTime: fmt(now) };
 }
 
-function formatBytes(bytes: number): string {
-  if (!bytes || bytes <= 0) return '0 B';
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let i = 0;
-  let v = bytes;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v >= 100 ? 0 : 2)} ${units[i]}`;
-}
-
-function formatBitRate(bps: number): string {
-  if (!bps || bps <= 0) return '0 Mbps';
-  const mbps = bps / 1024 / 1024;
-  return mbps >= 100 ? `${mbps.toFixed(0)} Mbps` : `${mbps.toFixed(2)} Mbps`;
-}
-
-// 天粒度的带宽是日均值，卡片文案随之变化，避免与「峰值」混淆
-const bwLabel = computed(() =>
-  resource.value?.resource_summary?.bw_interval === 'day' ? t('statistics.bwDailyLabel') : t('statistics.bwLabel'),
-);
-
-const summary = computed(() => {
-  const rs = resource.value?.resource_summary || {};
-  const vs = visits.value?.visits_summary || {};
-  const flux = Number(rs.flux || 0);
-  const hitFlux = Number(vs.hit_flux || 0);
-  // 分母用响应下行流量（与命中流量同源）；旧缓存无该字段时回退总流量
-  const hitDenom = Number(rs.out_flux || 0) || flux;
-  const hitRate = hitDenom > 0 ? (hitFlux / hitDenom) * 100 : 0;
-  return {
-    fluxText: formatBytes(flux),
-    bwText: formatBitRate(Number(rs.bw || 0)),
-    bsFluxText: formatBytes(Number(rs.bs_flux || 0)),
-    reqText: String(Number(vs.req_num || 0)).replace(/\B(?=(\d{3})+(?!\d))/g, ','),
-    hitRateText: `${hitRate.toFixed(1)}%`,
-  };
-});
-
-// 设计令牌缓存：getComputedStyle 是同步强制样式读取，避免每次重绘图表都反复读取（原为 24 次/渲染）
-let tokenCache: Record<string, string> | null = null;
-function readTokens(): Record<string, string> {
-  const s = getComputedStyle(document.documentElement);
-  const g = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
-  return {
-    primary: g('--app-primary', '#0a7a5c'),
-    text: g('--app-text-2', '#888'),
-    faint: g('--app-text-3', '#aaa'),
-    line: g('--app-divider', 'rgba(0,0,0,0.1)'),
-    surface: g('--app-surface', '#fff'),
-    textMain: g('--app-text', '#222'),
-  };
-}
-function tokens(): Record<string, string> {
-  if (!tokenCache) tokenCache = readTokens();
-  return tokenCache;
-}
-// 主题切换时令牌已变化，需失效缓存后重读
-function clearTokenCache(): void {
-  tokenCache = null;
-}
-
-// 调色板跟随设计令牌：信号青为主，其余为辅，状态色仅用于区分系列
-function chartPalette(): string[] {
-  return [tokens().primary, '#38bdf8', '#fbbf24', '#fb7185', '#a78bfa', '#34d399'];
-}
-
-function baseOption(): any {
-  const { text, faint, line, surface, textMain } = tokens();
-  return {
-    color: chartPalette(),
-    textStyle: { fontFamily: "'IBM Plex Mono', monospace" },
-    grid: { left: 50, right: 20, top: 40, bottom: 30 },
-    tooltip: {
-      trigger: 'axis',
-      backgroundColor: surface,
-      borderColor: line,
-      textStyle: { color: textMain, fontSize: 12 },
-    },
-    legend: { top: 0, textStyle: { color: text } },
-    xAxis: {
-      type: 'category',
-      data: labels.value,
-      boundaryGap: false,
-      axisLine: { lineStyle: { color: line } },
-      axisTick: { show: false },
-      axisLabel: { color: faint },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: faint },
-      splitLine: { lineStyle: { type: 'dashed', color: line, opacity: 0.6 } },
-    },
-  };
-}
-
-function renderChart(el: HTMLDivElement | undefined, option: any, seriesData: any) {
-  if (!el) return;
-  let chart = echarts.getInstanceByDom(el);
-  if (!chart) {
-    chart = echarts.init(el);
-    charts.push(chart);
-  }
-  // 增量更新替代全量替换，避免每次 load/主题切换整体重绘
-  chart.setOption(option, { notMerge: false, lazyUpdate: true });
-  void seriesData;
-}
-
-function renderCharts() {
-  const x = labels.value;
-  const rs = resource.value?.resource_detail || {};
-  const vs = visits.value?.visits_detail || {};
-  const st = status.value || {};
-
-  renderChart(fluxRef.value, {
-    ...baseOption(),
-    series: [
-      { name: t('statistics.seriesFlux'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: rs.flux || [], tooltip: { valueFormatter: (v: any) => formatBytes(Number(v)) } },
-      { name: t('statistics.seriesBsFlux'), type: 'line', smooth: true, data: rs.bs_flux || [] },
-    ],
-  }, null);
-
-  renderChart(bwRef.value, {
-    ...baseOption(),
-    series: [
-      { name: t('statistics.seriesBw'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: (rs.bw || []).map((v: number) => Math.round((v || 0) / 1024 / 1024)) },
-      { name: t('statistics.seriesBsBw'), type: 'line', smooth: true, data: (rs.bs_bw || []).map((v: number) => Math.round((v || 0) / 1024 / 1024)) },
-    ],
-  }, null);
-
-  // EO 不提供请求命中次数，全 0 时隐藏该曲线，避免看起来「命中数恒为 0」
-  const hitNum = vs.hit_num || [];
-  const hitSeries = hitNum.some((v: number) => Number(v) > 0)
-    ? [{ name: t('statistics.seriesHit'), type: 'line', smooth: true, data: hitNum }]
-    : [];
-  renderChart(reqRef.value, {
-    ...baseOption(),
-    series: [
-      { name: t('statistics.seriesReq'), type: 'line', smooth: true, areaStyle: { opacity: 0.1 }, data: vs.req_num || [] },
-      ...hitSeries,
-      { name: t('statistics.seriesBsReq'), type: 'line', smooth: true, data: vs.bs_num || [] },
-    ],
-  }, null);
-
-  const codeNames = ['2xx', '3xx', '4xx', '5xx'];
-  renderChart(statusRef.value, {
-    ...baseOption(),
-    legend: { top: 0 },
-    series: codeNames.map((name, i) => ({
-      name,
-      type: 'bar',
-      stack: 'total',
-      data: st.status_detail?.[i] || [],
-    })),
-  }, null);
-  void x;
-}
-
 async function load() {
-  loadBusy.value = true;
+  busy.value = true;
   try {
     const { startTime, endTime } = computeRange();
-    const res = await api<any>('GET', '/cdn/statistics', {
+    const res = await api<any>('GET', '/cdn/statistics/overview', {
       startTime,
       endTime,
-      type: 'All',
-      domains: selectedDomains.value.length ? selectedDomains.value.join(',') : undefined,
       aid: selectedAid.value || undefined,
     });
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
-    const data = res.data || {};
-    labels.value = data.labels || [];
-    resource.value = data.resource || null;
-    visits.value = data.visits || null;
-    status.value = data.status || null;
-    errors.value = (data._errors || []).map((e: string) => String(e));
-    await nextTick();
-    try {
-      renderCharts();
-    } catch (chartErr: any) {
-      // 图表渲染失败不应清空已获取的统计数据
-      console.error('[statistics] 图表渲染失败:', chartErr?.message || chartErr);
-    }
+    providers.value = res.data?.providers || [];
+    dataUntil.value = res.data?.dataUntil || '';
+    errors.value = providers.value
+      .filter((p) => p.status === 'error' || p.status === 'timeout' || p.status === 'partial')
+      .map((p) => `${p.name}: ${p.error || t(`statistics.status.${p.status}`)}`);
   } catch (e: any) {
     errors.value = [e?.message || String(e)];
   } finally {
-    loadBusy.value = false;
+    busy.value = false;
   }
-}
-
-function onRangeChange() {
-  load();
-}
-
-function setRange(value: string) {
-  range.value = value;
-  load();
-}
-
-function onCustomPart() {
-  if (customStart.value != null && customEnd.value != null) {
-    customRange.value = [customStart.value, customEnd.value];
-  } else {
-    customRange.value = null;
-  }
-  load();
 }
 
 async function loadOptions() {
-  const [a, d] = await Promise.all([
-    api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] })),
-    api<any>('GET', '/cdn/domains').catch(() => ({ code: -1, data: [] })),
-  ]);
-  accountOptions.value = (a.data || []).map((x: any) => ({ label: `${x.name}（${x.typename || x.type}）`, value: x.id }));
-  domainOptions.value = (d.data || []).map((x: any) => ({ label: x.name, value: x.name }));
+  if (!isAdmin.value) return;
+  const res = await api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] }));
+  accountOptions.value = (res.data || []).map((x: any) => ({
+    label: `${x.name}（${x.typename || x.type}）`,
+    value: x.id,
+  }));
 }
 
-// 主题切换时按新令牌重绘图表
-watch(isDark, () => {
-  clearTokenCache();
-  renderCharts();
-});
-
-let resizeRaf = 0;
-function handleResize() {
-  // 用 rAF 合并连续的 resize 事件，避免每次事件都重绘 4 个 echarts
-  if (resizeRaf) return;
-  resizeRaf = requestAnimationFrame(() => {
-    resizeRaf = 0;
-    charts.forEach((c) => c.resize());
-  });
+function goDetail(route: string) {
+  router.push(`/statistics/${route}`);
 }
 
 onMounted(() => {
   loadOptions();
   load();
-  window.addEventListener('resize', handleResize);
-});
-onBeforeUnmount(() => {
-  if (resizeRaf) cancelAnimationFrame(resizeRaf);
-  window.removeEventListener('resize', handleResize);
-  charts.forEach((c) => c.dispose());
 });
 </script>
 
 <style scoped>
-.chart {
-  width: 100%;
-  height: 280px;
-}
-@media (max-width: 767px) {
-  .chart {
-    height: 210px;
-  }
-}
 .filters {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px;
-  margin-bottom: 16px;
-}
-.filter-datetime {
-  width: 340px;
 }
 .filter-aid {
   width: 200px;
 }
-.filter-domains {
-  width: 260px;
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 16px;
 }
-.filter-range {
-  max-width: 100%;
+.data-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--app-text-3);
 }
-.range-pills {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  width: 100%;
-}
-.range-pills :deep(.n-button) {
-  flex: 1 1 auto;
-  min-width: 76px;
+.mb-3 {
+  margin-bottom: 12px;
 }
 @media (max-width: 767px) {
-  .filter-datetime,
-  .filter-aid,
-  .filter-domains {
+  .filter-aid {
     width: 100%;
+  }
+  .provider-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 }
 </style>

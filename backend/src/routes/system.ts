@@ -5,6 +5,8 @@ import { configGet, configSet, loadConfig } from '../config.js';
 import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook, sendQqbot } from '../lib/monitor/msgNotice.js';
 import { refreshAllStatCache, clearStatCache } from '../lib/cdn/statistics/cacheService.js';
+import { clearOverviewCache } from '../lib/cdn/statistics/overview.js';
+import { clearDetailCache } from '../lib/cdn/statistics/detail/cache.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
 import { runGuarded } from '../lib/scheduler/guards.js';
@@ -100,6 +102,8 @@ export default async function systemRoutes(app: FastifyInstance) {
   // 清空 CDN 数据统计缓存
   app.post('/api/system/stat-cache-clear', auth, async () => {
     const n = await clearStatCache();
+    clearOverviewCache();
+    clearDetailCache();
     return { code: 0, msg: `已清空统计缓存数据（${n} 条）` };
   });
 
