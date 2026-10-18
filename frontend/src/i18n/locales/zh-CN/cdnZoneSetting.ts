@@ -36,6 +36,7 @@ export default {
     ovNs: 'NS 服务器',
     ovNsEmpty: '暂无 NS 信息',
     ovVerify: '验证归属',
+    ovVerifiedBadge: '已验证站点归属',
     ovVerified: '验证已提交',
     ovPause: '暂停站点',
     ovResume: '启用站点',

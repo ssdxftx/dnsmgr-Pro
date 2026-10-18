@@ -36,6 +36,7 @@ export default {
     ovNs: 'Nameservers',
     ovNsEmpty: 'No nameserver info',
     ovVerify: 'Verify ownership',
+    ovVerifiedBadge: 'Ownership verified',
     ovVerified: 'Verification submitted',
     ovPause: 'Pause site',
     ovResume: 'Resume site',

@@ -93,7 +93,7 @@
       <template #footer>
         <n-space justify="space-between" class="cert-actions" style="width:100%">
           <n-button @click="addStep--">{{ t('cdnDomain.prev') }}</n-button>
-          <n-button type="primary" @click="nextAddStep">{{ t('cdnDomain.next') }}</n-button>
+          <n-button type="primary" :loading="domainChecking" @click="nextAddStep">{{ t('cdnDomain.next') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -117,12 +117,30 @@
           </n-radio-group>
         </n-form-item>
         <n-form-item v-if="addFlow.origin.ports" :label="t('cdnDomain.originPort')">
-          <n-space align="center">
-            <span class="port-label">HTTP</span>
-            <n-input-number v-model:value="form.http_port" :min="1" :max="65535" style="width:110px" placeholder="80" />
-            <span class="port-label">HTTPS</span>
-            <n-input-number v-model:value="form.https_port" :min="1" :max="65535" style="width:110px" placeholder="443" />
-          </n-space>
+          <div class="port-grid">
+            <label class="port-field">
+              <span class="port-field__label">HTTP</span>
+              <n-input-number
+                v-model:value="form.http_port"
+                :min="1"
+                :max="65535"
+                :show-button="false"
+                placeholder="80"
+                class="port-field__input"
+              />
+            </label>
+            <label class="port-field">
+              <span class="port-field__label">HTTPS</span>
+              <n-input-number
+                v-model:value="form.https_port"
+                :min="1"
+                :max="65535"
+                :show-button="false"
+                placeholder="443"
+                class="port-field__input"
+              />
+            </label>
+          </div>
         </n-form-item>
         <n-form-item v-if="addFlow.origin.host" :label="t('cdnDomain.originHost')">
           <n-space vertical style="width:100%">
@@ -526,6 +544,7 @@ const serviceAreaOptions = computed(() => [
 const showAdd = ref(false);
 const showSync = ref(false);
 const saveBusy = ref(false);
+const domainChecking = ref(false);
 const syncBusy = ref(false);
 const syncAid = ref<number | null>(null);
 const syncDid = ref<number>(0);
@@ -546,7 +565,7 @@ const form = reactive<any>({
   origin_protocol: 'follow',
   http_port: 80,
   https_port: 443,
-  origin_host_mode: 'origin',
+  origin_host_mode: 'accelerate',
   origin_host_custom: '',
   cert_mode: 'none',
   cert_choice: '',
@@ -1046,7 +1065,7 @@ function openAdd() {
     origin_protocol: 'follow',
     http_port: 80,
     https_port: 443,
-    origin_host_mode: 'origin',
+    origin_host_mode: 'accelerate',
     origin_host_custom: '',
     cert_mode: 'none',
     cert_choice: '',
@@ -1063,7 +1082,32 @@ function openAdd() {
   showAdd.value = true;
 }
 
-function nextAddStep() {
+/** 返回 true 表示已存在（调用方应阻止下一步） */
+async function checkDomainExists(name: string): Promise<boolean> {
+  if (!name) return false;
+  domainChecking.value = true;
+  try {
+    const res = await api<any>('GET', `/cdn/accounts/${form.aid}/domains/exists`, { name });
+    if (res.code !== 0) {
+      // 检测失败不阻断接入，仅提示
+      message.warning(t('cdnDomain.domainCheckFailed', { msg: res.msg || '' }), { duration: 6000 });
+      return false;
+    }
+    if (!res.data?.exists) return false;
+    const zone = res.data.zoneId || form.zone_name || '';
+    if (res.data.source === 'local') {
+      message.warning(t('cdnDomain.domainExistsLocal', { zone: zone || '-' }));
+    } else {
+      message.warning(t('cdnDomain.domainExistsCloud', { zone: zone || form.zone_name || '-' }));
+    }
+    return true;
+  } finally {
+    domainChecking.value = false;
+  }
+}
+
+async function nextAddStep() {
+  if (domainChecking.value) return;
   if (stepKey.value === 'account') {
     if (!form.aid) return message.warning(t('cdnDomain.pleaseSelectAccount'));
     if (addFlow.value.zone.needed && !form.zone_id) return message.warning(t('cdnDomain.pleaseSelectZone', { label: addFlow.value.zone.label }));
@@ -1077,6 +1121,7 @@ function nextAddStep() {
       if (!form.name) return message.warning(t('cdnDomain.pleaseInputSub'));
     } else if (!form.name) return message.warning(t('cdnDomain.pleaseInputDomain'));
     if (!form.did) return message.warning(t('cdnDomain.noLinkedDomain'));
+    if (await checkDomainExists(form.name)) return;
   } else if (stepKey.value === 'origin') {
     if (!form.origin) return message.warning(t('cdnDomain.pleaseInputOrigin'));
     if (addFlow.value.origin.host && form.origin_host_mode === 'custom' && !form.origin_host_custom) return message.warning(t('cdnDomain.pleaseInputHost'));
@@ -1536,12 +1581,33 @@ onUnmounted(() => {
 .add-form {
   min-height: 200px;
 }
-.port-label {
-  font-size: 13px;
+.port-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+  max-width: 360px;
+}
+.port-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.port-field__label {
+  font-size: 12px;
+  line-height: 1;
   color: var(--app-text-3);
+}
+.port-field__input {
+  width: 100%;
 }
 
 @media (max-width: 768px) {
+  .port-grid {
+    max-width: none;
+    gap: 8px;
+  }
   .cert-actions {
     width: 100%;
     justify-content: space-between;

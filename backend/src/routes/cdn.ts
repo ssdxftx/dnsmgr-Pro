@@ -456,6 +456,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
         status: z.status,
         area: z.area,
         paused: z.paused === true,
+        identificationStatus: z.identificationStatus,
+        ownershipVerified: z.ownershipVerified === true,
         cloud: true,
       };
     });
@@ -1162,6 +1164,29 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const r = await provider.timingCacheData(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), metricNames);
     if (r === false) return { code: -1, msg: '获取统计失败，' + provider.getError() };
     return { code: 0, data: r };
+  });
+
+  // 加速域名重复检测：本地表精确匹配 + 云端精确定位（EO 走 getDomainCname）
+  app.get('/api/cdn/accounts/:aid/domains/exists', auth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const name = String(req.query?.name || '').trim().toLowerCase();
+    if (!aid || !name) return { code: -1, msg: '参数不完整' };
+
+    // 1) 本项目已接入（跨站点，同一账户下域名唯一）
+    const local: any = await queryOne(`SELECT id, name, zone_id FROM ${table('cdn_domain')} WHERE aid = ? AND name = ? LIMIT 1`, [aid, name]);
+    if (local) {
+      return { code: 0, data: { exists: true, source: 'local', zoneId: local.zone_id || '' } };
+    }
+
+    // 2) 云端已存在：不传 zoneId，让 provider 自行按域名定位站点，可发现同账户其他站点
+    const provider: any = await cdnForZone(aid, null);
+    if (provider && typeof provider.getDomainCname === 'function') {
+      const cname = await provider.getDomainCname(name);
+      if (cname) return { code: 0, data: { exists: true, source: 'cloud', cname } };
+      const err = provider.getError?.() || '';
+      if (err) return { code: -1, msg: '云端检测失败：' + err };
+    }
+    return { code: 0, data: { exists: false } };
   });
 
   // 详情（域名级配置）

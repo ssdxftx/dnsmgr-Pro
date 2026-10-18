@@ -22,7 +22,11 @@
               <span class="zone-status-strip__sub">{{ zoneId }}</span>
             </div>
             <div class="zone-status-strip__actions">
-              <n-button size="small" :loading="!!busy['verify']" :disabled="!!busy['verify']" @click="run('verify', verifyOwnership)">{{ t('cdnZoneSetting.ovVerify') }}</n-button>
+              <n-tag v-if="zoneInfo.ownershipVerified" type="success" :bordered="false" size="medium" class="ov-verified">
+                <n-icon :component="CheckmarkCircleOutline" size="14" />
+                {{ t('cdnZoneSetting.ovVerifiedBadge') }}
+              </n-tag>
+              <n-button v-else size="small" :loading="!!busy['verify']" :disabled="!!busy['verify']" @click="run('verify', verifyOwnership)">{{ t('cdnZoneSetting.ovVerify') }}</n-button>
               <n-button size="small" :type="zoneInfo.paused ? 'primary' : 'warning'" :loading="!!busy['pause']" :disabled="!!busy['pause']" @click="run('pause', togglePause)">
                 {{ zoneInfo.paused ? t('cdnZoneSetting.ovResume') : t('cdnZoneSetting.ovPause') }}
               </n-button>
@@ -279,6 +283,7 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDialog, useMessage, NButton, NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
+import { CheckmarkCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
@@ -366,8 +371,10 @@ async function loadNs() {
 // ===================== 概览操作 =====================
 async function verifyOwnership() {
   const res = await api<any>('POST', `/cdn/accounts/${aid}/sites/verify`, { zoneId, domain: zoneInfo.value.zone_name || zoneInfo.value.name });
-  if (res.code === 0) message.success(t('cdnZoneSetting.ovVerified'));
-  else message.error(res.msg);
+  if (res.code === 0) {
+    message.success(t('cdnZoneSetting.ovVerified'));
+    await loadZoneInfo();
+  } else message.error(res.msg);
 }
 async function togglePause() {
   const res = await api<any>('POST', `/cdn/accounts/${aid}/sites/pause`, { zoneId, paused: !zoneInfo.value.paused });
@@ -980,3 +987,11 @@ onMounted(async () => {
   loadBusy.value = false;
 });
 </script>
+
+<style scoped>
+.ov-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+</style>

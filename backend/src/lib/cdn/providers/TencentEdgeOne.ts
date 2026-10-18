@@ -42,14 +42,29 @@ export class TencentEdgeOne implements CdnProvider {
   async getZones() {
     const zones = await this.listAllZones();
     if (zones === false) return [];
-    return zones.map((z: any) => ({
-      zoneId: z.ZoneId,
-      zoneName: z.ZoneName,
-      status: z.Status,
-      area: z.Area,
-      // DescribeZones 本身已返回 Paused，这里一并带出，避免调用方逐站再查一次（N+1）
-      paused: z.Paused === true,
-    }));
+
+    // 站点归属验证状态：一次拉全量后按 ZoneName 合并，避免逐站查询
+    const identMap = new Map<string, string>();
+    const idents = await this.send('DescribeIdentifications', { Limit: 1000 });
+    for (const it of idents?.Identifications || []) {
+      if (it?.ZoneName) identMap.set(String(it.ZoneName), String(it.Status || '').toLowerCase());
+    }
+
+    return zones.map((z: any) => {
+      const ident = identMap.get(String(z.ZoneName)) || '';
+      const status = String(z.Status || '').toLowerCase();
+      return {
+        zoneId: z.ZoneId,
+        zoneName: z.ZoneName,
+        status: z.Status,
+        area: z.Area,
+        // DescribeZones 本身已返回 Paused，这里一并带出，避免调用方逐站再查一次（N+1）
+        paused: z.Paused === true,
+        identificationStatus: ident,
+        // finished/verified 为已验证；active（NS 已生效）必然已验证
+        ownershipVerified: ident === 'finished' || ident === 'verified' || status === 'active',
+      };
+    });
   }
 
   // DescribeZones 单页上限 100 条，站点数超过 100 时必须翻页，否则列表截断、按域名定位失败
