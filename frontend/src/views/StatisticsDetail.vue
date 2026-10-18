@@ -35,7 +35,7 @@
           :placeholder="t('statistics.allAccounts')"
           clearable
           class="filter-aid"
-          @update:value="reload"
+          @update:value="onAccountChange"
         />
         <n-select
           v-if="isAdmin"
@@ -293,8 +293,21 @@ async function loadOptions() {
     api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] })),
     api<any>('GET', '/cdn/domains').catch(() => ({ code: -1, data: [] })),
   ]);
-  accountOptions.value = (a.data || []).map((x: any) => ({ label: `${x.name}（${x.typename || x.type}）`, value: x.id }));
-  domainOptions.value = (d.data || []).map((x: any) => ({ label: x.name, value: x.name }));
+  // 只保留当前服务商的账户，避免选到其他服务商后查询为空
+  accountOptions.value = (a.data || [])
+    .filter((x: any) => String(x.type) === routeKey)
+    .map((x: any) => ({ label: `${x.name}（${x.typename || x.type}）`, value: x.id }));
+  // 域名同样按服务商收敛；已选账户时再按 aid 收敛
+  domainOptions.value = (d.data || [])
+    .filter((x: any) => String(x.route) === routeKey)
+    .filter((x: any) => !selectedAid.value || Number(x.aid) === selectedAid.value)
+    .map((x: any) => ({ label: x.name, value: x.name }));
+}
+
+function onAccountChange() {
+  selectedDomains.value = [];
+  loadOptions();
+  reload();
 }
 
 watch(autoRefresh, (on) => {
