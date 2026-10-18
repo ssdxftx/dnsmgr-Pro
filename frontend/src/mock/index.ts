@@ -81,6 +81,12 @@ const CERT_ORDERS = [
 // 容灾概览（DmOverview）
 const DM_OVERVIEW = { run_count: 1286, run_time: '2026-10-10 12:00:00', run_state: 1, run_error: null, switch_count: 6, fail_count: 1 };
 
+const DM_TASKS = [
+  { id: 101, rr: 'www', domain: 'example.com', main_value: '1.1.1.1', backup_value: '2.2.2.2', type: 2, checktype: 1, frequency: 60, status: 0, active: 1, fail_count: 0, switch_count: 2, checktimestr: '2026-10-17 04:00:12', domain_id: 101 },
+  { id: 102, rr: 'api', domain: 'example.com', main_value: '3.3.3.3', backup_value: '4.4.4.4', type: 1, checktype: 2, frequency: 120, status: 1, active: 1, fail_count: 3, switch_count: 1, checktimestr: '2026-10-17 03:40:05', domain_id: 101 },
+  { id: 103, rr: 'img', domain: 'demo.org', main_value: '5.5.5.5', backup_value: '6.6.6.6', type: 3, checktype: 1, frequency: 300, status: 0, active: 0, fail_count: 0, switch_count: 0, checktimestr: '2026-10-16 22:10:00', domain_id: 102 },
+];
+
 // CDN 账户（CdnAccount）
 const CDN_ACCOUNTS = [
   { id: 1, type: 'tencent', name: '腾讯云 CDN' },
@@ -166,6 +172,15 @@ export function installMock() {
       if (path === '/api/records/search') return json(RECORDS);
       if (path === '/api/users') return json({ list: USERS, total: USERS.length });
       if (path === '/api/dmonitor/overview') return json(DM_OVERVIEW);
+      if (path === '/api/dmonitor/tasks') return json({ list: DM_TASKS, total: DM_TASKS.length });
+      {
+        const dmMatch = path.match(/^\/api\/dmonitor\/tasks\/(\d+)$/);
+        if (dmMatch) return json(DM_TASKS.find((x) => x.id === Number(dmMatch[1])) || DM_TASKS[0]);
+        const dmLogs = path.match(/^\/api\/dmonitor\/tasks\/(\d+)\/logs$/);
+        if (dmLogs) return json({ list: [], total: 0 });
+        const recLog = path.match(/^\/api\/domains\/(\d+)\/recordlog$/);
+        if (recLog) return json({ list: [], total: 0 });
+      }
       if (path === '/api/cdn/accounts') return json(CDN_ACCOUNTS);
       if (path === '/api/deploy/tasks') return json(DEPLOY_TASKS);
       if (path === '/api/schedule/tasks') return json({ list: SCHEDULE_TASKS, total: SCHEDULE_TASKS.length });

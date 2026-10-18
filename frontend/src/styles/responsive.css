@@ -216,3 +216,35 @@
     padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
   }
 }
+
+/* 移动端数字框：步进 32px 后 110px 宽只剩 22px 输入区，端口号会被裁 */
+@media (max-width: 767px) {
+  .port-input {
+    width: 130px !important;
+  }
+}
+
+/* 移动端 KPI 卡瘦身：175px 宽的卡里图标占 30px，隐去换取首屏可见列表 */
+@media (max-width: 767px) {
+  .tele-card {
+    padding: 10px 12px !important;
+  }
+  .tele-card__top {
+    display: none !important;
+  }
+  .n-checkbox {
+    min-width: 32px;
+  }
+  .n-base-selection {
+    min-height: 36px;
+  }
+  .m-card__actions .n-button {
+    min-width: 32px;
+  }
+  .n-tabs .n-tabs-tab {
+    scroll-snap-align: start;
+  }
+  .n-tabs .n-tabs-nav {
+    scroll-snap-type: x proximity;
+  }
+}
