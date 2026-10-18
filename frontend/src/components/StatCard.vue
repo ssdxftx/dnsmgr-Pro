@@ -1,5 +1,5 @@
 <template>
-  <div class="stat-card">
+  <div class="stat-card" :class="`stat-card--${tone}`">
     <div v-if="icon" class="stat-card__icon" :class="`stat-card__icon--${tone}`">
       <n-icon size="24" :component="icon" />
     </div>

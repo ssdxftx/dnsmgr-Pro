@@ -294,3 +294,70 @@
     min-height: 36px;
   }
 }
+
+/* 数据统计页的 StatCard 是桌面组件：153px 卡里正文只剩 51px，
+   34px 数值叠加 break-word 会把 Mbps 拆成三行，移动端改上下结构 */
+@media (max-width: 767px) {
+  .stat-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    min-height: 0;
+    padding: 12px 14px;
+    overflow: hidden;
+  }
+  .stat-card__icon {
+    display: none !important;
+  }
+  .stat-card__label {
+    font-size: 12px;
+    line-height: 1.35;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stat-card__value {
+    font-size: clamp(17px, 5.2vw, 20px);
+    line-height: 1.25;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  .stat-card__value.is-text {
+    font-size: 15px;
+  }
+  .stat-card__suffix {
+    font-size: 11px;
+    margin-left: 3px;
+  }
+  /* 图标隐藏后用左缘色条保留 tone 语义 */
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: var(--app-primary);
+  }
+  .stat-card--success::after {
+    background: var(--app-success);
+  }
+  .stat-card--warning::after {
+    background: var(--app-warning);
+  }
+  .stat-card--error::after {
+    background: var(--app-error);
+  }
+  .stat-card--info::after {
+    background: #14b8a6;
+  }
+  /* 5 张卡：2 列 + 末卡跨列，避免第 5 张落单留空 */
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .stat-grid > div:nth-child(5) {
+    grid-column: 1 / -1 !important;
+  }
+}

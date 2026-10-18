@@ -12,7 +12,7 @@
 
 ## 新增页面必须遵守
 
-1. **KPI 网格**：`<n-grid class="telemetry-row" ...>`。3 卡自动单行、4 卡自动 2×2；漏类名会退回默认列数。`npm run check:mobile` 会拦截。
+1. **KPI 网格**：`TelemetryCard` 用 `<n-grid class="telemetry-row" ...>`（3 卡单行、4 卡 2×2）；`StatCard` 用 `<n-grid class="stat-grid" ...>`（2 列 + 末卡跨列）。漏类名会退回默认列数，`npm run check:mobile` 会拦截。
 2. **列宽**：中文按 14px/字、英文 7px/字符 + 28px padding 估算，或给单元格 `white-space: nowrap`。差 1px 就会折行，把行高从 49px 撑到 70px。
 3. **移动卡片**：`columns` 里给 ID、创建/添加时间、备注、CNAME 这类「进去才需要」的字段加 `mobile: 'hide'`，单卡控制在 4 行内。
 4. **表单**：`label-placement="left"` 在移动端已统一转为上标签，新增表单无需额外处理。
@@ -34,6 +34,7 @@
 | 首条记录位置（390×844） | 445–652px，均在首屏内 |
 | 横向溢出 | 45 条路由均为 0 |
 | 首屏体积 | ≈318 KB gzip |
+| 统计页 StatCard | 移动端卡高 69px、末卡跨两列、图表 210px |
 
 改动后若任一指标偏离 ±5%，需复查 `responsive.css` 与对应页面。
 
@@ -47,7 +48,7 @@ npx vue-tsc --noEmit
 npm run build
 ```
 
-`check:mobile` 为静态检查（无需浏览器），覆盖 `telemetry-row` 类名与旧版单列写法。布局数值仍需在 390×844 下人工或 Playwright 复核。
+`check:mobile` 为静态检查（无需浏览器），覆盖 `telemetry-row` / `stat-grid` 类名与旧版单列写法。布局数值仍需在 390×844 下人工或 Playwright 复核。
 
 ## 已知边界
 

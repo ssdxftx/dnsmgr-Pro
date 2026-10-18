@@ -85,7 +85,7 @@
         {{ t('statistics.partialFail', { errors: errors.join(', ') }) }}
       </n-alert>
 
-      <n-grid cols="2 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
+      <n-grid class="stat-grid" cols="2 s:2 m:3" responsive="screen" :x-gap="14" :y-gap="14">
       <n-grid-item v-reveal class="d1">
         <StatCard :label="t('statistics.fluxLabel')" :value="summary.fluxText" tone="primary" :icon="CloudOutline" />
       </n-grid-item>
@@ -448,6 +448,11 @@ onBeforeUnmount(() => {
 .chart {
   width: 100%;
   height: 280px;
+}
+@media (max-width: 767px) {
+  .chart {
+    height: 210px;
+  }
 }
 .filters {
   display: flex;

@@ -2,7 +2,8 @@
 /**
  * 移动端约定的静态校验（无需浏览器）：
  * 1. 使用 TelemetryCard 的页面必须给 KPI 网格加 class="telemetry-row"
- * 2. 不再出现移动端单列的旧 KPI 写法 cols="1 ..."
+ * 2. 使用 StatCard 的页面必须给网格加 class="stat-grid"
+ * 3. 不再出现移动端单列的旧 KPI 写法 cols="1 ..."
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,6 +16,9 @@ for (const file of files) {
   const src = readFileSync(join(viewsDir, file), 'utf8');
   if (src.includes('TelemetryCard') && !src.includes('telemetry-row')) {
     problems.push(`${file}: 使用 TelemetryCard 但 KPI 网格缺少 class="telemetry-row"`);
+  }
+  if (src.includes('StatCard') && !src.includes('stat-grid')) {
+    problems.push(`${file}: 使用 StatCard 但网格缺少 class="stat-grid"`);
   }
   if (/cols="1 s:2 m:[34]"/.test(src)) {
     problems.push(`${file}: KPI 网格仍是移动端单列（cols="1 ..."）`);
