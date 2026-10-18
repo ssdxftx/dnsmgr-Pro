@@ -55,7 +55,7 @@
     </n-card>
 
     <!-- 接入域名：每步独立弹窗，下一步/上一步切换弹窗 -->
-    <n-modal :show="showAdd && addStep === 1" preset="card" :title="t('cdnDomain.addTitle1')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && stepKey === 'account'" preset="card" :title="t('cdnDomain.addTitle1')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.account')">
           <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
@@ -75,7 +75,7 @@
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 2" preset="card" :title="t('cdnDomain.addTitle2')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && stepKey === 'domain'" preset="card" :title="t('cdnDomain.addTitle2')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.accelDomain')">
           <n-input-group v-if="form.zone_name">
@@ -98,7 +98,7 @@
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 3" preset="card" :title="t('cdnDomain.addTitle3')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal :show="showAdd && stepKey === 'origin'" preset="card" :title="t('cdnDomain.addTitle3')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.origin')">
           <n-input v-model:value="form.origin" :placeholder="t('cdnDomain.originPlaceholder')" />
@@ -145,7 +145,40 @@
       </template>
     </n-modal>
 
-    <n-modal :show="showAdd && addStep === 4" preset="card" :title="t('cdnDomain.addTitle4')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
+    <n-modal
+      :show="showAdd && stepKey === 'scene'"
+      preset="card"
+      :title="t('cdnDomain.addTitleScene')"
+      class="modal-md"
+      :mask-closable="false"
+      @update:show="(v: boolean) => (showAdd = v)"
+    >
+      <n-alert type="info" :show-icon="true" class="cert-tip">{{ t('cdnDomain.sceneSkipHint') }}</n-alert>
+      <n-form label-placement="left" label-width="110" class="add-form">
+        <n-form-item :label="t('cdnDomain.sceneLabel')">
+          <n-space vertical style="width: 100%">
+            <n-space align="center" :wrap="true">
+              <n-button secondary type="primary" @click="showScenePicker = true">
+                {{ form.scene_id ? t('cdnDomain.sceneChange') : t('cdnDomain.scenePick') }}
+              </n-button>
+              <n-tag v-if="form.scene_id" type="success" :bordered="false">
+                {{ form.scene_label }}（{{ t(form.scene_source === 'official' ? 'cdnDomain.sceneOfficial' : 'cdnDomain.sceneProject') }}）
+              </n-tag>
+              <n-button v-if="form.scene_id" text type="error" @click="clearScene">{{ t('cdnDomain.sceneClear') }}</n-button>
+            </n-space>
+            <span v-if="form.scene_id" class="link-hint">{{ t('cdnDomain.sceneHostNote', { domain: form.name }) }}</span>
+          </n-space>
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="space-between" class="cert-actions" style="width: 100%">
+          <n-button @click="addStep--">{{ t('cdnDomain.prev') }}</n-button>
+          <n-button type="primary" @click="addStep++">{{ t('cdnDomain.next') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal :show="showAdd && stepKey === 'cert'" preset="card" :title="t('cdnDomain.addTitle4')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <div class="add-form">
         <n-form-item v-if="certModeOptions.length > 1" :label="t('cdnDomain.certSetting')" label-placement="left" label-width="110">
           <n-radio-group v-model:value="form.cert_mode">
@@ -173,6 +206,10 @@
         </n-space>
       </template>
     </n-modal>
+
+    <!-- 加速场景两级选择 -->
+    <RuleCreatePicker v-model:show="showScenePicker" mode="scene" @select="onSceneSource" />
+    <RuleTemplatePicker v-model:show="showSceneTemplate" :source="sceneSource" @select="onSceneTemplate" />
 
     <!-- 同步云端弹窗 -->
     <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" class="modal-sm" :mask-closable="false">
@@ -461,8 +498,13 @@ import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import EmptyState from '../components/EmptyState.vue';
+import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
+import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
+import { EO_PRESET_RULES } from '../lib/eoPresetRules';
+import { EO_RULE_TEMPLATES } from '../lib/eoRuleTemplates';
+import { fillHostValues } from '../lib/cdn/fillRuleHost';
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 const router = useRouter();
 const message = useMessage();
 const dialog = useDialog();
@@ -488,6 +530,9 @@ const syncBusy = ref(false);
 const syncAid = ref<number | null>(null);
 const syncDid = ref<number>(0);
 const addStep = ref(1);
+const showScenePicker = ref(false);
+const showSceneTemplate = ref(false);
+const sceneSource = ref<'official' | 'project'>('official');
 const form = reactive<any>({
   aid: null,
   did: null,
@@ -506,6 +551,9 @@ const form = reactive<any>({
   cert_mode: 'none',
   cert_choice: '',
   cert_choice_label: '',
+  scene_source: '' as '' | 'official' | 'project',
+  scene_id: '',
+  scene_label: '',
 });
 
 const checkedIds = ref<number[]>([]);
@@ -816,6 +864,17 @@ const addFlow = computed<any>(() => {
   );
 });
 
+type AddStepKey = 'account' | 'domain' | 'origin' | 'scene' | 'cert';
+
+// 步骤 key 数组：仅 EO 在回源与证书之间插入「选择加速场景」
+const stepKeys = computed<AddStepKey[]>(() => {
+  const keys: AddStepKey[] = ['account', 'domain', 'origin'];
+  if (addFlow.value.scene?.needed) keys.push('scene');
+  keys.push('cert');
+  return keys;
+});
+const stepKey = computed<AddStepKey | undefined>(() => stepKeys.value[addStep.value - 1]);
+
 // 按所选账户类型的厂商能力，动态给出证书配置选项
 const certModeOptions = computed(() => {
   const caps = providerCaps.value[accountTypes.value[form.aid]] || {};
@@ -954,6 +1013,7 @@ async function onAccountChange(aid: number) {
   form.zone_id = null;
   form.zone_name = '';
   zoneOptions.value = [];
+  clearScene();
   const type = accountTypes.value[aid];
   if (type === 'tencent_edgeone' || type === 'aliyun_esa') {
     const res = await api<any>('GET', `/cdn/accounts/${aid}/zones`);
@@ -965,6 +1025,7 @@ async function onAccountChange(aid: number) {
 function onZoneChange(zoneId: string) {
   const zone = zoneOptions.value.find((z: any) => z.value === zoneId);
   form.zone_name = zone?.name || '';
+  clearScene();
 }
 
 function goZones() {
@@ -990,7 +1051,12 @@ function openAdd() {
     cert_mode: 'none',
     cert_choice: '',
     cert_choice_label: '',
+    scene_source: '',
+    scene_id: '',
+    scene_label: '',
   });
+  showScenePicker.value = false;
+  showSceneTemplate.value = false;
   matchedDomain.value = '';
   zoneOptions.value = [];
   addStep.value = 1;
@@ -998,11 +1064,11 @@ function openAdd() {
 }
 
 function nextAddStep() {
-  if (addStep.value === 1) {
+  if (stepKey.value === 'account') {
     if (!form.aid) return message.warning(t('cdnDomain.pleaseSelectAccount'));
     if (addFlow.value.zone.needed && !form.zone_id) return message.warning(t('cdnDomain.pleaseSelectZone', { label: addFlow.value.zone.label }));
     if (addFlow.value.serviceArea.needed && !form.service_area) return message.warning(t('cdnDomain.pleaseSelectArea'));
-  } else if (addStep.value === 2) {
+  } else if (stepKey.value === 'domain') {
     if (form.zone_name) {
       const sub = String(form.sub || '').trim().toLowerCase();
       if (!sub) return message.warning(t('cdnDomain.pleaseInputSub'));
@@ -1011,11 +1077,65 @@ function nextAddStep() {
       if (!form.name) return message.warning(t('cdnDomain.pleaseInputSub'));
     } else if (!form.name) return message.warning(t('cdnDomain.pleaseInputDomain'));
     if (!form.did) return message.warning(t('cdnDomain.noLinkedDomain'));
-  } else if (addStep.value === 3) {
+  } else if (stepKey.value === 'origin') {
     if (!form.origin) return message.warning(t('cdnDomain.pleaseInputOrigin'));
     if (addFlow.value.origin.host && form.origin_host_mode === 'custom' && !form.origin_host_custom) return message.warning(t('cdnDomain.pleaseInputHost'));
   }
   addStep.value++;
+}
+
+function clearScene() {
+  form.scene_source = '';
+  form.scene_id = '';
+  form.scene_label = '';
+}
+
+function onSceneSource(source: RuleCreateSource) {
+  showScenePicker.value = false;
+  if (source === 'blank') {
+    clearScene();
+    return;
+  }
+  sceneSource.value = source;
+  showSceneTemplate.value = true;
+}
+
+function onSceneTemplate(id: string) {
+  showSceneTemplate.value = false;
+  const list = sceneSource.value === 'official' ? EO_PRESET_RULES : EO_RULE_TEMPLATES;
+  const tpl = list.find((x) => x.id === id);
+  if (!tpl) return;
+  const zh = String(locale.value || '').toLowerCase().startsWith('zh');
+  form.scene_source = sceneSource.value;
+  form.scene_id = tpl.id;
+  form.scene_label = zh ? tpl.label.zh : tpl.label.en;
+}
+
+/** 域名创建成功后应用场景模板：失败只提示，不回滚域名 */
+async function applySceneTemplate() {
+  if (!form.scene_id || !form.zone_id) return;
+  const list = form.scene_source === 'official' ? EO_PRESET_RULES : EO_RULE_TEMPLATES;
+  const tpl = list.find((x) => x.id === form.scene_id);
+  if (!tpl) return;
+  const zh = String(locale.value || '').toLowerCase().startsWith('zh');
+  const built = tpl.build(zh ? 'zh' : 'en');
+  const item = Array.isArray(built.Rules) && built.Rules.length ? built.Rules[0] : built;
+  const replaced = fillHostValues(item, form.name);
+  let ruleRes: any;
+  try {
+    ruleRes = await api<any>('POST', `/cdn/accounts/${form.aid}/rules`, {
+      zoneId: form.zone_id,
+      ruleName: item.RuleName,
+      status: item.Status ?? 'enable',
+      branches: item.Branches || [],
+      description: item.Description || [],
+    });
+  } catch (e: any) {
+    ruleRes = { code: -1, msg: e?.message || String(e) };
+  }
+  if (ruleRes.code === 0) message.success(t('cdnDomain.sceneApplied', { name: form.scene_label }));
+  else message.warning(t('cdnDomain.sceneApplyFailed', { msg: ruleRes.msg || '' }), { duration: 8000 });
+  if (replaced === 0) message.info(t('cdnDomain.sceneNoHost', { domain: form.name }));
 }
 
 function certChoiceLabel(choice: string): string {
@@ -1057,6 +1177,8 @@ async function submitAdd() {
     message.success(res.msg);
     showAdd.value = false;
     loadDomains();
+    // 应用加速场景（不阻断域名创建结果）
+    await applySceneTemplate();
     // 由本项目管理：新签发证书需要时间，打开证书管理实时查看执行阶段
     const cert = res.data?.cert;
     const domainId = Number(res.data?.id || 0);

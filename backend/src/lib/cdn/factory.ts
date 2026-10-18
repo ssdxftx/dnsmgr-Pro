@@ -26,6 +26,8 @@ export interface CdnAddFlow {
   serviceArea: { needed: boolean };
   origin: { protocol: boolean; ports: boolean; host: boolean; hostModes: string[] };
   cert: string[];
+  /** 是否需要「选择加速场景」步骤（仅 EO 规则引擎支持） */
+  scene?: { needed: boolean };
 }
 
 export interface CdnProviderMeta {
@@ -161,6 +163,7 @@ const ADD_FLOW_DEFAULT: CdnAddFlow = {
   serviceArea: { needed: true },
   origin: { protocol: true, ports: true, host: true, hostModes: ['accelerate', 'origin', 'custom'] },
   cert: [],
+  scene: { needed: false },
 };
 
 // 按厂商覆盖接入向导能力（以各 provider 的 updateOrigin / createDomain 实现为准）
@@ -169,6 +172,7 @@ const ADD_FLOW_OVERRIDES: Record<string, Partial<CdnAddFlow>> = {
     zone: { needed: true, label: '站点' },
     serviceArea: { needed: false },
     cert: ['freecert', 'certlink'],
+    scene: { needed: true },
   },
   aliyun_esa: {
     zone: { needed: true, label: '站点' },
@@ -188,6 +192,7 @@ for (const [type, meta] of Object.entries(cdnConfig)) {
     serviceArea: { ...ADD_FLOW_DEFAULT.serviceArea, ...(o.serviceArea || {}) },
     origin: { ...ADD_FLOW_DEFAULT.origin, ...(o.origin || {}) },
     cert: o.cert ?? ADD_FLOW_DEFAULT.cert,
+    scene: { ...ADD_FLOW_DEFAULT.scene!, ...(o.scene || {}) },
   };
 }
 

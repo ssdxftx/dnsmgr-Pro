@@ -2,12 +2,12 @@
   <n-modal
     :show="show"
     preset="card"
-    :title="t('cdnRules.createTitle')"
+    :title="isScene ? t('cdnDomain.sceneTitle') : t('cdnRules.createTitle')"
     style="width: min(940px, calc(100vw - 24px))"
     :mask-closable="true"
     @update:show="(v: boolean) => emit('update:show', v)"
   >
-    <div class="rcp-hint">{{ t('cdnRules.createHint') }}</div>
+    <div class="rcp-hint">{{ isScene ? t('cdnDomain.scenePickHint') : t('cdnRules.createHint') }}</div>
     <div class="rcp-grid">
       <button
         v-for="opt in options"
@@ -22,7 +22,7 @@
         </span>
         <span class="rcp-card__title">{{ opt.label }}</span>
         <span class="rcp-card__desc">{{ opt.desc }}</span>
-        <span class="rcp-card__meta">{{ opt.meta }}</span>
+        <span v-if="opt.meta" class="rcp-card__meta">{{ opt.meta }}</span>
       </button>
     </div>
   </n-modal>
@@ -40,13 +40,14 @@ import { EO_RULE_TEMPLATES } from '../../lib/eoRuleTemplates';
 
 export type RuleCreateSource = 'official' | 'project' | 'blank';
 
-defineProps<{ show: boolean }>();
+const props = withDefaults(defineProps<{ show: boolean; mode?: 'rule' | 'scene' }>(), { mode: 'rule' });
 const emit = defineEmits<{
   (e: 'update:show', v: boolean): void;
   (e: 'select', source: RuleCreateSource): void;
 }>();
 
 const { t } = useI18n();
+const isScene = computed(() => props.mode === 'scene');
 
 const options = computed<
   { key: RuleCreateSource; icon: any; label: string; desc: string; meta: string }[]
@@ -68,9 +69,9 @@ const options = computed<
   {
     key: 'blank',
     icon: AddCircleOutline,
-    label: t('cdnRules.createBlank'),
-    desc: t('cdnRules.createBlankDesc'),
-    meta: t('cdnRules.createFromScratch'),
+    label: isScene.value ? t('cdnDomain.sceneSkip') : t('cdnRules.createBlank'),
+    desc: isScene.value ? t('cdnDomain.sceneSkipDesc') : t('cdnRules.createBlankDesc'),
+    meta: isScene.value ? '' : t('cdnRules.createFromScratch'),
   },
 ]);
 </script>

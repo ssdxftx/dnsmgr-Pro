@@ -52,6 +52,36 @@ if (f.formatMetric(null, 'percent') !== '—') {
   failed++;
   console.error('formatMetric(null, percent) 应返回 —');
 }
+
+// 加速场景模板的域名填充
+const fillSource = readFileSync(join(root, 'src/lib/cdn/fillRuleHost.ts'), 'utf8');
+const fillCode = ts.transpileModule(fillSource, {
+  compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 },
+}).outputText;
+const fillModule = { exports: {} };
+new Function('module', 'exports', fillCode)(fillModule, fillModule.exports);
+const fill = fillModule.exports.fillHostValues;
+const hostIn = (condition) => ({ Condition: condition });
+const casesFill = [
+  [{ Condition: '${http.request.host} in []' }, 'a.com', "${http.request.host} in ['a.com']"],
+  [{ Condition: 'lower(${http.request.host}) not in []' }, 'a.com', "lower(${http.request.host}) not in ['a.com']"],
+];
+for (const [node, domain, expected] of casesFill) {
+  if (fill(node, domain) !== 1 || node.Condition !== expected) {
+    failed++;
+    console.error(`fillHostValues 输出异常：${node.Condition}，期望 ${expected}`);
+  }
+}
+const deep = { Branches: [{ SubRules: [{ Condition: '${http.request.host} in []' }] }] };
+if (fill(deep, 'a.com') !== 1 || deep.Branches[0].SubRules[0].Condition !== "${http.request.host} in ['a.com']") {
+  failed++;
+  console.error('fillHostValues 未替换深层子规则');
+}
+const plain = { Condition: 'true' };
+if (fill(plain, 'a.com') !== 0 || plain.Condition !== 'true') {
+  failed++;
+  console.error('fillHostValues 不应修改无 HOST 条件的节点');
+}
 if (failed) {
   console.error(`单位格式化校验失败：${failed} 项`);
   process.exit(1);
