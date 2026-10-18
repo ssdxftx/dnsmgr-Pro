@@ -93,7 +93,7 @@
               <n-input v-model:value="p.sub" :placeholder="t('userList.subPrefixPlaceholder')" />
               <n-date-picker v-model:value="p.expiretime" type="datetime" value-format="yyyy-MM-dd HH:mm:ss" clearable :placeholder="t('userList.expirePlaceholder')" style="width: 100%" />
             </div>
-            <n-button size="small" dashed @click="addPerm">{{ t('userList.addSubPermission') }}</n-button>
+            <n-button class="perm-add" size="small" dashed @click="addPerm">{{ t('userList.addSubPermission') }}</n-button>
           </div>
         </n-form-item>
       </n-form>

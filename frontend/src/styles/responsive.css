@@ -271,11 +271,26 @@
   .tele-card--error::after {
     background: var(--app-error);
   }
-  /* 3 张 KPI 卡时排满一行，避免第三张独占一行留下半屏空位 */
+  /* 3 张 KPI 卡时排满一行，避免第三张独占一行留下半屏空位。
+     新增 KPI 页面必须给 n-grid 加 class="telemetry-row"，否则此规则不生效 */
   .telemetry-row:has(> div:nth-child(3):last-child) {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
   .m-card__value .n-button {
     min-width: 32px;
+  }
+}
+
+/* 移动端剩余触控目标：开关轨道不变形，靠外层 padding 扩大热区 */
+@media (max-width: 767px) {
+  .n-switch {
+    padding: 7px 0;
+  }
+  .n-base-close {
+    width: 36px;
+    height: 36px;
+  }
+  .perm-add {
+    min-height: 36px;
   }
 }
