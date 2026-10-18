@@ -1,13 +1,14 @@
 {
   "name": "dnsmgr-frontend",
-  "version": "1.19.19",
+  "version": "1.19.20",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "check:i18n": "node scripts/check-i18n.mjs --strict"
+    "check:i18n": "node scripts/check-i18n.mjs --strict",
+    "check:mobile": "node scripts/check-mobile-static.mjs"
   },
   "dependencies": {
     "@vicons/ionicons5": "^0.13.0",
