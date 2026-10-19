@@ -125,7 +125,31 @@ const DNS_CHECK_TASKS = [
 ];
 
 // 操作日志（UserLog）：uid<=0 视为系统事件
-const USER_LOGS = Array.from({ length: 24 }, (_, i) => ({ id: i + 1, uid: i % 5 }));
+const AUDIT_MODULES = ['record', 'domain', 'cdn', 'cert', 'system'];
+const AUDIT_ACTIONS = ['record.create', 'record.update', 'domain.update', 'cdn.domain.create', 'cert.order.create', 'system.settings.update'];
+const USER_LOGS = Array.from({ length: 24 }, (_, i) => ({
+  id: i + 1,
+  uid: i % 5,
+  username: i % 5 ? `user${i % 5}` : '',
+  module: AUDIT_MODULES[i % AUDIT_MODULES.length],
+  action: AUDIT_ACTIONS[i % AUDIT_ACTIONS.length],
+  method: 'POST',
+  path: '/api/domains/101/records',
+  route: '/api/domains/:id/records',
+  target_type: 'record',
+  target_id: String(1000 + i),
+  target_name: `www${i}.example.com`,
+  summary: `新增 A 记录 www${i} → 1.1.1.${i}`,
+  detail: { params: { id: 101 }, body: { name: `www${i}`, type: 'A', value: `1.1.1.${i}` } },
+  changes: i % 3 ? [] : [{ field: '记录值', from: '1.1.1.1', to: `2.2.2.${i}` }],
+  result: i % 6 ? 1 : 0,
+  errmsg: i % 6 ? '' : '模拟失败：上游超时',
+  status: 200,
+  ip: `10.0.0.${i}`,
+  ua: 'Mozilla/5.0 (Mock)',
+  cost_ms: 12 + i,
+  addtime: `2026-10-${String(10 + (i % 9)).padStart(2, '0')} 12:0${i % 10}:00`,
+}));
 
 // 证书账户（CertAccount / DeployAccount 共用 /cert/accounts）
 const CERT_ACCOUNTS = [
@@ -336,6 +360,8 @@ export function installMock() {
       if (path === '/api/optimize/tasks') return json({ list: OPTIMIZE_TASKS, total: OPTIMIZE_TASKS.length });
       if (path === '/api/dns-check/tasks') return json(DNS_CHECK_TASKS);
       if (path === '/api/logs') return json({ list: USER_LOGS, total: USER_LOGS.length });
+      if (path === '/api/audit/logs') return json({ list: USER_LOGS, total: USER_LOGS.length, truncated: false });
+      if (path === '/api/audit/stats') return json({ total: USER_LOGS.length, today: 5, failed7d: 2, users30d: 3 });
       if (path === '/api/cert/accounts') return json(CERT_ACCOUNTS);
       if (path === '/api/cert/orders') {
         return new Response(

@@ -5,6 +5,8 @@ import { getDnsProvider } from '../lib/dns/factory.js';
 import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig } from '../lib/secret.js';
+import { audit } from '../lib/audit/context.js';
+import { diffFields } from '../lib/audit/mask.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -353,6 +355,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const { name, remark } = req.body || {};
     if (!name) return { code: -1, msg: '分类名不能为空' };
     await query(`INSERT INTO ${table('domain_category')} (name, remark, sort, addtime) VALUES (?, ?, 0, NOW())`, [name, remark || '']);
+    audit(req, { targetType: 'domain', targetName: String(name), summary: `新建域名分组 ${name}` });
     return { code: 0, msg: '添加分类成功' };
   });
 
@@ -381,12 +384,21 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = await query(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
       aid, domain, thirdid || '', recordcount || 0,
     ]).then((r: any) => r.insertId || 0);
+    audit(req, {
+      targetType: 'domain',
+      targetId: id,
+      targetName: String(domain),
+      summary: `接入域名 ${domain}`,
+      changes: [{ field: '域名', to: String(domain) }],
+      detail: { aid, domain, thirdid, recordcount },
+    });
     return { code: 0, msg: '添加域名成功', data: id };
   });
 
   app.delete('/api/domains/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
+    const row = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [id]);
     // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名
     await query(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
@@ -394,6 +406,12 @@ export default async function domainRoutes(app: FastifyInstance) {
     await query(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
     await query(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
     await query(`DELETE FROM ${table('dns_check_task')} WHERE did = ?`, [id]);
+    audit(req, {
+      targetType: 'domain',
+      targetId: id,
+      targetName: String(row?.name || ''),
+      summary: `删除域名 ${row?.name || '#' + id}`,
+    });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -401,7 +419,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.put('/api/domains/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number((req.params as any).id);
-    const row = await queryOne(`SELECT id FROM ${table('domain')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '域名不存在' };
     const b = req.body || {};
     const upd: Record<string, any> = {};
@@ -416,6 +434,21 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!cols.length) return { code: 0, msg: '无改动' };
     const fields = cols.map((k) => `${k} = ?`).join(', ');
     await query(`UPDATE ${table('domain')} SET ${fields} WHERE id = ?`, [...cols.map((k) => upd[k]), id]);
+    audit(req, {
+      targetType: 'domain',
+      targetId: id,
+      targetName: String(row.name || ''),
+      summary: `修改域名 ${row.name || '#' + id}`,
+      changes: diffFields(row, { ...row, ...upd }, {
+        remark: '备注',
+        cid: '分组',
+        is_hide: '隐藏',
+        is_sso: '单点登录',
+        is_notice: '到期提醒',
+        expiretime: '到期时间',
+      }),
+      detail: { fields: cols },
+    });
     return { code: 0, msg: '修改成功' };
   });
 
@@ -433,6 +466,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     await query(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);
     await query(`DELETE FROM ${table('sctask')} WHERE did IN (${ph})`, ids);
     await query(`DELETE FROM ${table('dns_check_task')} WHERE did IN (${ph})`, ids);
+    audit(req, {
+      targetType: 'domain',
+      summary: `批量删除 ${ids.length} 个域名`,
+      detail: { ids: ids.slice(0, 50) },
+    });
     return { code: 0, msg: '已删除 ' + ids.length + ' 个域名' };
   });
 
@@ -494,6 +532,12 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (m < 0) return { code: -1, msg: '无权限操作该子域名' };
     }
     const fullDomain = (name === '@' ? info.domain.name : `${name}.${info.domain.name}`).toLowerCase();
+    audit(req, {
+      targetType: 'record',
+      targetName: fullDomain,
+      summary: `检测解析 ${fullDomain}（${type}）`,
+      detail: { name, type, value: rawValue },
+    });
     const actual = await localResolve(fullDomain, type);
     if (!actual.length) {
       return { code: 0, data: { status: 'not_found', message: '未查询到该解析记录', actual: [] } };
@@ -538,6 +582,14 @@ export default async function domainRoutes(app: FastifyInstance) {
       await (provider as any).updateDomainRecordRemark(recordId, remark);
     }
     await bumpRecordCount(id, 1);
+    audit(req, {
+      targetType: 'record',
+      targetId: recordId,
+      targetName: `${name || '@'}.${info.domain.name}`,
+      summary: `新增 ${type} 记录 ${name || '@'} → ${value}`,
+      changes: [{ field: '记录', to: `${type} ${name || '@'} ${value}` }],
+      detail: { name, type, value, line, ttl, mx, weight, remark },
+    });
     return { code: 0, msg: '添加记录成功', data: recordId };
   });
 
@@ -561,12 +613,26 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (typeof provider.updateDomainRecordRemark === 'function') {
       const ok = await provider.updateDomainRecordRemark(recordId, remark);
       if (!ok) return { code: -1, msg: provider.getError() };
+      audit(req, {
+        targetType: 'record',
+        targetId: recordId,
+        targetName: info.domain.name,
+        summary: `修改解析备注 ${recordId}`,
+        changes: [{ field: '备注', to: String(remark ?? '') }],
+      });
       return { code: 0, msg: '备注修改成功' };
     }
     const cur = await provider.getDomainRecordInfo(recordId);
     if (!cur) return { code: -1, msg: provider.getError?.() || '获取记录信息失败' };
     const ok = await provider.updateDomainRecord(recordId, cur.Name, cur.Type, cur.Value, cur.Line, cur.TTL, cur.MX, cur.Weight, remark);
     if (!ok) return { code: -1, msg: provider.getError?.() || '备注修改失败' };
+    audit(req, {
+      targetType: 'record',
+      targetId: recordId,
+      targetName: `${cur.Name || '@'}.${info.domain.name}`,
+      summary: `修改解析备注 ${cur.Name || recordId}`,
+      changes: [{ field: '备注', from: String(cur.Remark ?? ''), to: String(remark ?? '') }],
+    });
     return { code: 0, msg: '备注修改成功' };
   });
 
@@ -589,8 +655,24 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (e) return { code: -1, msg: '新记录超出授权子域名范围' };
       }
     }
+    const cur =
+      typeof (provider as any).getDomainRecordInfo === 'function'
+        ? await (provider as any).getDomainRecordInfo(recordId).catch(() => null)
+        : null;
     const ok = await provider.updateDomainRecord(recordId, name, type, value, line || 'default', Number(ttl || 600), Number(mx || 1), weight ?? null, remark || null);
     if (!ok) return { code: -1, msg: provider.getError() };
+    audit(req, {
+      targetType: 'record',
+      targetId: recordId,
+      targetName: `${name || cur?.Name || '@'}.${info.domain.name}`,
+      summary: `修改解析记录 ${cur?.Name || name || recordId}：${cur?.Value ?? '-'} → ${value}`,
+      changes: diffFields(
+        cur && { Name: cur.Name, Type: cur.Type, Value: cur.Value, Line: cur.Line, TTL: cur.TTL, MX: cur.MX, Remark: cur.Remark },
+        { Name: name, Type: type, Value: value, Line: line, TTL: ttl, MX: mx, Remark: remark },
+        { Name: '主机记录', Type: '类型', Value: '记录值', Line: '线路', TTL: 'TTL', MX: 'MX', Remark: '备注' },
+      ),
+      detail: { recordId, name, type, value, line, ttl, mx, weight, remark },
+    });
     return { code: 0, msg: '修改记录成功' };
   });
 
@@ -610,9 +692,20 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (e) return { code: -1, msg: e };
       }
     }
+    const cur =
+      typeof (provider as any).getDomainRecordInfo === 'function'
+        ? await (provider as any).getDomainRecordInfo(recordId).catch(() => null)
+        : null;
     const ok = await provider.deleteDomainRecord(recordId);
     if (!ok) return { code: -1, msg: provider.getError() };
     await bumpRecordCount(id, -1);
+    audit(req, {
+      targetType: 'record',
+      targetId: recordId,
+      targetName: `${cur?.Name || '@'}.${info.domain.name}`,
+      summary: `删除 ${cur?.Type || '解析'} 记录 ${cur?.Name || recordId} → ${cur?.Value ?? '-'}`,
+      changes: [{ field: '记录', from: cur ? `${cur.Type} ${cur.Name} ${cur.Value}` : String(recordId), to: '' }],
+    });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -633,8 +726,19 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (e) return { code: -1, msg: e };
       }
     }
+    const cur =
+      typeof (provider as any).getDomainRecordInfo === 'function'
+        ? await (provider as any).getDomainRecordInfo(recordId).catch(() => null)
+        : null;
     const ok = await provider.setDomainRecordStatus(recordId, status);
     if (!ok) return { code: -1, msg: provider.getError() };
+    audit(req, {
+      targetType: 'record',
+      targetId: recordId,
+      targetName: `${cur?.Name || '@'}.${info.domain.name}`,
+      summary: `${Number(status) ? '启用' : '暂停'}解析记录 ${cur?.Name || recordId}`,
+      changes: [{ field: '状态', to: Number(status) ? '启用' : '暂停' }],
+    });
     return { code: 0, msg: '状态更新成功' };
   });
 
@@ -653,6 +757,15 @@ export default async function domainRoutes(app: FastifyInstance) {
     const action = String(b.action || '');
     const records: any[] = Array.isArray(b.records) ? b.records : [];
     if (!action || !records.length) return { code: -1, msg: '参数不能为空' };
+    const actionText: Record<string, string> = {
+      open: '启用', pause: '暂停', delete: '删除', remark: '修改备注', value: '修改记录值', line: '修改线路', group: '修改分组',
+    };
+    audit(req, {
+      targetType: 'record',
+      targetName: info.domain.name,
+      summary: `批量${actionText[action] || action} ${records.length} 条解析记录`,
+      detail: { action, count: records.length, ids: records.slice(0, 20).map((r: any) => r.RecordId) },
+    });
     if (!acc.admin) {
       // 以云端真实记录名判权，避免客户端用 r.Name 通过校验、却用 r.RecordId 越权操作
       const fn = provider.getDomainRecordInfo;
@@ -757,6 +870,12 @@ export default async function domainRoutes(app: FastifyInstance) {
     const fail = results.length - success;
     const invalidNote = invalid ? `，忽略${invalid}条格式错误的行` : '';
     if (success) await bumpRecordCount(id, success);
+    audit(req, {
+      targetType: 'record',
+      targetName: info.domain.name,
+      summary: `批量添加解析 ${success} 条（失败 ${fail}）`,
+      detail: { type, count: valid.length, invalid },
+    });
     if (success > 0) return { code: 0, msg: `批量添加解析，成功${success}条，失败${fail}条${invalidNote}` };
     return { code: -1, msg: '批量添加失败，' + (provider.getError?.() || '没有可添加的记录') };
   });
@@ -829,7 +948,16 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (act === 'status') {
       const status = String(b.status ?? '0');
       const ok = await provider.setWeightStatus(subdomain, status, b.type ?? null, b.line ?? null);
-      return ok ? { code: 0, msg: '操作成功' } : { code: -1, msg: '操作失败，' + provider.getError() };
+      if (ok) {
+        audit(req, {
+          targetType: 'domain',
+          targetId: id,
+          targetName: `${subdomain}.${info.domain.name}`,
+          summary: `${Number(status) ? '启用' : '停用'}权重解析 ${subdomain}`,
+        });
+        return { code: 0, msg: '操作成功' };
+      }
+      return { code: -1, msg: '操作失败，' + provider.getError() };
     }
     if (act === 'update') {
       const status = String(b.status ?? '0');
@@ -840,6 +968,13 @@ export default async function domainRoutes(app: FastifyInstance) {
         const okStatus = await provider.setWeightStatus(subdomain, status, type, line);
         if (!okStatus) return { code: -1, msg: '修改失败，' + provider.getError() };
       }
+      audit(req, {
+        targetType: 'domain',
+        targetId: id,
+        targetName: `${subdomain}.${info.domain.name}`,
+        summary: `修改权重解析 ${subdomain}`,
+        detail: { act, subdomain, type, line },
+      });
       if (status === '1') {
         let success = 0;
         for (const [recordId, w] of Object.entries(weight)) {
@@ -884,7 +1019,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.addDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
     const ok = await provider.addDomainAlias(alias);
-    return ok ? { code: 0, msg: '添加域名别名成功' } : { code: -1, msg: '添加域名别名失败，' + provider.getError() };
+    if (ok) {
+      audit(req, { targetType: 'domain', targetId: id, targetName: alias, summary: `添加域名别名 ${alias}` });
+      return { code: 0, msg: '添加域名别名成功' };
+    }
+    return { code: -1, msg: '添加域名别名失败，' + provider.getError() };
   });
 
   app.delete('/api/domains/:id/aliases/:aliasId', auth, async (req: any) => {
@@ -895,7 +1034,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     const provider: any = getDnsProvider(info.account.type, safeJson(info.account.config), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.deleteDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
     const ok = await provider.deleteDomainAlias(String(aliasId));
-    return ok ? { code: 0, msg: '删除域名别名成功' } : { code: -1, msg: '删除域名别名失败，' + provider.getError() };
+    if (ok) {
+      audit(req, { targetType: 'domain', targetId: id, summary: `删除域名别名 ${aliasId}` });
+      return { code: 0, msg: '删除域名别名成功' };
+    }
+    return { code: -1, msg: '删除域名别名失败，' + provider.getError() };
   });
 
   // ============ 解析操作日志（阿里云）============

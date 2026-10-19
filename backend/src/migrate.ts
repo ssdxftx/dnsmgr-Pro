@@ -184,6 +184,39 @@ export async function migrate(): Promise<void> {
   await ensureIndex('cdn_stat_data', 'idx_gran_ts', '(`granularity`, `ts`)');
   await ensureIndex('cdn_stat_data', 'idx_ts', '(`ts`)');
 
+  // 操作日志（审计旁路）：独立于旧 log 表，用户/域名删除后仍需留存，故不建外键
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('audit_log')} (
+      id bigint unsigned NOT NULL AUTO_INCREMENT,
+      uid int(11) unsigned NOT NULL DEFAULT '0',
+      username varchar(64) NOT NULL DEFAULT '',
+      module varchar(32) NOT NULL,
+      action varchar(48) NOT NULL,
+      method varchar(8) NOT NULL,
+      path varchar(255) NOT NULL,
+      route varchar(255) NOT NULL DEFAULT '',
+      target_type varchar(32) NOT NULL DEFAULT '',
+      target_id varchar(64) NOT NULL DEFAULT '',
+      target_name varchar(255) NOT NULL DEFAULT '',
+      summary varchar(500) NOT NULL DEFAULT '',
+      detail json DEFAULT NULL,
+      changes json DEFAULT NULL,
+      result tinyint(1) NOT NULL DEFAULT '1',
+      errmsg varchar(500) NOT NULL DEFAULT '',
+      status smallint NOT NULL DEFAULT '200',
+      ip varchar(64) NOT NULL DEFAULT '',
+      ua varchar(255) NOT NULL DEFAULT '',
+      cost_ms int NOT NULL DEFAULT '0',
+      addtime datetime NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_time (addtime),
+      KEY idx_uid_time (uid, addtime),
+      KEY idx_module_time (module, addtime),
+      KEY idx_result_time (result, addtime),
+      KEY idx_target (target_type, target_name)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  );
+
   // 高频点查/关联索引：消除按 aid / 域名 / (did,domain) 关联时的全表扫描
   await ensureIndex('cdn_domain', 'idx_aid', '(`aid`)');
   await ensureIndex('cdn_domain', 'idx_aid_zone', '(`aid`, `zone_id`)');

@@ -35,6 +35,8 @@ import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/c
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readConfigSafe } from '../lib/secret.js';
+import { audit } from '../lib/audit/context.js';
+import { diffFields } from '../lib/audit/mask.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
 import { EO_CONDITION_SCHEMA } from '../lib/cdn/ruleCondition.js';
 
@@ -501,6 +503,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const diff = zoneSettingDiff(current, setting);
     if (!Object.keys(diff).length) return { code: 0, msg: '未检测到配置变化' };
     if (!(await provider.updateZoneSetting(zoneId, diff))) return { code: -1, msg: '站点配置更新失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `修改站点配置 ${zoneId}（${Object.keys(diff).length} 项）`,
+      changes: diffFields(current, { ...current, ...diff }),
+      detail: { aid, zone_id: zoneId, keys: Object.keys(diff) },
+    });
     return { code: 0, msg: '站点配置更新成功' };
   });
 
@@ -576,6 +586,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
       instanceId: b.instanceId,
     });
     if (zone === false) return { code: -1, msg: '创建站点失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: (zone as any)?.zoneId,
+      targetName: name,
+      summary: `创建站点 ${name}`,
+      detail: { aid, name, type: b.type, area: b.area || b.coverage },
+    });
     return { code: 0, msg: '站点创建成功', data: zone };
   });
 
@@ -598,6 +615,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     } catch {
       /* 记录失败不影响验证结果 */
     }
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(b.domain || zoneId),
+      summary: `验证站点归属 ${b.domain || zoneId}`,
+    });
     return { code: 0, data: r };
   });
 
@@ -611,6 +634,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.setZonePaused !== 'function') return { code: -1, msg: '该 CDN 类型不支持暂停/启用' };
     const paused = b.paused === true || b.paused === 'true' || b.paused === 1;
     if (!(await provider.setZonePaused(zoneId, paused))) return { code: -1, msg: '操作失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `${paused ? '暂停' : '启用'}站点 ${zoneId}`,
+    });
     return { code: 0, msg: paused ? '站点已暂停' : '站点已启用' };
   });
 
@@ -803,6 +832,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.createRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     const id = await provider.createRule(zoneId, { ruleName: b.ruleName, status: b.status, enabled: b.enabled, branches: b.branches, description: b.description });
     if (id === false) return { code: -1, msg: '创建规则失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_rule',
+      targetId: id,
+      targetName: String(b.ruleName),
+      summary: `新建规则 ${b.ruleName}（${zoneId}）`,
+      detail: { aid, zoneId, ruleName: b.ruleName, status: b.status },
+    });
     return { code: 0, msg: '创建成功', data: { ruleId: id } };
   });
 
@@ -817,6 +853,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!(await provider.updateRule(zoneId, ruleId, { ruleName: b.ruleName, status: b.status, enabled: b.enabled, branches: b.branches, description: b.description }))) {
       return { code: -1, msg: '更新规则失败，' + provider.getError() };
     }
+    audit(req, {
+      targetType: 'cdn_rule',
+      targetId: ruleId,
+      targetName: String(b.ruleName || ruleId),
+      summary: `修改规则 ${b.ruleName || ruleId}（${zoneId}）`,
+      detail: { aid, zoneId, ruleName: b.ruleName, status: b.status },
+    });
     return { code: 0, msg: '更新成功' };
   });
 
@@ -829,6 +872,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
     if (!(await provider.deleteRules(zoneId, ruleIds))) return { code: -1, msg: '删除规则失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_rule',
+      targetName: zoneId,
+      summary: `删除规则 ${ruleIds.length} 条（${zoneId}）`,
+      detail: { aid, zoneId, ruleIds: ruleIds.slice(0, 50) },
+    });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -841,6 +890,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.setRulePriority !== 'function') return { code: -1, msg: '该 CDN 类型不支持优先级调整' };
     if (!(await provider.setRulePriority(zoneId, ruleIds))) return { code: -1, msg: '优先级调整失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_rule',
+      targetName: zoneId,
+      summary: `调整规则优先级（${zoneId}）`,
+      detail: { aid, zoneId, ruleIds: ruleIds.slice(0, 50) },
+    });
     return { code: 0, msg: '优先级已更新' };
   });
 
@@ -1300,6 +1355,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
       msg += `；证书：${r.message}`;
     }
 
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: newId,
+      targetName: String(name),
+      summary: `接入加速域名 ${name}（${acct.type}）`,
+      changes: [{ field: '加速域名', to: String(name) }],
+      detail: { aid, did, name, origin, origin_type, zone_id, cert_mode },
+    });
     return { code: 0, msg, data: { id: newId, cert: certResult } };
   });
 
@@ -1338,6 +1401,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     let msg = deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）';
     if (linked.orders) msg += `；已吊销并删除联动证书 ${linked.orders} 个、自动部署任务 ${linked.deployTasks} 个`;
     if (deleteDns) msg += `；${dnsMsg}`;
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `删除加速域名 ${row.name}`,
+      detail: { deleteCloud, deleteDns },
+    });
     return { code: 0, msg };
   });
 
@@ -1352,6 +1422,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const target = status === 'offline' ? 'offline' : 'online';
     if (!(await provider.setDomainStatus(row.name, target))) return { code: -1, msg: '状态更新失败，' + provider.getError() };
     await query(`UPDATE ${table('cdn_domain')} SET status = ? WHERE id = ?`, [target, id]);
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `${target === 'offline' ? '停用' : '启用'}加速域名 ${row.name}`,
+      changes: [{ field: '状态', to: target === 'offline' ? '停用' : '启用' }],
+    });
     return { code: 0, msg: target === 'offline' ? '加速域名已停用' : '加速域名已启用' };
   });
 
@@ -1371,6 +1448,38 @@ export default async function cdnRoutes(app: FastifyInstance) {
       `UPDATE ${table('cdn_domain')} SET origin = ?, origin_type = ?, origin_host = ?, origin_protocol = ?, http_port = ?, https_port = ? WHERE id = ?`,
       [origin, origin_type || 'ipaddr', origin_host || '', origin_protocol || 'follow', Number(http_port || 80), Number(https_port || 443), id],
     );
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `修改回源配置 ${row.name}`,
+      changes: diffFields(
+        {
+          origin: row.origin,
+          origin_type: row.origin_type,
+          origin_host: row.origin_host,
+          origin_protocol: row.origin_protocol,
+          http_port: row.http_port,
+          https_port: row.https_port,
+        },
+        {
+          origin,
+          origin_type: origin_type || 'ipaddr',
+          origin_host: origin_host || '',
+          origin_protocol: origin_protocol || 'follow',
+          http_port: Number(http_port || 80),
+          https_port: Number(https_port || 443),
+        },
+        {
+          origin: '源站',
+          origin_type: '源站类型',
+          origin_host: '回源 HOST',
+          origin_protocol: '回源协议',
+          http_port: 'HTTP 端口',
+          https_port: 'HTTPS 端口',
+        },
+      ),
+    });
     return { code: 0, msg: '回源配置更新成功' };
   });
 
@@ -1392,6 +1501,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
         await q(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, path, Number(r.ttl || 0)]);
       }
     });
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `修改缓存配置 ${row.name}（${ruleList.length} 条规则）`,
+      detail: { rules: ruleList.slice(0, 20) },
+    });
     return { code: 0, msg: '缓存规则更新成功' };
   });
 
@@ -1405,6 +1521,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
     if (!(await provider.setHttps(row.name, !!https_enabled, !!force_redirect))) return { code: -1, msg: 'HTTPS 配置更新失败，' + provider.getError() };
     await query(`UPDATE ${table('cdn_domain')} SET https_enabled = ?, force_redirect = ? WHERE id = ?`, [https_enabled ? 1 : 0, force_redirect ? 1 : 0, id]);
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `修改 HTTPS 配置 ${row.name}`,
+      changes: diffFields(
+        { https_enabled: row.https_enabled, force_redirect: row.force_redirect },
+        { https_enabled: https_enabled ? 1 : 0, force_redirect: force_redirect ? 1 : 0 },
+        { https_enabled: 'HTTPS', force_redirect: '强制跳转' },
+      ),
+    });
     return { code: 0, msg: 'HTTPS 配置更新成功' };
   });
 
@@ -1675,6 +1802,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const { cert_order_id, cert_aid, cert_use_default } = req.body || {};
     const r = await applyCertLink(Number(id), provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
     if (r.status !== 'failed') await setCertMode(Number(id), 'certlink');
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `证书联动 ${row.name}：${r.message}`,
+      detail: { cert_order_id, cert_aid, cert_use_default: !!cert_use_default },
+    });
     return { code: r.status === 'failed' ? -1 : 0, msg: r.message, data: { ...r, domain_id: Number(id) } };
   });
 
@@ -1716,6 +1850,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const mode = String(req.body?.mode || '');
     if (!['', 'freecert', 'certapply', 'certlink'].includes(mode)) return { code: -1, msg: '不支持的证书管理方式' };
     await setCertMode(Number(id), mode);
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `修改证书模式 ${row.name}：${mode || '不使用证书'}`,
+      changes: [{ field: '证书模式', from: row.cert_mode || 'none', to: mode || 'none' }],
+    });
     return { code: 0, msg: mode ? '证书管理方式已更新' : '已停用证书管理（不影响当前已部署证书）' };
   });
 
@@ -1799,6 +1940,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (Number(order.status) !== 3) {
       await linkLog(did, Number(order.id), 'order', 'doing', '手动触发：证书尚未签发，已提交立即处理');
       kickOrderProcessing(Number(order.id));
+      audit(req, {
+        targetType: 'cdn_domain',
+        targetId: id,
+        targetName: String(row.name),
+        summary: `执行证书联动 ${row.name}：触发证书处理`,
+      });
       return { code: 0, msg: '证书尚未签发，已触发立即处理，请稍后查看进度' };
     }
     const task: any = await ensureCertDeployForDomain(did, Number(order.id)).catch(() => false);
@@ -1811,15 +1958,34 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const t = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [task.taskId]);
     if (Number(t?.status) === 1) {
       await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [did]);
+      audit(req, {
+        targetType: 'cdn_domain',
+        targetId: id,
+        targetName: String(row.name),
+        summary: `执行证书联动 ${row.name}：部署成功`,
+      });
       return { code: 0, msg: '证书已部署到 CDN 加速域名' };
     }
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `执行证书联动 ${row.name}：部署未完成`,
+    });
     return { code: -1, msg: t?.error || '部署未完成，请稍后在进度日志查看或重试' };
   });
 
   // 同步云端
   app.post('/api/cdn/sync', auth, async (req: any) => {
     const { aid, did } = req.body || {};
-    return syncFromCloud(Number(aid || 0), Number(did || 0));
+    const r = await syncFromCloud(Number(aid || 0), Number(did || 0));
+    audit(req, {
+      targetType: 'account',
+      targetId: Number(aid || 0) || undefined,
+      summary: `同步云端加速域名（新增 ${r?.added || 0}，更新 ${r?.updated || 0}）`,
+      detail: { aid, did, result: r },
+    });
+    return r;
   });
 
   // 站点全局配置保存
@@ -1839,6 +2005,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const diff = zoneSettingDiff(current, setting);
     if (!Object.keys(diff).length) return { code: 0, msg: '未检测到配置变化' };
     if (!(await provider.updateZoneSetting(row.zone_id, diff))) return { code: -1, msg: '站点配置更新失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `修改站点设置 ${row.name}（${Object.keys(diff).length} 项）`,
+      changes: diffFields(current, { ...current, ...diff }),
+      detail: { zone_id: row.zone_id, keys: Object.keys(diff) },
+    });
     return { code: 0, msg: '站点配置更新成功' };
   });
 
@@ -2288,6 +2462,11 @@ const MAX_CACHE_OP_URLS = 100;
     if (!list.length) return { code: -1, msg: '请填写需要刷新的 URL' };
     if (list.length > MAX_CACHE_OP_URLS) return { code: -1, msg: `单次最多提交 ${MAX_CACHE_OP_URLS} 个 URL` };
     const result = await dispatchCacheOp('purge', type === 'dir' ? 'dir' : 'url', list);
+    audit(req, {
+      targetType: 'cdn_domain',
+      summary: `刷新缓存 ${list.length} 个 URL（成功 ${result.success.length}，失败 ${result.failed.length}）`,
+      detail: { type: type === 'dir' ? 'dir' : 'url', urls: list.slice(0, 50) },
+    });
     return { code: 0, ...result };
   });
 
@@ -2298,6 +2477,11 @@ const MAX_CACHE_OP_URLS = 100;
     if (!list.length) return { code: -1, msg: '请填写需要预热的 URL' };
     if (list.length > MAX_CACHE_OP_URLS) return { code: -1, msg: `单次最多提交 ${MAX_CACHE_OP_URLS} 个 URL` };
     const result = await dispatchCacheOp('preheat', 'preheat', list);
+    audit(req, {
+      targetType: 'cdn_domain',
+      summary: `预热 ${list.length} 个 URL（成功 ${result.success.length}，失败 ${result.failed.length}）`,
+      detail: { urls: list.slice(0, 50) },
+    });
     return { code: 0, ...result };
   });
 
@@ -2329,6 +2513,13 @@ const MAX_CACHE_OP_URLS = 100;
     const provider: any = await cdnForRow(row);
     if (!provider || typeof provider.setAccess !== 'function') return { code: -1, msg: '该厂商暂不支持访问控制配置' };
     if (!(await provider.setAccess(row.name, req.body || {}))) return { code: -1, msg: '访问控制更新失败，' + (provider.getError?.() || '') };
+    audit(req, {
+      targetType: 'cdn_domain',
+      targetId: id,
+      targetName: String(row.name),
+      summary: `修改访问控制 ${row.name}`,
+      detail: req.body || {},
+    });
     return { code: 0, msg: '访问控制更新成功' };
   });
 }

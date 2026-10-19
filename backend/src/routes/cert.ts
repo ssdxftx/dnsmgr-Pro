@@ -6,6 +6,8 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
+import { audit } from '../lib/audit/context.js';
+import { diffFields } from '../lib/audit/mask.js';
 import { certConfig, certClassConfig } from '../lib/cert/factory.js';
 import { getCertProvider } from '../lib/cert/factory.js';
 import { getMainDomain } from '../lib/cert/utils.js';
@@ -191,7 +193,17 @@ export default async function certRoutes(app: FastifyInstance) {
       } catch (e: any) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
       }
-      await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`, [type, name, encryptConfig(config), remark || '']);
+      const ins: any = await query(
+        `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`,
+        [type, name, encryptConfig(config), remark || ''],
+      );
+      audit(req, {
+        targetType: 'cert_account',
+        targetId: ins?.insertId,
+        targetName: String(name),
+        summary: `新增自动部署账户「${name}」（${type}）`,
+        detail: { type, name },
+      });
       return { code: 0, msg: '添加自动部署账户成功！' };
     }
 
@@ -203,6 +215,13 @@ export default async function certRoutes(app: FastifyInstance) {
       if (ext && typeof ext === 'object') {
         await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), id]);
       }
+      audit(req, {
+        targetType: 'cert_account',
+        targetId: id,
+        targetName: String(name),
+        summary: `新增证书账户「${name}」（${type}）`,
+        detail: { type, name },
+      });
       return { code: 0, msg: '添加SSL证书账户成功！' };
     } catch (e: any) {
       return { code: -1, msg: '验证SSL证书账户失败，' + e.message };
@@ -214,7 +233,7 @@ export default async function certRoutes(app: FastifyInstance) {
     const { type, name, config, remark, deploy = 0 } = req.body || {};
     if (!name || !config) return { code: -1, msg: '必填参数不能为空' };
     const isDeploy = Number(deploy) === 1;
-    const row = await queryOne(`SELECT config FROM ${table('cert_account')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '账户不存在' };
     // 前端回显的是掩码，敏感字段保持不变
     const merged = mergeMaskedConfig(config, decryptConfig(row.config));
@@ -229,6 +248,14 @@ export default async function certRoutes(app: FastifyInstance) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
       }
       await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptConfig(merged), remark || '', id]);
+      audit(req, {
+        targetType: 'cert_account',
+        targetId: id,
+        targetName: String(name),
+        summary: `修改自动部署账户「${name}」`,
+        changes: diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
+        detail: { type, name },
+      });
       return { code: 0, msg: '修改自动部署账户成功！' };
     }
 
@@ -240,6 +267,14 @@ export default async function certRoutes(app: FastifyInstance) {
       if (ext && typeof ext === 'object') {
         await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), id]);
       }
+      audit(req, {
+        targetType: 'cert_account',
+        targetId: id,
+        targetName: String(name),
+        summary: `修改证书账户「${name}」`,
+        changes: diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
+        detail: { type, name },
+      });
       return { code: 0, msg: '修改SSL证书账户成功！' };
     } catch (e: any) {
       return { code: -1, msg: '验证SSL证书账户失败，' + e.message };
@@ -253,7 +288,14 @@ export default async function certRoutes(app: FastifyInstance) {
     if (deployCount > 0) return { code: -1, msg: '该账户下存在自动部署任务，无法删除' };
     const orderCount = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE aid = ?`, [id]))?.c || 0;
     if (orderCount > 0) return { code: -1, msg: '该账户下存在证书订单，无法删除' };
+    const row: any = await queryOne(`SELECT name, type, deploy FROM ${table('cert_account')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('cert_account')} WHERE id = ?`, [id]);
+    audit(req, {
+      targetType: 'cert_account',
+      targetId: id,
+      targetName: String(row?.name || ''),
+      summary: `删除${Number(row?.deploy) ? '自动部署' : '证书'}账户「${row?.name || '#' + id}」`,
+    });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -376,6 +418,13 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     // 待处理订单立即在后台开始申请，无需用户手动点「处理」
     if (Number(order.status) === 0) kickOrderProcessing(id);
+    audit(req, {
+      targetType: 'cert_order',
+      targetId: id,
+      targetName: domList.join(','),
+      summary: `申请证书 ${domList.join(',')}`,
+      detail: { aid, keytype, keysize, domains: domList },
+    });
     return { code: 0, msg: '添加证书订单成功！', data: id };
   });
 
@@ -423,6 +472,13 @@ export default async function certRoutes(app: FastifyInstance) {
         await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
       }
     });
+    audit(req, {
+      targetType: 'cert_order',
+      targetId: id,
+      targetName: domList.join(','),
+      summary: `修改证书订单 #${id}`,
+      detail: { aid, keytype, keysize, domains: domList },
+    });
     return { code: 0, msg: '修改证书订单成功！' };
   });
 
@@ -435,8 +491,16 @@ export default async function certRoutes(app: FastifyInstance) {
     } catch {
       // ignore
     }
+    const doms = (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [id])).map((r: any) => r.domain);
     await query(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
+    audit(req, {
+      targetType: 'cert_order',
+      targetId: id,
+      targetName: doms.join(','),
+      summary: `删除证书订单 #${id}`,
+      detail: { domains: doms },
+    });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -451,9 +515,14 @@ export default async function certRoutes(app: FastifyInstance) {
         // 签发成功后立即创建 CDN 联动部署任务（若订单带联动标记）
         await processOrderLink(Number(id)).catch(() => {});
         certOrderSend(Number(id), true).catch(() => {});
+        audit(req, { targetType: 'cert_order', targetId: id, summary: `提交证书签发 #${id}：已签发` });
         return { code: 0, msg: '证书已签发成功！' };
       }
-      if (code === 1) return { code: 0, msg: '添加DNS记录成功！请等待DNS生效后点击验证' };
+      if (code === 1) {
+        audit(req, { targetType: 'cert_order', targetId: id, summary: `提交证书签发 #${id}：等待 DNS 验证` });
+        return { code: 0, msg: '添加DNS记录成功！请等待DNS生效后点击验证' };
+      }
+      audit(req, { targetType: 'cert_order', targetId: id, summary: `提交证书签发 #${id}` });
       return { code: 0, msg: '证书处理完成' };
     } catch (e: any) {
       certOrderSend(Number(id), false).catch(() => {});
@@ -467,6 +536,7 @@ export default async function certRoutes(app: FastifyInstance) {
       const service = new CertOrderService(id);
       await service.cancel();
       await service.reset();
+      audit(req, { targetType: 'cert_order', targetId: id, summary: `重置证书订单 #${id}` });
       return { code: 0, msg: '重置成功' };
     } catch (e: any) {
       return { code: -1, msg: clientMessage(e, '重置失败') };
@@ -477,6 +547,7 @@ export default async function certRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     try {
       await new CertOrderService(id).revoke();
+      audit(req, { targetType: 'cert_order', targetId: id, summary: `吊销证书 #${id}` });
       return { code: 0, msg: '吊销成功' };
     } catch (e: any) {
       return { code: -1, msg: clientMessage(e, '吊销失败') };
@@ -487,6 +558,11 @@ export default async function certRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { isauto } = req.body || {};
     await query(`UPDATE ${table('cert_order')} SET isauto = ? WHERE id = ?`, [isauto ? 1 : 0, id]);
+    audit(req, {
+      targetType: 'cert_order',
+      targetId: id,
+      summary: `${isauto ? '开启' : '关闭'}证书 #${id} 自动续签`,
+    });
     return { code: 0, msg: '操作成功' };
   });
 
@@ -632,10 +708,16 @@ export default async function certRoutes(app: FastifyInstance) {
     } catch (e: any) {
       return { code: -1, msg: '部署配置校验失败，' + e.message };
     }
-    await query(
+    const ins: any = await query(
       `INSERT INTO ${table('cert_deploy')} (aid, oid, config, remark, addtime, status, active) VALUES (?, ?, ?, ?, NOW(), 0, 1)`,
       [aid, oid, encryptConfig(config), remark || ''],
     );
+    audit(req, {
+      targetType: 'deploy_task',
+      targetId: ins?.insertId,
+      summary: `新建部署任务 #${ins?.insertId || '-'}（证书 #${oid}）`,
+      detail: { aid, oid },
+    });
     return { code: 0, msg: '添加自动部署任务成功！' };
   });
 
@@ -653,12 +735,19 @@ export default async function certRoutes(app: FastifyInstance) {
       return { code: -1, msg: '部署配置校验失败，' + e.message };
     }
     await query(`UPDATE ${table('cert_deploy')} SET aid = ?, oid = ?, config = ?, remark = ? WHERE id = ?`, [aid, oid, encryptConfig(merged), remark || '', id]);
+    audit(req, {
+      targetType: 'deploy_task',
+      targetId: id,
+      summary: `修改部署任务 #${id}`,
+      detail: { aid, oid },
+    });
     return { code: 0, msg: '修改自动部署任务成功！' };
   });
 
   app.delete('/api/deploy/tasks/:id', auth, async (req: any) => {
     const { id } = req.params as any;
     await query(`DELETE FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
+    audit(req, { targetType: 'deploy_task', targetId: id, summary: `删除部署任务 #${id}` });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -667,6 +756,7 @@ export default async function certRoutes(app: FastifyInstance) {
     try {
       await new CertDeployService(id).process(true);
       certDeploySend(Number(id), true).catch(() => {});
+      audit(req, { targetType: 'deploy_task', targetId: id, summary: `执行部署任务 #${id}：成功` });
       return { code: 0, msg: 'SSL证书部署任务执行成功！' };
     } catch (e: any) {
       certDeploySend(Number(id), false).catch(() => {});
@@ -678,6 +768,7 @@ export default async function certRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     try {
       await new CertDeployService(id).reset();
+      audit(req, { targetType: 'deploy_task', targetId: id, summary: `重置部署任务 #${id}` });
       return { code: 0, msg: '重置成功' };
     } catch (e: any) {
       return { code: -1, msg: clientMessage(e, '重置失败') };
@@ -688,6 +779,11 @@ export default async function certRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { active } = req.body || {};
     await query(`UPDATE ${table('cert_deploy')} SET active = ? WHERE id = ?`, [active ? 1 : 0, id]);
+    audit(req, {
+      targetType: 'deploy_task',
+      targetId: id,
+      summary: `${active ? '启用' : '停用'}部署任务 #${id}`,
+    });
     return { code: 0, msg: '操作成功' };
   });
 

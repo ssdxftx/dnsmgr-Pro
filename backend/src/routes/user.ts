@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
+import { audit } from '../lib/audit/context.js';
+import { diffFields } from '../lib/audit/mask.js';
 import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 import { SECRET_MASK } from '../lib/secret.js';
 
@@ -168,6 +170,13 @@ export default async function userRoutes(app: FastifyInstance) {
     if (level === 1) {
       await savePermissions(uid, permission);
     }
+    audit(req, {
+      targetType: 'user',
+      targetId: uid,
+      targetName: username,
+      summary: `新建用户 ${username}（等级 ${level}）`,
+      detail: { username, level, isApi, checkWhole },
+    });
     return { code: 0, msg: '添加用户成功！' };
   });
 
@@ -175,7 +184,10 @@ export default async function userRoutes(app: FastifyInstance) {
   app.put('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id, is_super, level FROM ${table('user')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(
+      `SELECT id, is_super, level, username, status, email, remark FROM ${table('user')} WHERE id = ?`,
+      [id],
+    );
     if (!row) return { code: -1, msg: '用户不存在' };
     const blocked = superBlocked(req, row as any);
     if (blocked) return { code: -1, msg: blocked };
@@ -230,6 +242,33 @@ export default async function userRoutes(app: FastifyInstance) {
       // 改密同时自增 token_version，使该用户已签发的旧 JWT 立即失效
       await query(`UPDATE ${table('user')} SET password = ?, token_version = token_version + 1 WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
     }
+    const after: Record<string, any> = {
+      username,
+      level,
+      status: row.status,
+      email: b.email !== undefined ? String(b.email ?? '') : row.email,
+      remark: b.remark !== undefined ? String(b.remark ?? '') : row.remark,
+    };
+    if (b.check_whole !== undefined) after.check_whole = Number(b.check_whole) === 1 ? 1 : 0;
+    if (b.stat_cache !== undefined) after.stat_cache = Number(b.stat_cache) === 1 ? 1 : 0;
+    const changes = diffFields(row, after, {
+      username: '用户名',
+      level: '等级',
+      status: '状态',
+      email: '邮箱',
+      remark: '备注',
+      check_whole: '整域名检测',
+      stat_cache: '统计缓存',
+    });
+    if (repwd) changes.push({ field: '密码', to: '已重置' });
+    audit(req, {
+      targetType: 'user',
+      targetId: id,
+      targetName: username,
+      summary: `修改用户 ${username}`,
+      changes,
+      detail: { username, level },
+    });
     return { code: 0, msg: '修改用户成功！' };
   });
 
@@ -238,13 +277,20 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
     const status = Number((req.body || {}).status);
-    const row = await queryOne(`SELECT is_super, level FROM ${table('user')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT is_super, level, username, status FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被修改状态' };
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法修改状态' };
     const statusBlocked = adminManageBlocked(req, { id, level: (row as any).level });
     if (statusBlocked) return { code: -1, msg: statusBlocked };
     await query(`UPDATE ${table('user')} SET status = ? WHERE id = ?`, [status, id]);
+    audit(req, {
+      targetType: 'user',
+      targetId: id,
+      targetName: String(row.username || ''),
+      summary: `${status ? '解封' : '封禁'}用户 ${row.username || '#' + id}`,
+      changes: [{ field: '状态', from: row.status ? '正常' : '封禁', to: status ? '正常' : '封禁' }],
+    });
     return { code: 0, msg: '设置成功' };
   });
 
@@ -252,12 +298,18 @@ export default async function userRoutes(app: FastifyInstance) {
   app.post('/api/users/:id/stat-cache', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT id, is_super FROM ${table('user')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT id, is_super, username FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     const blocked = superBlocked(req, row as any);
     if (blocked) return { code: -1, msg: blocked };
     const value = Number((req.body || {}).stat_cache) === 1 ? 1 : 0;
     await query(`UPDATE ${table('user')} SET stat_cache = ? WHERE id = ?`, [value, id]);
+    audit(req, {
+      targetType: 'user',
+      targetId: id,
+      targetName: String(row.username || ''),
+      summary: `${value ? '开启' : '关闭'}用户 ${row.username || '#' + id} 的统计缓存查看`,
+    });
     return { code: 0, msg: value ? '已开启统计缓存查看' : '已关闭统计缓存查看' };
   });
 
@@ -265,7 +317,7 @@ export default async function userRoutes(app: FastifyInstance) {
   app.delete('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row = await queryOne(`SELECT is_super, level FROM ${table('user')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT is_super, level, username FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被删除' };
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法删除' };
@@ -273,6 +325,12 @@ export default async function userRoutes(app: FastifyInstance) {
     if (deleteBlocked) return { code: -1, msg: deleteBlocked };
     await query(`DELETE FROM ${table('user')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
+    audit(req, {
+      targetType: 'user',
+      targetId: id,
+      targetName: String(row.username || ''),
+      summary: `删除用户 ${row.username || '#' + id}`,
+    });
     return { code: 0, msg: '删除成功' };
   });
 

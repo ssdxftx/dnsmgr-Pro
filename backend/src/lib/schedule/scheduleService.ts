@@ -2,6 +2,7 @@ import { query, queryOne, table } from '../../db.js';
 import { configSet } from '../../config.js';
 import { getDnsProvider } from '../dns/factory.js';
 import { fmtDateTime } from '../util.js';
+import { enqueueAudit, nowStr } from '../audit/store.js';
 
 function getDnsType(value: string): string {
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(value)) return 'A';
@@ -67,18 +68,32 @@ export async function executeOne(row: any): Promise<void> {
   const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
   if (!dns) throw new Error('DNS模块不存在');
 
+  let opOk = true;
+  let opErr = '';
   if (row.switchtype === 1) {
     const res = await dns.setDomainRecordStatus(row.recordid, '1');
     if (res) await addLog(domain, '启用解析', '定时启用解析成功');
-    else await addLog(domain, '启用解析失败', dns.getError());
+    else {
+      opOk = false;
+      opErr = dns.getError();
+      await addLog(domain, '启用解析失败', opErr);
+    }
   } else if (row.switchtype === 2) {
     const res = await dns.setDomainRecordStatus(row.recordid, '0');
     if (res) await addLog(domain, '暂停解析', '定时暂停解析成功');
-    else await addLog(domain, '暂停解析失败', dns.getError());
+    else {
+      opOk = false;
+      opErr = dns.getError();
+      await addLog(domain, '暂停解析失败', opErr);
+    }
   } else if (row.switchtype === 3) {
     const res = await dns.deleteDomainRecord(row.recordid);
     if (res) await addLog(domain, '删除解析', '定时删除解析成功');
-    else await addLog(domain, '删除解析失败', dns.getError());
+    else {
+      opOk = false;
+      opErr = dns.getError();
+      await addLog(domain, '删除解析失败', opErr);
+    }
   } else {
     const recordinfo = safeJson(row.recordinfo);
     if (!recordinfo.Line || !recordinfo.TTL) {
@@ -91,9 +106,38 @@ export async function executeOne(row: any): Promise<void> {
     if (res) {
       await addLog(domain, '修改解析', row.rr + ' [' + getDnsType(row.value) + '] ' + row.value + ' (线路:' + recordinfo.Line + ' TTL:' + recordinfo.TTL + ')');
     } else {
-      await addLog(domain, '修改解析失败', dns.getError());
+      opOk = false;
+      opErr = dns.getError();
+      await addLog(domain, '修改解析失败', opErr);
     }
   }
+
+  const opText: Record<number, string> = { 1: '启用解析', 2: '暂停解析', 3: '删除解析' };
+  enqueueAudit({
+    uid: 0,
+    username: 'system',
+    module: 'schedule',
+    action: 'schedule.record.switch',
+    method: 'SYSTEM',
+    path: '',
+    route: '',
+    target_type: 'record',
+    target_id: String(row.recordid || ''),
+    target_name: domain,
+    summary: `定时任务${opText[Number(row.switchtype)] || '切换解析'} ${domain}`,
+    detail: null,
+    changes: JSON.stringify([
+      { field: '操作', to: opText[Number(row.switchtype)] || '修改解析' },
+      ...(row.switchtype >= 4 && row.value ? [{ field: '记录值', to: String(row.value) }] : []),
+    ]),
+    result: opOk ? 1 : 0,
+    errmsg: opOk ? '' : String(opErr || '').slice(0, 500),
+    status: 0,
+    ip: '',
+    ua: '',
+    cost_ms: 0,
+    addtime: nowStr(),
+  });
 
   await updateNexttime(row);
 }

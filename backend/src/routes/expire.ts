@@ -3,6 +3,7 @@ import { query, queryOne, table } from '../db.js';
 import { checkLevel, getUserPermissions, matchPermission } from '../auth.js';
 import { configGet, configSet } from '../config.js';
 import { updateDomainDate } from '../lib/expire/expireNoticeService.js';
+import { audit } from '../lib/audit/context.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -21,9 +22,9 @@ export default async function expireRoutes(app: FastifyInstance) {
   app.post('/api/expire/settings', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const body = req.body || {};
-    for (const k of KEYS) {
-      if (k in body) await configSet(k, String(body[k] ?? ''));
-    }
+    const keys = KEYS.filter((k) => k in body);
+    for (const k of keys) await configSet(k, String(body[k] ?? ''));
+    if (keys.length) audit(req, { summary: `保存到期提醒设置：${keys.join('、')}`, detail: { keys } });
     return { code: 0, msg: '设置保存成功' };
   });
 
@@ -39,6 +40,15 @@ export default async function expireRoutes(app: FastifyInstance) {
       if (m === 1) return { code: -1, msg: '该域名仅查看，禁止修改' };
     }
     const res = await updateDomainDate(id, row.name);
+    if (res?.code === 0) {
+      audit(req, {
+        targetType: 'domain',
+        targetId: id,
+        targetName: String(row.name),
+        summary: `更新域名 ${row.name} 的到期时间`,
+        detail: { regTime: res?.regTime, expireTime: res?.expireTime },
+      });
+    }
     return res;
   });
 
@@ -49,6 +59,11 @@ export default async function expireRoutes(app: FastifyInstance) {
     const isNotice = b.is_notice == 1 ? 1 : 0;
     if (!ids.length) return { code: -1, msg: '请选择域名' };
     await query(`UPDATE ${table('domain')} SET is_notice = ? WHERE id IN (${ids.map(() => '?').join(',')})`, [isNotice, ...ids]);
+    audit(req, {
+      targetType: 'domain',
+      summary: `批量${isNotice ? '开启' : '关闭'}到期提醒（${ids.length} 个域名）`,
+      detail: { ids: ids.slice(0, 50), is_notice: isNotice },
+    });
     return { code: 0, msg: isNotice ? '已开启到期提醒' : '已关闭到期提醒' };
   });
 }

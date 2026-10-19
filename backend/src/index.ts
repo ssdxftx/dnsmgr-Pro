@@ -6,7 +6,7 @@ import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { getSysKey } from './config.js';
+import { configGet, getSysKey } from './config.js';
 import { isInstalled, getInstallState } from './installer.js';
 import { findUserById } from './auth.js';
 import { ConfigDecryptError, setSecretKey } from './lib/secret.js';
@@ -41,6 +41,10 @@ import { runGuarded } from './lib/scheduler/guards.js';
 import { withDistributedLock } from './lib/scheduler/distLock.js';
 import { refreshAllStatCache, getStatCacheIntervalMs, isStatCacheEnabled } from './lib/cdn/statistics/cacheService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
+import { query, table } from './db.js';
+import { registerAuditHooks } from './lib/audit/hooks.js';
+import { shutdownAudit } from './lib/audit/store.js';
+import auditRoutes from './routes/audit.js';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[backend] 未捕获的异步异常:', reason?.message || reason);
@@ -86,6 +90,13 @@ const app = Fastify({
 });
 
 applySecurityHeaders(app);
+
+// 审计旁路：挂全局钩子，必须早于所有业务路由注册
+registerAuditHooks(app);
+// 退出前尽量刷完审计队列，避免最后 1 秒内的操作丢失
+app.addHook('onClose', async () => {
+  await shutdownAudit();
+});
 
 // 账户配置无法解密时返回可操作的中文提示，避免被云端「Authentication error」掩盖
 app.setErrorHandler((err: any, _req: any, reply: any) => {
@@ -250,6 +261,7 @@ if (installed) {
   await app.register(dnsCheckRoutes);
   await app.register(aboutRoutes);
   await app.register(qqbotRoutes);
+  await app.register(auditRoutes);
 }
 
 // 静态资源与 SPA 回退（容器内 serve 前端构建产物；本地未构建则不注册）
@@ -268,6 +280,22 @@ if (webDir) {
     }
     return reply.type('text/html').send(indexHtml);
   });
+}
+
+let auditCleanDay = '';
+async function cleanAuditLog(): Promise<void> {
+  const now = new Date();
+  const day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+  if (auditCleanDay === day || now.getHours() < 3) return;
+  const days = Math.max(7, Number(await configGet('audit_retain_days', '180')) || 180);
+  for (let i = 0; i < 20; i++) {
+    const res: any = await query(
+      `DELETE FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
+      [days],
+    );
+    if (!res?.affectedRows) break;
+  }
+  auditCleanDay = day;
 }
 
 const port = Number(process.env.PORT || 8082);
@@ -323,8 +351,16 @@ try {
       60 * 1000,
     );
     console.log('[dnsmgr-backend] CDN 数据统计缓存调度器已启动');
+
+    // 审计日志保留策略：每天 03:20 后首次触发，分批删除超期数据
+    setInterval(distributed('auditclean', cleanAuditLog, '[audit] 清理异常:'), 10 * 60 * 1000);
   }
 } catch (e) {
   console.error(e);
   process.exit(1);
+}
+for (const sig of ['SIGTERM', 'SIGINT'] as const) {
+  process.once(sig, () => {
+    void app.close().finally(() => process.exit(0));
+  });
 }

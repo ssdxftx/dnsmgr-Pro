@@ -5,6 +5,8 @@ import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
 import { ConfigDecryptError, decryptConfig, encryptConfig, isEncryptedConfig, isSecretKey, maskConfig, mergeMaskedConfig, SECRET_MASK } from '../lib/secret.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
+import { audit } from '../lib/audit/context.js';
+import { diffFields } from '../lib/audit/mask.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -47,6 +49,13 @@ export default async function accountRoutes(app: FastifyInstance) {
     const id = await insertAndGetId(`INSERT INTO ${table('account')} (type, name, config, remark, addtime) VALUES (?, ?, ?, ?, NOW())`, [
       type, name, encryptConfig(config), remark || '',
     ]);
+    audit(req, {
+      targetType: 'account',
+      targetId: id,
+      targetName: String(name),
+      summary: `新增 ${type} 账户「${name}」`,
+      detail: { type, name },
+    });
     return { code: 0, msg: '添加账户成功', data: id };
   });
 
@@ -55,7 +64,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const row = await queryOne(`SELECT config FROM ${table('account')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '账户不存在' };
     // 前端回显的是掩码，敏感字段保持不变
     const merged = mergeMaskedConfig(config, decryptConfig(row.config));
@@ -68,6 +77,18 @@ export default async function accountRoutes(app: FastifyInstance) {
     await query(`UPDATE ${table('account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [
       type, name, encryptConfig(merged), remark || '', id,
     ]);
+    const beforeCfg = decryptConfig(row.config) || {};
+    audit(req, {
+      targetType: 'account',
+      targetId: id,
+      targetName: String(name),
+      summary: `修改 ${type} 账户「${name}」`,
+      changes: [
+        ...diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
+        ...(secretChanged(beforeCfg, merged) ? [{ field: '凭证', to: '已更新' }] : []),
+      ],
+      detail: { type, name },
+    });
     return { code: 0, msg: '修改账户成功' };
   });
 
@@ -76,7 +97,14 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('domain')} WHERE aid = ?`, [id]);
     if (dcount && dcount.c > 0) return { code: -1, msg: '该账户下存在域名，无法删除' };
+    const row: any = await queryOne(`SELECT name, type FROM ${table('account')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('account')} WHERE id = ?`, [id]);
+    audit(req, {
+      targetType: 'account',
+      targetId: id,
+      targetName: String(row?.name || ''),
+      summary: `删除账户「${row?.name || '#' + id}」`,
+    });
     return { code: 0, msg: '删除成功' };
   });
 
@@ -107,6 +135,13 @@ export default async function accountRoutes(app: FastifyInstance) {
       type, name, encryptConfig(config), remark || '',
     ]);
     bumpCdnAccountEpoch();
+    audit(req, {
+      targetType: 'account',
+      targetId: id,
+      targetName: String(name),
+      summary: `新增 CDN 账户「${name}」`,
+      detail: { type, name },
+    });
     return { code: 0, msg: '添加CDN账户成功', data: id };
   });
 
@@ -115,7 +150,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const row = await queryOne(`SELECT config FROM ${table('cdn_account')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: 'CDN账户不存在' };
     const merged = mergeMaskedConfig(config, decryptConfig(row.config));
     const provider = getCdnProvider(type, merged);
@@ -126,6 +161,18 @@ export default async function accountRoutes(app: FastifyInstance) {
       type, name, encryptConfig(merged), remark || '', id,
     ]);
     bumpCdnAccountEpoch();
+    const beforeCfg = decryptConfig(row.config) || {};
+    audit(req, {
+      targetType: 'account',
+      targetId: id,
+      targetName: String(name),
+      summary: `修改 CDN 账户「${name}」`,
+      changes: [
+        ...diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
+        ...(secretChanged(beforeCfg, merged) ? [{ field: '凭证', to: '已更新' }] : []),
+      ],
+      detail: { type, name },
+    });
     return { code: 0, msg: '修改CDN账户成功' };
   });
 
@@ -133,6 +180,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
     const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
+    const row: any = await queryOne(`SELECT name, type FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     // 级联清理关联数据并置于同一事务，避免遗留缓存规则/统计数据等孤儿记录
     await withTransaction(async (q) => {
       await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did IN (SELECT id FROM ${table('cdn_domain')} WHERE aid = ?)`, [id]);
@@ -141,6 +189,12 @@ export default async function accountRoutes(app: FastifyInstance) {
       await q(`DELETE FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     });
     bumpCdnAccountEpoch();
+    audit(req, {
+      targetType: 'account',
+      targetId: id,
+      targetName: String(row?.name || ''),
+      summary: `删除 CDN 账户「${row?.name || '#' + id}」`,
+    });
     return { code: 0, msg: '删除成功' + (dcount && dcount.c > 0 ? '，已一并删除 ' + dcount.c + ' 个加速域名' : '') };
   });
 
@@ -154,6 +208,13 @@ export default async function accountRoutes(app: FastifyInstance) {
     const zones = await provider.getZones();
     return { code: 0, data: zones };
   });
+}
+
+function secretChanged(before: Record<string, any>, after: Record<string, any>): boolean {
+  for (const k of Object.keys(after || {})) {
+    if (isSecretKey(k) && String(before?.[k] ?? '') !== String(after?.[k] ?? '')) return true;
+  }
+  return false;
 }
 
 function safeJson(s: any): Record<string, any> {

@@ -2,6 +2,7 @@ import { query, queryOne, table } from '../../db.js';
 import { getDnsProvider } from '../dns/factory.js';
 import { configSet } from '../../config.js';
 import { fmtDateTime } from '../util.js';
+import { enqueueAudit, nowStr } from '../audit/store.js';
 import { checkPing, checkTcp, checkCurl, type CheckResult } from './checkUtils.js';
 import { sendNotice } from './msgNotice.js';
 
@@ -140,6 +141,34 @@ async function handle(row: any): Promise<void> {
   }
 
   await insertLog(row.id, action, row.type !== 3 && result ? (result.status ? null : result.errmsg) : null);
+
+  if (action > 0 && drow) {
+    const toValue = action === 1 ? row.backup_value : row.main_value;
+    const opText = action === 1 ? '切换备用解析' : '切回主解析';
+    const ok = row.type === 3 ? true : !!result?.status;
+    enqueueAudit({
+      uid: 0,
+      username: 'system',
+      module: 'monitor',
+      action: 'monitor.record.switch',
+      method: 'SYSTEM',
+      path: '',
+      route: '',
+      target_type: 'record',
+      target_id: String(row.recordid || ''),
+      target_name: `${row.rr || '@'}.${drow.name}`,
+      summary: `监控自动${opText} ${row.rr || '@'}.${drow.name}${toValue ? ` → ${toValue}` : ''}`,
+      detail: null,
+      changes: JSON.stringify([{ field: '记录值', to: String(toValue ?? '') }]),
+      result: ok ? 1 : 0,
+      errmsg: ok ? '' : String(result?.errmsg || '').slice(0, 500),
+      status: 0,
+      ip: '',
+      ua: '',
+      cost_ms: 0,
+      addtime: nowStr(),
+    });
+  }
 
   if (row.type !== 3) {
     await sendNotice(action, row, { status: result.status, errmsg: result.errmsg });

@@ -12,6 +12,7 @@ import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js
 import { runGuarded } from '../lib/scheduler/guards.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
+import { audit } from '../lib/audit/context.js';
 
 // 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
 function safeEqual(a: string, b: string): boolean {
@@ -38,7 +39,7 @@ const SETTINGS_KEYS = new Set([
   'vcode', 'register_enable', 'register_mode',
   'proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type',
   'cron_type', 'cron_key',
-  'cdn_stats_cache', 'cdn_stats_cache_interval',
+  'cdn_stats_cache', 'cdn_stats_cache_interval', 'audit_retain_days',
 ]);
 
 export default async function systemRoutes(app: FastifyInstance) {
@@ -57,6 +58,8 @@ export default async function systemRoutes(app: FastifyInstance) {
   // 保存系统配置（忽略掩码值，避免未修改的密钥被写坏；禁止通过该接口修改签名密钥）
   app.post('/api/system/settings', auth, async (req: any) => {
     const b = req.body || {};
+    const before = await loadConfig();
+    const changed: string[] = [];
     if (b.mail_type !== undefined && b.mail_name2 !== undefined && Number(b.mail_type) > 0) {
       b.mail_name = b.mail_name2;
       delete b.mail_name2;
@@ -74,7 +77,19 @@ export default async function systemRoutes(app: FastifyInstance) {
       if (!key || key === 'sys_key') continue;
       if (!SETTINGS_KEYS.has(key)) continue;
       if (isSecretKey(key) && String(value) === SECRET_MASK) continue;
+      if (String(before[key] ?? '') !== String(value)) changed.push(key);
       await configSet(key, String(value));
+    }
+    if (changed.length) {
+      audit(req, {
+        summary: `保存系统设置：${changed.slice(0, 8).join('、')}${changed.length > 8 ? ` 等 ${changed.length} 项` : ''}`,
+        changes: changed.slice(0, 20).map((k) => ({
+          field: k,
+          from: isSecretKey(k) ? (before[k] ? '已设置' : '未设置') : String(before[k] ?? ''),
+          to: isSecretKey(k) ? '已更新' : String(b[k] ?? ''),
+        })),
+        detail: { keys: changed },
+      });
     }
     return { code: 0, msg: 'succ' };
   });
