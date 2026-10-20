@@ -36,7 +36,7 @@ function keySpecError(keytype: any, keysize: any): string | null {
 }
 
 import { decryptConfig, encryptAccountConfig, encryptConfig, maskConfig, mergeMaskedConfig, readAccountConfig, encryptText, decryptText } from '../lib/secret.js';
-import { getVisibleAccount } from '../lib/accounts/visibility.js';
+import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { getDekForWrite } from '../lib/vault/service.js';
 
 // 批量取多个订单绑定的域名，避免证书/部署列表逐条查询（N+1）
@@ -52,6 +52,15 @@ async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
     map.set(Number(r.oid), arr);
   }
   return map;
+}
+
+/** 证书订单越权守卫：订单归属账户对当前用户不可见时按不存在处理 */
+async function canAccessCertOrder(id: any, user: any): Promise<boolean> {
+  const row: any = await queryOne(`SELECT aid FROM ${table('cert_order')} WHERE id = ?`, [Number(id)]);
+  if (!row) return false;
+  // aid=0 为手工上传证书，沿用全站可见的既有行为
+  if (!Number(row.aid)) return true;
+  return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
 }
 
 function parseCertKey(fullchain: string, privatekey: string) {
@@ -339,6 +348,13 @@ export default async function certRoutes(app: FastifyInstance) {
     const { domain, id, aid, type, status, offset = 0, limit = 20 } = req.query || {};
     let where = '1=1';
     const params: any[] = [];
+    // 与账户列表同口径：管理员看共享 + 自己的私有，普通用户只看自己的私有
+    const visibleCertAccounts = await listVisibleAccounts('cert_account', req.user);
+    const allowedCertAids = visibleCertAccounts.map((a: any) => Number(a.id));
+    where += allowedCertAids.length
+      ? ` AND (A.aid = 0 OR A.aid IN (${allowedCertAids.map(() => '?').join(',')}))`
+      : ' AND A.aid = 0';
+    params.push(...allowedCertAids);
     if (id) {
       where += ' AND A.id = ?';
       params.push(id);
@@ -433,6 +449,7 @@ export default async function certRoutes(app: FastifyInstance) {
         privatekey: encryptText(privatekey),
       };
     } else {
+      if (!(await getVisibleAccount('cert_account', Number(aid), req.user))) return { code: -1, msg: '证书账户不存在' };
       order = { aid, keytype, keysize, addtime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date() };
       const ke = keySpecError(keytype, keysize);
       if (ke) return { code: -1, msg: ke };
@@ -463,11 +480,14 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '添加证书订单成功！', data: id };
   });
 
-  app.put('/api/cert/orders/:id', auth, async (req: any) => {
+  app.put('/api/cert/orders/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { aid, keytype, keysize, fullchain, privatekey, domains } = req.body || {};
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
-    if (!row) return { code: -1, msg: '证书订单不存在' };
+    if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     let order: any;
     let domList: string[] = [];
 
@@ -489,6 +509,7 @@ export default async function certRoutes(app: FastifyInstance) {
         privatekey: encryptText(privatekey),
       };
     } else {
+      if (!(await getVisibleAccount('cert_account', Number(aid), req.user))) return { code: -1, msg: '证书账户不存在' };
       const ke = keySpecError(keytype, keysize);
       if (ke) return { code: -1, msg: ke };
       domList = (domains || []).map((d: string) => d.trim()).filter(Boolean);
@@ -517,8 +538,11 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '修改证书订单成功！' };
   });
 
-  app.delete('/api/cert/orders/:id', auth, async (req: any) => {
+  app.delete('/api/cert/orders/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     const count = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE oid = ?`, [id]))?.c || 0;
     if (count > 0) return { code: -1, msg: '该证书关联了自动部署任务，无法删除' };
     try {
@@ -539,9 +563,12 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
-  app.post('/api/cert/orders/:id/process', auth, async (req: any) => {
+  app.post('/api/cert/orders/:id/process', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { reset = 0 } = req.body || {};
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     try {
       const service = new CertOrderService(id);
       if (reset == 1) await service.reset();
@@ -565,8 +592,11 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/cert/orders/:id/reset', auth, async (req: any) => {
+  app.post('/api/cert/orders/:id/reset', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     try {
       const service = new CertOrderService(id);
       await service.cancel();
@@ -578,8 +608,11 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/cert/orders/:id/revoke', auth, async (req: any) => {
+  app.post('/api/cert/orders/:id/revoke', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     try {
       await new CertOrderService(id).revoke();
       audit(req, { targetType: 'cert_order', targetId: id, summary: `吊销证书 #${id}` });
@@ -589,9 +622,12 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/cert/orders/:id/setauto', auth, async (req: any) => {
+  app.post('/api/cert/orders/:id/setauto', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { isauto } = req.body || {};
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     await query(`UPDATE ${table('cert_order')} SET isauto = ? WHERE id = ?`, [isauto ? 1 : 0, id]);
     audit(req, {
       targetType: 'cert_order',
@@ -601,10 +637,13 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '操作成功' };
   });
 
-  app.get('/api/cert/orders/:id/info', auth, async (req: any) => {
+  app.get('/api/cert/orders/:id/info', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
-    if (!row) return { code: -1, msg: '证书订单不存在' };
+    if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
     // 私钥为加密存储，读取时解密（兼容历史明文）
     const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
@@ -634,8 +673,11 @@ export default async function certRoutes(app: FastifyInstance) {
     };
   });
 
-  app.get('/api/cert/orders/:id/log', auth, async (req: any) => {
+  app.get('/api/cert/orders/:id/log', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     const row = await queryOne(`SELECT processid FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row?.processid) return { code: -1, msg: '无日志' };
     const file = join(LOG_DIR, row.processid + '.log');

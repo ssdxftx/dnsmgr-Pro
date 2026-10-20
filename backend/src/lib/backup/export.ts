@@ -190,15 +190,30 @@ export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
     let key: Buffer;
     let kdf: { algo: string; salt: string | null };
     let vaultStats: Record<string, any> | undefined;
+    let userDek: Buffer | null = null;
 
     if (scope === 'user') {
       const vault = await query<any>(
-        `SELECT mode, exclude_from_site_backup FROM ${table('user_vault')} WHERE uid = ?`,
+        `SELECT mode, exclude_from_site_backup, salt, wrapped_dek, kdf_params FROM ${table('user_vault')} WHERE uid = ?`,
         [ownerUid],
       );
       const mode = String(vault[0]?.mode || 'none');
       if (mode === 'passphrase') {
         if (!opts.passphrase) throw new Error('该账户使用口令模式，导出需要输入保险库口令');
+        const v = vault[0] || {};
+        let params: any = KDF_PARAMS;
+        try {
+          params = { ...KDF_PARAMS, ...(JSON.parse(String(v.kdf_params || '{}')) || {}) };
+        } catch {
+          params = KDF_PARAMS;
+        }
+        if (!v.salt || !v.wrapped_dek) throw new Error('保险库密钥缺失，无法导出私有凭证');
+        userDek = unwrapDek(
+          await deriveKek(String(opts.passphrase), Buffer.from(v.salt), params),
+          Buffer.from(v.wrapped_dek),
+          ownerUid,
+        );
+        if (!userDek) throw new Error('保险库口令错误，无法导出私有凭证');
         const salt = randomBytes(16);
         key = await deriveKek(opts.passphrase, salt, KDF_PARAMS);
         kdf = { algo: 'scrypt', salt: salt.toString('base64') };
@@ -233,11 +248,14 @@ export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
       if (scope === 'site') {
         const vaultRows = await read(`SELECT mode FROM ${table('user_vault')}`);
         const convenient = (vaultRows as any[]).filter((r) => String(r.mode) === 'none').length;
+        const excludeList = [...excludedUsers];
+        const notExcluded = excludeList.length ? ` AND owner_uid NOT IN (${excludeList.map(() => '?').join(',')})` : '';
         const privateCount = await read(
           `SELECT
-             (SELECT COUNT(*) FROM ${table('account')} WHERE visibility = 'private') +
-             (SELECT COUNT(*) FROM ${table('cdn_account')} WHERE visibility = 'private') +
-             (SELECT COUNT(*) FROM ${table('cert_account')} WHERE visibility = 'private') AS c`,
+             (SELECT COUNT(*) FROM ${table('account')} WHERE visibility = 'private'${notExcluded}) +
+             (SELECT COUNT(*) FROM ${table('cdn_account')} WHERE visibility = 'private'${notExcluded}) +
+             (SELECT COUNT(*) FROM ${table('cert_account')} WHERE visibility = 'private'${notExcluded}) AS c`,
+          [...excludeList, ...excludeList, ...excludeList],
         );
         vaultStats = {
           privateAccounts: Number((privateCount as any[])[0]?.c || 0),
@@ -277,10 +295,9 @@ export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
                       const dek = unwrapDek(deriveSysKek(sysKey), Buffer.from(row.wrapped_dek_sys), uid);
                       if (dek) row.__dek_bk = wrapDek(key, dek, uid).toString('base64');
                     }
-                    // 口令模式个人归档：归档密钥即 KEK，可解出 DEK 供换 uid 后重包
-                    if (scope === 'user' && String(row.mode) === 'passphrase' && row.wrapped_dek) {
-                      const dek = unwrapDek(key, Buffer.from(row.wrapped_dek), uid);
-                      if (dek) row.__dek_bk = wrapDek(key, dek, uid).toString('base64');
+                    // 口令模式个人归档：导出前已用保险库 salt 解出 DEK，换 uid 后重包
+                    if (scope === 'user' && String(row.mode) === 'passphrase' && userDek) {
+                      row.__dek_bk = wrapDek(key, userDek, uid).toString('base64');
                     }
                   }
                 : undefined,

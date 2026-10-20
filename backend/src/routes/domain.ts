@@ -192,12 +192,24 @@ export default async function domainRoutes(app: FastifyInstance) {
     const acc = await getUserPerms(req);
     const kw = String(req.query?.kw || '').trim();
     const rows = await query(
-      `SELECT A.*, B.type AS account_type, B.name AS account_name FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
+      `SELECT A.*, B.type AS account_type, B.name AS account_name,
+              B.visibility AS account_visibility, B.owner_uid AS account_owner
+       FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
     );
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     let data = rows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
-    if (!acc.admin) {
+    if (acc.admin) {
+      // 管理员可见域名，但他人私有账户只显示占位名，避免泄露账户备注等元信息
+      data = data.map((r: any) => {
+        if (r.account_visibility === 'private' && Number(r.account_owner) !== Number(req.user.uid)) {
+          r.account_name = '个人账户';
+        }
+        delete r.account_visibility;
+        delete r.account_owner;
+        return r;
+      });
+    } else {
       const byName = new Map(data.map((r: any) => [r.name, r]));
       // 按域名聚合授权：同一域名只拉取一次云端记录，避免多子域名授权重复请求
       const permsByDomain = new Map<string, SubPermission[]>();
@@ -247,6 +259,8 @@ export default async function domainRoutes(app: FastifyInstance) {
         const dSafe = { ...d };
         delete dSafe.account_type;
         delete dSafe.account_name;
+        delete dSafe.account_visibility;
+        delete dSafe.account_owner;
         out.push({
           ...dSafe,
           recordcount: cnt,

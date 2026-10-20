@@ -138,7 +138,7 @@ async function checkLocked(row: VaultRow): Promise<void> {
   }
 }
 
-async function bumpFail(uid: number, fail: number): Promise<never> {
+async function bumpFail(uid: number, fail: number, message = '保险库口令错误'): Promise<never> {
   const next = fail + 1;
   if (next >= MAX_FAIL) {
     await query(
@@ -148,7 +148,7 @@ async function bumpFail(uid: number, fail: number): Promise<never> {
     throw new VaultError('口令错误次数过多，已锁定 15 分钟', 429);
   }
   await query(`UPDATE ${table('user_vault')} SET fail_count = ? WHERE uid = ?`, [next, uid]);
-  throw new VaultError('保险库口令错误');
+  throw new VaultError(message);
 }
 
 export async function unlockVault(uid: number, jti: string, passphrase: string): Promise<number> {
@@ -234,10 +234,13 @@ export async function recoverVault(uid: number, jti: string, recovery: string, n
   if (!row.recovery_hash || !row.salt_recovery || !row.wrapped_dek_recovery) {
     throw new VaultError('未设置恢复码，无法找回口令');
   }
+  await checkLocked(row);
   const code = String(recovery || '').trim();
-  if (sha256(code.normalize('NFKC')) !== row.recovery_hash) throw new VaultError('恢复码错误');
+  if (sha256(code.normalize('NFKC')) !== row.recovery_hash) {
+    return await bumpFail(uid, Number(row.fail_count || 0), '恢复码错误');
+  }
   const dek = unwrapDek(await deriveKek(code, buf(row.salt_recovery) as Buffer), buf(row.wrapped_dek_recovery) as Buffer, uid);
-  if (!dek) throw new VaultError('恢复码错误');
+  if (!dek) return await bumpFail(uid, Number(row.fail_count || 0), '恢复码错误');
   const pass = String(nextPass || '');
   if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   const salt = newSalt();
@@ -255,7 +258,7 @@ export async function setRecovery(uid: number, jti: string, recovery: string): P
   if (!row) throw new VaultError('保险库未初始化');
   const dek = (await getDekForWrite(uid, jti)) || (await sysDek(row));
   if (!dek) throw new VaultError('请先解锁保险库', 423);
-  const rec = await await buildRecovery(uid, dek, recovery);
+  const rec = await buildRecovery(uid, dek, recovery);
   await query(
     `UPDATE ${table('user_vault')} SET salt_recovery = ?, wrapped_dek_recovery = ?, recovery_hash = ?, updated_at = NOW() WHERE uid = ?`,
     [rec.salt, rec.wrapped, rec.hash, uid],
@@ -270,8 +273,18 @@ export async function setExcludeFromSiteBackup(uid: number, exclude: boolean): P
   ]);
 }
 
-export async function destroyVault(uid: number, confirm: string): Promise<void> {
+export async function destroyVault(uid: number, confirm: string, passphrase?: string): Promise<void> {
   if (String(confirm || '') !== 'DESTROY') throw new VaultError('请输入 DESTROY 确认销毁');
+  const row = await getVaultRow(uid);
+  if (row?.mode === 'passphrase') {
+    await checkLocked(row);
+    const dek = unwrapDek(
+      await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer),
+      buf(row.wrapped_dek) as Buffer,
+      uid,
+    );
+    if (!dek) return await bumpFail(uid, Number(row.fail_count || 0));
+  }
   await query(`DELETE FROM ${table('account')} WHERE owner_uid = ? AND visibility = 'private'`, [uid]);
   await query(`DELETE FROM ${table('cdn_account')} WHERE owner_uid = ? AND visibility = 'private'`, [uid]);
   await query(`DELETE FROM ${table('cert_account')} WHERE owner_uid = ? AND visibility = 'private'`, [uid]);

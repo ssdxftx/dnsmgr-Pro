@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { query, table, withTransaction } from '../../db.js';
 import { getSysKey } from '../../config.js';
-import { deriveSysKek, unwrapDek, wrapDek } from '../vault/keys.js';
+import { deriveKek, deriveSysKek, KDF_PARAMS, KDF_PARAMS_JSON, unwrapDek, wrapDek } from '../vault/keys.js';
 import { decodeStoredValue, TABLES } from './manifest.js';
 import { openArchive } from './archive.js';
 
@@ -12,6 +12,8 @@ export interface ImportOptions {
   mode: ImportMode;
   dryRun?: boolean;
   actor?: { uid: number; username: string };
+  actorIsAdmin?: boolean;
+  passphrase?: string;
   overwriteConfig?: boolean;
 }
 
@@ -131,6 +133,12 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       const userCount = await q(`SELECT COUNT(*) AS c FROM ${table('user')}`);
       const isEmptySite = Number((userCount as any[])[0]?.c || 0) === 0;
       const sysKey = await getSysKey();
+      const ownerUid = Number(header.ownerUid || 0);
+      const actorUid = Number(opts.actor?.uid || 0);
+      const actorIsAdmin = opts.actorIsAdmin === true;
+      const selfMerge = scope === 'user' && actorUid > 0 && !actorIsAdmin;
+      let privateBlocked = false;
+      let warnedPrivate = false;
 
       const colsCache = new Map<string, Set<string>>();
       const cols = async (name: string) => {
@@ -173,11 +181,22 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             }
             case 'user': {
               const origId = Number(row.id);
+              if (selfMerge) {
+                if (origId !== ownerUid) {
+                  rep.skipped++;
+                  continue;
+                }
+                uidMap.set(origId, actorUid);
+                rep.reused++;
+                continue;
+              }
               const mapped = await mapUser(q, row, {
                 scope,
                 mode,
                 isEmptySite,
-                ownerUid: Number(header.ownerUid || 0),
+                ownerUid,
+                actorUid,
+                actorIsAdmin,
                 uniqueName,
                 cols: columns,
               });
@@ -193,13 +212,46 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 continue;
               }
               const dekBk = typeof row.__dek_bk === 'string' ? Buffer.from(row.__dek_bk, 'base64') : null;
+              const dek = dekBk ? unwrapDek(opts.key, dekBk, origUid) : null;
               let wrappedSys: Buffer | null = null;
               let wrappedPass: Buffer | null = null;
-              if (dekBk) {
-                const dek = unwrapDek(opts.key, dekBk, origUid);
-                if (dek) {
-                  if (String(row.mode) === 'none') wrappedSys = wrapDek(deriveSysKek(sysKey), dek, uid);
-                  else if (scope === 'user') wrappedPass = wrapDek(opts.key, dek, uid);
+              if (selfMerge) {
+                if (!dek) {
+                  privateBlocked = true;
+                  if (!warnedPrivate) {
+                    warnedPrivate = true;
+                    report.warnings.push('无法从备份中读取保险库密钥，私有账户未导入');
+                  }
+                  rep.skipped++;
+                  continue;
+                }
+                const target: any = (await q(`SELECT * FROM ${table('user_vault')} WHERE uid = ?`, [uid]))[0];
+                if (target) {
+                  const targetDek = await unwrapTargetDek(target, opts.passphrase);
+                  if (!targetDek || !targetDek.equals(dek)) {
+                    privateBlocked = true;
+                    if (!warnedPrivate) {
+                      warnedPrivate = true;
+                      report.warnings.push('当前保险库与备份密钥不一致，私有账户未导入');
+                    }
+                    rep.skipped++;
+                    continue;
+                  }
+                  rep.reused++;
+                  continue;
+                }
+              }
+              if (dek) {
+                if (String(row.mode) === 'none') wrappedSys = wrapDek(deriveSysKek(sysKey), dek, uid);
+                else if (scope === 'user') {
+                  // 归档密钥 = scrypt(口令, 归档 salt)；把 salt 同步为归档 salt，解锁时才能得到同一 KEK
+                  const saltB64 = String(archive.header.kdf?.salt || '');
+                  const salt = saltB64 ? Buffer.from(saltB64, 'base64') : null;
+                  if (salt && salt.length) {
+                    row.salt = salt;
+                    row.kdf_params = KDF_PARAMS_JSON;
+                    wrappedPass = wrapDek(opts.key, dek, uid);
+                  }
                 }
               }
               if (uid !== origUid && !wrappedSys && !wrappedPass) {
@@ -219,6 +271,10 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'cdn_account':
             case 'cert_account': {
               const origAid = Number(row.id);
+              if (privateBlocked && row.visibility === 'private') {
+                rep.dropped++;
+                continue;
+              }
               const owner = Number(row.owner_uid || 0);
               row.owner_uid = uidMap.get(owner) ?? 0;
               const hit = await q(
@@ -228,6 +284,10 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               if (hit.length) {
                 const id = Number((hit as any[])[0].id);
                 (name === 'account' ? aidMap : name === 'cdn_account' ? caidMap : xaidMap).set(origAid, id);
+                const existing: any = (await q(`SELECT * FROM ${table(name)} WHERE id = ?`, [id]))[0];
+                if (existing && credentialsDiffer(existing, row)) {
+                  report.warnings.push(`账户「${row.name}」已存在但配置不同，已复用原账户（未覆盖凭证）`);
+                }
                 rep.reused++;
                 continue;
               }
@@ -246,7 +306,13 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             }
             case 'domain': {
               const orig = Number(row.id);
-              row.aid = aidMap.get(Number(row.aid)) ?? 0;
+              const origAid = Number(row.aid);
+              row.aid = aidMap.get(origAid) ?? 0;
+              if (origAid && !row.aid) {
+                rep.skipped++;
+                report.warnings.push(`域名「${row.name}」的云账户未导入，域名已跳过`);
+                continue;
+              }
               row.cid = cidMap.get(Number(row.cid)) ?? 0;
               const hit = await q(`SELECT id FROM ${table('domain')} WHERE name = ? LIMIT 1`, [row.name]);
               if (hit.length) {
@@ -346,6 +412,14 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 rep.skipped++;
                 continue;
               }
+              const dup = await q(
+                `SELECT id FROM ${table('permission')} WHERE uid = ? AND domain = ? AND IFNULL(sub, '') = ? LIMIT 1`,
+                [row.uid, row.domain, row.sub || ''],
+              );
+              if (dup.length) {
+                rep.reused++;
+                continue;
+              }
               delete row.id;
               await insertRow(q, name, row, columns);
               rep.inserted++;
@@ -397,6 +471,8 @@ async function mapUser(
     mode: ImportMode;
     isEmptySite: boolean;
     ownerUid: number;
+    actorUid: number;
+    actorIsAdmin: boolean;
     uniqueName: (q: Q, base: string) => Promise<string>;
     cols: Set<string>;
   },
@@ -405,9 +481,13 @@ async function mapUser(
   const isOwner = ctx.scope === 'user' && origId === ctx.ownerUid;
   let level = Number(row.level || 1);
   let isSuper = Number(row.is_super || 0);
-  if (isOwner) {
+  // 只有「安装向导 + 空站 + 个人备份」才允许所有者成为管理员；
+  // 已运行站点导入个人备份必须保持普通用户，避免自助提权
+  if (isOwner && ctx.mode === 'install' && ctx.isEmptySite) {
     level = 2;
     isSuper = 1;
+  } else if (ctx.scope === 'user' && ctx.actorUid > 0 && !ctx.actorIsAdmin) {
+    throw new Error('该备份不属于当前账号，无法导入');
   } else if (ctx.mode === 'merge' && ctx.scope === 'site') {
     level = 1;
     isSuper = 0;
@@ -439,4 +519,46 @@ async function mapUser(
     }
   }
   return insertRow(q, 'user', data, ctx.cols);
+}
+
+/** 便捷模式用 sys_key 解包，口令模式用当前口令解包；失败返回 null */
+async function unwrapTargetDek(row: any, passphrase?: string): Promise<Buffer | null> {
+  if (String(row.mode) === 'none') {
+    if (!row.wrapped_dek_sys) return null;
+    return unwrapDek(deriveSysKek(await getSysKey()), Buffer.from(row.wrapped_dek_sys), Number(row.uid));
+  }
+  if (!passphrase || !row.salt || !row.wrapped_dek) return null;
+  let params: any = KDF_PARAMS;
+  try {
+    params = { ...KDF_PARAMS, ...(JSON.parse(String(row.kdf_params || '{}')) || {}) };
+  } catch {
+    params = KDF_PARAMS;
+  }
+  return unwrapDek(await deriveKek(String(passphrase), Buffer.from(row.salt), params), Buffer.from(row.wrapped_dek), Number(row.uid));
+}
+
+const ACCOUNT_COMPARE_SKIP = new Set(['id', 'addtime', 'updatetime', 'created_at', 'updated_at']);
+
+/** 只比较非密文配置项：密文每次加密 IV 不同，且导入会重新加密，不能直接比对 */
+function comparable(v: any): any {
+  if (v && typeof v === 'object' && ('__encv1' in v || '__b64' in v)) return null;
+  if (typeof v === 'string' && (v.startsWith('enc:v1:') || v.startsWith('enc:u1:'))) return null;
+  if (Buffer.isBuffer(v)) return null;
+  return v;
+}
+
+function credentialsDiffer(existing: any, incoming: any): boolean {
+  for (const [k, v] of Object.entries(incoming)) {
+    if (k.startsWith('__') || ACCOUNT_COMPARE_SKIP.has(k)) continue;
+    const b = comparable(v);
+    if (b === null || b === undefined) continue;
+    const a = comparable(existing[k]);
+    if (a === null || a === undefined) continue;
+    if (typeof a === 'object' || typeof b === 'object') {
+      if (JSON.stringify(a) !== JSON.stringify(b)) return true;
+    } else if (String(a) !== String(b)) {
+      return true;
+    }
+  }
+  return false;
 }

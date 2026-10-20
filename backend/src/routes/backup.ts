@@ -170,11 +170,20 @@ export default async function backupRoutes(app: FastifyInstance) {
       if (String(header.scope) === 'site' && !isAdmin(req.user)) {
         return reply.code(403).send({ code: -1, msg: '无权限导入整站备份' });
       }
+      if (
+        String(header.scope) === 'user' &&
+        !isAdmin(req.user) &&
+        Number(header.ownerUid || 0) !== Number(req.user.uid)
+      ) {
+        return reply.code(403).send({ code: -1, msg: '只能导入自己的备份' });
+      }
       const report = await importArchive(tmp, {
         key,
         mode,
         dryRun: fields.dry_run === true || fields.dry_run === 'true',
         actor: { uid: Number(req.user.uid), username: String(req.user.username || '') },
+        actorIsAdmin: isAdmin(req.user),
+        passphrase: fields.passphrase ? String(fields.passphrase) : undefined,
         overwriteConfig: fields.overwrite_config === true,
       });
       audit(req, { module: 'backup', action: 'backup.import', summary: `导入备份（${mode}）`, detail: { mode, scope: header.scope } });

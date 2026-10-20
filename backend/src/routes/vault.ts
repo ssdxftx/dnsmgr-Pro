@@ -151,7 +151,11 @@ export default async function vaultRoutes(app: FastifyInstance) {
 
   app.post('/api/vault/destroy', auth, async (req: any, reply: any) => {
     try {
-      await destroyVault(Number(req.user.uid), String(req.body?.confirm || ''));
+      await destroyVault(
+        Number(req.user.uid),
+        String(req.body?.confirm || ''),
+        req.body?.passphrase ? String(req.body.passphrase) : undefined,
+      );
       audit(req, { module: 'vault', action: 'vault.destroy', summary: '销毁保险库与全部私有凭证', scrubBody: true });
       return { code: 0, msg: '保险库已销毁' };
     } catch (e) {

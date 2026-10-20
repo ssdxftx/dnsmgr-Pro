@@ -17,7 +17,7 @@
           <n-card size="small" :bordered="true" class="vault-choice">
             <h3>{{ t('vault.modeNone') }}</h3>
             <p class="text-dim">{{ t('vault.modeNoneHint') }}</p>
-            <n-button block @click="initConvenient">{{ t('vault.initNone') }}</n-button>
+            <n-button block @click="openNone">{{ t('vault.initNone') }}</n-button>
           </n-card>
         </n-grid-item>
         <n-grid-item>
@@ -141,13 +141,37 @@
       </template>
     </n-modal>
 
+    <n-modal v-model:show="noneOpen" preset="card" :title="t('vault.modeNone')" class="modal-md" :mask-closable="false">
+      <n-alert type="warning" class="mb-3">{{ t('vault.modeNoneWarn') }}</n-alert>
+      <n-checkbox v-model:checked="noneAck">{{ t('vault.acknowledge') }}</n-checkbox>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="noneOpen = false">{{ t('backup.cancel') }}</n-button>
+          <n-button :loading="busy" :disabled="!noneAck" @click="initConvenient">{{ t('vault.initNone') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <n-modal v-model:show="destroyOpen" preset="card" :title="t('vault.destroy')" class="modal-md" :mask-closable="false">
       <n-alert type="error" class="mb-3">{{ t('vault.destroyHint') }}</n-alert>
       <n-input v-model:value="destroyConfirm" :placeholder="t('vault.destroyConfirm')" />
+      <n-input
+        v-if="status.mode === 'passphrase'"
+        v-model:value="destroyPass"
+        type="password"
+        show-password-on="click"
+        class="mt-3"
+        :placeholder="t('vault.destroyPass')"
+      />
       <template #footer>
         <n-space justify="end">
           <n-button @click="destroyOpen = false">{{ t('backup.cancel') }}</n-button>
-          <n-button type="error" :loading="busy" :disabled="destroyConfirm !== 'DESTROY'" @click="destroy">{{ t('vault.destroy') }}</n-button>
+          <n-button
+            type="error"
+            :loading="busy"
+            :disabled="destroyConfirm !== 'DESTROY' || (status.mode === 'passphrase' && !destroyPass)"
+            @click="destroy"
+          >{{ t('vault.destroy') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -178,8 +202,11 @@ const passOpen = ref(false);
 const upgradeOpen = ref(false);
 const downgradeOpen = ref(false);
 const destroyOpen = ref(false);
+const noneOpen = ref(false);
+const noneAck = ref(false);
 const unlockPass = ref('');
 const destroyConfirm = ref('');
+const destroyPass = ref('');
 const initForm = reactive({ passphrase: '', confirm: '' });
 const passForm = reactive({ old: '', next: '' });
 
@@ -211,11 +238,19 @@ async function initPassphrase() {
   }
 }
 
+function openNone() {
+  noneAck.value = false;
+  noneOpen.value = true;
+}
+
 async function initConvenient() {
+  if (!noneAck.value) return message.warning(t('vault.ackRequired'));
   busy.value = true;
   try {
     const res = await api<any>('POST', '/vault/init', { mode: 'none', acknowledge: true });
     if (res.code !== 0) return message.error(res.msg);
+    noneOpen.value = false;
+    noneAck.value = false;
     message.success(t('vault.initDone'));
     await load();
   } finally {
@@ -301,11 +336,15 @@ async function toggleExclude(v: boolean) {
 async function destroy() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/destroy', { confirm: destroyConfirm.value });
+    const res = await api<any>('POST', '/vault/destroy', {
+      confirm: destroyConfirm.value,
+      passphrase: destroyPass.value,
+    });
     if (res.code !== 0) return message.error(res.msg);
     destroyOpen.value = false;
     destroyConfirm.value = '';
-    message.success(t('vault.saved'));
+    destroyPass.value = '';
+    message.success(t('vault.destroyed'));
     await load();
   } finally {
     busy.value = false;
