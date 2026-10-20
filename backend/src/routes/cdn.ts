@@ -2035,8 +2035,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 同步云端
-  app.post('/api/cdn/sync', adminAuth, async (req: any) => {
+  app.post('/api/cdn/sync', adminAuth, async (req: any, reply: any) => {
     const { aid, did } = req.body || {};
+    if (!(await getVisibleAccount('cdn_account', Number(aid || 0), req.user))) {
+      return reply.code(404).send({ code: -1, msg: '账户不存在' });
+    }
     const r = await syncFromCloud(Number(aid || 0), Number(did || 0));
     audit(req, {
       targetType: 'account',

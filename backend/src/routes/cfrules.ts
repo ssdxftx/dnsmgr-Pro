@@ -4,6 +4,7 @@ import { checkLevel } from '../auth.js';
 import { fmtDateTime } from '../lib/util.js';
 import { EnhanceError, CloudflareEnhanceService } from '../lib/cloudflare/enhance.js';
 import { maskConfig } from '../lib/secret.js';
+import { getVisibleAccount, listVisibleAccounts, maskAccountLabel } from '../lib/accounts/visibility.js';
 import {
   CloudflareRulesetService,
   PHASE_META,
@@ -20,9 +21,9 @@ import {
   resolveCredential,
 } from '../lib/cloudflare/rulesCredential.js';
 
-function unwrap(e: any): { code: number; msg: string } {
-  if (e instanceof EnhanceError) return { code: -1, msg: e.message };
-  return { code: -1, msg: e?.message || '操作失败' };
+function fail(reply: any, e: any) {
+  const status = Number(e?.status) || 200;
+  return reply.code(status).send({ code: -1, msg: e?.message || '操作失败' });
 }
 
 async function addLog(uid: number, domain: string, action: string, data: string): Promise<void> {
@@ -65,11 +66,12 @@ interface RulesContext {
 }
 
 /** 组装某域名在指定 phase 下的规则引擎上下文（含凭证解析） */
-async function buildContext(domainId: number, phase: string): Promise<RulesContext> {
+async function buildContext(domainId: number, phase: string, user: any): Promise<RulesContext> {
   const domain: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [domainId]);
   if (!domain) throw new EnhanceError('域名不存在', 404);
-  const account: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [domain.aid]);
-  if (!account || account.type !== 'cloudflare') throw new EnhanceError('仅支持 Cloudflare 域名');
+  const account: any = await getVisibleAccount('account', Number(domain.aid), user);
+  if (!account) throw new EnhanceError('账户不存在', 404);
+  if (account.type !== 'cloudflare') throw new EnhanceError('仅支持 Cloudflare 域名');
   const zoneId = String(domain.thirdid || '').trim();
   if (!zoneId) throw new EnhanceError('当前域名缺少 Cloudflare Zone ID');
 
@@ -121,33 +123,45 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
   });
 
   // 可管理的 Cloudflare 域名
-  app.get('/api/cf-rules/domains', auth, async () => {
+  app.get('/api/cf-rules/domains', auth, async (req: any) => {
     const rows: any[] = await query(
-      `SELECT A.id, A.name, A.thirdid AS zone_id, A.aid, B.name AS account_name
+      `SELECT A.id, A.name, A.thirdid AS zone_id, A.aid, B.name AS account_name,
+              B.visibility AS visibility, B.owner_uid AS owner_uid
        FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id
        WHERE B.type = 'cloudflare' ORDER BY A.id DESC`,
     );
+    const visible = await listVisibleAccounts('account', req.user);
+    const visibleIds = new Set(visible.map((a: any) => Number(a.id)));
     const data = rows
-      .filter((r) => String(r.zone_id || '').trim())
-      .map((r) => ({ id: Number(r.id), name: r.name, zone_id: r.zone_id, aid: Number(r.aid), account_name: r.account_name }));
+      .filter((r) => visibleIds.has(Number(r.aid)) && String(r.zone_id || '').trim())
+      .map((r) => ({
+        id: Number(r.id),
+        name: r.name,
+        zone_id: r.zone_id,
+        aid: Number(r.aid),
+        account_name: maskAccountLabel({ ...r, name: r.account_name }, req.user),
+      }));
     return { code: 0, data };
   });
 
   // CF 账户聚合：供「站点设置」页渲染账户卡片
-  app.get('/api/cf-rules/accounts', auth, async () => {
+  app.get('/api/cf-rules/accounts', auth, async (req: any) => {
     const rows: any[] = await query(
-      `SELECT B.id AS aid, B.name AS account_name,
+      `SELECT B.id AS aid, B.name AS account_name, B.visibility AS visibility, B.owner_uid AS owner_uid,
               COUNT(A.id) AS domain_count,
               COUNT(DISTINCT A.thirdid) AS zone_count
          FROM ${table('domain')} A
          JOIN ${table('account')} B ON A.aid = B.id
         WHERE B.type = 'cloudflare'
           AND A.thirdid IS NOT NULL AND A.thirdid <> ''
-        GROUP BY B.id, B.name
+        GROUP BY B.id, B.name, B.visibility, B.owner_uid
         ORDER BY B.id DESC`,
     );
+    const visible = await listVisibleAccounts('account', req.user);
+    const visibleIds = new Set(visible.map((a: any) => Number(a.id)));
     const data: any[] = [];
     for (const r of rows) {
+      if (!visibleIds.has(Number(r.aid))) continue;
       let credential = 'missing';
       try {
         const { config } = await resolveCredential(Number(r.aid));
@@ -159,7 +173,7 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
       }
       data.push({
         aid: Number(r.aid),
-        name: r.account_name,
+        name: maskAccountLabel({ ...r, name: r.account_name }, req.user),
         domainCount: Number(r.domain_count),
         zoneCount: Number(r.zone_count),
         credential,
@@ -169,20 +183,22 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
   });
 
   // 查询某账户凭证状态
-  app.get('/api/cf-rules/credential', auth, async (req: any) => {
+  app.get('/api/cf-rules/credential', auth, async (req: any, reply: any) => {
     const aid = Number(req.query?.aid || 0);
     if (!aid) return { code: -1, msg: '缺少账户参数' };
+    if (!(await getVisibleAccount('account', aid, req.user))) return reply.code(404).send({ code: -1, msg: '账户不存在' });
     const dedicated = await getDedicatedCredential(aid);
     return { code: 0, data: { has_dedicated: !!dedicated, config: dedicated ? maskConfig(dedicated) : null } };
   });
 
   // 保存并校验专用凭证（按 Cloudflare 账户绑定）
-  app.post('/api/cf-rules/credential', auth, async (req: any) => {
+  app.post('/api/cf-rules/credential', auth, async (req: any, reply: any) => {
     const b = req.body || {};
     const aid = Number(b.aid || 0);
     if (!aid) return { code: -1, msg: '缺少账户参数' };
-    const account = await queryOne(`SELECT id FROM ${table('account')} WHERE id = ? AND type = 'cloudflare'`, [aid]);
-    if (!account) return { code: -1, msg: 'Cloudflare 账户不存在' };
+    const account = await getVisibleAccount('account', aid, req.user);
+    if (!account) return reply.code(404).send({ code: -1, msg: '账户不存在' });
+    if (account.type !== 'cloudflare') return { code: -1, msg: 'Cloudflare 账户不存在' };
 
     const authType = Number(b.auth) === 0 ? 0 : 1;
     const email = String(b.email || '').trim();
@@ -220,15 +236,16 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
   });
 
   // 移除专用凭证，回退 DNS 账户密钥
-  app.delete('/api/cf-rules/credential', auth, async (req: any) => {
+  app.delete('/api/cf-rules/credential', auth, async (req: any, reply: any) => {
     const aid = Number(req.query?.aid || 0);
     if (!aid) return { code: -1, msg: '缺少账户参数' };
+    if (!(await getVisibleAccount('account', aid, req.user))) return reply.code(404).send({ code: -1, msg: '账户不存在' });
     await removeDedicatedCredential(aid);
     return { code: 0, msg: '已移除专用凭证，将回退使用 DNS 账户密钥' };
   });
 
   // 规则列表
-  app.get('/api/cf-rules/rules', auth, async (req: any) => {
+  app.get('/api/cf-rules/rules', auth, async (req: any, reply: any) => {
     const domainId = Number(req.query?.domainId || 0);
     const phase = String(req.query?.phase || '').trim();
     if (!domainId || !phase) return { code: -1, msg: '参数不完整' };
@@ -236,9 +253,9 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
 
     let ctx: RulesContext;
     try {
-      ctx = await buildContext(domainId, phase);
+      ctx = await buildContext(domainId, phase, req.user);
     } catch (e: any) {
-      return unwrap(e);
+      return fail(reply, e);
     }
     try {
       const rules = await ctx.service.listRules(phase);
@@ -253,7 +270,7 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
   });
 
   // 新增规则
-  app.post('/api/cf-rules/rules', auth, async (req: any) => {
+  app.post('/api/cf-rules/rules', auth, async (req: any, reply: any) => {
     const p = parseRuleBody(req.body);
     if (!p.domainId || !p.phase) return { code: -1, msg: '参数不完整' };
     if (!isSupportedPhase(p.phase)) return { code: -1, msg: '不支持的规则类型' };
@@ -262,9 +279,9 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
 
     let ctx: RulesContext;
     try {
-      ctx = await buildContext(p.domainId, p.phase);
+      ctx = await buildContext(p.domainId, p.phase, req.user);
     } catch (e: any) {
-      return unwrap(e);
+      return fail(reply, e);
     }
     try {
       const rule = await ctx.service.createRule(p.phase, {
@@ -282,7 +299,7 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
   });
 
   // 更新规则
-  app.put('/api/cf-rules/rules/:ruleId', auth, async (req: any) => {
+  app.put('/api/cf-rules/rules/:ruleId', auth, async (req: any, reply: any) => {
     const ruleId = String(req.params.ruleId || '').trim();
     if (!ruleId) return { code: -1, msg: '缺少规则 ID' };
     const p = parseRuleBody(req.body);
@@ -293,9 +310,9 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
 
     let ctx: RulesContext;
     try {
-      ctx = await buildContext(p.domainId, p.phase);
+      ctx = await buildContext(p.domainId, p.phase, req.user);
     } catch (e: any) {
-      return unwrap(e);
+      return fail(reply, e);
     }
     try {
       const rule = await ctx.service.updateRule(p.phase, ruleId, {
@@ -313,7 +330,7 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
   });
 
   // 删除规则
-  app.delete('/api/cf-rules/rules/:ruleId', auth, async (req: any) => {
+  app.delete('/api/cf-rules/rules/:ruleId', auth, async (req: any, reply: any) => {
     const ruleId = String(req.params.ruleId || '').trim();
     const domainId = Number(req.query?.domainId || 0);
     const phase = String(req.query?.phase || '').trim();
@@ -322,9 +339,9 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
 
     let ctx: RulesContext;
     try {
-      ctx = await buildContext(domainId, phase);
+      ctx = await buildContext(domainId, phase, req.user);
     } catch (e: any) {
-      return unwrap(e);
+      return fail(reply, e);
     }
     try {
       await ctx.service.deleteRule(phase, ruleId);

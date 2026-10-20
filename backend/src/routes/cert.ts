@@ -63,6 +63,14 @@ async function canAccessCertOrder(id: any, user: any): Promise<boolean> {
   return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
 }
 
+/** 部署任务越权守卫：任务绑定的证书账户对当前用户不可见时按不存在处理 */
+async function canAccessDeployTask(id: any, user: any): Promise<boolean> {
+  const row: any = await queryOne(`SELECT aid FROM ${table('cert_deploy')} WHERE id = ?`, [Number(id)]);
+  if (!row) return false;
+  if (!Number(row.aid)) return checkLevel(user, 2);
+  return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
+}
+
 function parseCertKey(fullchain: string, privatekey: string) {
   let cert: X509Certificate;
   try {
@@ -747,6 +755,10 @@ export default async function certRoutes(app: FastifyInstance) {
       where += ' AND A.oid = ?';
       params.push(oid);
     }
+    const visibleCertAids = (await listVisibleAccounts('cert_account', req.user)).map((a: any) => Number(a.id));
+    if (!visibleCertAids.length) return { code: 0, total: 0, data: [] };
+    where += ` AND A.aid IN (${visibleCertAids.map(() => '?').join(',')})`;
+    params.push(...visibleCertAids);
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A WHERE ${where}`, params))?.c || 0;
     const rows = await query(
       `SELECT A.*, B.type, B.name AS aname, C.aid AS certaid FROM ${table('cert_deploy')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id LEFT JOIN ${table('cert_order')} C ON A.oid = C.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
@@ -776,9 +788,15 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, total, data: list };
   });
 
-  app.post('/api/deploy/tasks', auth, async (req: any) => {
+  app.post('/api/deploy/tasks', auth, async (req: any, reply: any) => {
     const { aid, oid, config, remark } = req.body || {};
     if (!aid || !oid || !config) return { code: -1, msg: '必填参数不能为空' };
+    if (!(await getVisibleAccount('cert_account', Number(aid), req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书账户不存在' });
+    }
+    if (!(await canAccessCertOrder(oid, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     try {
       await assertDeployConfigAllowed(config);
     } catch (e: any) {
@@ -797,10 +815,19 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '添加自动部署任务成功！' };
   });
 
-  app.put('/api/deploy/tasks/:id', auth, async (req: any) => {
+  app.put('/api/deploy/tasks/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { aid, oid, config, remark } = req.body || {};
     if (!aid || !oid || !config) return { code: -1, msg: '必填参数不能为空' };
+    if (!(await canAccessDeployTask(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
+    }
+    if (!(await getVisibleAccount('cert_account', Number(aid), req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书账户不存在' });
+    }
+    if (!(await canAccessCertOrder(oid, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     const row = await queryOne(`SELECT config FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
     // 前端回显的是掩码，敏感字段保持不变
@@ -820,15 +847,21 @@ export default async function certRoutes(app: FastifyInstance) {
     return { code: 0, msg: '修改自动部署任务成功！' };
   });
 
-  app.delete('/api/deploy/tasks/:id', auth, async (req: any) => {
+  app.delete('/api/deploy/tasks/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessDeployTask(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
+    }
     await query(`DELETE FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
     audit(req, { targetType: 'deploy_task', targetId: id, summary: `删除部署任务 #${id}` });
     return { code: 0, msg: '删除成功' };
   });
 
-  app.post('/api/deploy/tasks/:id/process', auth, async (req: any) => {
+  app.post('/api/deploy/tasks/:id/process', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessDeployTask(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
+    }
     try {
       await new CertDeployService(id).process(true);
       certDeploySend(Number(id), true).catch(() => {});
@@ -840,8 +873,11 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/deploy/tasks/:id/reset', auth, async (req: any) => {
+  app.post('/api/deploy/tasks/:id/reset', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessDeployTask(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
+    }
     try {
       await new CertDeployService(id).reset();
       audit(req, { targetType: 'deploy_task', targetId: id, summary: `重置部署任务 #${id}` });
@@ -851,8 +887,11 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/deploy/tasks/:id/setactive', auth, async (req: any) => {
+  app.post('/api/deploy/tasks/:id/setactive', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    if (!(await canAccessDeployTask(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
+    }
     const { active } = req.body || {};
     await query(`UPDATE ${table('cert_deploy')} SET active = ? WHERE id = ?`, [active ? 1 : 0, id]);
     audit(req, {
