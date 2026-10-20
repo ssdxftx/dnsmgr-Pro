@@ -74,7 +74,13 @@ export async function flushAudit(): Promise<void> {
 export async function shutdownAudit(): Promise<void> {
   if (timer) clearInterval(timer);
   timer = null;
-  for (let i = 0; i < 5 && queue.length; i++) await flushAudit();
+  const deadline = Date.now() + 3000;
+  while (queue.length && Date.now() < deadline) {
+    const before = failCount;
+    await flushAudit();
+    if (failCount > before) break;
+    if (queue.length < FLUSH_BATCH) break;
+  }
 }
 
 export function nowStr(): string {

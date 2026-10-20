@@ -88,6 +88,7 @@
           </n-descriptions-item>
           <n-descriptions-item :label="t('audit.module')">{{ moduleLabel(cur.module) }}</n-descriptions-item>
           <n-descriptions-item :label="t('audit.action')">{{ actionLabel(cur.action) }}</n-descriptions-item>
+          <n-descriptions-item :label="t('audit.summary')">{{ cur.summary || '-' }}</n-descriptions-item>
           <n-descriptions-item :label="t('audit.target')">{{ cur.target_name || '-' }}</n-descriptions-item>
           <n-descriptions-item :label="t('audit.result')">
             <n-tag :type="cur.result ? 'success' : 'error'" size="small" :bordered="false">
@@ -228,6 +229,12 @@ const columns = computed<any[]>(() => [
     key: 'action',
     width: 150,
     render: (row: any) => h(NEllipsis, { expandTrigger: 'click' }, { default: () => actionLabel(row.action) }),
+  },
+  {
+    title: t('audit.summary'),
+    key: 'summary',
+    minWidth: 240,
+    render: (row: any) => h(NEllipsis, { expandTrigger: 'click', lineClamp: 2 }, { default: () => row.summary || '-' }),
   },
   {
     title: t('audit.target'),

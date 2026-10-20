@@ -180,6 +180,7 @@ export default {
     user: '用户',
     module: '模块',
     action: '操作',
+    summary: '摘要',
     target: '对象',
     result: '结果',
     success: '成功',

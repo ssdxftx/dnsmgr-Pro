@@ -88,7 +88,7 @@ export default async function auditRoutes(app: FastifyInstance) {
       `SELECT COUNT(*) AS total,
               SUM(addtime >= CURDATE()) AS today,
               SUM(result = 0 AND addtime >= DATE_SUB(NOW(), INTERVAL 7 DAY)) AS failed7d,
-              COUNT(DISTINCT uid) AS users30d
+              COUNT(DISTINCT CASE WHEN uid > 0 THEN uid END) AS users30d
        FROM ${table('audit_log')}
        WHERE addtime >= DATE_SUB(NOW(), INTERVAL 30 DAY)${scope}`,
     );

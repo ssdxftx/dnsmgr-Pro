@@ -5,6 +5,7 @@ import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { sendMail } from '../lib/monitor/msgNotice.js';
+import { audit } from '../lib/audit/context.js';
 import { clampLimit, clampOffset } from '../lib/util.js';
 
 const SITENAME = '聚合DNS管理系统';
@@ -148,16 +149,29 @@ export default async function registerRoutes(app: FastifyInstance) {
     }
 
     const hash = await bcrypt.hash(password, 10);
+    let newId = 0;
     try {
-      await query(
+      const ins: any = await query(
         `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, regtime, status, email) VALUES (?, ?, 0, '', 1, NOW(), 1, ?)`,
         [username, hash, email || null]
       );
+      newId = Number(ins?.insertId || 0);
     } catch (e: any) {
       if (e?.code === 'ER_DUP_ENTRY') return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
       throw e;
     }
-    await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES ((SELECT id FROM ${table('user')} WHERE username = ?), '用户注册', ?, NOW())`, [username, 'IP:' + (req.ip || '')]);
+    await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES (?, '用户注册', ?, NOW())`, [newId, 'IP:' + (req.ip || '')]);
+    audit(req, {
+      uid: newId,
+      username,
+      module: 'auth',
+      action: 'auth.register',
+      targetType: 'user',
+      targetId: newId,
+      targetName: username,
+      summary: `新用户注册：${username}（IP ${req.ip || '-'}）`,
+      detail: { username, email: email || '' },
+    });
 
     return { code: 0, msg: '注册成功，请登录' };
   });

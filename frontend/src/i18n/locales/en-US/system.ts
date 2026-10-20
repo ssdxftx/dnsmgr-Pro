@@ -180,6 +180,7 @@ export default {
     user: 'User',
     module: 'Module',
     action: 'Action',
+    summary: 'Summary',
     target: 'Target',
     result: 'Result',
     success: 'Success',

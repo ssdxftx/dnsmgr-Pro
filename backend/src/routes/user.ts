@@ -185,7 +185,7 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
     const row: any = await queryOne(
-      `SELECT id, is_super, level, username, status, email, remark FROM ${table('user')} WHERE id = ?`,
+      `SELECT id, is_super, level, username, status, email, remark, apikey, is_api FROM ${table('user')} WHERE id = ?`,
       [id],
     );
     if (!row) return { code: -1, msg: '用户不存在' };
@@ -233,6 +233,9 @@ export default async function userRoutes(app: FastifyInstance) {
     }
     params.push(id);
     await query(`UPDATE ${table('user')} SET ${sets.join(', ')} WHERE id = ?`, params);
+    const prevPerm = level === 1
+      ? await queryOne<any>(`SELECT COUNT(*) AS c FROM ${table('permission')} WHERE uid = ?`, [id])
+      : undefined;
     if (level === 1) {
       await savePermissions(id, permission);
     } else {
@@ -242,18 +245,22 @@ export default async function userRoutes(app: FastifyInstance) {
       // 改密同时自增 token_version，使该用户已签发的旧 JWT 立即失效
       await query(`UPDATE ${table('user')} SET password = ?, token_version = token_version + 1 WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
     }
+    const before: Record<string, any> = { ...row };
+    delete before.apikey;
     const after: Record<string, any> = {
       username,
       level,
+      is_api: isApi,
       status: row.status,
       email: b.email !== undefined ? String(b.email ?? '') : row.email,
       remark: b.remark !== undefined ? String(b.remark ?? '') : row.remark,
     };
     if (b.check_whole !== undefined) after.check_whole = Number(b.check_whole) === 1 ? 1 : 0;
     if (b.stat_cache !== undefined) after.stat_cache = Number(b.stat_cache) === 1 ? 1 : 0;
-    const changes = diffFields(row, after, {
+    const changes = diffFields(before, after, {
       username: '用户名',
       level: '等级',
+      is_api: 'API 访问',
       status: '状态',
       email: '邮箱',
       remark: '备注',
@@ -261,6 +268,12 @@ export default async function userRoutes(app: FastifyInstance) {
       stat_cache: '统计缓存',
     });
     if (repwd) changes.push({ field: '密码', to: '已重置' });
+    if (apikeyRaw && apikeyRaw !== SECRET_MASK && apikey !== String(row.apikey ?? '')) {
+      changes.push({ field: 'API 密钥', to: '已更新' });
+    }
+    if (level === 1 && Number(prevPerm?.c || 0) !== permission.length) {
+      changes.push({ field: '子域名授权', to: `${permission.length} 条` });
+    }
     audit(req, {
       targetType: 'user',
       targetId: id,

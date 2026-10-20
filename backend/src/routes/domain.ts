@@ -10,6 +10,11 @@ import { diffFields } from '../lib/audit/mask.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
+/** 拼接完整记录名：主机记录为 @ 或空时指向根域名，避免出现 @.example.com */
+function recFull(name: string | undefined | null, domain: string): string {
+  return !name || name === '@' ? domain : `${name}.${domain}`;
+}
+
 function safeJson(s: any): Record<string, any> {
   if (s && typeof s === 'object') return s as Record<string, any>;
   const cfg = decryptConfig(s);
@@ -585,7 +590,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     audit(req, {
       targetType: 'record',
       targetId: recordId,
-      targetName: `${name || '@'}.${info.domain.name}`,
+      targetName: recFull(name, info.domain.name),
       summary: `新增 ${type} 记录 ${name || '@'} → ${value}`,
       changes: [{ field: '记录', to: `${type} ${name || '@'} ${value}` }],
       detail: { name, type, value, line, ttl, mx, weight, remark },
@@ -629,7 +634,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     audit(req, {
       targetType: 'record',
       targetId: recordId,
-      targetName: `${cur.Name || '@'}.${info.domain.name}`,
+      targetName: recFull(cur.Name, info.domain.name),
       summary: `修改解析备注 ${cur.Name || recordId}`,
       changes: [{ field: '备注', from: String(cur.Remark ?? ''), to: String(remark ?? '') }],
     });
@@ -664,7 +669,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     audit(req, {
       targetType: 'record',
       targetId: recordId,
-      targetName: `${name || cur?.Name || '@'}.${info.domain.name}`,
+      targetName: recFull(name || cur?.Name, info.domain.name),
       summary: `修改解析记录 ${cur?.Name || name || recordId}：${cur?.Value ?? '-'} → ${value}`,
       changes: diffFields(
         cur && { Name: cur.Name, Type: cur.Type, Value: cur.Value, Line: cur.Line, TTL: cur.TTL, MX: cur.MX, Remark: cur.Remark },
@@ -702,7 +707,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     audit(req, {
       targetType: 'record',
       targetId: recordId,
-      targetName: `${cur?.Name || '@'}.${info.domain.name}`,
+      targetName: recFull(cur?.Name, info.domain.name),
       summary: `删除 ${cur?.Type || '解析'} 记录 ${cur?.Name || recordId} → ${cur?.Value ?? '-'}`,
       changes: [{ field: '记录', from: cur ? `${cur.Type} ${cur.Name} ${cur.Value}` : String(recordId), to: '' }],
     });
@@ -735,7 +740,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     audit(req, {
       targetType: 'record',
       targetId: recordId,
-      targetName: `${cur?.Name || '@'}.${info.domain.name}`,
+      targetName: recFull(cur?.Name, info.domain.name),
       summary: `${Number(status) ? '启用' : '暂停'}解析记录 ${cur?.Name || recordId}`,
       changes: [{ field: '状态', to: Number(status) ? '启用' : '暂停' }],
     });

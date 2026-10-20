@@ -6,7 +6,7 @@ import type { AuditRow } from './types.js';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SKIP_PREFIXES = ['/api/setup', '/api/health', '/api/qqbot/webhook'];
-const ANON_LOGIN_ROUTES = ['/api/auth/login', '/api/auth/totp'];
+const ANON_WRITE_ROUTES = ['/api/auth/login', '/api/auth/totp', '/api/register'];
 
 function shouldSkip(req: any, route: string): boolean {
   if (!WRITE_METHODS.has(req.method)) return true;
@@ -17,7 +17,7 @@ function shouldSkip(req: any, route: string): boolean {
   if ((req as any).audit?.skip) return true;
   // 匿名且非登录接口：多半是扫描器/过期令牌，不记录
   const uid = Number(req.user?.uid || 0);
-  if (!uid && !ANON_LOGIN_ROUTES.includes(route)) return true;
+  if (!uid && !ANON_WRITE_ROUTES.includes(route)) return true;
   return false;
 }
 
@@ -28,8 +28,14 @@ export function registerAuditHooks(app: FastifyInstance): void {
     if (payload && typeof payload === 'object' && !Buffer.isBuffer(payload)) {
       if (typeof (payload as any).code === 'number') (reply as any).__auditCode = (payload as any).code;
       if (typeof (payload as any).msg === 'string') (reply as any).__auditMsg = (payload as any).msg;
+      else if (typeof (payload as any).message === 'string') (reply as any).__auditMsg = (payload as any).message;
     }
     return payload;
+  });
+
+  app.addHook('onError', async (req: any, reply: any, err: any) => {
+    if (!WRITE_METHODS.has(req.method)) return;
+    if (err && typeof err.message === 'string') (reply as any).__auditMsg = err.message;
   });
 
   app.addHook('onResponse', (req: any, reply: any, done: any) => {
