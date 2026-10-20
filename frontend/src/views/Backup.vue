@@ -37,6 +37,7 @@
             </div>
             <n-space>
               <n-button size="small" quaternary @click="testDest(d)">{{ t('backup.destTest') }}</n-button>
+              <n-button size="small" quaternary @click="openRemote(d)">{{ t('backup.remoteBrowse') }}</n-button>
               <n-button size="small" quaternary @click="openDest(d)">{{ t('backup.save') }}</n-button>
               <n-button size="small" quaternary type="error" @click="removeDest(d)">{{ t('backup.delete') }}</n-button>
             </n-space>
@@ -72,8 +73,35 @@
       <n-empty v-else :description="t('backup.schedTitle')" />
     </n-card>
 
+    <n-modal v-model:show="showRemote" preset="card" :title="t('backup.remoteTitle')" class="modal-lg" :mask-closable="false">
+      <n-space vertical :size="12">
+        <n-space align="center" :size="8" style="flex-wrap: wrap">
+          <n-select v-model:value="remoteDestId" :options="remoteDestOptions" style="min-width: 200px; max-width: 260px" @update:value="loadRemote" />
+          <n-button :loading="remoteLoading" @click="loadRemote">{{ t('backup.remoteRefresh') }}</n-button>
+        </n-space>
+        <n-alert type="info">{{ t('backup.remoteHint') }}</n-alert>
+        <n-spin :show="remoteLoading">
+          <n-list v-if="remoteFiles.length" bordered>
+            <n-list-item v-for="f in remoteFiles" :key="f.name">
+              <div class="remote-row">
+                <div class="remote-meta">
+                  <div class="remote-name">{{ f.name }}</div>
+                  <div class="text-dim">{{ fmtSize(f.size) }} · {{ f.createdAt || f.modified || '-' }} · {{ f.scope === 'user' ? t('backup.remoteScopeUser') : t('backup.remoteScopeSite') }}</div>
+                </div>
+                <n-button size="small" type="primary" :disabled="!f.restorable" @click="restoreRemote(f)">{{ t('backup.remoteRestore') }}</n-button>
+              </div>
+            </n-list-item>
+          </n-list>
+          <n-empty v-else :description="t('backup.remoteEmpty')" />
+        </n-spin>
+      </n-space>
+    </n-modal>
+
     <n-modal v-model:show="showRestore" preset="card" :title="t('backup.restoreTitle')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
+        <n-alert v-if="restoreTarget?.remote" type="info" class="mb-3">
+          {{ t('backup.remoteSelected') }}: {{ restoreTarget.file_name }}
+        </n-alert>
         <n-form-item :label="t('backup.restoreMode')">
           <n-radio-group v-model:value="restoreForm.mode">
             <n-radio value="replace">{{ t('backup.replace') }}</n-radio>
@@ -178,7 +206,11 @@ const destinations = ref<any[]>([]);
 const schedules = ref<any[]>([]);
 
 const showRestore = ref(false);
+const showRemote = ref(false);
 const showDest = ref(false);
+const remoteDestId = ref(0);
+const remoteFiles = ref<any[]>([]);
+const remoteLoading = ref(false);
 const showSched = ref(false);
 const restoreTarget = ref<any>(null);
 const restoreForm = reactive({ mode: 'replace', confirm: '' });
@@ -192,6 +224,10 @@ const destOptions = computed(() => [
   { label: t('backup.localOnly'), value: 0 },
   ...destinations.value.map((d) => ({ label: d.name, value: Number(d.id) })),
 ]);
+
+const remoteDestOptions = computed(() =>
+  destinations.value.map((d) => ({ label: `${d.name} (${d.type})`, value: Number(d.id) })),
+);
 
 const successCount = computed(() => jobs.value.filter((j) => j.status === 'success').length);
 const lastBackupText = computed(() => {
@@ -306,6 +342,42 @@ async function download(row: any) {
   URL.revokeObjectURL(url);
 }
 
+async function openRemote(d: any) {
+  remoteDestId.value = Number(d.id);
+  remoteFiles.value = [];
+  showRemote.value = true;
+  await loadRemote();
+}
+
+async function loadRemote() {
+  if (!remoteDestId.value) return;
+  remoteLoading.value = true;
+  try {
+    const res = await api<any>('GET', `/backup/remote/${remoteDestId.value}`);
+    if (res.code !== 0) return message.error(res.msg);
+    remoteFiles.value = res.data || [];
+  } catch (e: any) {
+    message.error(e?.message || t('backup.remoteLoadFailed'));
+  } finally {
+    remoteLoading.value = false;
+  }
+}
+
+function restoreRemote(f: any) {
+  showRemote.value = false;
+  restoreTarget.value = {
+    id: 0,
+    remote: true,
+    destId: remoteDestId.value,
+    file_name: f.name,
+    scope: f.scope,
+    file_size: f.size,
+  };
+  restoreForm.mode = 'replace';
+  restoreForm.confirm = '';
+  showRestore.value = true;
+}
+
 function openRestore(row: any) {
   restoreTarget.value = row;
   restoreForm.mode = 'replace';
@@ -317,11 +389,14 @@ async function doRestore() {
   if (!restoreTarget.value) return;
   restoring.value = true;
   try {
-    const res = await api<any>('POST', '/backup/restore', {
-      jobId: restoreTarget.value.id,
-      mode: restoreForm.mode,
-      confirm: restoreForm.confirm,
-    });
+    const body: any = { mode: restoreForm.mode, confirm: restoreForm.confirm };
+    if (restoreTarget.value.remote) {
+      body.destId = restoreTarget.value.destId;
+      body.fileName = restoreTarget.value.file_name;
+    } else {
+      body.jobId = restoreTarget.value.id;
+    }
+    const res = await api<any>('POST', '/backup/restore', body);
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.restoreDone'));
     showRestore.value = false;
@@ -449,5 +524,30 @@ onMounted(loadAll);
 .text-dim {
   color: var(--app-text-3);
   font-size: 12px;
+}
+
+.remote-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.remote-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.remote-name {
+  font-weight: 500;
+  word-break: break-all;
+}
+
+@media (max-width: 767px) {
+  .remote-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 </style>

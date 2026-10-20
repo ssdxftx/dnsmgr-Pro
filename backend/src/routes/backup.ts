@@ -31,6 +31,16 @@ function isAdmin(user: any): boolean {
   return checkLevel(user, 2);
 }
 
+function archiveMeta(name: string) {
+  const scope = name.startsWith('user-') ? 'user' : 'site';
+  const m = /^(?:site|user)-(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})-/.exec(name);
+  return {
+    scope,
+    createdAt: m ? `${m[1]}-${m[2]}-${m[3]} ${m[4]}:${m[5]}:${m[6]}` : '',
+    restorable: scope === 'site',
+  };
+}
+
 function computeNextRun(row: any, from = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0');
   const fmt = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
@@ -187,9 +197,58 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (restoreHits.length >= 3) return reply.code(429).send({ code: -1, msg: '恢复操作过于频繁，请稍后再试' });
     restoreHits.push(now);
 
-    const job: any = b.jobId
-      ? await queryOne(`SELECT * FROM ${table('backup_job')} WHERE id = ?`, [Number(b.jobId)])
-      : await queryOne(`SELECT * FROM ${table('backup_job')} WHERE file_name = ? LIMIT 1`, [String(b.fileName || '')]);
+    const destId = Number(b.destId || 0);
+    const remoteName = path.basename(String(b.fileName || ''));
+    let job: any;
+    let localFromRemote = '';
+    if (!b.jobId && destId > 0) {
+      // 云端在线恢复：先拉取到本地，再走统一的恢复流程
+      if (!remoteName || remoteName !== String(b.fileName) || !remoteName.endsWith('.dnsmgrbk')) {
+        return { code: -1, msg: '文件名不合法' };
+      }
+      if (remoteName.startsWith('user-')) return { code: -1, msg: '仅支持恢复整站备份' };
+      const dest = await getDestination(destId);
+      if (!dest) return { code: -1, msg: '备份目的地不存在' };
+      await ensureDataDirs();
+      localFromRemote = resolveArchivePath(remoteName);
+      try {
+        await downloadRemote(destId, remoteName, localFromRemote);
+      } catch (e: any) {
+        await unlink(localFromRemote).catch(() => undefined);
+        return { code: -1, msg: `云端备份下载失败：${String(e?.message || e)}` };
+      }
+      let header: any;
+      try {
+        header = (await readArchiveHeader(localFromRemote)).header;
+      } catch (e: any) {
+        await unlink(localFromRemote).catch(() => undefined);
+        return { code: -1, msg: `备份文件无法识别：${String(e?.message || e)}` };
+      }
+      if (String(header.scope) !== 'site') {
+        await unlink(localFromRemote).catch(() => undefined);
+        return { code: -1, msg: '仅支持恢复整站备份' };
+      }
+      const st = await stat(localFromRemote);
+      const existed: any = await queryOne(`SELECT * FROM ${table('backup_job')} WHERE file_name = ? LIMIT 1`, [remoteName]);
+      if (existed) {
+        await query(
+          `UPDATE ${table('backup_job')} SET scope = 'site', status = 'success', file_size = ?, dest = ?, dest_id = ?, error = NULL, finished_at = NOW() WHERE id = ?`,
+          [st.size, dest.type, destId, existed.id],
+        );
+        job = { ...existed, scope: 'site' };
+      } else {
+        const r: any = await query(
+          `INSERT INTO ${table('backup_job')} (kind, scope, status, file_name, file_size, dest, dest_id, include_logs, created_at, finished_at)
+           VALUES ('manual', 'site', 'success', ?, ?, ?, ?, 1, NOW(), NOW())`,
+          [remoteName, st.size, dest.type, destId],
+        );
+        job = { id: r.insertId, file_name: remoteName, scope: 'site' };
+      }
+    } else {
+      job = b.jobId
+        ? await queryOne(`SELECT * FROM ${table('backup_job')} WHERE id = ?`, [Number(b.jobId)])
+        : await queryOne(`SELECT * FROM ${table('backup_job')} WHERE file_name = ? LIMIT 1`, [String(b.fileName || '')]);
+    }
     if (!job?.file_name) return { code: -1, msg: '请选择要恢复的备份' };
     if (String(job.scope) !== 'site') return { code: -1, msg: '仅支持恢复整站备份' };
 
@@ -383,7 +442,8 @@ export default async function backupRoutes(app: FastifyInstance) {
   app.get('/api/backup/remote/:destId', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     try {
-      return { code: 0, data: await listRemote(Number(req.params.destId)) };
+      const items = await listRemote(Number(req.params.destId));
+      return { code: 0, data: items.map((it) => ({ ...it, ...archiveMeta(it.name) })) };
     } catch (e: any) {
       return { code: -1, msg: String(e?.message || e) };
     }
