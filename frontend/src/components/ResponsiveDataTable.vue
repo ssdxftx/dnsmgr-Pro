@@ -81,7 +81,6 @@
       <div v-if="mobilePagination" class="rdt__pager">
         <n-pagination
           :page="mobilePagination.page"
-          :page-count="mobilePagination.pageCount"
           :page-size="mobilePagination.pageSize"
           :item-count="mobilePagination.itemCount"
           :simple="false"
@@ -239,13 +238,12 @@ const CellRender = (p: any) => renderCell(p.col, p.row, p.index);
 const mobilePagination = computed(() => {
   const p = props.pagination;
   if (!isMobile.value || !p || typeof p !== 'object') return null;
-  // 调用方通常只传 itemCount/pageSize（naive-ui 风格），此处按需推导总页数
+  // 只传 itemCount/pageSize，naive-ui 会自行推导总页数，避免 page-count 与 item-count 同时出现触发告警
   const pageSize = Number(p.pageSize || 10);
-  const pageCount = Number(p.pageCount ?? 0) || Math.ceil(Number(p.itemCount ?? 0) / (pageSize > 0 ? pageSize : 10));
-  if (!pageCount || pageCount <= 1) return null;
+  const itemCount = Number(p.itemCount ?? 0);
+  if (!itemCount || itemCount <= (pageSize > 0 ? pageSize : 10)) return null;
   return {
     page: Number(p.page ?? 1),
-    pageCount,
     pageSize: p.pageSize,
     itemCount: p.itemCount,
   };

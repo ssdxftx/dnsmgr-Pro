@@ -233,9 +233,7 @@ export default async function userRoutes(app: FastifyInstance) {
     }
     params.push(id);
     await query(`UPDATE ${table('user')} SET ${sets.join(', ')} WHERE id = ?`, params);
-    const prevPerm = level === 1
-      ? await queryOne<any>(`SELECT COUNT(*) AS c FROM ${table('permission')} WHERE uid = ?`, [id])
-      : undefined;
+    const prevPerm = await queryOne<any>(`SELECT COUNT(*) AS c FROM ${table('permission')} WHERE uid = ?`, [id]);
     if (level === 1) {
       await savePermissions(id, permission);
     } else {
@@ -245,8 +243,6 @@ export default async function userRoutes(app: FastifyInstance) {
       // 改密同时自增 token_version，使该用户已签发的旧 JWT 立即失效
       await query(`UPDATE ${table('user')} SET password = ?, token_version = token_version + 1 WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
     }
-    const before: Record<string, any> = { ...row };
-    delete before.apikey;
     const after: Record<string, any> = {
       username,
       level,
@@ -257,6 +253,8 @@ export default async function userRoutes(app: FastifyInstance) {
     };
     if (b.check_whole !== undefined) after.check_whole = Number(b.check_whole) === 1 ? 1 : 0;
     if (b.stat_cache !== undefined) after.stat_cache = Number(b.stat_cache) === 1 ? 1 : 0;
+    // 以 after 的键为准取旧值，避免 id / is_super 这类只存在于 before 的字段被判成「被清空」
+    const before: Record<string, any> = Object.fromEntries(Object.keys(after).map((k) => [k, row[k]]));
     const changes = diffFields(before, after, {
       username: '用户名',
       level: '等级',
@@ -271,8 +269,11 @@ export default async function userRoutes(app: FastifyInstance) {
     if (apikeyRaw && apikeyRaw !== SECRET_MASK && apikey !== String(row.apikey ?? '')) {
       changes.push({ field: 'API 密钥', to: '已更新' });
     }
-    if (level === 1 && Number(prevPerm?.c || 0) !== permission.length) {
+    const prevCount = Number(prevPerm?.c || 0);
+    if (level === 1 && prevCount !== permission.length) {
       changes.push({ field: '子域名授权', to: `${permission.length} 条` });
+    } else if (level !== 1 && prevCount > 0) {
+      changes.push({ field: '子域名授权', to: '已清空' });
     }
     audit(req, {
       targetType: 'user',
