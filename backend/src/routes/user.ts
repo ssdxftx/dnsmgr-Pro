@@ -185,7 +185,7 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
     const row: any = await queryOne(
-      `SELECT id, is_super, level, username, status, email, remark, apikey, is_api FROM ${table('user')} WHERE id = ?`,
+      `SELECT id, is_super, level, username, status, email, remark, apikey, is_api, check_whole, stat_cache FROM ${table('user')} WHERE id = ?`,
       [id],
     );
     if (!row) return { code: -1, msg: '用户不存在' };
