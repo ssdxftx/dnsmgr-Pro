@@ -9,7 +9,7 @@ import { appendLog } from './util.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
 
-import { decryptConfig, encryptConfig, decryptText } from './secret.js';
+import { ConfigDecryptError, decryptConfig, encryptConfig, decryptText } from './secret.js';
 import { assertDeployConfigAllowed } from './netGuard.js';
 
 function safeJson(s: string | null): any {
@@ -92,8 +92,12 @@ export class CertDeployService {
     if (order.status === 4) throw new Error('SSL证书订单已吊销');
     if (order.status !== 3) throw new Error('SSL证书订单未完成签发');
     if (!order.fullchain || !order.privatekey) throw new Error('SSL证书或私钥内容不存在');
-    // 私钥为加密存储，部署前解密（兼容历史明文）
-    const privateKey = decryptText(order.privatekey) ?? order.privatekey;
+    // 私钥为加密存储，部署前解密（兼容历史明文）；密文解密失败时禁止把密文当私钥部署
+    const decryptedKey = decryptText(order.privatekey);
+    if (decryptedKey === null && String(order.privatekey).startsWith('enc:')) {
+      throw new ConfigDecryptError('证书私钥无法解密（系统密钥可能已变更），请重新签发或导入证书');
+    }
+    const privateKey = decryptedKey ?? order.privatekey;
 
     await this.lockTask();
     try {

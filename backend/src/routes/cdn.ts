@@ -33,7 +33,7 @@ import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
 import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
-import { checkLevel } from '../auth.js';
+import { checkLevel, getUserPermissions, matchPermission } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
 import { canAccessCertOrder, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findAnyVaultDekForUser } from '../lib/vault/service.js';
@@ -102,7 +102,21 @@ async function accountConfigOf(acct: any): Promise<Record<string, any>> {
     if (state === 'error') throw new ConfigDecryptError('私有账户凭证无法解密，请重新填写');
     return config;
   }
-  return await accountConfigOf(acct);
+  return safeJson(acct?.config);
+}
+
+/** 校验用户能否把加速域名接入到该 DNS 域名：管理员放行；普通用户需有非只读授权且记录名在授权范围内 */
+async function assertDnsDomainUsable(user: any, did: number, accelName: string): Promise<any | null> {
+  if (!Number.isFinite(did) || did <= 0) return null;
+  const d: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
+  if (!d) return null;
+  if (checkLevel(user, 2)) return d;
+  const name = String(accelName || '').toLowerCase();
+  const base = String(d.name || '').toLowerCase();
+  if (name !== base && !name.endsWith('.' + base)) return null;
+  const recordName = name === base ? '@' : name.slice(0, name.length - base.length - 1);
+  const perms = await getUserPermissions(Number(user?.uid));
+  return matchPermission(perms, String(d.name), recordName) === 0 ? d : null;
 }
 
 function calcRecordName(accelDomain: string, dnsDomain: string): string {
@@ -113,9 +127,9 @@ function calcRecordName(accelDomain: string, dnsDomain: string): string {
 // 删除接入 CDN 域名时联动创建的 DNS 解析记录（CNAME）。
 // 优先按 cdn_domain.dns_record 记录 ID 删除；若缺失（历史数据/接入时自动添加失败）则
 // 按「记录名 + CNAME + 目标值」精确匹配兜底，避免误删无关记录。
-async function removeLinkedDnsRecord(row: any): Promise<{ ok: boolean; message: string }> {
-  const dnsDomain: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [row.did]);
-  if (!dnsDomain) return { ok: false, message: '未找到联动域名，解析记录需手动处理' };
+async function removeLinkedDnsRecord(row: any, user: any): Promise<{ ok: boolean; message: string }> {
+  const dnsDomain: any = await assertDnsDomainUsable(user, Number(row.did), String(row.name));
+  if (!dnsDomain) return { ok: false, message: '未找到联动域名或无权限，解析记录需手动处理' };
   const dnsAcct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
   if (!dnsAcct) return { ok: false, message: 'DNS账户不存在，解析记录需手动处理' };
   const dns: any = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
@@ -1340,11 +1354,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const originProtocol = ['follow', 'http', 'https'].includes(protoRaw) ? protoRaw : 'follow';
     const httpPort = Number(req.body?.http_port) > 0 ? Number(req.body.http_port) : 80;
     const httpsPort = Number(req.body?.https_port) > 0 ? Number(req.body.https_port) : 443;
-    const dnsDomain = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
-    if (!dnsDomain) return { code: -1, msg: '请选择要联动解析的域名' };
+    const dnsDomain = await assertDnsDomainUsable(req.user, Number(did), String(name));
+    if (!dnsDomain) return reply.code(404).send({ code: -1, msg: '域名不存在或无权限' });
     const suffix = '.' + dnsDomain.name;
     if (name !== dnsDomain.name && !name.endsWith(suffix)) {
-      return { code: -1, msg: `加速域名必须属于所选域名 ${dnsDomain.name} 的子域名` };
+      return { code: -1, msg: '加速域名必须属于所选域名的子域名' };
     }
     if (await queryOne(`SELECT id FROM ${table('cdn_domain')} WHERE name = ?`, [name])) {
       return { code: -1, msg: '该加速域名已接入' };
@@ -1354,6 +1368,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider: any = getCdnProvider(acct.type, await accountConfigOf(acct));
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const certMode = ['freecert', 'certapply', 'certlink'].includes(cert_mode) ? cert_mode : 'none';
+    if (certMode !== 'none' && !checkLevel(req.user, 2)) {
+      return reply.code(403).send({ code: -1, msg: '仅管理员可配置证书' });
+    }
     if (certMode === 'freecert' && !cdnConfig[acct.type]?.freecert) return { code: -1, msg: '该 CDN 类型不支持配置平台免费证书' };
     if (certMode === 'certapply' && !cdnConfig[acct.type]?.certapply) return { code: -1, msg: '该 CDN 类型不支持联动证书申请' };
     if (certMode === 'certlink' && !cdnConfig[acct.type]?.certlink) return { code: -1, msg: '该 CDN 类型不支持与项目联动' };
@@ -1452,7 +1469,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     // 可选删除联动创建的解析记录；删除失败不阻断加速域名删除，仅提示手动处理
     let dnsMsg = '';
     if (deleteDns) {
-      const r = await removeLinkedDnsRecord(row);
+      const r = await removeLinkedDnsRecord(row, req.user);
       dnsMsg = r.message;
     }
     await query(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
@@ -1856,7 +1873,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 对已接入的加速域名执行「与项目联动」（选择已有证书或新建签发）
-  app.post('/api/cdn/domains/:id/certlink', authCdnDomain, async (req: any) => {
+  app.post('/api/cdn/domains/:id/certlink', authCdnDomain, async (req: any, reply: any) => {
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '仅管理员可配置证书' });
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1905,7 +1923,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
   }
 
   // 显式设置证书管理方式（用于切换为「不使用证书」或已完成的切换）
-  app.post('/api/cdn/domains/:id/cert_mode', authCdnDomain, async (req: any) => {
+  app.post('/api/cdn/domains/:id/cert_mode', authCdnDomain, async (req: any, reply: any) => {
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1923,7 +1942,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 证书管理 - 云端状态：查询该加速域名在 CDN 云端的当前证书配置，并附本项目联动摘要
-  app.get('/api/cdn/domains/:id/cert_status', authCdnDomain, async (req: any) => {
+  app.get('/api/cdn/domains/:id/cert_status', authCdnDomain, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1943,6 +1962,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
       }
     }
     const order = await findLinkedOrder(did);
+    if (order && !(await canAccessCertOrder(Number(order.id), req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书不存在' });
+    }
     let linked: any = null;
     if (order) {
       const ds = await query(`SELECT id, status, active FROM ${table('cert_deploy')} WHERE oid = ? ORDER BY id DESC LIMIT 1`, [order.id]);
@@ -1958,7 +1980,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 与项目联动 - 实时进度日志：返回各阶段日志与当前订单/部署任务状态，供前端轮询
-  app.get('/api/cdn/domains/:id/certlink/log', authCdnDomain, async (req: any) => {
+  app.get('/api/cdn/domains/:id/certlink/log', authCdnDomain, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1968,6 +1990,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
       [did],
     );
     const order = await findLinkedOrder(did);
+    if (order && !(await canAccessCertOrder(Number(order.id), req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书不存在' });
+    }
     let domains: string[] = [];
     let deploy: any = null;
     if (order) {
@@ -1992,13 +2017,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 与项目联动 - 立即推进：证书未签发则触发处理，已签发则创建并执行自动部署任务
-  app.post('/api/cdn/domains/:id/certlink/run', authCdnDomain, async (req: any) => {
+  app.post('/api/cdn/domains/:id/certlink/run', authCdnDomain, async (req: any, reply: any) => {
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '仅管理员可配置证书' });
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const did = Number(id);
     const order = await findLinkedOrder(did);
     if (!order) return { code: -1, msg: '未找到该域名的联动证书订单，请重新发起「与项目联动」' };
+    if (!(await canAccessCertOrder(Number(order.id), req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书不存在' });
+    }
     if (Number(order.status) !== 3) {
       await linkLog(did, Number(order.id), 'order', 'doing', '手动触发：证书尚未签发，已提交立即处理');
       kickOrderProcessing(Number(order.id));
@@ -2098,17 +2127,25 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const routeFilter = String(q.route || '').trim();
       const dataUntil = fmtStatTime(end);
 
-      // 各服务商的接入规模：用于「只展示已接入」与卡片副标题（不读取、不解密 config）
+      // 各服务商的接入规模：按当前用户可见账户统计，避免普通用户读到他人私有账户规模
       const routeStats = new Map<string, { accounts: number; domains: number }>();
-      const acctCountRows: any[] = await query(
-        `SELECT type, COUNT(*) c FROM ${table('cdn_account')} WHERE visibility = 'shared' GROUP BY type`,
-      );
+      const visibleAccts = await listVisibleAccounts('cdn_account', req.user);
+      const visibleAids = (visibleAccts as any[]).map((a) => Number(a.id)).filter((id) => id > 0);
+      const acctCountRows: any[] = visibleAids.length
+        ? await query(
+            `SELECT type, COUNT(*) c FROM ${table('cdn_account')} WHERE id IN (${visibleAids.map(() => '?').join(',')}) GROUP BY type`,
+            visibleAids,
+          )
+        : [];
       for (const r of acctCountRows) {
         routeStats.set(String(r.type), { accounts: Number(r.c), domains: 0 });
       }
-      const domCountRows: any[] = await query(
-        `SELECT route, COUNT(*) c, COUNT(DISTINCT aid) a FROM ${table('cdn_domain')} GROUP BY route`,
-      );
+      const domCountRows: any[] = visibleAids.length
+        ? await query(
+            `SELECT route, COUNT(*) c, COUNT(DISTINCT aid) a FROM ${table('cdn_domain')} WHERE aid IN (${visibleAids.map(() => '?').join(',')}) GROUP BY route`,
+            visibleAids,
+          )
+        : [];
       for (const r of domCountRows) {
         const st = routeStats.get(String(r.route)) || { accounts: 0, domains: 0 };
         st.domains = Number(r.c);
@@ -2564,11 +2601,15 @@ const MAX_CACHE_OP_URLS = 100;
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const def = { referer_mode: 'off', referer_list: [], ip_mode: 'off', ip_list: [], ua_list: [] };
     const provider: any = await cdnForRow(row);
-    if (provider && typeof provider.getAccess === 'function') {
+    if (!provider) return { code: -1, msg: 'CDN账户不存在或凭证不可用，无法查询访问控制' };
+    if (typeof provider.getAccess !== 'function') return { code: -1, msg: '该厂商暂不支持访问控制配置' };
+    try {
       const cfg = await provider.getAccess(row.name);
-      if (cfg) return { code: 0, data: { ...def, ...cfg } };
+      if (!cfg) return { code: -1, msg: '查询云端访问控制失败，请稍后重试' };
+      return { code: 0, data: { ...def, ...cfg } };
+    } catch (e: any) {
+      return { code: -1, msg: '查询云端访问控制失败：' + (e?.message || String(e)) };
     }
-    return { code: 0, data: def };
   });
 
   // 访问控制 - 保存

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { query, table } from './db.js';
+import { query, queryOne, table } from './db.js';
 
 let cache: Record<string, string> = {};
 let loadedAt = 0;
@@ -28,11 +28,19 @@ export async function configSet(key: string, value: string): Promise<void> {
   cache[key] = value;
 }
 
+/** 多副本安全初始化：先 INSERT IGNORE，再回读数据库中的唯一值，避免后写覆盖导致密文不可解 */
+export async function configEnsure(key: string, generate: () => string): Promise<string> {
+  const cur = await configGet(key, '');
+  if (cur) return cur;
+  const candidate = generate();
+  await query(`INSERT IGNORE INTO ${table('config')} (\`key\`, value) VALUES (?, ?)`, [key, candidate]);
+  const row: any = await queryOne(`SELECT value FROM ${table('config')} WHERE \`key\` = ?`, [key]);
+  const value = row?.value || candidate;
+  cache[key] = value;
+  return value;
+}
+
 export async function getSysKey(): Promise<string> {
-  const k = await configGet('sys_key', '');
-  if (k) return k;
   // 缺失时生成并持久化随机密钥，避免使用固定弱密钥
-  const generated = randomBytes(24).toString('hex');
-  await configSet('sys_key', generated);
-  return generated;
+  return configEnsure('sys_key', () => randomBytes(24).toString('hex'));
 }

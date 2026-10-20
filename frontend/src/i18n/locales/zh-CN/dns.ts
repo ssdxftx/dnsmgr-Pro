@@ -44,6 +44,7 @@ export default {
     selectAccountDomain: '请选择账户和域名',
     selectDomain: '请选择域名',
     importSuccess: '成功导入 {count} 个域名',
+    importPartial: '部分域名导入失败：{names}',
     accountOption: '{id} - {type}（{name}）',
     queryingWhois: '正在查询 WHOIS 到期时间...',
     refreshSuccess: '刷新成功',

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { checkLevel, getUserPermissions } from '../auth.js';
+import { checkLevel, getUserPermissions, matchPermission } from '../auth.js';
 import { checkDomainRecords, calcNextRun, listSubDomains } from '../lib/dns/checkService.js';
 import { fmtDateTime, escapeLike } from '../lib/util.js';
 
@@ -138,7 +138,8 @@ async function canAccessDomain(user: any, did: number): Promise<boolean> {
   const d: any = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [did]);
   if (!d) return false;
   const perms = await getUserPermissions(user.uid);
-  return perms.some((p: any) => p.domain === d.name);
+  // 只读授权不能创建/修改检测任务（会周期发起外部解析并发送邮件）
+  return perms.some((p: any) => p.domain === d.name && Number(p.readonly) !== 1);
 }
 
 /** 校验普通用户选择的子域名是否落在其接入域名范围内 */
@@ -147,10 +148,5 @@ async function canAccessSub(user: any, did: number, sub: string): Promise<boolea
   const d: any = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [did]);
   if (!d) return false;
   const perms = await getUserPermissions(user.uid);
-  const access = perms
-    .filter((p: any) => p.domain === d.name)
-    .map((p: any) => (p.sub ? `${p.sub}.${d.name}` : d.name).toLowerCase());
-  const s = sub.trim().toLowerCase().replace(/\.+$/, '');
-  const target = `${s}.${d.name}`.toLowerCase();
-  return access.some((a: string) => target === a || target.endsWith('.' + a));
+  return matchPermission(perms, d.name, sub.trim().replace(/\.+$/, '')) === 0;
 }

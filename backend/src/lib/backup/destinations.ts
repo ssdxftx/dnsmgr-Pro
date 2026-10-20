@@ -13,7 +13,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { queryOne, table } from '../../db.js';
 import { decryptConfig } from '../secret.js';
-import { assertUrlAllowed, safeFetch } from '../netGuard.js';
+import { assertDeployTargetAllowed, assertUrlAllowed, safeFetch } from '../netGuard.js';
 
 export interface DestinationRow {
   id: number;
@@ -149,7 +149,7 @@ export async function testDestination(row: DestinationRow): Promise<{ ok: boolea
       await webdavFetch(row.config, probeUrl, { method: 'DELETE' }).catch(() => undefined);
       return { ok: true, message: '连接成功（可读写）' };
     }
-    const client = s3Client(row.config);
+    const client = await s3Client(row.config);
     await client.send(new ListObjectsV2Command({ Bucket: row.config.bucket, MaxKeys: 1 }));
     return { ok: true, message: '连接成功' };
   } catch (e: any) {
@@ -157,7 +157,9 @@ export async function testDestination(row: DestinationRow): Promise<{ ok: boolea
   }
 }
 
-function s3Client(cfg: any): S3Client {
+async function s3Client(cfg: any): Promise<S3Client> {
+  // 自建 S3 常在内网，允许内网目标但拒绝链路本地/云元数据地址
+  if (cfg.endpoint) await assertDeployTargetAllowed(String(cfg.endpoint));
   return new S3Client({
     region: cfg.region || 'us-east-1',
     endpoint: cfg.endpoint || undefined,
@@ -198,7 +200,7 @@ export async function uploadToDestination(destId: number, localPath: string, nam
     return;
   }
   const size = (await stat(localPath)).size;
-  const client = s3Client(row.config);
+  const client = await s3Client(row.config);
   await client.send(
     new PutObjectCommand({
       Bucket: row.config.bucket,
@@ -233,7 +235,7 @@ export async function listRemote(destId: number): Promise<RemoteItem[]> {
     }
     return items;
   }
-  const client = s3Client(row.config);
+  const client = await s3Client(row.config);
   const prefix = String(row.config.prefix || '').replace(/^\/+|\/+$/g, '');
   const res = await client.send(new ListObjectsV2Command({ Bucket: row.config.bucket, Prefix: prefix || undefined }));
   return (res.Contents || [])
@@ -258,7 +260,7 @@ export async function downloadRemote(destId: number, name: string, localPath: st
     await pipeline(Readable.fromWeb(res.body as any), createWriteStream(localPath));
     return;
   }
-  const client = s3Client(row.config);
+  const client = await s3Client(row.config);
   const res = await client.send(new GetObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
   if (!res.Body) throw new Error('S3 下载失败');
   await pipeline(res.Body as any, createWriteStream(localPath));
@@ -272,7 +274,7 @@ export async function deleteRemote(destId: number, name: string): Promise<void> 
       await webdavFetch(row.config, joinUrl(String(row.config.url), name), { method: 'DELETE' });
       return;
     }
-    const client = s3Client(row.config);
+    const client = await s3Client(row.config);
     await client.send(new DeleteObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
   } catch {
     // 远端删除失败不应阻断本地清理

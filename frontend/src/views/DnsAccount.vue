@@ -199,16 +199,21 @@ async function save() {
   if (!form.type || !form.name) return message.warning(t('dnsAccount.fillWarning'));
   if (!currentProvider.value?.implemented) return message.warning(t('dnsAccount.providerUnsupported'));
   saveBusy.value = true;
-  const body = { type: form.type, name: form.name, config: form.config };
-  const res = editingId.value
-    ? await api('PUT', `/dns/accounts/${editingId.value}`, body)
-    : await api('POST', '/dns/accounts', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    loadAccounts();
-  } else message.error(res.msg);
+  try {
+    const body = { type: form.type, name: form.name, config: form.config };
+    const res = editingId.value
+      ? await api('PUT', `/dns/accounts/${editingId.value}`, body)
+      : await api('POST', '/dns/accounts', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      loadAccounts();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.failed'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function del(row: any) {

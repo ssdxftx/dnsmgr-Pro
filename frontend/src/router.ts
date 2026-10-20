@@ -93,6 +93,12 @@ router.beforeEach(async (to, from, next) => {
     if (to.path.startsWith('/statistics') && Number(u?.stat_cache) === 1) return next();
     return next('/domains');
   }
+  // CDN 站点设置路由的两个参数都必须为正整数
+  if (to.params.aid !== undefined || to.params.zoneId !== undefined) {
+    const aid = Number(to.params.aid);
+    const zoneId = String(to.params.zoneId ?? '');
+    if (!Number.isInteger(aid) || aid <= 0 || !zoneId.trim()) return next('/cdn-zones');
+  }
   // 带参数路由的 id 必须是正整数，避免 Number('abc')=NaN 直接进接口（页面回显 #NaN、报错无意义）
   if (to.params.id !== undefined) {
     const id = Number(to.params.id);

@@ -148,6 +148,7 @@ export default async function authRoutes(app: FastifyInstance) {
     if (decoded.type !== 'totp_pre') return totpFail('bad_pre_token', '请重新登录');
     const user = await findUserById(decoded.uid);
     if (!user) return totpFail('user_missing', '用户不存在');
+    if (Number(user.status) === 0) return totpFail('user_disabled', '账号已被禁用', user);
     if (user.totp_open != 1 || !user.totp_secret) return totpFail('totp_not_enabled', '未开启TOTP二次验证', user);
     const totpSecret = decryptText(user.totp_secret) || '';
     if (!verifyTOTP(totpSecret, code)) return totpFail('bad_code', '动态口令错误', user);

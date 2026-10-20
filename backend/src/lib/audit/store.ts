@@ -10,6 +10,9 @@ let queue: AuditRow[] = [];
 let timer: NodeJS.Timeout | null = null;
 let flushing = false;
 let failCount = 0;
+let deadCount = 0;
+let retryAfter = 0;
+const retryTimes = new WeakMap<AuditRow, number>();
 
 function ensureTimer() {
   if (timer) return;
@@ -27,6 +30,7 @@ export function enqueueAudit(row: AuditRow): void {
 
 export async function flushAudit(): Promise<void> {
   if (flushing || queue.length === 0) return;
+  if (Date.now() < retryAfter) return;
   flushing = true;
   const batch = queue.splice(0, FLUSH_BATCH);
   try {
@@ -58,15 +62,25 @@ export async function flushAudit(): Promise<void> {
       ]),
     ]);
     failCount = 0;
+    retryAfter = 0;
   } catch (e: any) {
-    // 审计失败不影响业务；每 20 次才打一条日志，避免刷屏
+    // 审计失败不影响业务；批次回队重试，超过上限进入死信计数，避免静默丢数据
     failCount++;
+    const retry: AuditRow[] = [];
+    for (const row of batch) {
+      const n = (retryTimes.get(row) || 0) + 1;
+      retryTimes.set(row, n);
+      if (n <= 3) retry.push(row);
+      else deadCount++;
+    }
+    if (retry.length) queue.unshift(...retry);
+    retryAfter = Date.now() + 5000;
     if (failCount === 1 || failCount % 20 === 0) {
-      console.error(`[audit] 写入失败（累计 ${failCount} 次）：${e?.message || e}`);
+      console.error(`[audit] 写入失败（累计 ${failCount} 次，死信 ${deadCount} 条）：${e?.message || e}`);
     }
   } finally {
     flushing = false;
-    if (queue.length >= FLUSH_BATCH) void flushAudit();
+    if (!retryAfter && queue.length >= FLUSH_BATCH) void flushAudit();
   }
 }
 

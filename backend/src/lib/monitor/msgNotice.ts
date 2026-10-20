@@ -7,7 +7,7 @@ import { certConfig } from '../cert/factory.js';
 import { deployConfig } from '../deploy/meta.js';
 import { STATUS_LABEL } from '../certService.js';
 import { QqBot } from './qqbot.js';
-import { assertUrlAllowed } from '../netGuard.js';
+import { safeFetch } from '../netGuard.js';
 
 const SITENAME = '聚合DNS管理系统';
 
@@ -130,17 +130,17 @@ export async function sendTelegram(content: string): Promise<boolean | string> {
   const post: Record<string, any> = { chat_id: chatid, text: content, parse_mode: 'HTML' };
   const topicid = parseInt((await configGet('tgbot_topicid')) || '0');
   if (topicid > 0) post.message_thread_id = topicid;
+  let res: Response;
   try {
-    await assertUrlAllowed(base);
+    res = await safeFetch(`${base}/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(Object.fromEntries(Object.entries(post).map(([k, v]) => [k, String(v)]))),
+      signal: AbortSignal.timeout(15000),
+    });
   } catch (e: any) {
     return e?.message || 'Telegram 代理地址不合法';
   }
-  const res = await fetch(`${base}/bot${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams(Object.fromEntries(Object.entries(post).map(([k, v]) => [k, String(v)]))),
-    signal: AbortSignal.timeout(15000),
-  });
   const arr: any = await res.json().catch(() => null);
   if (arr && arr.ok === true) return true;
   return (arr && arr.description) || '请求失败';
@@ -206,17 +206,17 @@ export async function sendWebhook(sub: string, content: string): Promise<boolean
   } else {
     return '不支持的Webhook地址';
   }
+  let res: Response;
   try {
-    await assertUrlAllowed(url);
+    res = await safeFetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+      body: JSON.stringify(post),
+      signal: AbortSignal.timeout(15000),
+    });
   } catch (e: any) {
     return e?.message || 'Webhook地址不合法';
   }
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json; charset=UTF-8' },
-    body: JSON.stringify(post),
-    signal: AbortSignal.timeout(15000),
-  });
   const arr: any = await res.json().catch(() => null);
   if ((arr && arr.errcode === 0) || (arr && arr.code === 0)) return true;
   return (arr && (arr.errmsg || arr.msg)) || '请求失败';
@@ -278,8 +278,7 @@ export async function sendCustomWebhook(sub: string, content: string): Promise<b
   }
 
   try {
-    await assertUrlAllowed(fetchUrl);
-    const res = await fetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend, signal: AbortSignal.timeout(15000) });
+    const res = await safeFetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend, signal: AbortSignal.timeout(15000) });
     if (res.status >= 200 && res.status < 300) return true;
     return '请求失败，HTTP状态码：' + res.status;
   } catch (e: any) {

@@ -113,7 +113,15 @@ export function mergeMaskedConfig(input: any, existing: any): any {
   if (input === null || input === undefined) return input;
   if (Array.isArray(input)) {
     const ex = Array.isArray(existing) ? existing : [];
-    return input.map((v, i) => mergeMaskedConfig(v, ex[i]));
+    return input.map((v, i) => {
+      if (!v || typeof v !== 'object') return mergeMaskedConfig(v, ex[i]);
+      const key = (v as any).id ?? (v as any).name ?? (v as any).key;
+      const match =
+        key === undefined
+          ? ex[i]
+          : ex.find((e: any) => e && typeof e === 'object' && ((e.id ?? e.name ?? e.key) === key));
+      return mergeMaskedConfig(v, match ?? {});
+    });
   }
   if (typeof input !== 'object') return input;
 
@@ -134,6 +142,10 @@ export function mergeMaskedConfig(input: any, existing: any): any {
     if (v && typeof v === 'object' && !isSecretKey(k)) {
       next[k] = mergeMaskedConfig(v, ex[k]);
     }
+  }
+  // 新条目（无匹配原值）里的掩码占位符不能落库，要求用户重新填写
+  for (const k of Object.keys(next)) {
+    if (next[k] === SECRET_MASK) next[k] = '';
   }
   return next;
 }

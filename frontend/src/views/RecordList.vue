@@ -63,7 +63,7 @@ const displayTitle = computed(() => {
   if (!domainName.value) return t('record.domainFallback', { id: domainId });
   return subFilter.value ? `${subFilter.value}.${domainName.value}` : domainName.value;
 });
-const access = ref<{ admin: boolean; readonly: boolean; writable: boolean }>({ admin: true, readonly: false, writable: true });
+const access = ref<{ admin: boolean; readonly: boolean; writable: boolean }>({ admin: false, readonly: true, writable: false });
 const domainIndex = ref<Record<string, { id: number; sub: string }>>({});
 const recordTable = ref<InstanceType<typeof RecordTable> | null>(null);
 

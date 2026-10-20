@@ -97,16 +97,10 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
     if (!/^[A-Za-z0-9_.-]+$/.test(username)) return { code: -1, msg: '用户名仅支持字母、数字、下划线、点和横线' };
 
-    const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? LIMIT 1`, [username]);
-    // 防账号枚举：不明确区分用户名/邮箱是否已存在
-    if (exists) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
-
     if (mode === 'email') {
       if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
       const code = String(b.code ?? '').trim();
       if (!code) return { code: -1, msg: '请输入邮箱验证码' };
-      const emailUsed = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
-      if (emailUsed) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
       const verify = await queryOne<any>(
         `SELECT * FROM ${table('reg_verify')} WHERE email = ? AND code = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
         [email, code]
@@ -127,6 +121,9 @@ export default async function registerRoutes(app: FastifyInstance) {
         }
         return { code: -1, msg: '验证码错误或已过期' };
       }
+      // 验证码有效后再检查邮箱占用，避免无凭据时枚举已注册邮箱
+      const emailUsed = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
+      if (emailUsed) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
       // 原子占用验证码：在 UPDATE 中再次校验 used=0，避免并发下同一验证码重复注册
       const consumed: any = await query(`UPDATE ${table('reg_verify')} SET used = 1 WHERE id = ? AND used = 0`, [verify.id]);
       if (!consumed || !consumed.affectedRows) return { code: -1, msg: '验证码错误或已过期' };
@@ -147,6 +144,10 @@ export default async function registerRoutes(app: FastifyInstance) {
       );
       if (!upd || !upd.affectedRows) return { code: -1, msg: '该注册码已过期、停用或使用次数已用完' };
     }
+
+    // 验证码/注册码校验通过后再检查用户名，避免无凭据时枚举账号
+    const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? LIMIT 1`, [username]);
+    if (exists) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
 
     const hash = await bcrypt.hash(password, 10);
     let newId = 0;

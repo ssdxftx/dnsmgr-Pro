@@ -5,8 +5,8 @@
     <n-tabs v-model:value="tab" type="line" animated>
       <n-tab-pane v-if="admin" name="site" :tab="t('backup.tabSite')">
     <n-grid class="telemetry-row" cols="2 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item><TelemetryCard :value="successCount" :label="t('backup.lastBackup')" tone="primary" :icon="ArchiveOutline" :caption="lastBackupText" /></n-grid-item>
-      <n-grid-item><TelemetryCard :value="schedules.length" :label="t('backup.nextRun')" tone="info" :icon="TimeOutline" :caption="nextRunText" /></n-grid-item>
+      <n-grid-item><TelemetryCard :value="successCount" :label="t('backup.successBackups')" tone="primary" :icon="ArchiveOutline" :caption="lastBackupText" /></n-grid-item>
+      <n-grid-item><TelemetryCard :value="schedules.length" :label="t('backup.scheduleCount')" tone="info" :icon="TimeOutline" :caption="nextRunText" /></n-grid-item>
       <n-grid-item><TelemetryCard :value="keyReady ? 1 : 0" :label="t('backup.keyTitle')" :tone="keyReady ? 'success' : 'warning'" :icon="KeyOutline" :caption="keyReady ? t('backup.keyReady') : t('backup.keyMissing')" /></n-grid-item>
       <n-grid-item><TelemetryCard :value="jobs.length" :label="t('backup.totalJobs')" tone="primary" :icon="CloudDownloadOutline" :caption="t('backup.jobsTitle')" /></n-grid-item>
     </n-grid>
@@ -370,9 +370,14 @@ async function download(row: any) {
   const a = document.createElement('a');
   a.href = url;
   a.download = row.file_name || `backup-${row.id}.dnsmgrbk`;
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+let remoteSeq = 0;
+let remoteAbort: AbortController | null = null;
 
 async function openRemote(d: any) {
   remoteDestId.value = Number(d.id);
@@ -383,15 +388,22 @@ async function openRemote(d: any) {
 
 async function loadRemote() {
   if (!remoteDestId.value) return;
+  const seq = ++remoteSeq;
+  const destId = remoteDestId.value;
+  remoteAbort?.abort();
+  const ctrl = new AbortController();
+  remoteAbort = ctrl;
   remoteLoading.value = true;
   try {
-    const res = await api<any>('GET', `/backup/remote/${remoteDestId.value}`);
+    const res = await api<any>('GET', `/backup/remote/${destId}`, undefined, { signal: ctrl.signal });
+    if (seq !== remoteSeq || destId !== remoteDestId.value) return;
     if (res.code !== 0) return message.error(res.msg);
     remoteFiles.value = res.data || [];
   } catch (e: any) {
+    if (seq !== remoteSeq || ctrl.signal.aborted) return;
     message.error(e?.message || t('backup.remoteLoadFailed'));
   } finally {
-    remoteLoading.value = false;
+    if (seq === remoteSeq) remoteLoading.value = false;
   }
 }
 
@@ -480,8 +492,12 @@ async function saveDest() {
 }
 
 async function testDest(d: any) {
-  const res = await api<any>('POST', `/backup/destinations/${d.id}/test`, {});
-  res.code === 0 ? message.success(res.msg) : message.error(res.msg);
+  try {
+    const res = await api<any>('POST', `/backup/destinations/${d.id}/test`, {});
+    res.code === 0 ? message.success(res.msg) : message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
+  }
 }
 
 function removeDest(d: any) {
@@ -491,8 +507,13 @@ function removeDest(d: any) {
     positiveText: t('backup.delete'),
     negativeText: t('backup.cancel'),
     onPositiveClick: async () => {
-      await api<any>('DELETE', `/backup/destinations/${d.id}`);
-      await loadAll();
+      try {
+        const res = await api<any>('DELETE', `/backup/destinations/${d.id}`);
+        if (res.code !== 0) return message.error(res.msg);
+        await loadAll();
+      } catch (e: any) {
+        message.error(e?.message || t('backup.loadFailed'));
+      }
     },
   });
 }
@@ -531,9 +552,14 @@ async function saveSched() {
 }
 
 async function runSched(s: any) {
-  const res = await api<any>('POST', `/backup/schedules/${s.id}/run`, {});
-  res.code === 0 ? message.success(t('backup.exportDone')) : message.error(res.msg);
-  await loadAll();
+  try {
+    const res = await api<any>('POST', `/backup/schedules/${s.id}/run`, {});
+    if (res.code !== 0) return message.error(res.msg);
+    message.success(t('backup.exportDone'));
+    await loadAll();
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
+  }
 }
 
 function removeSched(s: any) {
@@ -543,8 +569,13 @@ function removeSched(s: any) {
     positiveText: t('backup.delete'),
     negativeText: t('backup.cancel'),
     onPositiveClick: async () => {
-      await api<any>('DELETE', `/backup/schedules/${s.id}`);
-      await loadAll();
+      try {
+        const res = await api<any>('DELETE', `/backup/schedules/${s.id}`);
+        if (res.code !== 0) return message.error(res.msg);
+        await loadAll();
+      } catch (e: any) {
+        message.error(e?.message || t('backup.loadFailed'));
+      }
     },
   });
 }

@@ -61,13 +61,24 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 // 云元数据服务地址：部署商/外部请求指向这些地址可用于窃取云主机临时凭据
 const METADATA_HOSTS = new Set(['169.254.169.254', '100.100.100.200', '169.254.0.23', 'fd00:ec2::254']);
 
+function normalizeIp(ip: string): string {
+  const low = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '');
+  const dotted = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(low);
+  if (dotted) return dotted[1];
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(low);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    return [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.');
+  }
+  return low;
+}
+
 export function isMetadataIp(ip: string): boolean {
-  const low = ip.toLowerCase();
-  // 剥离 IPv4 映射前缀后递归，避免 ::ffff:169.254.169.254 之类绕过
-  if (low.startsWith('::ffff:')) return isMetadataIp(low.slice(7));
-  if (METADATA_HOSTS.has(low)) return true;
-  if (net.isIPv4(ip)) return ip.startsWith('169.254.'); // 链路本地
-  if (net.isIPv6(ip)) return low.startsWith('fe80'); // 链路本地
+  const v = normalizeIp(ip);
+  if (METADATA_HOSTS.has(v)) return true;
+  if (net.isIPv4(v)) return v.startsWith('169.254.') || v === '100.100.100.200';
+  if (net.isIPv6(v)) return v.startsWith('fe80') || v === 'fd00:ec2::254';
   return false;
 }
 

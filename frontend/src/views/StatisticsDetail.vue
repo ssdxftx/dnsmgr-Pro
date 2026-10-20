@@ -233,7 +233,14 @@ function onTopDim(value: string) {
   loadGroup('top');
 }
 
+let loadSeq = 0;
+let loadAbort: AbortController | null = null;
+
 async function loadGroup(group: string) {
+  const seq = ++loadSeq;
+  loadAbort?.abort();
+  const ctrl = new AbortController();
+  loadAbort = ctrl;
   busy.value = true;
   try {
     const { startTime, endTime } = computeRange();
@@ -247,7 +254,8 @@ async function loadGroup(group: string) {
       aid: selectedAid.value || undefined,
       domains: selectedDomains.value.length ? selectedDomains.value.join(',') : undefined,
       top: top || undefined,
-    });
+    }, { signal: ctrl.signal });
+    if (seq !== loadSeq) return;
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     const data = res.data as DetailData;
     detail.value = { ...data, series: [...(detail.value?.series || [])], breakdowns: [...(detail.value?.breakdowns || [])] };
@@ -270,9 +278,10 @@ async function loadGroup(group: string) {
     loaded.value = nextLoaded;
     errors.value = data._errors || [];
   } catch (e: any) {
+    if (seq !== loadSeq || ctrl.signal.aborted) return;
     errors.value = [e?.message || String(e)];
   } finally {
-    busy.value = false;
+    if (seq === loadSeq) busy.value = false;
   }
 }
 

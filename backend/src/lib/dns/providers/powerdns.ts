@@ -26,7 +26,8 @@ export class PowerDns implements DnsProvider {
   private rrsetsCache: PdnsRrset[] | null = null;
 
   constructor(config: Record<string, any>) {
-    this.baseUrl = `http://${config.ip}:${config.port}/api/v1`;
+    const scheme = String(config.protocol || 'http').toLowerCase() === 'https' ? 'https' : 'http';
+    this.baseUrl = `${scheme}://${config.ip}:${config.port}/api/v1`;
     this.apikey = config.apikey;
     this.domain = config.domain || '';
     this.domainid = config.domainid || '';

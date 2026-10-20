@@ -340,18 +340,33 @@ async function doImport() {
     return;
   }
   importBusy.value = true;
-  const results = await Promise.all(
-    checkedDomains.value.map((d: any) =>
-      api('POST', '/domains', { aid: importAid.value, domain: d.Domain, thirdid: d.DomainId, recordcount: d.RecordCount || 0 }),
-    ),
-  );
-  importBusy.value = false;
-  const ok = results.filter((r: any) => r.code === 0).length;
-  message.success(t('domain.importSuccess', { count: ok }));
-  checkedDomains.value = [];
-  pullDomains.value = [];
-  showImport.value = false;
-  loadDomains();
+  try {
+    const queue = [...checkedDomains.value];
+    const failed: string[] = [];
+    let ok = 0;
+    const worker = async () => {
+      while (queue.length) {
+        const d: any = queue.shift();
+        if (!d) break;
+        try {
+          const r: any = await api('POST', '/domains', { aid: importAid.value, domain: d.Domain, thirdid: d.DomainId, recordcount: d.RecordCount || 0 });
+          if (r.code === 0) ok++;
+          else failed.push(String(d.Domain));
+        } catch {
+          failed.push(String(d.Domain));
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, checkedDomains.value.length) }, worker));
+    message.success(t('domain.importSuccess', { count: ok }));
+    if (failed.length) message.warning(t('domain.importPartial', { names: failed.join(', ') }));
+    checkedDomains.value = [];
+    pullDomains.value = [];
+    showImport.value = false;
+    loadDomains();
+  } finally {
+    importBusy.value = false;
+  }
 }
 
 async function doAddCategory() {

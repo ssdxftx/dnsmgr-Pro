@@ -191,16 +191,21 @@ function safeJson(s: string) {
 async function save() {
   if (!form.type || !form.name) return message.warning(t('certAccount.fillWarning'));
   saveBusy.value = true;
-  const body = { type: form.type, name: form.name, remark: form.remark, config: form.config };
-  const res = editingId.value
-    ? await api('PUT', `/cert/accounts/${editingId.value}`, body)
-    : await api('POST', '/cert/accounts', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    loadAccounts();
-  } else message.error(res.msg);
+  try {
+    const body = { type: form.type, name: form.name, remark: form.remark, config: form.config };
+    const res = editingId.value
+      ? await api('PUT', `/cert/accounts/${editingId.value}`, body)
+      : await api('POST', '/cert/accounts', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      loadAccounts();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.failed'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function del(row: any) {

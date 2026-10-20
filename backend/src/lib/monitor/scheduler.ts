@@ -2,6 +2,7 @@ import { query, table } from '../../db.js';
 import { configSet } from '../../config.js';
 import { fmtDateTime } from '../util.js';
 import { runMonitorTask } from './taskRunner.js';
+import { withDistributedLock } from '../scheduler/distLock.js';
 
 let running = false;
 let day = '';
@@ -15,7 +16,7 @@ export function startMonitorScheduler(): void {
   setInterval(() => {
     if (running) return;
     running = true;
-    tick()
+    withDistributedLock('dnsmgr:monitor', tick)
       .catch(async (e: any) => {
         await configSet('run_error', e.message || String(e));
         console.error('[dmtask] 调度异常:', e.message);

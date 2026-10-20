@@ -290,7 +290,8 @@ export default async function userRoutes(app: FastifyInstance) {
   app.post('/api/users/:id/status', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const status = Number((req.body || {}).status);
+    // 仅允许 1=正常、0=封禁，避免 -1/2 等值绕过 authenticate 的封禁判断
+    const status = Number((req.body || {}).status) === 1 ? 1 : 0;
     const row: any = await queryOne(`SELECT is_super, level, username, status FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
     if (Number((row as any).is_super) === 1) return { code: -1, msg: '超级管理员不可被修改状态' };

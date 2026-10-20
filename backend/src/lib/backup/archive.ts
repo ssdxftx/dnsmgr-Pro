@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -10,6 +10,8 @@ import { APP_VERSION } from '../version.js';
 export const MAGIC = Buffer.from('DNSMGRBK', 'utf8');
 export const FORMAT_VERSION = 1;
 const TAG_LEN = 16;
+const IMPORT_TMP_TTL_MS = 3600_000;
+const MAX_IMPORT_JSON_BYTES = Number(process.env.DNSMGR_MAX_IMPORT_BYTES || 512 * 1024 * 1024);
 
 export function dataRoot(): string {
   return process.env.DNSMGR_DATA_DIR || path.resolve(process.cwd(), 'data');
@@ -305,13 +307,36 @@ function objectMembers(s: string, objStart: number): Map<string, [number, number
   }
 }
 
+/** 清理异常退出遗留的导入临时文件（含全站明文凭据），避免长期驻留数据卷 */
+async function cleanStaleImportFiles(): Promise<void> {
+  const dir = tmpDir();
+  let names: string[] = [];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    if (!name.startsWith('import-') || !name.endsWith('.json')) continue;
+    const file = path.join(dir, name);
+    try {
+      const st = await stat(file);
+      if (now - st.mtimeMs > IMPORT_TMP_TTL_MS) await unlink(file);
+    } catch {
+      /* 已被并发清理或无权访问，忽略 */
+    }
+  }
+}
+
 /** 解密 + 解压到临时文件，供按表解析；调用方负责 dispose */
 export async function openArchive(file: string, key: Buffer): Promise<OpenedArchive> {
   const { header, headerEnd, fileSize } = await readArchiveHeader(file);
   verifyArchiveKey(header, key);
 
-  const tmp = path.join(tmpDir(), `import-${randomBytes(6).toString('hex')}.json`);
   await ensureDataDirs();
+  await cleanStaleImportFiles();
+  const tmp = path.join(tmpDir(), `import-${randomBytes(6).toString('hex')}.json`);
   const hash = createHash('sha256');
   const rs = createReadStream(file, { start: headerEnd, end: fileSize - TAG_LEN - 1 });
   // 摘要必须对「解密后的 gzip 字节」计算，与写入端 gz 输出一致；
@@ -325,9 +350,21 @@ export async function openArchive(file: string, key: Buffer): Promise<OpenedArch
   const dec = createDecipheriv('aes-256-gcm', key, Buffer.from(header.iv, 'base64'));
   dec.setAuthTag(Buffer.from((await readTag(file, fileSize)), 'base64'));
   const gunzip = createGunzip();
-  const ws = createWriteStream(tmp);
+  // 解压后累计字节上限，防止高压缩比归档打满磁盘
+  let unpacked = 0;
+  const limiter = new Transform({
+    transform(chunk, _enc, cb) {
+      unpacked += chunk.length;
+      if (unpacked > MAX_IMPORT_JSON_BYTES) {
+        cb(new Error('解压内容超过允许上限'));
+        return;
+      }
+      cb(null, chunk);
+    },
+  });
+  const ws = createWriteStream(tmp, { mode: 0o600 });
   try {
-    await pipeline(rs, dec, tap, gunzip, ws);
+    await pipeline(rs, dec, tap, gunzip, limiter, ws);
   } catch (e: any) {
     await unlink(tmp).catch(() => undefined);
     throw new Error('文件校验失败：' + (e?.message || '解密失败'));

@@ -44,6 +44,7 @@ export default {
     selectAccountDomain: 'Please select an account and domains',
     selectDomain: 'Please select domains',
     importSuccess: 'Successfully imported {count} domains',
+    importPartial: 'Some domains failed to import: {names}',
     accountOption: '{id} - {type} ({name})',
     queryingWhois: 'Querying WHOIS expiry time...',
     refreshSuccess: 'Refreshed successfully',

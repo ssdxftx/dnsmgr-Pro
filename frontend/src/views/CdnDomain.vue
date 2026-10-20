@@ -506,7 +506,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { computed, h, onActivated, onDeactivated, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
 import { NButton, NTag, NEllipsis, NCheckbox, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
@@ -1415,6 +1415,15 @@ onMounted(() => {
   loadAccounts();
   loadDnsDomains();
   loadProviders();
+});
+
+onDeactivated(() => {
+  // keep-alive 页面切走后停止证书日志轮询
+  stopLinkLogTimer();
+});
+
+onActivated(() => {
+  if (linkLogDomainId.value && !linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
 });
 
 onUnmounted(() => {

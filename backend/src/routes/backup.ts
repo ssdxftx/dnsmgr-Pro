@@ -100,7 +100,8 @@ export default async function backupRoutes(app: FastifyInstance) {
         passphrase: b.passphrase ? String(b.passphrase) : undefined,
         kind: 'manual',
       });
-      const destId = Number(b.dest_id || 0);
+      // 普通用户只能落本地，避免把个人备份写入管理员配置的远端存储
+      const destId = isAdmin(req.user) ? Number(b.dest_id || 0) : 0;
       if (destId > 0) {
         await uploadToDestination(destId, resolveArchivePath(r.file), r.file);
         const dest = await getDestination(destId);

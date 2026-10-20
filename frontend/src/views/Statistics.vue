@@ -100,11 +100,19 @@ function computeRange(): { startTime: string; endTime: string } {
   return { startTime: fmt(new Date(now.getTime() - 86400000)), endTime: fmt(now) };
 }
 
+let loadSeq = 0;
+let loadAbort: AbortController | null = null;
+
 async function load() {
+  const seq = ++loadSeq;
+  loadAbort?.abort();
+  const ctrl = new AbortController();
+  loadAbort = ctrl;
   busy.value = true;
   try {
     const { startTime, endTime } = computeRange();
-    const res = await api<any>('GET', '/cdn/statistics/overview', { startTime, endTime });
+    const res = await api<any>('GET', '/cdn/statistics/overview', { startTime, endTime }, { signal: ctrl.signal });
+    if (seq !== loadSeq) return;
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     providers.value = res.data?.providers || [];
     dataUntil.value = res.data?.dataUntil || '';
@@ -112,9 +120,10 @@ async function load() {
       .filter((p) => p.status === 'error' || p.status === 'timeout' || p.status === 'partial')
       .map((p) => `${p.name}: ${p.error || t(`statistics.status.${p.status}`)}`);
   } catch (e: any) {
+    if (seq !== loadSeq || ctrl.signal.aborted) return;
     errors.value = [e?.message || String(e)];
   } finally {
-    busy.value = false;
+    if (seq === loadSeq) busy.value = false;
   }
 }
 

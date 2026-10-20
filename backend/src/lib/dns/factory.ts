@@ -155,6 +155,16 @@ export const dnsProviders: Record<string, DnsProviderMeta> = {
     config: {
       ip: { name: 'IP地址', type: 'input', required: true },
       port: { name: '端口', type: 'input', required: true },
+      protocol: {
+        name: '协议',
+        type: 'select',
+        options: [
+          { value: 'https', label: 'HTTPS（推荐）' },
+          { value: 'http', label: 'HTTP（仅内网）' },
+        ],
+        value: 'http',
+        required: true,
+      },
       apikey: { name: 'API KEY', type: 'input', required: true },
       proxy: proxyField,
     },

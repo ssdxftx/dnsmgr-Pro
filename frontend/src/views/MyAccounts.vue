@@ -2,7 +2,18 @@
   <div class="app-stack">
     <PageHeader v-if="!embedded" :title="t('vault.title')" :subtitle="t('vault.subtitle')" />
 
-    <n-card v-if="!status.initialized" :bordered="false">
+    <n-card v-if="statusState === 'loading'" :bordered="false">
+      <n-spin size="small" :description="t('common.loading')" />
+    </n-card>
+
+    <n-card v-else-if="statusState === 'error'" :bordered="false">
+      <n-alert type="error" :show-icon="true">
+        {{ t('common.loadFailedHint') }}
+        <n-button size="tiny" type="primary" style="margin-left: 8px" @click="load">{{ t('common.retry') }}</n-button>
+      </n-alert>
+    </n-card>
+
+    <n-card v-else-if="!status.initialized" :bordered="false">
       <template #header>{{ t('vault.notInit') }}</template>
       <p class="text-dim">{{ t('vault.notInitHint') }}</p>
       <n-grid cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
@@ -119,7 +130,7 @@
     <n-modal v-model:show="upgradeOpen" preset="card" :title="t('vault.upgrade')" class="modal-md" :mask-closable="false">
       <n-form label-placement="top">
         <n-form-item :label="t('vault.passphrase')">
-          <n-input v-model:value="initForm.passphrase" type="password" show-password-on="click" :placeholder="t('vault.passphraseHint')" />
+          <n-input v-model:value="upgradePass" type="password" show-password-on="click" :placeholder="t('vault.passphraseHint')" />
         </n-form-item>
       </n-form>
       <template #footer>
@@ -132,7 +143,7 @@
 
     <n-modal v-model:show="downgradeOpen" preset="card" :title="t('vault.downgrade')" class="modal-md" :mask-closable="false">
       <n-alert type="warning" class="mb-3">{{ t('vault.modeNoneHint') }}</n-alert>
-      <n-input v-model:value="unlockPass" type="password" show-password-on="click" :placeholder="t('vault.oldPass')" />
+      <n-input v-model:value="downgradePass" type="password" show-password-on="click" :placeholder="t('vault.oldPass')" />
       <template #footer>
         <n-space justify="end">
           <n-button @click="downgradeOpen = false">{{ t('backup.cancel') }}</n-button>
@@ -148,6 +159,22 @@
         <n-space justify="end">
           <n-button @click="noneOpen = false">{{ t('backup.cancel') }}</n-button>
           <n-button :loading="busy" :disabled="!noneAck" @click="initConvenient">{{ t('vault.initNone') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="recoveryOpen" preset="card" :title="t('vault.setRecovery')" class="modal-md" :mask-closable="false" :closable="!recoveryCode">
+      <n-alert v-if="!recoveryCode" type="warning" class="mb-3">{{ t('vault.recoveryWarn') }}</n-alert>
+      <template v-if="recoveryCode">
+        <n-alert type="success" class="mb-3">{{ t('vault.recoveryCode') }}</n-alert>
+        <n-input :value="recoveryCode" readonly select-all />
+        <n-checkbox v-model:checked="recoveryAck" class="mt-3">{{ t('vault.recoverySavedAck') }}</n-checkbox>
+      </template>
+      <template #footer>
+        <n-space justify="end">
+          <n-button v-if="!recoveryCode" @click="recoveryOpen = false">{{ t('backup.cancel') }}</n-button>
+          <n-button v-if="!recoveryCode" type="warning" :loading="busy" @click="generateRecovery">{{ t('vault.setRecovery') }}</n-button>
+          <n-button v-else type="primary" :disabled="!recoveryAck" @click="recoveryOpen = false">{{ t('vault.saved') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -179,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
@@ -195,6 +222,7 @@ const { t } = useI18n();
 const message = useMessage();
 
 const status = ref<any>({});
+const statusState = ref<'loading' | 'ok' | 'error'>('loading');
 const busy = ref(false);
 const initOpen = ref(false);
 const unlockOpen = ref(false);
@@ -205,6 +233,11 @@ const destroyOpen = ref(false);
 const noneOpen = ref(false);
 const noneAck = ref(false);
 const unlockPass = ref('');
+const downgradePass = ref('');
+const upgradePass = ref('');
+const recoveryOpen = ref(false);
+const recoveryCode = ref('');
+const recoveryAck = ref(false);
 const destroyConfirm = ref('');
 const destroyPass = ref('');
 const initForm = reactive({ passphrase: '', confirm: '' });
@@ -212,9 +245,24 @@ const passForm = reactive({ old: '', next: '' });
 
 const ready = computed(() => status.value.unlocked || status.value.mode === 'none');
 
+// 各弹窗关闭时清空口令，避免在解锁/降级/升级之间残留明文
+watch(unlockOpen, (v) => { if (!v) unlockPass.value = ''; });
+watch(downgradeOpen, (v) => { if (!v) downgradePass.value = ''; });
+watch(upgradeOpen, (v) => { if (!v) upgradePass.value = ''; });
+watch(passOpen, (v) => { if (!v) { passForm.old = ''; passForm.next = ''; } });
+watch(initOpen, (v) => { if (!v) { initForm.passphrase = ''; initForm.confirm = ''; } });
+
 async function load() {
-  const res = await api<any>('GET', '/vault/status');
-  status.value = res?.data || {};
+  statusState.value = 'loading';
+  try {
+    const res = await api<any>('GET', '/vault/status');
+    if (res.code !== 0) throw new Error(res.msg || 'load failed');
+    status.value = res?.data || {};
+    statusState.value = 'ok';
+  } catch {
+    status.value = {};
+    statusState.value = 'error';
+  }
 }
 
 function openInit() {
@@ -293,7 +341,7 @@ async function changePass() {
 async function upgrade() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/upgrade', { passphrase: initForm.passphrase });
+    const res = await api<any>('POST', '/vault/upgrade', { passphrase: upgradePass.value });
     if (res.code !== 0) return message.error(res.msg);
     upgradeOpen.value = false;
     message.success(t('vault.saved'));
@@ -306,7 +354,7 @@ async function upgrade() {
 async function downgrade() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/downgrade', { passphrase: unlockPass.value });
+    const res = await api<any>('POST', '/vault/downgrade', { passphrase: downgradePass.value });
     if (res.code !== 0) return message.error(res.msg);
     downgradeOpen.value = false;
     message.success(t('vault.saved'));
@@ -316,15 +364,29 @@ async function downgrade() {
   }
 }
 
-async function setRecovery() {
-  const res = await api<any>('POST', '/vault/recovery', { recovery: 'random' });
-  if (res.code !== 0) return message.error(res.msg);
-  const code = res?.data?.recoveryCode;
-  if (code) {
-    await navigator.clipboard?.writeText(code).catch(() => undefined);
-    message.success(`${t('vault.recoveryCode')}: ${code}`);
-  } else {
-    message.success(t('vault.saved'));
+function setRecovery() {
+  recoveryCode.value = '';
+  recoveryAck.value = false;
+  recoveryOpen.value = true;
+}
+
+async function generateRecovery() {
+  busy.value = true;
+  try {
+    const res = await api<any>('POST', '/vault/recovery', { recovery: 'random' });
+    if (res.code !== 0) return message.error(res.msg);
+    const code = String(res?.data?.recoveryCode || '');
+    if (!code) return message.error(t('vault.saved'));
+    recoveryCode.value = code;
+    recoveryAck.value = false;
+    try {
+      await navigator.clipboard.writeText(code);
+      message.success(t('vault.copied'));
+    } catch {
+      message.warning(t('vault.recoveryCode'));
+    }
+  } finally {
+    busy.value = false;
   }
 }
 

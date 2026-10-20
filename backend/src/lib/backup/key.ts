@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { configGet, configSet } from '../../config.js';
+import { configEnsure, configGet, configSet } from '../../config.js';
 import { readArchiveHeader } from './archive.js';
 import { deriveKek } from '../vault/keys.js';
 
@@ -20,7 +20,8 @@ export async function getBackupKey(): Promise<Buffer | null> {
 export async function ensureBackupKey(): Promise<Buffer> {
   const cur = await getBackupKey();
   if (cur) return cur;
-  return rotateBackupKey();
+  const raw = await configEnsure(KEY_NAME, () => randomBytes(32).toString('base64url'));
+  return Buffer.from(raw, 'base64url');
 }
 
 export async function rotateBackupKey(): Promise<Buffer> {
