@@ -58,6 +58,7 @@
         <div
           v-for="(row, index) in data"
           :key="String(rowKey ? rowKey(row) : (row.id ?? index))"
+          v-bind="rowProps ? rowProps(row) : {}"
           class="m-card"
         >
           <div class="m-card__head">
@@ -161,8 +162,12 @@ function isActionColumn(col: any) {
 
 const hasSelection = computed(() => props.selectable ?? props.columns.some(isSystemColumn));
 
-const dataColumns = computed(() => props.columns.filter((c) => !isSystemColumn(c) && !isActionColumn(c)));
-const actionColumn = computed(() => props.columns.find(isActionColumn));
+// 操作列优先认 key='actions'：页面可能同时存在标题为「操作」的数据列，
+// 按标题匹配会把数据列误当成操作区，导致真正的操作按钮在移动端消失。
+const actionColumn = computed(
+  () => props.columns.find((c: any) => c?.key === 'actions') || props.columns.find(isActionColumn),
+);
+const dataColumns = computed(() => props.columns.filter((c) => !isSystemColumn(c) && c !== actionColumn.value));
 
 const TITLE_KEYS = ['name', 'domain', 'title', 'label', 'hostname', 'routename', 'username', 'email', 'subject', 'remark'];
 const titleColumn = computed(() => {

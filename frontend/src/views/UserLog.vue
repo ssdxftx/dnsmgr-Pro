@@ -633,6 +633,10 @@ onMounted(() => {
 :deep(.n-data-table-tbody .n-data-table-tr) {
   cursor: pointer;
 }
+:deep(.n-data-table-td--fixed-right),
+:deep(.n-data-table-th--fixed-right) {
+  box-shadow: -8px 0 12px -8px color-mix(in srgb, var(--app-text-3) 45%, transparent);
+}
 
 .audit-summary {
   padding: 10px 12px;
@@ -738,6 +742,8 @@ onMounted(() => {
     gap: 8px;
   }
   .audit-toolbar__kw {
+    flex: 1 1 150px;
+    min-width: 120px;
     max-width: none;
   }
 }

@@ -208,8 +208,8 @@ export default {
     from: '原值',
     to: '新值',
     today: '今日操作',
-    failed7d: '近 7 天失败',
-    activeUsers30d: '近 30 天活跃用户',
+    failed7d: '失败操作',
+    activeUsers30d: '活跃用户',
     truncated: '结果超过 1 万条，请缩小时间范围以精确查看',
     detailBtn: '详情',
     modules: {

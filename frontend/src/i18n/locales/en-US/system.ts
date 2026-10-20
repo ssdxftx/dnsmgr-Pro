@@ -208,8 +208,8 @@ export default {
     from: 'From',
     to: 'To',
     today: 'Operations Today',
-    failed7d: 'Failed in 7 Days',
-    activeUsers30d: 'Active Users (30d)',
+    failed7d: 'Failed',
+    activeUsers30d: 'Active users',
     truncated: 'More than 10,000 results; narrow the time range for precise results',
     detailBtn: 'Detail',
     modules: {
