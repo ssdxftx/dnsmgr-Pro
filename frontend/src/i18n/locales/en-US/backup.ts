@@ -2,6 +2,9 @@ export default {
   backup: {
     title: 'Backup & Restore',
     subtitle: 'Encrypted site backups, online restore and schedules',
+    tabSite: 'Site backup',
+    tabMine: 'My backup',
+    tabVault: 'Credential vault',
     lastBackup: 'Last backup',
     nextRun: 'Next run',
     keyReady: 'Backup key configured',

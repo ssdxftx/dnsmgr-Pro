@@ -1,10 +1,10 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="t('myBackup.title')" :subtitle="t('myBackup.subtitle')" />
+    <PageHeader v-if="!embedded" :title="t('myBackup.title')" :subtitle="t('myBackup.subtitle')" />
 
     <n-alert v-if="vault.initialized === false" type="warning">
       {{ t('myBackup.vaultNeeded') }}
-      <router-link to="/my-accounts">{{ t('myBackup.goVault') }}</router-link>
+      <router-link :to="{ path: '/backup', query: { tab: 'vault' } }">{{ t('myBackup.goVault') }}</router-link>
     </n-alert>
     <n-alert v-else-if="vault.mode === 'none'" type="warning">{{ t('myBackup.convenientWarning') }}</n-alert>
 
@@ -59,6 +59,9 @@ import { NButton, NSpace, useDialog, useMessage } from 'naive-ui';
 import { api, getToken } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
+const embedded = computed(() => props.embedded);
 
 const { t } = useI18n();
 const message = useMessage();

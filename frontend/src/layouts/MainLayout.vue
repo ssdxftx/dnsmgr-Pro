@@ -116,7 +116,7 @@
 import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
-import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, PersonCircleOutline, ArchiveOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
+import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, ArchiveOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { clearToken } from '../api';
 import { isAdminUser, requiresAdmin } from '../lib/admin';
@@ -174,15 +174,6 @@ function renderIcon(icon: Component) {
 
 const menuOptions = computed<MenuOption[]>(() => [
   { label: t('nav.dashboard'), key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
-  {
-    label: t('nav.groupPersonal'),
-    key: 'group-personal',
-    icon: renderIcon(PersonCircleOutline),
-    children: [
-      { label: t('nav.myAccounts'), key: 'my-accounts', icon: renderIcon(CloudOutline) },
-      { label: t('nav.myBackup'), key: 'my-backup', icon: renderIcon(ArchiveOutline) },
-    ],
-  },
   {
     label: t('nav.groupDomain'),
     key: 'group-domain',
@@ -279,7 +270,7 @@ const activeKey = computed(() => {
     'optimize-settings', 'optimize-tasks',
     'cert-accounts', 'cert-orders', 'deploy-accounts', 'deploy-tasks', 'cert-settings',
     'cert-cname',
-    'my-accounts', 'my-backup', 'backup',
+    'backup',
     'system-settings', 'users', 'logs', 'about',
   ].find((k) => route.path.startsWith('/' + k));
   return matched || 'dashboard';
@@ -296,7 +287,7 @@ const activeGroupMap: Record<string, string> = {
   'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
   'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
   'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert', 'cert-cname': 'group-cert',
-  'system-settings': 'group-system', users: 'group-system', logs: 'group-system', about: 'group-system',
+  'system-settings': 'group-system', users: 'group-system', logs: 'group-system', backup: 'group-system', about: 'group-system',
 };
 
 const groupLabels = computed<Record<string, string>>(() => ({

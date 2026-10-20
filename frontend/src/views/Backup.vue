@@ -2,6 +2,8 @@
   <div class="app-stack">
     <PageHeader :title="t('backup.title')" :subtitle="t('backup.subtitle')" />
 
+    <n-tabs v-model:value="tab" type="line" animated>
+      <n-tab-pane v-if="admin" name="site" :tab="t('backup.tabSite')">
     <n-grid class="telemetry-row" cols="2 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item><TelemetryCard :value="successCount" :label="t('backup.lastBackup')" tone="primary" :icon="ArchiveOutline" :caption="lastBackupText" /></n-grid-item>
       <n-grid-item><TelemetryCard :value="schedules.length" :label="t('backup.nextRun')" tone="info" :icon="TimeOutline" :caption="nextRunText" /></n-grid-item>
@@ -72,6 +74,14 @@
       </n-list>
       <n-empty v-else :description="t('backup.schedTitle')" />
     </n-card>
+      </n-tab-pane>
+      <n-tab-pane name="mine" :tab="t('backup.tabMine')">
+        <MyBackup embedded />
+      </n-tab-pane>
+      <n-tab-pane name="vault" :tab="t('backup.tabVault')">
+        <MyAccounts embedded />
+      </n-tab-pane>
+    </n-tabs>
 
     <n-modal v-model:show="showRemote" preset="card" :title="t('backup.remoteTitle')" class="modal-lg" :mask-closable="false">
       <n-space vertical :size="12">
@@ -181,18 +191,40 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useRoute, useRouter } from 'vue-router';
 import { NButton, NSpace, useDialog, useMessage } from 'naive-ui';
 import { ArchiveOutline, CloudDownloadOutline, KeyOutline, TimeOutline } from '@vicons/ionicons5';
-import { api } from '../api';
+import { api, getUser } from '../api';
+import { isAdminUser } from '../lib/admin';
 import PageHeader from '../components/PageHeader.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import MyBackup from './MyBackup.vue';
+import MyAccounts from './MyAccounts.vue';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const route = useRoute();
+const router = useRouter();
+
+const admin = isAdminUser(getUser());
+const validTabs = admin ? ['site', 'mine', 'vault'] : ['mine', 'vault'];
+const initialTab = String(route.query.tab || '');
+const tab = ref(validTabs.includes(initialTab) ? initialTab : (admin ? 'site' : 'mine'));
+
+watch(
+  () => route.query.tab,
+  (v) => {
+    const next = String(v || '');
+    if (validTabs.includes(next) && next !== tab.value) tab.value = next;
+  },
+);
+watch(tab, (v) => {
+  if (String(route.query.tab || '') !== v) router.replace({ path: '/backup', query: { ...route.query, tab: v } });
+});
 
 const loading = ref(false);
 const busy = ref(false);
@@ -517,7 +549,12 @@ function removeSched(s: any) {
   });
 }
 
-onMounted(loadAll);
+onMounted(() => {
+  if (String(route.query.tab || '') !== tab.value) {
+    router.replace({ path: '/backup', query: { ...route.query, tab: tab.value } });
+  }
+  if (admin) loadAll();
+});
 </script>
 
 <style scoped>

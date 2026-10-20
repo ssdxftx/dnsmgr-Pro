@@ -2,6 +2,9 @@ export default {
   backup: {
     title: '备份与恢复',
     subtitle: '整站数据加密备份、在线恢复与定时计划',
+    tabSite: '站点备份',
+    tabMine: '我的备份',
+    tabVault: '凭证保险库',
     lastBackup: '上次备份',
     nextRun: '下次计划',
     keyReady: '备份密钥已设置',

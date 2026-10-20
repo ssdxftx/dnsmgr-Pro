@@ -1,6 +1,6 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="t('vault.title')" :subtitle="t('vault.subtitle')" />
+    <PageHeader v-if="!embedded" :title="t('vault.title')" :subtitle="t('vault.subtitle')" />
 
     <n-card v-if="!status.initialized" :bordered="false">
       <template #header>{{ t('vault.notInit') }}</template>
@@ -163,6 +163,9 @@ import PageHeader from '../components/PageHeader.vue';
 import DnsAccount from './DnsAccount.vue';
 import CdnAccount from './CdnAccount.vue';
 import CertAccount from './CertAccount.vue';
+
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
+const embedded = computed(() => props.embedded);
 
 const { t } = useI18n();
 const message = useMessage();
