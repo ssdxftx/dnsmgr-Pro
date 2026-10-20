@@ -12,6 +12,9 @@ const routes = [
     children: [
       { path: '', redirect: '/domains' },
       { path: 'dashboard', component: () => import('./views/Dashboard.vue'), meta: { titleKey: 'route.dashboard' } },
+      { path: 'my-accounts', component: () => import('./views/MyAccounts.vue'), meta: { titleKey: 'route.myAccounts' } },
+      { path: 'my-backup', component: () => import('./views/MyBackup.vue'), meta: { titleKey: 'route.myBackup' } },
+      { path: 'backup', component: () => import('./views/Backup.vue'), meta: { titleKey: 'route.backup' } },
       { path: 'domains', component: () => import('./views/DomainList.vue'), meta: { titleKey: 'route.domains' } },
       { path: 'domains/:id/records', component: () => import('./views/RecordList.vue'), meta: { titleKey: 'route.records' } },
       { path: 'domains/:id/records/import', component: () => import('./views/RecordImport.vue'), meta: { titleKey: 'route.recordImport' } },

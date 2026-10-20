@@ -34,14 +34,23 @@ import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } fro
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
-import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readConfigSafe } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
+import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
+import { findAnyVaultDekForUser } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
 import { EO_CONDITION_SCHEMA } from '../lib/cdn/ruleCondition.js';
 
-// 所有 CDN 管理接口仅管理员可用
+// CDN 路由默认只要求登录；账户/域名入口再按归属收口。
+// 站点级设置、证书申请、刷新预热、同步等管理动作仍要求管理员。
 const authenticate = (app: FastifyInstance) => ({
+  preHandler: async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+  },
+});
+
+const requireAdmin = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
     await (app as any).authenticate(req, reply);
     if (!req.user) return;
@@ -84,6 +93,18 @@ function safeJson(s: any): Record<string, any> {
   return {};
 }
 
+/** 账户配置读取：私有账户需用保险库 DEK 解密，未解锁时明确报错而非静默当成空配置 */
+async function accountConfigOf(acct: any): Promise<Record<string, any>> {
+  if (acct?.visibility === 'private') {
+    const dek = await findAnyVaultDekForUser(Number(acct.owner_uid));
+    const { config, state } = readAccountConfig(acct.config, dek);
+    if (state === 'locked') throw new ConfigDecryptError('保险库已锁定，请先解锁');
+    if (state === 'error') throw new ConfigDecryptError('私有账户凭证无法解密，请重新填写');
+    return config;
+  }
+  return await accountConfigOf(acct);
+}
+
 function calcRecordName(accelDomain: string, dnsDomain: string): string {
   if (accelDomain === dnsDomain) return '@';
   return accelDomain.slice(0, accelDomain.length - dnsDomain.length - 1);
@@ -97,7 +118,7 @@ async function removeLinkedDnsRecord(row: any): Promise<{ ok: boolean; message: 
   if (!dnsDomain) return { ok: false, message: '未找到联动域名，解析记录需手动处理' };
   const dnsAcct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
   if (!dnsAcct) return { ok: false, message: 'DNS账户不存在，解析记录需手动处理' };
-  const dns: any = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), dnsDomain.name, dnsDomain.thirdid);
+  const dns: any = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
   if (!dns) return { ok: false, message: 'DNS模块不存在，解析记录需手动处理' };
 
   const norm = (v: any) => String(Array.isArray(v) ? v[0] : v ?? '').trim().toLowerCase();
@@ -299,6 +320,7 @@ function basicsFromCache(cached: any): Array<{ key: string; unit: any; value: nu
 
 export default async function cdnRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
+  const adminAuth = requireAdmin(app);
   const providerCache = new Map<string, { at: number; provider: CdnProvider | false }>();
   const PROVIDER_CACHE_TTL = 5000;
   let providerCacheEpoch = getCdnAccountEpoch();
@@ -311,6 +333,31 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (!checkLevel(req.user, 2) && Number(req.user.stat_cache) !== 1) {
         return reply.code(403).send({ code: -1, msg: '无权限' });
       }
+    },
+  };
+
+  // 用户直传 aid：统一做可见性校验，越权返回 404（不泄露账户存在性）
+  const authAid = {
+    preHandler: async (req: any, reply: any) => {
+      await (app as any).authenticate(req, reply);
+      if (!req.user) return;
+      const acct = await getVisibleAccount('cdn_account', Number(req.params.aid), req.user);
+      if (!acct) return reply.code(404).send({ code: -1, msg: '账户不存在' });
+      req.account = acct;
+    },
+  };
+
+  // 用户直传域名 id：先查归属账户，再按账户可见性收口
+  const authCdnDomain = {
+    preHandler: async (req: any, reply: any) => {
+      await (app as any).authenticate(req, reply);
+      if (!req.user) return;
+      const row: any = await queryOne(`SELECT id, aid FROM ${table('cdn_domain')} WHERE id = ?`, [Number(req.params.id)]);
+      if (!row) return reply.code(404).send({ code: -1, msg: '加速域名不存在' });
+      const acct = await getVisibleAccount('cdn_account', Number(row.aid), req.user);
+      if (!acct) return reply.code(404).send({ code: -1, msg: '加速域名不存在' });
+      req.cdnDomain = row;
+      req.account = acct;
     },
   };
 
@@ -340,7 +387,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     let provider: CdnProvider | false = false;
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
     if (acct) {
-      const p: any = getCdnProvider(acct.type, safeJson(acct.config));
+      const p: any = getCdnProvider(acct.type, await accountConfigOf(acct));
       if (p) {
         if (zoneId && typeof p.setZoneId === 'function') p.setZoneId(zoneId);
         if (zoneId && typeof p.setSiteId === 'function') p.setSiteId(zoneId);
@@ -367,9 +414,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
       params.push(String(q.zone_id));
     }
     const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
-    const rows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
+    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
+    const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
+    const rows = (await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params)).filter((r: any) =>
+      allowedAids.has(Number(r.aid)),
+    );
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
-    const cdnAccounts = await query(`SELECT id, type FROM ${table('cdn_account')}`);
+    const cdnAccounts = visibleAccounts;
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
     const certAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certapply).map((a: any) => a.id));
     const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
@@ -406,9 +457,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点列表（按账户 + 站点聚合）
-  app.get('/api/cdn/zones', auth, async (req: any) => {
+  app.get('/api/cdn/zones', auth, async (req: any, reply: any) => {
     const aid = Number(req.query?.aid || 0);
-    const rows = await query(
+    if (aid) {
+      const acct = await getVisibleAccount('cdn_account', aid, req.user);
+      if (!acct) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
+    }
+    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
+    const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
+    const rows = (await query(
       `SELECT aid, zone_id, MIN(route) AS route,
               MIN(name) AS primary_name,
               COUNT(*) AS domain_count,
@@ -417,7 +474,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
        WHERE zone_id IS NOT NULL AND zone_id != ''
        GROUP BY aid, zone_id
        ORDER BY aid ASC, zone_id ASC`,
-    );
+    )).filter((r: any) => allowedAids.has(Number(r.aid)));
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const localItem = (r: any) => ({
       aid: r.aid,
@@ -439,7 +496,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     // 传 aid：以「云端站点」为准，含尚未接入任何域名的站点；本地数据仅用于补域名数与域名列表
     const acct: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
     if (!acct) return { code: -1, msg: 'CDN账户不存在' };
-    const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+    const provider: any = getCdnProvider(acct.type, await accountConfigOf(acct));
     if (!provider || typeof provider.getZones !== 'function') {
       // 该类型不支持站点枚举时回退到本地聚合，避免页面空白
       return { code: 0, data: (rows as any[]).filter((r) => Number(r.aid) === aid).map(localItem), cloud: false };
@@ -477,7 +534,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点配置读取
-  app.get('/api/cdn/zones/setting', auth, async (req: any) => {
+  app.get('/api/cdn/zones/setting', adminAuth, async (req: any) => {
     const aid = Number(req.query.aid || 0);
     const zoneId = String(req.query.zone_id || '').trim();
     if (!aid || !zoneId) return { code: -1, msg: '参数不完整' };
@@ -489,7 +546,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点配置保存
-  app.post('/api/cdn/zones/setting', auth, async (req: any) => {
+  app.post('/api/cdn/zones/setting', adminAuth, async (req: any) => {
     const { aid, zone_id, setting } = req.body || {};
     const zoneId = String(zone_id || '').trim();
     if (!aid || !zoneId) return { code: -1, msg: '参数不完整' };
@@ -517,7 +574,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // ===== 站点生命周期（EO Zone / ESA Site）=====
 
   // 云上站点列表
-  app.get('/api/cdn/accounts/:aid/sites', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/sites', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const provider: any = await cdnForZone(aid, null);
     if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点管理' };
@@ -540,7 +597,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 套餐实例列表（ESA 创建站点需要）
-  app.get('/api/cdn/accounts/:aid/plan-instances', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/plan-instances', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const provider: any = await cdnForZone(aid, null);
     if (!provider || typeof provider.listPlanInstances !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐实例查询' };
@@ -550,7 +607,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点名校验 / 归属识别
-  app.post('/api/cdn/accounts/:aid/sites/check', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/sites/check', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const name = String((req.body || {}).siteName || '').trim();
     if (!name) return { code: -1, msg: '站点名称不能为空' };
@@ -570,7 +627,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 创建站点
-  app.post('/api/cdn/accounts/:aid/sites', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/sites', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const provider: any = await cdnForZone(aid, null);
     if (!provider || typeof provider.createZone !== 'function') return { code: -1, msg: '该 CDN 类型不支持创建站点' };
@@ -597,7 +654,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 验证归属
-  app.post('/api/cdn/accounts/:aid/sites/verify', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/sites/verify', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -625,7 +682,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 暂停 / 启用站点
-  app.post('/api/cdn/accounts/:aid/sites/pause', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/sites/pause', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -644,7 +701,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点 NS 列表
-  app.get('/api/cdn/accounts/:aid/sites/:zoneId/ns', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/ns', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String((req.params as any).zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId);
@@ -655,7 +712,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 更新站点属性（接入类型 / 覆盖范围 / 站点名独占）
-  app.put('/api/cdn/accounts/:aid/sites/:zoneId', auth, async (req: any) => {
+  app.put('/api/cdn/accounts/:aid/sites/:zoneId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String((req.params as any).zoneId || '').trim();
     const b = req.body || {};
@@ -680,7 +737,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 删除站点
-  app.delete('/api/cdn/accounts/:aid/sites/:zoneId', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/sites/:zoneId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String((req.params as any).zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId);
@@ -690,7 +747,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // ===== 源站组 =====
-  app.get('/api/cdn/accounts/:aid/origin-groups', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/origin-groups', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -701,7 +758,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.post('/api/cdn/accounts/:aid/origin-groups', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/origin-groups', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -713,7 +770,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功', data: { groupId: id } };
   });
 
-  app.put('/api/cdn/accounts/:aid/origin-groups/:groupId', auth, async (req: any) => {
+  app.put('/api/cdn/accounts/:aid/origin-groups/:groupId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = String((req.params as any).groupId || '');
     const b = req.body || {};
@@ -727,7 +784,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/origin-groups/:groupId', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/origin-groups/:groupId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = String((req.params as any).groupId || '');
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
@@ -739,7 +796,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // ===== 负载均衡 =====
-  app.get('/api/cdn/accounts/:aid/load-balancers', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/load-balancers', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -750,7 +807,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.post('/api/cdn/accounts/:aid/load-balancers', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/load-balancers', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -770,7 +827,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功', data: { instanceId: id } };
   });
 
-  app.put('/api/cdn/accounts/:aid/load-balancers/:instanceId', auth, async (req: any) => {
+  app.put('/api/cdn/accounts/:aid/load-balancers/:instanceId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const instanceId = String((req.params as any).instanceId || '');
     const b = req.body || {};
@@ -791,7 +848,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/load-balancers/:instanceId', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/load-balancers/:instanceId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const instanceId = String((req.params as any).instanceId || '');
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
@@ -803,7 +860,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // ===== 规则引擎（EO L7 规则）=====
-  app.get('/api/cdn/accounts/:aid/rules/setting', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/rules/setting', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const provider: any = await cdnForZone(aid, null);
     if (!provider || typeof provider.getRulesSetting !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则元数据' };
@@ -812,7 +869,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.get('/api/cdn/accounts/:aid/rules', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -823,7 +880,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: list };
   });
 
-  app.post('/api/cdn/accounts/:aid/rules', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -842,7 +899,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功', data: { ruleId: id } };
   });
 
-  app.put('/api/cdn/accounts/:aid/rules/:ruleId', auth, async (req: any) => {
+  app.put('/api/cdn/accounts/:aid/rules/:ruleId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const ruleId = String((req.params as any).ruleId || '');
     const b = req.body || {};
@@ -863,7 +920,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/rules', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -881,7 +938,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
-  app.post('/api/cdn/accounts/:aid/rules/priority', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/rules/priority', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -900,7 +957,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // ===== 规则引擎（ESA 12 类规则配置，kind 形如 RedirectRule）=====
-  app.get('/api/cdn/accounts/:aid/rule-configs', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/rule-configs', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     const kind = String(req.query.kind || '').trim();
@@ -913,7 +970,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.post('/api/cdn/accounts/:aid/rule-configs', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/rule-configs', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -927,7 +984,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '保存成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/rule-configs/:configId', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/rule-configs/:configId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const configId = String((req.params as any).configId || '');
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
@@ -943,11 +1000,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // 规则字段元数据：驱动可视化规则编辑器
   //   ESA：由官方 OpenAPI 元数据生成的静态字段表（15 类 × List/Create/Update/Delete 全支持）
   //   EO ：透传 DescribeRulesSetting，返回可用动作及其属性定义（Type=CHOICE/TOGGLE/OBJECT/...）
-  app.get('/api/cdn/accounts/:aid/rule-schema', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/rule-schema', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const acct: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
     if (!acct) return { code: -1, msg: '账户不存在' };
-    const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+    const provider: any = getCdnProvider(acct.type, await accountConfigOf(acct));
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
 
     if (typeof provider.listRuleConfigs === 'function') {
@@ -974,7 +1031,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // ===== 安全：IP 组 =====
-  app.get('/api/cdn/accounts/:aid/security/ip-groups', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/security/ip-groups', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -985,7 +1042,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: list };
   });
 
-  app.post('/api/cdn/accounts/:aid/security/ip-groups', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/security/ip-groups', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -998,7 +1055,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功', data: { groupId: id } };
   });
 
-  app.put('/api/cdn/accounts/:aid/security/ip-groups/:groupId', auth, async (req: any) => {
+  app.put('/api/cdn/accounts/:aid/security/ip-groups/:groupId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = Number((req.params as any).groupId);
     const b = req.body || {};
@@ -1013,7 +1070,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/security/ip-groups/:groupId', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/security/ip-groups/:groupId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = Number((req.params as any).groupId);
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
@@ -1024,7 +1081,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
-  app.get('/api/cdn/accounts/:aid/security/ip-groups/:groupId/content', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/security/ip-groups/:groupId/content', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const groupId = Number((req.params as any).groupId);
     const zoneId = String(req.query.zoneId || '').trim();
@@ -1042,7 +1099,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     getter: string,
     setter: string,
   ) => {
-    app.get(`/api/cdn/accounts/:aid/security/${name}`, auth, async (req: any) => {
+    app.get(`/api/cdn/accounts/:aid/security/${name}`, authAid, async (req: any) => {
       const aid = Number((req.params as any).aid);
       const zoneId = String(req.query.zoneId || '').trim();
       if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -1052,7 +1109,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (r === false) return { code: -1, msg: '获取配置失败，' + provider.getError() };
       return { code: 0, data: r };
     });
-    app.post(`/api/cdn/accounts/:aid/security/${name}`, auth, async (req: any) => {
+    app.post(`/api/cdn/accounts/:aid/security/${name}`, authAid, async (req: any) => {
       const aid = Number((req.params as any).aid);
       const b = req.body || {};
       const zoneId = String(b.zoneId || '').trim();
@@ -1069,7 +1126,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   securityConfigRoute('origin-protection', 'getOriginProtection', 'setOriginProtection');
 
   // ===== 四层代理 =====
-  app.get('/api/cdn/accounts/:aid/l4-proxies', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/l4-proxies', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -1080,7 +1137,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.post('/api/cdn/accounts/:aid/l4-proxies', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/l4-proxies', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const b = req.body || {};
     const zoneId = String(b.zoneId || '').trim();
@@ -1092,7 +1149,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功', data: { proxyId: id } };
   });
 
-  app.put('/api/cdn/accounts/:aid/l4-proxies/:proxyId', auth, async (req: any) => {
+  app.put('/api/cdn/accounts/:aid/l4-proxies/:proxyId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
     const b = req.body || {};
@@ -1106,7 +1163,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
     const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
@@ -1117,7 +1174,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '删除成功' };
   });
 
-  app.get('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
     const zoneId = String(req.query.zoneId || '').trim();
@@ -1129,7 +1186,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.post('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', auth, async (req: any) => {
+  app.post('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
     const b = req.body || {};
@@ -1142,7 +1199,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功' };
   });
 
-  app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', auth, async (req: any) => {
+  app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
     const b = req.body || {};
@@ -1156,7 +1213,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // ===== 任务 / 配额 / 统计增强 =====
-  app.get('/api/cdn/accounts/:aid/tasks/purge', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/tasks/purge', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId || null);
@@ -1166,7 +1223,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.get('/api/cdn/accounts/:aid/tasks/prefetch', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/tasks/prefetch', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId || null);
@@ -1176,7 +1233,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.get('/api/cdn/accounts/:aid/quota/content', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/quota/content', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
@@ -1187,7 +1244,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.get('/api/cdn/accounts/:aid/quota/purge', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/quota/purge', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String(req.query.zoneId || '').trim();
     const type = String(req.query.type || 'file');
@@ -1201,7 +1258,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 缓存增强：开发模式 / 缓存标签 / 屏蔽 / 分层缓存 / 上传
   const cacheAction = (name: string, method: string, argBuilder: (zoneId: string, b: any) => any[]) => {
-    app.post(`/api/cdn/accounts/:aid/cache/${name}`, auth, async (req: any) => {
+    app.post(`/api/cdn/accounts/:aid/cache/${name}`, authAid, async (req: any) => {
       const aid = Number((req.params as any).aid);
       const b = req.body || {};
       const zoneId = String(b.zoneId || '').trim();
@@ -1219,7 +1276,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   cacheAction('tiered', 'updateTieredCache', (z, b) => [z, String(b.mode || 'edge')]);
   cacheAction('upload-file', 'uploadFile', (z, b) => [z, String(b.url || ''), String(b.type || 'preload'), String(b.taskName || ('dnsmgr-' + Date.now()))]);
 
-  app.get('/api/cdn/accounts/:aid/analysis/top', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/analysis/top', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean);
     const provider: any = await cdnForZone(aid, zoneIds[0] || null);
@@ -1229,7 +1286,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: r };
   });
 
-  app.get('/api/cdn/accounts/:aid/analysis/timing-cache', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/analysis/timing-cache', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean);
     const metricNames = String(req.query.metricNames || 'l7Cache_outFlux').split(',').map((s) => s.trim()).filter(Boolean);
@@ -1241,7 +1298,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 加速域名重复检测：本地表精确匹配 + 云端精确定位（EO 走 getDomainCname）
-  app.get('/api/cdn/accounts/:aid/domains/exists', auth, async (req: any) => {
+  app.get('/api/cdn/accounts/:aid/domains/exists', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const name = String(req.query?.name || '').trim().toLowerCase();
     if (!aid || !name) return { code: -1, msg: '参数不完整' };
@@ -1264,7 +1321,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 详情（域名级配置）
-  app.get('/api/cdn/domains/:id', auth, async (req: any) => {
+  app.get('/api/cdn/domains/:id', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1273,9 +1330,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 接入域名 + 联动 DNS + 自动同步
-  app.post('/api/cdn/domains', auth, async (req: any) => {
+  app.post('/api/cdn/domains', auth, async (req: any, reply: any) => {
     const { aid, did, name, origin, origin_type, service_area, zone_id, cert_mode, cert_order_id, cert_aid, cert_use_default } = req.body || {};
     if (!aid || !name || !origin) return { code: -1, msg: '必填参数不能为空' };
+    const visibleAcct = await getVisibleAccount('cdn_account', Number(aid), req.user);
+    if (!visibleAcct) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
     const originHost = String(req.body?.origin_host || '');
     const protoRaw = String(req.body?.origin_protocol || 'follow');
     const originProtocol = ['follow', 'http', 'https'].includes(protoRaw) ? protoRaw : 'follow';
@@ -1292,7 +1351,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
     if (!acct) return { code: -1, msg: 'CDN账户不存在' };
-    const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+    const provider: any = getCdnProvider(acct.type, await accountConfigOf(acct));
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const certMode = ['freecert', 'certapply', 'certlink'].includes(cert_mode) ? cert_mode : 'none';
     if (certMode === 'freecert' && !cdnConfig[acct.type]?.freecert) return { code: -1, msg: '该 CDN 类型不支持配置平台免费证书' };
@@ -1318,7 +1377,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     let dnsError = '';
     const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
     if (dnsAcct) {
-      const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), dnsDomain.name, dnsDomain.thirdid);
+      const dns = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
       if (dns) {
         const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
         if (recordId) dnsRecord = String(recordId);
@@ -1368,7 +1427,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 删除：可选同时删除云端加速域名（delete_cloud=1）、可选同时删除联动 DNS 解析记录（delete_dns=1）；
   // 云端删除失败时不删除本地记录，便于重试；联动证书需先吊销成功才会删除，吊销失败则整体中止
-  app.delete('/api/cdn/domains/:id', auth, async (req: any) => {
+  app.delete('/api/cdn/domains/:id', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const deleteCloud = ['1', 'true'].includes(String(req.query?.delete_cloud || '').toLowerCase());
     const deleteDns = ['1', 'true'].includes(String(req.query?.delete_dns || '').toLowerCase());
@@ -1412,7 +1471,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 状态
-  app.post('/api/cdn/domains/:id/status', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/status', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const { status } = req.body || {};
     const row = await loadCdnDomain(id);
@@ -1433,7 +1492,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 回源
-  app.post('/api/cdn/domains/:id/origin', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/origin', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const { origin, origin_type, origin_host, origin_protocol, http_port, https_port } = req.body || {};
     const row = await loadCdnDomain(id);
@@ -1484,7 +1543,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 缓存规则
-  app.post('/api/cdn/domains/:id/cache', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/cache', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const { rules } = req.body || {};
     const ruleList = Array.isArray(rules) ? rules : [];
@@ -1512,7 +1571,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // HTTPS
-  app.post('/api/cdn/domains/:id/https', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/https', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const { https_enabled, force_redirect } = req.body || {};
     const row = await loadCdnDomain(id);
@@ -1541,7 +1600,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!dnsDomain) return '未找到联动域名，请手动添加验证记录';
     const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
     if (!dnsAcct) return 'DNS账户不存在，请手动添加验证记录';
-    const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), dnsDomain.name, dnsDomain.thirdid);
+    const dns = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
     if (!dns) return 'DNS模块不存在，请手动添加验证记录';
     const rel = calcRecordName(row.name, dnsDomain.name);
     const name = rel === '@' ? rec.name : `${rec.name}.${rel}`;
@@ -1590,7 +1649,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   }
 
   // 批量为加速域名申请平台免费证书（如腾讯云 EdgeOne 免费证书）
-  app.post('/api/cdn/domains/freecert', auth, async (req: any) => {
+  app.post('/api/cdn/domains/freecert', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要配置免费证书的加速域名' };
     const data = await runFreeCert(ids, false);
@@ -1599,7 +1658,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 检查免费证书申请结果，通过后部署到加速域名
-  app.post('/api/cdn/domains/freecert/check', auth, async (req: any) => {
+  app.post('/api/cdn/domains/freecert/check', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runFreeCert(ids, true);
@@ -1686,7 +1745,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   }
 
   // 按站点申请/复用通配符证书，已签发则直传 ESA 站点
-  app.post('/api/cdn/domains/cert', auth, async (req: any) => {
+  app.post('/api/cdn/domains/cert', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要申请证书的加速域名' };
     const data = await runCertLink(ids, false);
@@ -1695,7 +1754,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 检查通配符证书签发结果，已签发则直传 ESA 站点
-  app.post('/api/cdn/domains/cert/check', auth, async (req: any) => {
+  app.post('/api/cdn/domains/cert/check', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runCertLink(ids, true);
@@ -1753,7 +1812,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!aid) return { status: 'failed', message: '请选择证书提供商' };
     const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]);
     if (!account) return { status: 'failed', message: '证书提供商不存在' };
-    if (!providerReady(account.type, safeJson(account.config))) return { status: 'failed', message: `证书提供商「${account.name}」密钥未配置完整` };
+    if (!providerReady(account.type, await accountConfigOf(account))) return { status: 'failed', message: `证书提供商「${account.name}」密钥未配置完整` };
     const order = await ensureExactOrder(aid, row.name, JSON.stringify({ cdnDomainId: domainId }));
     if (Number(order.status) === 3) {
       await linkLog(domainId, Number(order.id), 'issue', 'ok', `已复用已签发证书 #${order.id}`);
@@ -1774,7 +1833,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   }
 
   // 与项目联动 - 证书候选：精确匹配的已签发证书 + 可用签发提供商（无则默认 Let's Encrypt）
-  app.get('/api/cdn/cert/candidates', auth, async (req: any) => {
+  app.get('/api/cdn/cert/candidates', adminAuth, async (req: any) => {
     const raw = String(req.query?.name || '').trim();
     if (!raw) return { code: -1, msg: '请提供加速域名' };
     const exact = await findExactCertOrders(raw);
@@ -1794,7 +1853,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 对已接入的加速域名执行「与项目联动」（选择已有证书或新建签发）
-  app.post('/api/cdn/domains/:id/certlink', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/certlink', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1843,7 +1902,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   }
 
   // 显式设置证书管理方式（用于切换为「不使用证书」或已完成的切换）
-  app.post('/api/cdn/domains/:id/cert_mode', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/cert_mode', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1861,7 +1920,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 证书管理 - 云端状态：查询该加速域名在 CDN 云端的当前证书配置，并附本项目联动摘要
-  app.get('/api/cdn/domains/:id/cert_status', auth, async (req: any) => {
+  app.get('/api/cdn/domains/:id/cert_status', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1896,7 +1955,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 与项目联动 - 实时进度日志：返回各阶段日志与当前订单/部署任务状态，供前端轮询
-  app.get('/api/cdn/domains/:id/certlink/log', auth, async (req: any) => {
+  app.get('/api/cdn/domains/:id/certlink/log', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1930,7 +1989,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 与项目联动 - 立即推进：证书未签发则触发处理，已签发则创建并执行自动部署任务
-  app.post('/api/cdn/domains/:id/certlink/run', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/certlink/run', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -1976,7 +2035,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 同步云端
-  app.post('/api/cdn/sync', auth, async (req: any) => {
+  app.post('/api/cdn/sync', adminAuth, async (req: any) => {
     const { aid, did } = req.body || {};
     const r = await syncFromCloud(Number(aid || 0), Number(did || 0));
     audit(req, {
@@ -1989,7 +2048,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 站点全局配置保存
-  app.post('/api/cdn/domains/:id/zone_setting', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/zone_setting', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const { setting } = req.body || {};
     const row = await loadCdnDomain(id);
@@ -2457,7 +2516,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 const MAX_CACHE_OP_URLS = 100;
 
 // 缓存刷新
-  app.post('/api/cdn/purge', auth, async (req: any) => {
+  app.post('/api/cdn/purge', adminAuth, async (req: any) => {
     const { type, urls } = req.body || {};
     const list = dedupe(Array.isArray(urls) ? urls : []);
     if (!list.length) return { code: -1, msg: '请填写需要刷新的 URL' };
@@ -2472,7 +2531,7 @@ const MAX_CACHE_OP_URLS = 100;
   });
 
   // 缓存预热
-  app.post('/api/cdn/preheat', auth, async (req: any) => {
+  app.post('/api/cdn/preheat', adminAuth, async (req: any) => {
     const { urls } = req.body || {};
     const list = dedupe(Array.isArray(urls) ? urls : []);
     if (!list.length) return { code: -1, msg: '请填写需要预热的 URL' };
@@ -2487,13 +2546,13 @@ const MAX_CACHE_OP_URLS = 100;
   });
 
   // 刷新/预热历史
-  app.get('/api/cdn/cache-tasks', auth, async () => {
+  app.get('/api/cdn/cache-tasks', adminAuth, async () => {
     const rows = await query(`SELECT * FROM ${table('cdn_cache_task')} ORDER BY id DESC LIMIT 200`);
     return { code: 0, data: rows };
   });
 
   // 访问控制 - 查询
-  app.get('/api/cdn/domains/:id/access', auth, async (req: any) => {
+  app.get('/api/cdn/domains/:id/access', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -2507,7 +2566,7 @@ const MAX_CACHE_OP_URLS = 100;
   });
 
   // 访问控制 - 保存
-  app.post('/api/cdn/domains/:id/access', auth, async (req: any) => {
+  app.post('/api/cdn/domains/:id/access', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
@@ -2534,7 +2593,7 @@ const CDN_SYNC_COLUMNS = new Set([
 async function syncFromCloud(aid: number, did: number): Promise<any> {
   const account = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
   if (!account) return { code: -1, msg: 'CDN账户不存在', added: 0, skipped: 0, updated: 0 };
-  const provider: any = getCdnProvider(account.type, safeJson(account.config));
+  const provider: any = getCdnProvider(account.type, await accountConfigOf(account));
   if (!provider) return { code: -1, msg: 'CDN模块不存在', added: 0, skipped: 0, updated: 0 };
 
   const list = await provider.listDomains();
@@ -2622,7 +2681,7 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
     if (belongDomain && cname) {
       const dnsAcct = acctById.get(Number(belongDomain.aid));
       if (dnsAcct) {
-        const dns = getDnsProvider(dnsAcct.type, safeJson(dnsAcct.config), belongDomain.name, belongDomain.thirdid);
+        const dns = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), belongDomain.name, belongDomain.thirdid);
         if (dns) {
           const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
           if (recordId) {

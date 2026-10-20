@@ -87,6 +87,17 @@ export default async function setupRoutes(app: FastifyInstance) {
     };
   });
 
+  // 跳过后立即重启，避免等待令牌过期
+  app.post('/api/setup/skip', async (req: any) => {
+    const cfg = getDbConfig();
+    const token = String(req.body?.install_token || '');
+    if (!consumeInstallToken(token, cfg.db_name)) {
+      return { code: -1, msg: '安装令牌已失效' };
+    }
+    setTimeout(() => process.exit(0), 300);
+    return { code: 0, msg: '即将重启' };
+  });
+
   // 安装向导导入已有备份（仅安装后 10 分钟内、持有一次性令牌时可用）
   app.post('/api/setup/import', async (req: any, reply: any) => {
     const cfg = getDbConfig();
@@ -102,7 +113,14 @@ export default async function setupRoutes(app: FastifyInstance) {
       await loadConfig(true);
       setSecretKey(await getSysKey());
       const pass = fieldValue(up.fields, 'passphrase');
-      const key = await keyForArchive(tmp, pass ? String(pass) : undefined);
+      const rawKey = fieldValue(up.fields, 'backup_key');
+      let key: Buffer;
+      if (rawKey) {
+        key = Buffer.from(String(rawKey), 'base64url');
+        if (key.length !== 32) return { code: -1, msg: '备份密钥格式不正确（需为 32 字节 Base64URL）' };
+      } else {
+        key = await keyForArchive(tmp, pass ? String(pass) : undefined);
+      }
       const tempAdmin: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 ORDER BY id LIMIT 1`);
       const report = await importArchive(tmp, { key, mode: 'install' });
 
@@ -116,6 +134,13 @@ export default async function setupRoutes(app: FastifyInstance) {
           await query(`UPDATE ${table('user')} SET is_super = 0`);
           await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = ?`, [(admins as any[])[0].id]);
         }
+      }
+
+      // 保证恰好一个超级管理员（归档用户的 is_super 可能为 0）
+      const superRow: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 LIMIT 1`);
+      if (!superRow) {
+        const admin: any = await queryOne(`SELECT id FROM ${table('user')} WHERE level >= 2 ORDER BY id LIMIT 1`);
+        if (admin?.id) await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = ?`, [admin.id]);
       }
 
       setTimeout(() => process.exit(0), 800);

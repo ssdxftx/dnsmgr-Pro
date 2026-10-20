@@ -20,6 +20,7 @@ export const ADMIN_PREFIXES = [
   '/system-settings',
   '/users',
   '/logs',
+  '/backup',
 ];
 
 export function requiresAdmin(path: string): boolean {

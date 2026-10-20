@@ -35,7 +35,9 @@ function keySpecError(keytype: any, keysize: any): string | null {
   return null;
 }
 
-import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig, encryptText, decryptText } from '../lib/secret.js';
+import { decryptConfig, encryptAccountConfig, encryptConfig, maskConfig, mergeMaskedConfig, readAccountConfig, encryptText, decryptText } from '../lib/secret.js';
+import { getVisibleAccount } from '../lib/accounts/visibility.js';
+import { getDekForWrite } from '../lib/vault/service.js';
 
 // 批量取多个订单绑定的域名，避免证书/部署列表逐条查询（N+1）
 async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
@@ -154,24 +156,36 @@ export default async function certRoutes(app: FastifyInstance) {
   app.get('/api/cert/accounts', auth, async (req: any) => {
     const { kw, offset = 0, limit = 20, deploy = 0 } = req.query || {};
     const isDeploy = Number(deploy) === 1;
-    let where = isDeploy ? 'deploy = 1' : 'deploy = 0';
-    const params: any[] = [];
+    const admin = checkLevel(req.user, 2);
+    // 管理员：共享账户 + 自己的私有；普通用户：仅自己的私有
+    let where =
+      (isDeploy ? 'deploy = 1' : 'deploy = 0') +
+      (admin
+        ? " AND (visibility = 'shared' OR (visibility = 'private' AND owner_uid = ?))"
+        : " AND visibility = 'private' AND owner_uid = ?");
+    const params: any[] = [req.user.uid];
     if (kw) {
       where += " AND (name LIKE ? ESCAPE '!' OR remark LIKE ? ESCAPE '!' OR id = ?)";
       params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%', kw);
     }
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_account')} WHERE ${where}`, params))?.c || 0;
     const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, clampLimit(limit, 20), clampOffset(offset)]);
-    const list = rows.map((r: any) => ({
+    const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
+    const list = rows.map((r: any) => {
+      const { config, state } = readAccountConfig(r.config, dek);
+      return {
       id: r.id,
       type: r.type,
       name: r.name,
-      config: maskConfig(decryptConfig(r.config)),
+      config: maskConfig(config),
+      config_state: state,
+      is_owner: Number(r.owner_uid) === Number(req.user.uid),
       remark: r.remark,
       addtime: r.addtime,
       typename: isDeploy ? (deployConfig[r.type]?.name || '') : (certConfig[r.type]?.name || ''),
       icon: isDeploy ? (deployConfig[r.type]?.icon || '') : (certConfig[r.type]?.icon || ''),
-    }));
+      };
+    });
     return { code: 0, total, data: list };
   });
 
@@ -179,9 +193,15 @@ export default async function certRoutes(app: FastifyInstance) {
     const { type, name, config, remark, deploy = 0 } = req.body || {};
     if (!name || !config) return { code: -1, msg: '必填参数不能为空' };
     const isDeploy = Number(deploy) === 1;
-    // 加密使用随机 IV，密文不可直接比较，改为解密后按明文判重
-    const same = await query(`SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = ?`, [type, deploy]);
-    const dup = (same as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === JSON.stringify(config));
+    const isPrivate = !checkLevel(req.user, 2);
+    const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    if (isPrivate && !dek) return { code: -1, msg: '保险库已锁定，请先解锁' };
+    // 加密使用随机 IV，密文不可直接比较，改为解密后按明文判重（仅在同一归属范围内）
+    const same = await query(
+      `SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = ? AND visibility = ? AND owner_uid = ?`,
+      [type, deploy, isPrivate ? 'private' : 'shared', isPrivate ? req.user.uid : 0],
+    );
+    const dup = (same as any[]).find((r: any) => JSON.stringify(readAccountConfig(r.config, dek).config) === JSON.stringify(config));
     if (dup) return { code: -1, msg: isDeploy ? '自动部署账户已存在' : 'SSL证书账户已存在' };
 
     if (isDeploy) {
@@ -194,15 +214,17 @@ export default async function certRoutes(app: FastifyInstance) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
       }
       const ins: any = await query(
-        `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`,
-        [type, name, encryptConfig(config), remark || ''],
+        `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, owner_uid, visibility, addtime)
+         VALUES (?, ?, ?, ?, 1, ?, ?, NOW())`,
+        [type, name, encryptAccountConfig(config, isPrivate, dek), remark || '', isPrivate ? req.user.uid : 0, isPrivate ? 'private' : 'shared'],
       );
       audit(req, {
         targetType: 'cert_account',
         targetId: ins?.insertId,
-        targetName: String(name),
-        summary: `新增自动部署账户「${name}」（${type}）`,
+        targetName: isPrivate ? '私有账户' : String(name),
+        summary: isPrivate ? '新增私有自动部署账户' : `新增自动部署账户「${name}」（${type}）`,
         detail: { type, name },
+        scrubBody: isPrivate,
       });
       return { code: 0, msg: '添加自动部署账户成功！' };
     }
@@ -211,16 +233,21 @@ export default async function certRoutes(app: FastifyInstance) {
     const provider = getCertProvider(type, config, null);
     try {
       const ext = await provider.register();
-      const id = await query(`INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 0, NOW())`, [type, name, encryptConfig(config), remark || '']).then((r: any) => r.insertId || 0);
+      const id = await query(
+        `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, owner_uid, visibility, addtime)
+         VALUES (?, ?, ?, ?, 0, ?, ?, NOW())`,
+        [type, name, encryptAccountConfig(config, isPrivate, dek), remark || '', isPrivate ? req.user.uid : 0, isPrivate ? 'private' : 'shared'],
+      ).then((r: any) => r.insertId || 0);
       if (ext && typeof ext === 'object') {
         await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), id]);
       }
       audit(req, {
         targetType: 'cert_account',
         targetId: id,
-        targetName: String(name),
-        summary: `新增证书账户「${name}」（${type}）`,
+        targetName: isPrivate ? '私有账户' : String(name),
+        summary: isPrivate ? '新增私有证书账户' : `新增证书账户「${name}」（${type}）`,
         detail: { type, name },
+        scrubBody: isPrivate,
       });
       return { code: 0, msg: '添加SSL证书账户成功！' };
     } catch (e: any) {
@@ -228,15 +255,19 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.put('/api/cert/accounts/:id', auth, async (req: any) => {
+  app.put('/api/cert/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { type, name, config, remark, deploy = 0 } = req.body || {};
     if (!name || !config) return { code: -1, msg: '必填参数不能为空' };
     const isDeploy = Number(deploy) === 1;
-    const row: any = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ?`, [id]);
-    if (!row) return { code: -1, msg: '账户不存在' };
+    const row: any = await getVisibleAccount('cert_account', Number(id), req.user);
+    if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
+    const isPrivate = row.visibility === 'private';
+    const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    const base = readAccountConfig(row.config, dek);
+    if (base.state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });
     // 前端回显的是掩码，敏感字段保持不变
-    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    const merged = mergeMaskedConfig(config, base.config);
 
     if (isDeploy) {
       const provider = getDeployProvider(type, merged);
@@ -247,12 +278,13 @@ export default async function certRoutes(app: FastifyInstance) {
       } catch (e: any) {
         return { code: -1, msg: '验证自动部署账户失败，' + e.message };
       }
-      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptConfig(merged), remark || '', id]);
+      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptAccountConfig(merged, isPrivate, dek), remark || '', id]);
       audit(req, {
         targetType: 'cert_account',
         targetId: id,
-        targetName: String(name),
-        summary: `修改自动部署账户「${name}」`,
+        targetName: isPrivate ? '私有账户' : String(name),
+        summary: isPrivate ? '修改私有自动部署账户' : `修改自动部署账户「${name}」`,
+        scrubBody: isPrivate,
         changes: diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
         detail: { type, name },
       });
@@ -263,15 +295,16 @@ export default async function certRoutes(app: FastifyInstance) {
     const provider = getCertProvider(type, merged, null);
     try {
       const ext = await provider.register();
-      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptConfig(merged), remark || '', id]);
+      await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptAccountConfig(merged, isPrivate, dek), remark || '', id]);
       if (ext && typeof ext === 'object') {
         await query(`UPDATE ${table('cert_account')} SET ext = ? WHERE id = ?`, [encryptConfig(ext), id]);
       }
       audit(req, {
         targetType: 'cert_account',
         targetId: id,
-        targetName: String(name),
-        summary: `修改证书账户「${name}」`,
+        targetName: isPrivate ? '私有账户' : String(name),
+        summary: isPrivate ? '修改私有证书账户' : `修改证书账户「${name}」`,
+        scrubBody: isPrivate,
         changes: diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
         detail: { type, name },
       });
@@ -281,20 +314,22 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
-  app.delete('/api/cert/accounts/:id', auth, async (req: any) => {
+  app.delete('/api/cert/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    const row: any = await getVisibleAccount('cert_account', Number(id), req.user);
+    if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
     // 两项关联检查都必须执行，避免客户端通过 deploy 参数只触发其一而绕过
     const deployCount = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE aid = ?`, [id]))?.c || 0;
     if (deployCount > 0) return { code: -1, msg: '该账户下存在自动部署任务，无法删除' };
     const orderCount = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE aid = ?`, [id]))?.c || 0;
     if (orderCount > 0) return { code: -1, msg: '该账户下存在证书订单，无法删除' };
-    const row: any = await queryOne(`SELECT name, type, deploy FROM ${table('cert_account')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('cert_account')} WHERE id = ?`, [id]);
+    const isPrivate = row.visibility === 'private';
     audit(req, {
       targetType: 'cert_account',
       targetId: id,
-      targetName: String(row?.name || ''),
-      summary: `删除${Number(row?.deploy) ? '自动部署' : '证书'}账户「${row?.name || '#' + id}」`,
+      targetName: isPrivate ? '私有账户' : String(row?.name || ''),
+      summary: isPrivate ? '删除私有证书账户' : `删除${Number(row?.deploy) ? '自动部署' : '证书'}账户「${row?.name || '#' + id}」`,
     });
     return { code: 0, msg: '删除成功' };
   });

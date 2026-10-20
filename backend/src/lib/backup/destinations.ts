@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { readFile, unlink } from 'node:fs/promises';
+import { readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -73,6 +73,10 @@ function s3Client(cfg: any): S3Client {
     endpoint: cfg.endpoint || undefined,
     forcePathStyle: true,
     credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
+    // 关闭默认的 CRC 校验：新版 SDK 会对流式上传启用 aws-chunked，
+    // 部分 S3 兼容实现（MinIO/R2/自建网关）会把分块头写进对象，导致归档损坏
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
 
@@ -84,9 +88,11 @@ function s3Key(cfg: any, name: string): string {
 export async function uploadToDestination(destId: number, localPath: string, name: string): Promise<void> {
   const row = await getDestination(destId);
   if (!row) throw new Error('备份目的地不存在');
+  const size = (await stat(localPath)).size;
   if (row.type === 'webdav') {
     const res = await webdavFetch(row.config, joinUrl(String(row.config.url), name), {
       method: 'PUT',
+      headers: { 'Content-Length': String(size) },
       body: Readable.toWeb(createReadStream(localPath)) as any,
       duplex: 'half',
     } as any);
@@ -95,7 +101,13 @@ export async function uploadToDestination(destId: number, localPath: string, nam
   }
   const client = s3Client(row.config);
   await client.send(
-    new PutObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name), Body: createReadStream(localPath) }),
+    new PutObjectCommand({
+      Bucket: row.config.bucket,
+      Key: s3Key(row.config, name),
+      Body: createReadStream(localPath),
+      // 显式长度：缺省时 SDK 使用 aws-chunked，部分兼容实现会把分块头写进对象导致文件损坏
+      ContentLength: size,
+    }),
   );
 }
 

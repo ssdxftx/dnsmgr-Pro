@@ -108,6 +108,16 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
         }
       }
 
+      // 安装向导导入：归档内存在管理员时，先删除临时管理员，让用户名与 ID 可被归档用户复用；
+      // 删除与导入在同一事务内，导入失败会整体回滚，临时管理员仍在，不会出现无法登录
+      if (mode === 'install') {
+        const userTable = archive.readTable('user');
+        const hasAdmin = rowsOf(userTable).some((r) => Number(r.level) >= 2);
+        if (hasAdmin) {
+          await q(`DELETE FROM ${table('user')} WHERE is_super = 1`);
+        }
+      }
+
       const uidMap = new Map<number, number>();
       const aidMap = new Map<number, number>();
       const caidMap = new Map<number, number>();

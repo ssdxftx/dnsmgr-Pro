@@ -1,5 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { encryptWithDek, isUserEncrypted, U1_PREFIX } from './vault/keys.js';
+import { decryptWithDek, encryptWithDek, isUserEncrypted, U1_PREFIX } from './vault/keys.js';
 
 // 账号凭据（AK/SK、密码、Token 等）加密存储：AES-256-GCM，密钥由 sys_key 派生。
 // 历史明文数据仍可直接解析，读取后下次保存即自动加密，无需迁移脚本。
@@ -156,6 +156,20 @@ export function readConfigState(raw: any): { config: Record<string, any>; state:
   const cfg = decryptConfig(raw);
   if (cfg) return { config: cfg, state: 'ok' };
   return { config: {}, state: isEncryptedConfig(raw) ? 'error' : 'ok' };
+}
+
+/** 读取账户配置：私有密文用会话 DEK 解，未解锁时返回 locked */
+export function readAccountConfig(raw: any, dek: Buffer | null): { config: Record<string, any>; state: ConfigState } {
+  if (!isUserEncrypted(raw)) return readConfigState(raw);
+  if (!dek) return { config: {}, state: 'locked' };
+  const text = decryptWithDek(dek, String(raw));
+  if (text === null) return { config: {}, state: 'error' };
+  try {
+    const v = JSON.parse(text);
+    return { config: v && typeof v === 'object' ? v : {}, state: 'ok' };
+  } catch {
+    return { config: {}, state: 'error' };
+  }
 }
 
 /** 私有账户写入保险库密文；共享账户继续用 sys_key 加密 */

@@ -47,6 +47,21 @@
           <n-button type="primary" block :loading="installBusy" @click="onInstall">{{ t('setup.installNow') }}</n-button>
         </n-space>
       </n-form>
+
+      <n-card v-if="showImport" size="small" :bordered="true" class="mt-4">
+        <h3 style="margin-top: 0">{{ t('setup.importTitle') }}</h3>
+        <p class="text-dim">{{ t('setup.importHint') }}</p>
+        <div class="app-toolbar">
+          <input ref="fileEl" type="file" accept=".dnsmgrbk" @change="onFile" />
+          <span class="text-dim">{{ importFile?.name || t('setup.importFile') }}</span>
+        </div>
+        <n-input v-model:value="importKey" type="password" show-password-on="click" :placeholder="t('setup.importKey')" class="mt-3" />
+        <n-input v-model:value="importPass" type="password" show-password-on="click" :placeholder="t('setup.importPassphrase')" class="mt-3" />
+        <n-space class="mt-3">
+          <n-button type="primary" :loading="importBusy" :disabled="!importFile" @click="doImport">{{ t('setup.importNow') }}</n-button>
+          <n-button quaternary :disabled="importBusy" @click="skipImport">{{ t('setup.skip') }}</n-button>
+        </n-space>
+      </n-card>
     </n-card>
   </AuthShell>
 </template>
@@ -64,6 +79,13 @@ const router = useRouter();
 const message = useMessage();
 const checkBusy = ref(false);
 const installBusy = ref(false);
+const importBusy = ref(false);
+const showImport = ref(false);
+const installToken = ref('');
+const importFile = ref<File | null>(null);
+const importPass = ref('');
+const importKey = ref('');
+const fileEl = ref<HTMLInputElement | null>(null);
 const checked = ref(false);
 const detected = ref(false);
 const form = reactive({
@@ -118,8 +140,15 @@ async function onInstall() {
   try {
     const res = await api<any>('POST', '/setup/install', form);
     if (res.code === 0) {
-      message.success(res.msg);
-      await waitRestart();
+      const token = res?.data?.install_token;
+      if (token) {
+        installToken.value = token;
+        showImport.value = true;
+        message.success(res.msg);
+      } else {
+        message.success(res.msg);
+        await waitRestart();
+      }
     } else {
       message.error(res.msg);
     }
@@ -130,7 +159,48 @@ async function onInstall() {
   }
 }
 
+function onFile(e: Event) {
+  importFile.value = (e.target as HTMLInputElement).files?.[0] || null;
+}
+
+async function doImport() {
+  if (!importFile.value) return;
+  importBusy.value = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', importFile.value);
+    fd.append('install_token', installToken.value);
+    if (importKey.value) fd.append('backup_key', importKey.value);
+    if (importPass.value) fd.append('passphrase', importPass.value);
+    const res = await fetch('/api/setup/import', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (json.code !== 0) return message.error(json.msg || t('setup.importFailed'));
+    message.success(t('setup.importDone'));
+    await waitRestart();
+  } catch (e: any) {
+    message.error(e?.message || t('setup.importFailed'));
+  } finally {
+    importBusy.value = false;
+  }
+}
+
+async function skipImport() {
+  importBusy.value = true;
+  try {
+    await fetch('/api/setup/skip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ install_token: installToken.value }),
+    });
+    await waitRestart();
+  } finally {
+    importBusy.value = false;
+  }
+}
+
 async function waitRestart() {
+  // 服务端会先退出再被编排拉起，先等待退出，避免读到重启前的状态
+  await sleep(2500);
   for (let i = 0; i < 60; i++) {
     await sleep(2000);
     try {
@@ -159,3 +229,9 @@ onMounted(async () => {
   }
 });
 </script>
+<style scoped>
+.text-dim {
+  color: var(--app-text-3);
+  font-size: 12px;
+}
+</style>

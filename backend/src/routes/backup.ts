@@ -5,7 +5,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { audit } from '../lib/audit/context.js';
-import { decryptConfig, encryptConfig, maskConfig } from '../lib/secret.js';
+import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
 import {
   backupsDir,
   ensureDataDirs,
@@ -252,7 +252,8 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (!row) return { code: -1, msg: '目的地不存在' };
     const b = req.body || {};
     const old = decryptConfig(row.config) || {};
-    const merged = { ...old, ...(b.config || {}) };
+    // 前端回显的是掩码，敏感字段沿用原值
+    const merged = mergeMaskedConfig(b.config || {}, old);
     await query(`UPDATE ${table('backup_destination')} SET name = ?, config = ?, enabled = ? WHERE id = ?`, [
       String(b.name ?? row.name),
       encryptConfig(merged),

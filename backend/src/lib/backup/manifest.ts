@@ -65,8 +65,11 @@ export function encodeStoredValue(v: any): any {
 
 /** 导入时还原列值；enc:u1: 保持原样（顺序不能反，否则私有凭证会被当成坏密文） */
 export function decodeStoredValue(v: any): any {
+  if (Buffer.isBuffer(v)) return v;
   if (isB64Value(v)) return Buffer.from(v.__b64, 'base64');
   if (isPlainEncValue(v)) return encryptText(v.__encv1);
+  // JSON 列在导出时已被 mysql2 解析为对象/数组，写回前必须还原为 JSON 文本
+  if (v && typeof v === 'object') return JSON.stringify(v);
   return v;
 }
 

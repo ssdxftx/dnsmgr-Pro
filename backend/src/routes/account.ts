@@ -3,7 +3,9 @@ import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
-import { ConfigDecryptError, decryptConfig, encryptConfig, isEncryptedConfig, isSecretKey, maskConfig, mergeMaskedConfig, SECRET_MASK } from '../lib/secret.js';
+import { ConfigDecryptError, decryptConfig, encryptAccountConfig, encryptConfig, isEncryptedConfig, isSecretKey, maskConfig, mergeMaskedConfig, readAccountConfig, SECRET_MASK } from '../lib/secret.js';
+import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
+import { getDekForWrite } from '../lib/vault/service.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
@@ -23,22 +25,33 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/dns/accounts', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
-    const rows = await query(`SELECT id, type, name, config, remark, addtime FROM ${table('account')} ORDER BY id DESC`);
+    const rows = await listVisibleAccounts('account', req.user);
+    const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
     return {
       code: 0,
       data: rows.map((r: any) => {
-        const cfg = decryptConfig(r.config);
-        return { ...r, config: maskConfig(cfg), config_error: !cfg && isEncryptedConfig(r.config) };
+        const { config, state } = readAccountConfig(r.config, dek);
+        return {
+          ...r,
+          config: maskConfig(config),
+          config_error: state === 'error',
+          config_state: state,
+          is_owner: Number(r.owner_uid) === Number(req.user.uid),
+        };
       }),
     };
   });
 
   app.post('/api/dns/accounts', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const exists = await queryOne(`SELECT id FROM ${table('account')} WHERE type = ? AND name = ?`, [type, name]);
+    const isPrivate = !isAdmin(req.user);
+    const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    if (isPrivate && !dek) return { code: -1, msg: '保险库已锁定，请先解锁' };
+    const exists = await queryOne(
+      `SELECT id FROM ${table('account')} WHERE type = ? AND name = ? AND visibility = ? AND owner_uid = ?`,
+      [type, name, isPrivate ? 'private' : 'shared', isPrivate ? req.user.uid : 0],
+    );
     if (exists) return { code: -1, msg: '账户已存在' };
     const missing = missingRequiredSecret(type, config);
     if (missing.length) return { code: -1, msg: `请填写：${missing.join('、')}` };
@@ -46,28 +59,40 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证账户失败，' + provider.getError() };
-    const id = await insertAndGetId(`INSERT INTO ${table('account')} (type, name, config, remark, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      type, name, encryptConfig(config), remark || '',
-    ]);
+    const id = await insertAndGetId(
+      `INSERT INTO ${table('account')} (type, name, config, remark, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        type,
+        name,
+        encryptAccountConfig(config, isPrivate, dek),
+        remark || '',
+        isPrivate ? req.user.uid : 0,
+        isPrivate ? 'private' : 'shared',
+      ],
+    );
     audit(req, {
       targetType: 'account',
       targetId: id,
-      targetName: String(name),
-      summary: `新增 ${type} 账户「${name}」`,
+      targetName: isPrivate ? '私有账户' : String(name),
+      summary: isPrivate ? '新增私有 DNS 账户' : `新增 ${type} 账户「${name}」`,
       detail: { type, name },
+      scrubBody: isPrivate,
     });
     return { code: 0, msg: '添加账户成功', data: id };
   });
 
-  app.put('/api/dns/accounts/:id', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
+  app.put('/api/dns/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const row: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [id]);
-    if (!row) return { code: -1, msg: '账户不存在' };
+    const row: any = await getVisibleAccount('account', Number(id), req.user);
+    if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
+    const isPrivate = row.visibility === 'private';
+    const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    const base = readAccountConfig(row.config, dek);
+    if (base.state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });
     // 前端回显的是掩码，敏感字段保持不变
-    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    const merged = mergeMaskedConfig(config, base.config);
     const missing = missingRequiredSecret(type, merged);
     if (missing.length) return { code: -1, msg: `请填写：${missing.join('、')}` };
     const provider = getDnsProvider(type, merged, '', null);
@@ -75,14 +100,15 @@ export default async function accountRoutes(app: FastifyInstance) {
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证账户失败，' + provider.getError() };
     await query(`UPDATE ${table('account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [
-      type, name, encryptConfig(merged), remark || '', id,
+      type, name, encryptAccountConfig(merged, isPrivate, dek), remark || '', id,
     ]);
-    const beforeCfg = decryptConfig(row.config) || {};
+    const beforeCfg = base.config || {};
     audit(req, {
       targetType: 'account',
       targetId: id,
-      targetName: String(name),
-      summary: `修改 ${type} 账户「${name}」`,
+      targetName: isPrivate ? '私有账户' : String(name),
+      summary: isPrivate ? '修改私有 DNS 账户' : `修改 ${type} 账户「${name}」`,
+      scrubBody: isPrivate,
       changes: [
         ...diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
         ...(secretChanged(beforeCfg, merged) ? [{ field: '凭证', to: '已更新' }] : []),
@@ -92,18 +118,19 @@ export default async function accountRoutes(app: FastifyInstance) {
     return { code: 0, msg: '修改账户成功' };
   });
 
-  app.delete('/api/dns/accounts/:id', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
+  app.delete('/api/dns/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    const row: any = await getVisibleAccount('account', Number(id), req.user);
+    if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
     const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('domain')} WHERE aid = ?`, [id]);
     if (dcount && dcount.c > 0) return { code: -1, msg: '该账户下存在域名，无法删除' };
-    const row: any = await queryOne(`SELECT name, type FROM ${table('account')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('account')} WHERE id = ?`, [id]);
+    const isPrivate = row.visibility === 'private';
     audit(req, {
       targetType: 'account',
       targetId: id,
-      targetName: String(row?.name || ''),
-      summary: `删除账户「${row?.name || '#' + id}」`,
+      targetName: isPrivate ? '私有账户' : String(row?.name || ''),
+      summary: isPrivate ? '删除私有 DNS 账户' : `删除账户「${row?.name || '#' + id}」`,
     });
     return { code: 0, msg: '删除成功' };
   });
@@ -114,59 +141,86 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/cdn/accounts', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
-    const rows = await query(`SELECT id, type, name, config, remark, addtime FROM ${table('cdn_account')} ORDER BY id DESC`);
+    const rows = await listVisibleAccounts('cdn_account', req.user);
+    const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
-    const data = rows.map((r: any) => ({ ...r, config: maskConfig(decryptConfig(r.config)), typename: typeNames[r.type] || r.type }));
+    const data = rows.map((r: any) => {
+      const { config, state } = readAccountConfig(r.config, dek);
+      return {
+        ...r,
+        config: maskConfig(config),
+        config_state: state,
+        is_owner: Number(r.owner_uid) === Number(req.user.uid),
+        typename: typeNames[r.type] || r.type,
+      };
+    });
     return { code: 0, data };
   });
 
   app.post('/api/cdn/accounts', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const exists = await queryOne(`SELECT id FROM ${table('cdn_account')} WHERE type = ? AND name = ?`, [type, name]);
+    const isPrivate = !isAdmin(req.user);
+    const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    if (isPrivate && !dek) return { code: -1, msg: '保险库已锁定，请先解锁' };
+    const exists = await queryOne(
+      `SELECT id FROM ${table('cdn_account')} WHERE type = ? AND name = ? AND visibility = ? AND owner_uid = ?`,
+      [type, name, isPrivate ? 'private' : 'shared', isPrivate ? req.user.uid : 0],
+    );
     if (exists) return { code: -1, msg: 'CDN账户已存在' };
     const provider = getCdnProvider(type, config);
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证CDN账户失败，' + provider.getError() };
-    const id = await insertAndGetId(`INSERT INTO ${table('cdn_account')} (type, name, config, remark, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      type, name, encryptConfig(config), remark || '',
-    ]);
+    const id = await insertAndGetId(
+      `INSERT INTO ${table('cdn_account')} (type, name, config, remark, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        type,
+        name,
+        encryptAccountConfig(config, isPrivate, dek),
+        remark || '',
+        isPrivate ? req.user.uid : 0,
+        isPrivate ? 'private' : 'shared',
+      ],
+    );
     bumpCdnAccountEpoch();
     audit(req, {
       targetType: 'account',
       targetId: id,
-      targetName: String(name),
-      summary: `新增 CDN 账户「${name}」`,
+      targetName: isPrivate ? '私有账户' : String(name),
+      summary: isPrivate ? '新增私有 CDN 账户' : `新增 CDN 账户「${name}」`,
       detail: { type, name },
+      scrubBody: isPrivate,
     });
     return { code: 0, msg: '添加CDN账户成功', data: id };
   });
 
-  app.put('/api/cdn/accounts/:id', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
+  app.put('/api/cdn/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
-    const row: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [id]);
-    if (!row) return { code: -1, msg: 'CDN账户不存在' };
-    const merged = mergeMaskedConfig(config, decryptConfig(row.config));
+    const row: any = await getVisibleAccount('cdn_account', Number(id), req.user);
+    if (!row) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
+    const isPrivate = row.visibility === 'private';
+    const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    const base = readAccountConfig(row.config, dek);
+    if (base.state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });
+    const merged = mergeMaskedConfig(config, base.config);
     const provider = getCdnProvider(type, merged);
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证CDN账户失败，' + provider.getError() };
     await query(`UPDATE ${table('cdn_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [
-      type, name, encryptConfig(merged), remark || '', id,
+      type, name, encryptAccountConfig(merged, isPrivate, dek), remark || '', id,
     ]);
     bumpCdnAccountEpoch();
-    const beforeCfg = decryptConfig(row.config) || {};
+    const beforeCfg = base.config || {};
     audit(req, {
       targetType: 'account',
       targetId: id,
-      targetName: String(name),
-      summary: `修改 CDN 账户「${name}」`,
+      targetName: isPrivate ? '私有账户' : String(name),
+      summary: isPrivate ? '修改私有 CDN 账户' : `修改 CDN 账户「${name}」`,
+      scrubBody: isPrivate,
       changes: [
         ...diffFields({ name: row.name, remark: row.remark }, { name, remark }, { name: '名称', remark: '备注' }),
         ...(secretChanged(beforeCfg, merged) ? [{ field: '凭证', to: '已更新' }] : []),
@@ -176,11 +230,11 @@ export default async function accountRoutes(app: FastifyInstance) {
     return { code: 0, msg: '修改CDN账户成功' };
   });
 
-  app.delete('/api/cdn/accounts/:id', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
+  app.delete('/api/cdn/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
+    const row: any = await getVisibleAccount('cdn_account', Number(id), req.user);
+    if (!row) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
     const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
-    const row: any = await queryOne(`SELECT name, type FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     // 级联清理关联数据并置于同一事务，避免遗留缓存规则/统计数据等孤儿记录
     await withTransaction(async (q) => {
       await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did IN (SELECT id FROM ${table('cdn_domain')} WHERE aid = ?)`, [id]);
@@ -189,21 +243,24 @@ export default async function accountRoutes(app: FastifyInstance) {
       await q(`DELETE FROM ${table('cdn_account')} WHERE id = ?`, [id]);
     });
     bumpCdnAccountEpoch();
+    const isPrivate = row.visibility === 'private';
     audit(req, {
       targetType: 'account',
       targetId: id,
-      targetName: String(row?.name || ''),
-      summary: `删除 CDN 账户「${row?.name || '#' + id}」`,
+      targetName: isPrivate ? '私有账户' : String(row?.name || ''),
+      summary: isPrivate ? '删除私有 CDN 账户' : `删除 CDN 账户「${row?.name || '#' + id}」`,
     });
     return { code: 0, msg: '删除成功' + (dcount && dcount.c > 0 ? '，已一并删除 ' + dcount.c + ' 个加速域名' : '') };
   });
 
-  app.get('/api/cdn/accounts/:id/zones', auth, async (req: any) => {
-    if (!isAdmin(req.user)) return { code: -1, msg: '无权限' };
+  app.get('/api/cdn/accounts/:id/zones', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
-    const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [id]);
-    if (!acct) return { code: -1, msg: 'CDN账户不存在' };
-    const provider = getCdnProvider(acct.type, safeJson(acct.config));
+    const acct: any = await getVisibleAccount('cdn_account', Number(id), req.user);
+    if (!acct) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
+    const dek = acct.visibility === 'private' ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
+    const { config, state } = readAccountConfig(acct.config, dek);
+    if (state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });
+    const provider = getCdnProvider(acct.type, config);
     if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该账户不支持站点查询' };
     const zones = await provider.getZones();
     return { code: 0, data: zones };

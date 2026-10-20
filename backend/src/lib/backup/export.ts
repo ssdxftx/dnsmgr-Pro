@@ -155,10 +155,15 @@ async function tableChunk(
   const excluded = EXCLUDE_COLUMNS[name] || [];
   const columns = cols.map((c) => String(c.Field)).filter((c) => !excluded.includes(c));
   const raw = (await read(`SELECT * FROM ${table(name)}`)) as any[];
-  const rows = raw.filter(keep).map((r) => {
-    transform?.(r);
-    return encodeRow(r, columns);
-  });
+  const kept = raw.filter(keep);
+  for (const r of kept) transform?.(r);
+  // 导出期附加的合成列（如保险库的 __dek_bk）必须在 encodeRow 之前写进 columns，否则会被丢弃
+  for (const r of kept) {
+    for (const k of Object.keys(r)) {
+      if (k.startsWith('__') && !columns.includes(k)) columns.push(k);
+    }
+  }
+  const rows = kept.map((r) => encodeRow(r, columns));
   return { name, columns, rows };
 }
 
