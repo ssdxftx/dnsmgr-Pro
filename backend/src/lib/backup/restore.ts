@@ -19,7 +19,7 @@ export async function restoreBackup(opts: RestoreOptions): Promise<any> {
   const locked = await withDistributedLock('dnsmgr:backup:restore', async () => {
     result = await runRestore(opts);
   });
-  if (!locked) throw new Error('已有恢复任务正在执行');
+  if (!locked) throw new Error('未获取到恢复锁（可能已有任务执行，或数据库不可用）');
   return result;
 }
 

@@ -6,6 +6,7 @@ import { loadConfig } from '../config.js';
 import { getSysKey } from '../config.js';
 import { setSecretKey } from '../lib/secret.js';
 import { importArchive } from '../lib/backup/import.js';
+import { setMaintenance } from '../lib/backup/maintenance.js';
 import { keyForArchive } from '../lib/backup/key.js';
 import { fieldValue, saveUpload } from '../lib/backup/upload.js';
 
@@ -123,6 +124,8 @@ export default async function setupRoutes(app: FastifyInstance) {
       }
       const tempAdmin: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 ORDER BY id LIMIT 1`);
       const report = await importArchive(tmp, { key, mode: 'install' });
+      // 旧归档可能带 maintenance=1，安装完成后必须归零
+      await setMaintenance(false);
 
       if (tempAdmin?.id) {
         const admins = await query(

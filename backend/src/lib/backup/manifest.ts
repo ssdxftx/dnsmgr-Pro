@@ -17,10 +17,8 @@ export const TABLES = [
 
 export type BackupTable = (typeof TABLES)[number];
 
-/** 永不写入归档的列 */
-export const EXCLUDE_COLUMNS: Record<string, string[]> = {
-  config: ['sys_key'],
-};
+/** 永不写入归档的列（config 的 sys_key/maintenance 在 export.ts 中按行过滤） */
+export const EXCLUDE_COLUMNS: Record<string, string[]> = {};
 
 /** 不参与导出的表（可再生产物 / 运行态日志 / 备份自身记录） */
 export const SKIP_TABLES = ['backup_job', 'log', 'reg_verify', 'cdn_stat_data', 'user_vault_tmp'];

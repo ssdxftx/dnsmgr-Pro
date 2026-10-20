@@ -163,7 +163,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
           switch (name) {
             case 'config': {
               const key = String(row.key || '');
-              if (!key || key === 'sys_key' || key === 'backup_key') {
+              if (!key || key === 'sys_key' || key === 'backup_key' || key === 'maintenance') {
                 report.config.skipped++;
                 continue;
               }

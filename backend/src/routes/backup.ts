@@ -15,7 +15,7 @@ import {
 import { exportBackup } from '../lib/backup/export.js';
 import { importArchive } from '../lib/backup/import.js';
 import { hasBackupKey, rotateBackupKey, keyForArchive } from '../lib/backup/key.js';
-import { getRestoreStatus } from '../lib/backup/maintenance.js';
+import { getRestoreStatus, setMaintenance } from '../lib/backup/maintenance.js';
 import { restoreBackup } from '../lib/backup/restore.js';
 import {
   deleteRemote,
@@ -187,6 +187,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         passphrase: fields.passphrase ? String(fields.passphrase) : undefined,
         overwriteConfig: fields.overwrite_config === true,
       });
+      if (!report.dryRun) await setMaintenance(false);
       audit(req, { module: 'backup', action: 'backup.import', summary: `导入备份（${mode}）`, detail: { mode, scope: header.scope } });
       return { code: 0, msg: report.dryRun ? '预检完成' : '导入完成', data: report };
     } catch (e: any) {
@@ -278,6 +279,20 @@ export default async function backupRoutes(app: FastifyInstance) {
   app.get('/api/backup/restore/status', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     return { code: 0, data: getRestoreStatus() };
+  });
+
+  // 恢复失败后的逃生口：维护标志已持久化，重启不再自动解除
+  app.post('/api/backup/maintenance/exit', auth, async (req: any, reply: any) => {
+    if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    if (String(req.body?.confirm || '') !== 'EXIT') {
+      return reply.code(400).send({ code: -1, msg: '请输入 EXIT 确认' });
+    }
+    if (getRestoreStatus().running) {
+      return reply.code(409).send({ code: -1, msg: '恢复任务正在执行，无法退出维护模式' });
+    }
+    await setMaintenance(false);
+    audit(req, { module: 'backup', action: 'backup.maintenance.exit', summary: '管理员手动退出维护模式' });
+    return { code: 0, msg: '已退出维护模式' };
   });
 
   // ===== 备份密钥 =====

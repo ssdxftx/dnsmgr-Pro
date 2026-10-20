@@ -31,7 +31,9 @@ export async function initMaintenance(): Promise<void> {
 
 export async function setMaintenance(v: boolean): Promise<void> {
   maintenance = v;
-  await configSet('maintenance', v ? '1' : '0').catch(() => undefined);
+  await configSet('maintenance', v ? '1' : '0').catch((e) =>
+    console.warn('[backup] 维护标志持久化失败，重启后将丢失:', e?.message || e),
+  );
 }
 
 export function getRestoreStatus(): RestoreStatus {

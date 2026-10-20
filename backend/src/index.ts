@@ -127,7 +127,9 @@ app.addHook('onRequest', async (req: any, reply: any) => {
   if (!isMaintenance()) return;
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
   const url = String(req.raw?.url || '').split('?')[0];
+  // 备份接口与登录必须可用，否则重启后无人能拿到令牌退出维护模式
   if (url.startsWith('/api/backup')) return;
+  if (url === '/api/auth/login' || url === '/api/auth/totp') return;
   return reply.code(503).send({ code: -1, msg: '系统正在恢复数据，请稍后再试' });
 });
 

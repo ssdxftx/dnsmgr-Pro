@@ -88,6 +88,8 @@ async function buildUserContext(read: SnapshotRead, uid: number): Promise<UserCo
 
 function siteFilter(name: string, excludedUsers: Set<number>) {
   return (row: any): boolean => {
+    // 运行态标志不进归档：否则恢复中的快照被带到别的站点会永久卡在维护模式
+    if (name === 'config') return !['maintenance', 'sys_key'].includes(String(row.key));
     if (!excludedUsers.size) return true;
     if (name === 'user') return !excludedUsers.has(Number(row.id));
     if (name === 'user_vault') return !excludedUsers.has(Number(row.uid));

@@ -18,6 +18,7 @@
         <n-select v-model:value="destId" :options="destOptions" style="max-width: 220px" :disabled="busy" />
         <n-button type="primary" :loading="busy" @click="startExport">{{ t('backup.exportNow') }}</n-button>
         <n-button quaternary @click="rotateKey">{{ t('backup.rotateKey') }}</n-button>
+        <n-button v-if="admin" quaternary type="warning" @click="openExit">{{ t('backup.exitMaintenance') }}</n-button>
       </div>
     </n-card>
 
@@ -127,8 +128,20 @@
       </n-form>
       <template #footer>
         <n-space justify="end">
+          <n-button quaternary type="warning" @click="openExit">{{ t('backup.exitMaintenance') }}</n-button>
           <n-button @click="showRestore = false">{{ t('backup.cancel') }}</n-button>
           <n-button type="error" :loading="restoring" :disabled="restoreForm.confirm !== 'RESTORE'" @click="doRestore">{{ t('backup.restoreStart') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showExit" preset="card" :title="t('backup.exitMaintenance')" class="modal-sm" :mask-closable="false">
+      <n-alert type="warning" class="mb-3">{{ t('backup.exitMaintenanceHint') }}</n-alert>
+      <n-input v-model:value="exitConfirm" :placeholder="t('backup.exitMaintenanceConfirm')" />
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showExit = false">{{ t('backup.cancel') }}</n-button>
+          <n-button type="warning" :loading="exiting" :disabled="exitConfirm !== 'EXIT'" @click="exitMaintenance">{{ t('backup.exitMaintenance') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -238,6 +251,9 @@ const destinations = ref<any[]>([]);
 const schedules = ref<any[]>([]);
 
 const showRestore = ref(false);
+const showExit = ref(false);
+const exitConfirm = ref('');
+const exiting = ref(false);
 const showRemote = ref(false);
 const showDest = ref(false);
 const remoteDestId = ref(0);
@@ -449,6 +465,26 @@ async function doRestore() {
     message.error(e?.message || t('backup.restoreFailed'));
   } finally {
     restoring.value = false;
+  }
+}
+
+function openExit() {
+  exitConfirm.value = '';
+  showExit.value = true;
+}
+
+async function exitMaintenance() {
+  exiting.value = true;
+  try {
+    const res = await api<any>('POST', '/backup/maintenance/exit', { confirm: exitConfirm.value });
+    if (res.code !== 0) return message.error(res.msg);
+    message.success(t('backup.exitMaintenanceDone'));
+    showExit.value = false;
+    showRestore.value = false;
+  } catch (e: any) {
+    message.error(e?.message || t('backup.restoreFailed'));
+  } finally {
+    exiting.value = false;
   }
 }
 
