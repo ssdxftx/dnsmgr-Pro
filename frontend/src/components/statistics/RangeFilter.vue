@@ -15,7 +15,7 @@
         {{ opt.label }}
       </n-button>
     </div>
-    <template v-if="range === 'custom'">
+    <template v-if="range === 'custom' && !hideCustomInputs">
       <n-date-picker
         v-if="!isMobile"
         :value="customRange"
@@ -58,6 +58,12 @@ const props = defineProps<{
   range: string;
   customRange: [number, number] | null;
   isAdmin: boolean;
+  /** 不传时保持原有 5 档；传了就按传入的顺序渲染 */
+  presets?: string[];
+  /** 是否允许「自定义」档位，默认跟随 isAdmin */
+  allowCustom?: boolean;
+  /** 只渲染档位按钮，自定义时间输入由调用方渲染（如移动端放进抽屉） */
+  hideCustomInputs?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -77,7 +83,8 @@ const options = computed(() => {
     { label: t('statistics.range30d'), value: '30d' },
     { label: t('statistics.rangeCustom'), value: 'custom' },
   ];
-  return props.isAdmin ? list : list.filter((o) => o.value !== 'custom');
+  const scoped = props.presets ? list.filter((o) => props.presets!.includes(o.value)) : list;
+  return props.allowCustom ?? props.isAdmin ? scoped : scoped.filter((o) => o.value !== 'custom');
 });
 
 const customStart = ref<number | null>(props.customRange?.[0] ?? null);

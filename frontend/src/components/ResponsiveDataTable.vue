@@ -15,6 +15,7 @@
       :virtual-scroll="virtualScroll"
       :max-height="virtualScroll ? maxHeight : undefined"
       :checked-row-keys="hasSelection ? checkedRowKeys : undefined"
+      :row-props="rowProps"
       @update:checked-row-keys="onUpdateChecked"
     >
       <template #empty>
@@ -120,6 +121,8 @@ const props = withDefaults(
     error?: boolean;
     virtualScroll?: boolean;
     maxHeight?: number;
+    /** 行属性（点击整行打开详情等），透传给 n-data-table */
+    rowProps?: (row: any) => Record<string, any>;
   }>(),
   {
     loading: false,
@@ -137,6 +140,7 @@ const props = withDefaults(
     error: false,
     virtualScroll: false,
     maxHeight: undefined,
+    rowProps: undefined,
   },
 );
 
