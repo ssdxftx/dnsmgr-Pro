@@ -72,6 +72,19 @@ interface WebdavDirState {
   ok: boolean;
   status: number;
   detail: string;
+  writable: boolean | null;
+}
+
+function webdavWritable(xml: string): boolean | null {
+  const m = /<(?:[A-Za-z0-9_-]+:)?current-user-privilege-set[^>]*>([\s\S]*?)<\/(?:[A-Za-z0-9_-]+:)?current-user-privilege-set>/i.exec(xml);
+  if (!m) return null;
+  return /<(?:[A-Za-z0-9_-]+:)?(?:write|write-content|all)\b/i.test(m[1]);
+}
+
+function readonlyError(path: string): Error {
+  return new Error(
+    `WebDAV 目标目录只读（路径 ${path}）：当前账号没有写入权限，请改填可写目录，例如坚果云的 /dav/我的坚果云/ 或其中的子目录`,
+  );
 }
 
 // 校验目标地址确实是 WebDAV 目录：仅看 HTTP 200 会把普通网页/反向代理首页误判为可用
@@ -79,14 +92,14 @@ async function webdavDirState(cfg: any, url: string): Promise<WebdavDirState> {
   const base = url.trim().replace(/\/+$/, '');
   const res = await webdavFetch(cfg, base || url, { method: 'PROPFIND', headers: { Depth: '0' } });
   if (res.status !== 200 && res.status !== 207) {
-    return { ok: false, status: res.status, detail: (await responseSnippet(res)) || '目录不存在或无权访问' };
+    return { ok: false, status: res.status, detail: (await responseSnippet(res)) || '目录不存在或无权访问', writable: null };
   }
   const xml = await res.text();
   // PROPFIND 的 resourcetype 为空表示这是文件，不能作为上传目录
   if (!/<(?:[A-Za-z0-9_-]+:)?collection[\s/>]/i.test(xml)) {
-    return { ok: false, status: res.status, detail: '该地址指向文件或不是 WebDAV 目录，请填写目录地址' };
+    return { ok: false, status: res.status, detail: '该地址指向文件或不是 WebDAV 目录，请填写目录地址', writable: null };
   }
-  return { ok: true, status: res.status, detail: '' };
+  return { ok: true, status: res.status, detail: '', writable: webdavWritable(xml) };
 }
 
 async function ensureWebdavDir(cfg: any, url: string): Promise<WebdavDirState> {
@@ -94,10 +107,10 @@ async function ensureWebdavDir(cfg: any, url: string): Promise<WebdavDirState> {
   if (state.ok || state.status !== 404) return state;
   const base = url.trim().replace(/\/+$/, '');
   const res = await webdavFetch(cfg, base + '/', { method: 'MKCOL' });
-  if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status, detail: '' };
+  if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status, detail: '', writable: null };
   // MKCOL 返回 405 通常表示目录已被并发创建，交给后续写入判断
-  if (res.status === 405) return { ok: true, status: res.status, detail: '' };
-  return { ok: false, status: res.status, detail: (await responseSnippet(res)) || '创建目录失败' };
+  if (res.status === 405) return { ok: true, status: res.status, detail: '', writable: null };
+  return { ok: false, status: res.status, detail: (await responseSnippet(res)) || '创建目录失败', writable: null };
 }
 
 async function webdavPut(cfg: any, url: string, localPath: string): Promise<Response> {
@@ -117,6 +130,12 @@ export async function testDestination(row: DestinationRow): Promise<{ ok: boolea
       if (!url) return { ok: false, message: '请填写 WebDAV 地址' };
       const dir = await ensureWebdavDir(row.config, url);
       if (!dir.ok) return { ok: false, message: `连接失败（HTTP ${dir.status}）：${dir.detail}` };
+      if (dir.writable === false) {
+        return {
+          ok: false,
+          message: `目录只读：当前账号没有写入权限，请改填可写目录（坚果云请使用 /dav/我的坚果云/ 或其中的子目录）`,
+        };
+      }
       // 只做 PROPFIND 无法发现「可读不可写」，用一次真实写入探测
       const probeUrl = joinUrl(url, `.dnsmgr-write-test-${randomBytes(4).toString('hex')}`);
       const put = await webdavFetch(row.config, probeUrl, {
@@ -166,7 +185,10 @@ export async function uploadToDestination(destId: number, localPath: string, nam
     let res = await webdavPut(row.config, fileUrl, localPath);
     // 目标目录可能尚未创建（或服务端要求目录以 / 结尾），先补建目录再重试一次
     if (res.status === 404 || res.status === 409) {
-      const dir = await ensureWebdavDir(row.config, base);
+      const state = await webdavDirState(row.config, base);
+      if (state.writable === false) throw readonlyError(urlPath(base));
+      const dir = state.ok ? state : await ensureWebdavDir(row.config, base);
+      if (dir.writable === false) throw readonlyError(urlPath(base));
       if (dir.ok) res = await webdavPut(row.config, fileUrl, localPath);
       else throw new Error(`WebDAV 上传失败（HTTP ${res.status}，路径 ${urlPath(fileUrl)}）：${dir.detail}`);
     }

@@ -55,6 +55,7 @@ export default {
     destName: 'Name',
     destType: 'Type',
     destUrl: 'WebDAV URL',
+    destUrlHint: 'Writable folder URL; the Jianguoyun root /dav/ is read-only, use /dav/我的坚果云/ or a subfolder',
     destUser: 'Username',
     destPass: 'Password',
     destEndpoint: 'S3 endpoint',

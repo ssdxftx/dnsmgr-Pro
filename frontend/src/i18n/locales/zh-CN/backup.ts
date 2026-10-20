@@ -55,6 +55,7 @@ export default {
     destName: '名称',
     destType: '类型',
     destUrl: 'WebDAV 地址',
+    destUrlHint: '可写目录地址；坚果云根目录 /dav/ 只读，请填 /dav/我的坚果云/ 或其子目录',
     destUser: '用户名',
     destPass: '密码',
     destEndpoint: 'S3 Endpoint',

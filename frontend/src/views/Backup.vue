@@ -102,7 +102,7 @@
           <n-select v-model:value="destForm.type" :options="[{ label: 'WebDAV', value: 'webdav' }, { label: 'S3', value: 's3' }]" />
         </n-form-item>
         <template v-if="destForm.type === 'webdav'">
-          <n-form-item :label="t('backup.destUrl')"><n-input v-model:value="destForm.config.url" placeholder="https://dav.example.com/backup" /></n-form-item>
+          <n-form-item :label="t('backup.destUrl')" :feedback="t('backup.destUrlHint')"><n-input v-model:value="destForm.config.url" placeholder="https://dav.example.com/backup/" /></n-form-item>
           <n-form-item :label="t('backup.destUser')"><n-input v-model:value="destForm.config.username" /></n-form-item>
           <n-form-item :label="t('backup.destPass')"><n-input v-model:value="destForm.config.password" type="password" show-password-on="click" /></n-form-item>
         </template>
