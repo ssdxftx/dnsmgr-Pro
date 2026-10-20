@@ -88,3 +88,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - vue-i18n 文案中的裸 `@` 会被当作「链接消息」语法（`@:key`）解析，触发 `Message compilation error: Invalid linked format`；编译失败的 `t()` 在渲染期抛错，Vue 会把对应组件（如 `n-form-item`）渲染成注释节点 `<!---->`，表现为字段凭空消失且无显式报错
   - 本仓库 `record.hostPlaceholder`（zh/en）与 `system.webhookUser`/`webhookUserPlaceholder`（zh）曾含裸 `@`；修复方式：写成字面量 `{'@'}`
   - 排查 i18n 相关渲染问题时，禁止用 mock 的 `useI18n`（返回 key）验证渲染，会掩盖消息编译错误；应以真实 i18n + 生产构建产物在真实浏览器中验证（必要时用无头浏览器驱动）
+[Project Knowledge Summary]
+- Date: 2026-10-20
+- Context: Discovered by Agent while 实现并验证备份恢复与个人凭证保险库
+- Category: Testing Methods / Troubleshooting & Debugging
+- Instructions:
+  - 备份/保险库涉及加密与 DB 迁移，纯静态检查不足；本环境用 MariaDB + Playwright（`npm i -g playwright && playwright install --with-deps chromium`）做端到端验证，S3 用 `npm i -g s3rver` 模拟（endpoint `http://127.0.0.1:8098`、forcePathStyle），WebDAV 可用极简 Node 服务模拟
+  - 安装向导导入备份必须先拿到 `/api/setup/install` 返回的 `install_token`，再 `POST /api/setup/import`（multipart：file、install_token、backup_key、可选 passphrase）；整站归档用 `backup_key`（32B Base64URL），口令归档用 passphrase 派生
+  - 后端只有 `not_installed` 状态才允许安装；设置 `DB_*` 环境变量会让状态变为 `unknown`，测试全新安装时不要预设 DB 环境变量，应由安装接口写入 `config.json`
+  - AWS SDK v3 新版默认 CRC 校验会对流式 `PutObject` 启用 aws-chunked，部分 S3 兼容实现会把分块头写进对象；需设置 `requestChecksumCalculation/responseChecksumValidation: 'WHEN_REQUIRED'` 并显式传 `ContentLength`
+  - `mysql2` 会把 JSON 列解析成对象、`VARBINARY` 返回 Buffer；归档导入前必须对普通对象 `JSON.stringify`、对 Buffer 原样保留，否则 JSON 列校验失败或 Buffer 被序列化成 `{type:'Buffer'}`
+  - 保险库包裹层 AAD 绑定 uid，备份导入要尽量保留原用户 ID；便捷模式 DEK 由源站 sys_key 包裹，跨站导入需在归档中额外携带用归档密钥包裹的 DEK 再重包
