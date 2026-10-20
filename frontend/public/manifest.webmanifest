@@ -1,0 +1,18 @@
+{
+  "name": "聚合 DNS 管理系统",
+  "short_name": "DNS Manager",
+  "description": "多厂商 DNS、CDN 与 SSL 证书一体化管理平台",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b1220",
+  "theme_color": "#0a7a5c",
+  "icons": [
+    {
+      "src": "/favicon.webp",
+      "sizes": "any",
+      "type": "image/webp",
+      "purpose": "any maskeable"
+    }
+  ]
+}

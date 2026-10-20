@@ -1,0 +1,639 @@
+<template>
+  <div>
+    <div v-if="checked.length" class="record-batch">
+      <n-space size="small" align="center">
+        <n-text depth="3">{{ t('record.selected', { count: checked.length }) }}</n-text>
+        <n-button size="tiny" type="success" @click="runBatch('open')">{{ t('common.enable') }}</n-button>
+        <n-button size="tiny" @click="runBatch('pause')">{{ t('record.paused') }}</n-button>
+        <n-dropdown trigger="click" :options="batchMoreOptions" @select="onBatchMore">
+          <n-button size="tiny">{{ t('record.batchMore') }}</n-button>
+        </n-dropdown>
+        <n-button size="tiny" type="error" @click="batchDelete">{{ t('common.delete') }}</n-button>
+      </n-space>
+    </div>
+    <ResponsiveDataTable
+      v-model:checked-row-keys="checked"
+      :columns="columns"
+      :data="records"
+      :loading="loading"
+      :pagination="pagination"
+      :row-key="recordKey"
+      :empty-text="t('record.empty')"
+    />
+
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('record.editTitle') : t('record.addTitle')" :style="modalStyle" :mask-closable="false">
+      <div class="record-form-scroll">
+        <n-form :label-placement="labelPlacement" :label-width="isMobile ? 'auto' : 110">
+          <n-form-item :label="t('record.hostRecord')">
+            <n-input v-model:value="form.name" :placeholder="t('record.hostPlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('record.recordType')">
+            <n-select v-model:value="form.type" :options="typeOptions" />
+          </n-form-item>
+          <n-form-item :label="t('record.recordValue')">
+            <n-input v-model:value="form.value" :placeholder="t('record.valuePlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('record.line')">
+            <n-select v-model:value="form.line" :options="lineOptions" filterable :placeholder="t('record.defaultLinePlaceholder')" />
+          </n-form-item>
+          <n-form-item label="TTL">
+            <n-input-number v-model:value="form.ttl" :min="1" style="width:100%" />
+          </n-form-item>
+          <n-form-item v-if="form.type === 'MX'" :label="t('record.priority')">
+            <n-input-number v-model:value="form.mx" :min="0" style="width:100%" />
+          </n-form-item>
+          <n-form-item :label="t('common.remark')">
+            <n-input v-model:value="form.remark" :placeholder="t('record.remarkPlaceholder')" />
+          </n-form-item>
+        </n-form>
+      </div>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showEdit = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" @click="saveRecord">{{ t('common.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showBatch" preset="card" :title="batchTitle" class="modal-sm" :mask-closable="false">
+      <n-form v-if="batchAction === 'value'" label-placement="left" label-width="110">
+        <n-form-item :label="t('record.recordType')"><n-select v-model:value="batchForm.type" :options="typeOptions" /></n-form-item>
+        <n-form-item :label="t('record.recordValue')"><n-input v-model:value="batchForm.value" /></n-form-item>
+      </n-form>
+      <n-form v-else-if="batchAction === 'line'" label-placement="left" label-width="110">
+        <n-form-item :label="t('record.line')"><n-select v-model:value="batchForm.line" :options="batchLineOptions" filterable /></n-form-item>
+      </n-form>
+      <n-form v-else-if="batchAction === 'remark'" label-placement="left" label-width="110">
+        <n-form-item :label="t('common.remark')"><n-input v-model:value="batchForm.remark" /></n-form-item>
+      </n-form>
+      <n-form v-else-if="batchAction === 'group'" label-placement="left" label-width="110">
+        <n-form-item :label="t('record.batchGroup')"><n-select v-model:value="batchForm.groupid" :options="groupOptions" filterable /></n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showBatch = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" @click="submitBatch">{{ t('common.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showValue" preset="card" :title="t('record.valueTitle')" class="modal-md" :mask-closable="false">
+      <n-input type="textarea" :value="valueDetail" :autosize="{ minRows: 2, maxRows: 10 }" readonly />
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showValue = false">{{ t('common.close') }}</n-button>
+          <n-button type="primary" @click="copyValue">{{ t('common.copy') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showRemark" preset="card" :title="t('record.editRemark')" class="modal-sm" :mask-closable="false">
+      <n-input v-model:value="remarkForm.remark" type="textarea" :rows="3" :placeholder="t('record.remarkContentPlaceholder')" />
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showRemark = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="saveRemarkBusy" @click="saveRemark">{{ t('common.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
+    <n-modal v-model:show="showCheck" preset="card" :title="t('record.checkTitle')" class="modal-sm" :mask-closable="false">
+      <n-space vertical :size="12">
+        <n-descriptions :column="1" size="small" label-placement="left" bordered>
+          <n-descriptions-item :label="t('record.hostRecord')">{{ checkFullHost }}</n-descriptions-item>
+          <n-descriptions-item :label="t('record.recordType')">{{ checkResult.type }}</n-descriptions-item>
+          <n-descriptions-item :label="t('record.recordValue')">{{ checkResult.value }}</n-descriptions-item>
+        </n-descriptions>
+        <n-alert
+          :type="checkResult.status === 'active' ? 'success' : checkResult.status === 'mismatch' ? 'error' : 'warning'"
+          :show-icon="false"
+          :title="statusText"
+        />
+        <div v-if="checkResult.actual && checkResult.actual.length">
+          <n-text strong>{{ t('record.actualValue') }}</n-text>
+          <n-ul>
+            <n-li v-for="(a, i) in checkResult.actual" :key="i">{{ a }}</n-li>
+          </n-ul>
+        </div>
+        <div v-if="checkResult.expected">
+          <n-text strong>{{ t('record.expectedValue') }}</n-text>
+          <span>{{ checkResult.expected }}</span>
+        </div>
+      </n-space>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showCheck = false">{{ t('common.close') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, h, reactive, ref } from 'vue';
+import { useResponsive } from '../composables/useResponsive';
+import { useI18n } from 'vue-i18n';
+import { NButton, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
+import { api } from '../api';
+import ResponsiveDataTable from './ResponsiveDataTable.vue';
+import { useAction } from '../composables/useAction';
+
+interface DomainTarget {
+  id: number;
+  sub: string;
+}
+
+const props = withDefaults(
+  defineProps<{
+    records: any[];
+    loading?: boolean;
+    pagination?: false | Record<string, any>;
+    domainId?: number;
+    domainName?: string;
+    access?: { admin?: boolean; readonly?: boolean; writable?: boolean };
+    showFullName?: boolean;
+    showAdd?: boolean;
+    domainIndex?: Record<string, DomainTarget>;
+    subFilter?: string;
+  }>(),
+  {
+    loading: false,
+    pagination: false,
+    domainId: undefined,
+    domainName: '',
+    access: undefined,
+    showFullName: false,
+    showAdd: true,
+    domainIndex: undefined,
+    subFilter: '',
+  },
+);
+
+const emit = defineEmits<{ (e: 'refresh'): void }>();
+const { t } = useI18n();
+const message = useMessage();
+const dialog = useDialog();
+const { busy, run } = useAction();
+
+const linesByDid = ref<Record<number, Record<string, string>>>({});
+const currentDid = ref<number | null>(null);
+const checked = ref<string[]>([]);
+const showBatch = ref(false);
+const batchAction = ref<'' | 'value' | 'line' | 'remark' | 'group'>('');
+const batchForm = reactive<any>({ type: 'A', value: '', line: '', remark: '', groupid: null });
+const groups = ref<any[]>([]);
+
+const saveBusy = ref(false);
+const showEdit = ref(false);
+const editingId = ref<string | null>(null);
+const editingDid = ref<number | null>(null);
+const form = reactive<any>({ name: '', type: 'A', value: '', line: 'default', ttl: 600, mx: 1, remark: '' });
+
+// 统一走 useResponsive（内部已用 passive 监听合并宽度更新），避免各处重复注册 resize 监听
+const { isMobile } = useResponsive();
+
+// 手机端标签置顶并把弹窗限制在视口内，避免主机记录等输入框被标签挤压
+const labelPlacement = computed(() => (isMobile.value ? 'top' : 'left'));
+const modalStyle = computed(() => (isMobile.value ? { width: 'calc(100vw - 24px)', maxWidth: '640px' } : { maxWidth: '640px' }));
+
+const showValue = ref(false);
+const valueDetail = ref('');
+const showRemark = ref(false);
+const remarkForm = reactive<any>({ did: null, recordId: '', remark: '' });
+const saveRemarkBusy = ref(false);
+
+const showCheck = ref(false);
+const checkResult = ref<any>({ status: '', name: '', domainName: '', type: '', value: '', actual: [], expected: '' });
+
+const typeOptions = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'REDIRECT_URL', 'FORWARD_URL'].map((v) => ({ label: v, value: v }));
+
+const lineOptions = computed(() =>
+  Object.entries(linesByDid.value[currentDid.value ?? -1] || {}).map(([name, code]) => ({ label: name, value: code })),
+);
+
+const statusText = computed(() => {
+  const s = checkResult.value.status;
+  if (s === 'active') return t('record.statusActive');
+  if (s === 'mismatch') return t('record.statusMismatch');
+  if (s === 'not_found') return t('record.statusNotFound');
+  return '';
+});
+
+const checkFullHost = computed(() => {
+  const name = String(checkResult.value.name ?? '');
+  const domain = String(checkResult.value.domainName ?? '');
+  if (!name || name === '@') return domain;
+  return `${name}.${domain}`;
+});
+
+function rowDid(row: any): number | null {
+  const did = row?.did ?? props.domainId ?? null;
+  return did === null || did === undefined ? null : Number(did);
+}
+
+function recordKey(row: any): string {
+  return String(row?.RecordId ?? row?.id ?? '') + ':' + String(row?.did ?? props.domainId ?? '');
+}
+
+function selectedRows(): any[] {
+  const set = new Set(checked.value);
+  return props.records.filter((r) => set.has(recordKey(r)));
+}
+
+async function runBatch(action: string, extra: Record<string, any> = {}) {
+  const rows = selectedRows();
+  if (!rows.length) return;
+  const did = rowDid(rows[0]);
+  if (!did || rows.some((r) => rowDid(r) !== did)) return message.warning(t('record.batchSameDomain'));
+  const res = await api('POST', `/domains/${did}/records/batch`, {
+    action,
+    records: rows.map((r) => ({ RecordId: r.RecordId, Name: r.Name, Type: r.Type, Value: r.Value, Line: r.Line, TTL: r.TTL, MX: r.MX, Weight: r.Weight, Remark: r.Remark })),
+    ...extra,
+  });
+  if (res.code === 0) {
+    message.success(res.msg);
+    checked.value = [];
+    emit('refresh');
+  } else message.error(res.msg);
+}
+
+function batchDelete() {
+  if (!checked.value.length) return;
+  dialog.warning({
+    title: t('common.delete'),
+    content: t('record.batchDeleteConfirm', { count: checked.value.length }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: () => runBatch('delete'),
+  });
+}
+
+const batchMoreOptions = computed(() => [
+  { label: t('record.batchValue'), key: 'value' },
+  { label: t('record.batchLine'), key: 'line' },
+  { label: t('record.batchRemark'), key: 'remark' },
+  { label: t('record.batchGroup'), key: 'group' },
+]);
+
+const batchTitle = computed(() => {
+  const map: Record<string, string> = {
+    value: t('record.batchValue'),
+    line: t('record.batchLine'),
+    remark: t('record.batchRemark'),
+    group: t('record.batchGroup'),
+  };
+  return map[batchAction.value] || '';
+});
+
+const batchLineOptions = computed(() => {
+  const rows = selectedRows();
+  const did = rows.length ? rowDid(rows[0]) : null;
+  return Object.entries(linesByDid.value[did ?? -1] || {}).map(([name, code]) => ({ label: name, value: code }));
+});
+
+const groupOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })));
+
+function onBatchMore(key: string) {
+  batchAction.value = key as any;
+  const rows = selectedRows();
+  const did = rows.length ? rowDid(rows[0]) : null;
+  if (did) ensureLines(did);
+  batchForm.type = rows[0]?.Type || 'A';
+  batchForm.value = '';
+  batchForm.line = rows[0]?.Line || '';
+  batchForm.remark = '';
+  batchForm.groupid = null;
+  if (key === 'group') {
+    if (!did) return;
+    api<any>('GET', `/domains/${did}/groups`).then((res) => {
+      if (res.code === 0) {
+        groups.value = res.data || [];
+        showBatch.value = true;
+      } else {
+        message.error(res.msg);
+      }
+    });
+    return;
+  }
+  showBatch.value = true;
+}
+
+function submitBatch() {
+  showBatch.value = false;
+  if (batchAction.value === 'value') runBatch('value', { type: batchForm.type, value: batchForm.value });
+  else if (batchAction.value === 'line') runBatch('line', { line: batchForm.line });
+  else if (batchAction.value === 'remark') runBatch('remark', { remark: batchForm.remark });
+  else if (batchAction.value === 'group') runBatch('group', { groupid: batchForm.groupid });
+}
+
+function rowDomainName(row: any): string {
+  return String(row?.Domain ?? props.domainName ?? '');
+}
+
+function rowWritable(row: any): boolean {
+  if (row && row._writable !== undefined) return !!row._writable;
+  return !!props.access?.writable;
+}
+
+function fullRecordDomain(row: any, name: string): string {
+  const n = String(name || '').trim().replace(/\.$/, '');
+  const base = rowDomainName(row);
+  if (!n || n === '@') return base;
+  return `${n}.${base}`;
+}
+
+function resolveDomainTarget(row: any, name: string): DomainTarget | null {
+  if (!props.domainIndex) return null;
+  const n = String(name || '').trim();
+  if (!n || n === '@') return null;
+  const hit = props.domainIndex[fullRecordDomain(row, n).toLowerCase()];
+  if (!hit) return null;
+  if (hit.id === rowDid(row) && (hit.sub || '') === props.subFilter) return null;
+  return hit;
+}
+
+function jumpToDomain(row: any, name: string) {
+  const target = resolveDomainTarget(row, name);
+  if (!target) return;
+  const sub = target.sub ? `?sub=${encodeURIComponent(target.sub)}` : '';
+  window.open(`/domains/${target.id}/records${sub}`, '_self');
+}
+
+async function ensureLines(did: number | null) {
+  if (!did || linesByDid.value[did]) return;
+  const res = await api<any>('GET', `/domains/${did}/lines`);
+  if (res.code === 0) linesByDid.value[did] = res.data;
+}
+
+// 记录类型 → 徽章配色分组
+function typeClass(type: string): string {
+  const v = String(type || '').toUpperCase();
+  if (v === 'A' || v === 'AAAA') return 'addr';
+  if (v === 'CNAME') return 'cname';
+  if (v === 'MX') return 'mail';
+  if (v === 'TXT' || v === 'NS' || v === 'SRV' || v === 'CAA') return 'txt';
+  return 'url';
+}
+
+const columns = computed<any[]>(() => {
+  const cols: any[] = [];
+  if (props.access?.readonly !== true) cols.push({ type: 'selection', width: 40 });
+  cols.push(
+    {
+      title: t('record.hostRecord'),
+      key: 'Name',
+      width: 160,
+      render(row: any) {
+        const name = String(row.Name ?? '');
+        if (props.showFullName) {
+          return h('span', { class: 'rec-host font-mono' }, fullRecordDomain(row, name));
+        }
+        const target = resolveDomainTarget(row, name);
+        if (!target) return h('span', { class: 'rec-host font-mono' }, name || '@');
+        return h(
+          NButton,
+          { text: true, size: 'tiny', type: 'primary', title: t('record.jumpTo', { domain: fullRecordDomain(row, name) }), onClick: () => jumpToDomain(row, name) },
+          { default: () => name },
+        );
+      },
+    },
+  );
+  cols.push(
+    {
+      title: t('record.typeCol'),
+      key: 'Type',
+      width: 96,
+      render(row: any) {
+        const type = String(row.Type ?? '');
+        return h('span', { class: `rec-type rec-type--${typeClass(type)}` }, type);
+      },
+    },
+    {
+      title: t('record.valueCol'),
+      key: 'Value',
+      width: 90,
+      render: (row: any) => h(NButton, { text: true, size: 'tiny', type: 'primary', onClick: () => openValue(row.Value) }, { default: () => t('record.view') }),
+    },
+    {
+      title: t('common.remark'),
+      key: 'Remark',
+      width: 110,
+      render(row: any) {
+        const text = row.Remark || '';
+        if (!rowWritable(row)) return text || '—';
+        return h(
+          NButton,
+          { text: true, size: 'tiny', type: text ? 'default' : 'primary', onClick: () => openRemark(row) },
+          { default: () => text || t('record.addRemark') },
+        );
+      },
+    },
+    { title: t('record.lineCol'), key: 'Line', width: 90 },
+    { title: 'TTL', key: 'TTL', width: 80 },
+    {
+      title: t('common.status'),
+      key: 'Status',
+      width: 80,
+      render(row: any) {
+        return h(NTag, { type: row.Status === '1' ? 'success' : 'default', size: 'small' }, { default: () => (row.Status === '1' ? t('common.enable') : t('record.paused')) });
+      },
+    },
+    {
+      title: t('common.actions'),
+      key: 'actions',
+      width: 260,
+      render(row: any) {
+        const checkKey = `check:${row.RecordId}`;
+        const checkBtn = h(
+          NButton,
+          {
+            size: 'tiny',
+            quaternary: true,
+            type: 'info',
+            loading: !!busy[checkKey],
+            disabled: !!busy[checkKey],
+            onClick: () => run(checkKey, () => checkRecord(row)),
+          },
+          { default: () => t('record.check') },
+        );
+        if (!rowWritable(row)) return h('div', { class: 'row-actions' }, [checkBtn]);
+        const toggleKey = `toggle:${row.RecordId}`;
+        return h('div', { class: 'row-actions' }, [
+            h(
+              NButton,
+              {
+                size: 'tiny',
+                quaternary: true,
+                loading: !!busy[toggleKey],
+                disabled: !!busy[toggleKey],
+                onClick: () => run(toggleKey, () => toggleStatus(row)),
+              },
+              { default: () => (row.Status === '1' ? t('record.paused') : t('common.enable')) },
+            ),
+            h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+            h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRecord(row) }, { default: () => t('common.delete') }),
+            checkBtn,
+        ]);
+      },
+    },
+  );
+  return cols;
+});
+
+function openValue(value: any) {
+  valueDetail.value = String(value ?? '');
+  showValue.value = true;
+}
+
+async function copyValue() {
+  try {
+    await navigator.clipboard.writeText(valueDetail.value);
+    message.success(t('common.copied'));
+  } catch {
+    message.error(t('record.copyFailed'));
+  }
+}
+
+function openRemark(row: any) {
+  remarkForm.did = rowDid(row);
+  remarkForm.recordId = row.RecordId;
+  remarkForm.remark = row.Remark || '';
+  showRemark.value = true;
+}
+
+async function saveRemark() {
+  if (!remarkForm.did) return;
+  saveRemarkBusy.value = true;
+  const res = await api('POST', `/domains/${remarkForm.did}/records/${remarkForm.recordId}/remark`, { remark: remarkForm.remark || null });
+  saveRemarkBusy.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    showRemark.value = false;
+    emit('refresh');
+  } else message.error(res.msg);
+}
+
+function openAdd() {
+  if (!props.showAdd || !props.domainId) return;
+  editingId.value = null;
+  editingDid.value = props.domainId;
+  currentDid.value = props.domainId;
+  ensureLines(props.domainId);
+  Object.assign(form, { name: '', type: 'A', value: '', line: 'default', ttl: 600, mx: 1, remark: '' });
+  showEdit.value = true;
+}
+
+function openEdit(row: any) {
+  editingId.value = row.RecordId;
+  editingDid.value = rowDid(row);
+  currentDid.value = rowDid(row);
+  ensureLines(rowDid(row));
+  Object.assign(form, { name: row.Name, type: row.Type, value: row.Value, line: row.Line, ttl: row.TTL, mx: row.MX ?? 1, remark: row.Remark || '' });
+  showEdit.value = true;
+}
+
+async function saveRecord() {
+  if (!form.name || !form.value) return message.warning(t('record.fillRequired'));
+  const did = editingId.value ? editingDid.value : props.domainId;
+  if (!did) return;
+  saveBusy.value = true;
+  const body = { ...form };
+  const res = editingId.value
+    ? await api('PUT', `/domains/${did}/records/${editingId.value}`, body)
+    : await api('POST', `/domains/${did}/records`, body);
+  saveBusy.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    showEdit.value = false;
+    emit('refresh');
+  } else message.error(res.msg);
+}
+
+async function checkRecord(row: any) {
+  const did = rowDid(row);
+  if (!did) return;
+  const value = Array.isArray(row.Value) ? row.Value[0] : row.Value;
+  const res = await api<any>('POST', `/domains/${did}/records/check`, { name: row.Name, type: row.Type, value });
+  if (res.code === 0) {
+    checkResult.value = { ...res.data, name: row.Name, domainName: rowDomainName(row), type: row.Type, value: String(value) };
+    showCheck.value = true;
+  } else message.error(res.msg);
+}
+
+async function toggleStatus(row: any) {
+  const did = rowDid(row);
+  if (!did) return;
+  const target = row.Status === '1' ? '0' : '1';
+  const res = await api('POST', `/domains/${did}/records/${row.RecordId}/status`, { status: target });
+  if (res.code === 0) {
+    message.success(res.msg);
+    emit('refresh');
+  } else message.error(res.msg);
+}
+
+function delRecord(row: any) {
+  const did = rowDid(row);
+  if (!did) return;
+  dialog.warning({
+    title: t('record.deleteTitle'),
+    content: t('record.deleteConfirm', { name: fullRecordDomain(row, row.Name) }),
+    positiveText: t('common.delete'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res = await api('DELETE', `/domains/${did}/records/${row.RecordId}`);
+      if (res.code === 0) {
+        message.success(t('record.deleteSuccess'));
+        emit('refresh');
+      } else message.error(res.msg);
+    },
+  });
+}
+
+defineExpose({ openAdd });
+</script>
+
+<style scoped>
+/* 表单内容超出视口时内部滚动，避免 Naive UI 模态卡片居中导致顶部字段被裁掉无法触达 */
+.record-form-scroll {
+  max-height: calc(100dvh - 200px);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
+}
+
+/* 主机记录等宽 + 记录类型遥测徽章 */
+.rec-host {
+  color: var(--app-text);
+}
+.rec-type {
+  display: inline-block;
+  min-width: 34px;
+  text-align: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-family: var(--app-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.rec-type--addr {
+  background: var(--app-primary-weak);
+  color: var(--app-primary-strong);
+}
+.rec-type--cname {
+  background: color-mix(in srgb, #38bdf8 16%, transparent);
+  color: color-mix(in srgb, #38bdf8 62%, var(--app-text));
+}
+.rec-type--mail {
+  background: var(--app-warning-weak);
+  color: var(--app-warning);
+}
+.rec-type--txt {
+  background: var(--app-bg-soft);
+  color: var(--app-text-2);
+}
+.rec-type--url {
+  background: var(--app-error-weak);
+  color: var(--app-error);
+}
+</style>

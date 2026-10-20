@@ -1,0 +1,77 @@
+{
+  "FormatVersion": "1.0",
+  "Rules": [
+    {
+      "RuleName": "音视频直播",
+      "Branches": [
+        {
+          "Condition": "${http.request.host} in []",
+          "SubRules": [
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['m3u8', 'mpd']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "CustomTime": {
+                          "CacheTime": 1,
+                          "IgnoreCacheControl": "off",
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['ts', 'mp4', 'm4a', 'm4s']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "CustomTime": {
+                          "CacheTime": 1,
+                          "IgnoreCacheControl": "off",
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            },
+            {
+              "Branches": [
+                {
+                  "Condition": "*",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "FollowOrigin": {
+                          "DefaultCache": "on",
+                          "DefaultCacheStrategy": "on",
+                          "DefaultCacheTime": 0,
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            }
+          ]
+        }
+      ],
+      "Description": []
+    }
+  ]
+}

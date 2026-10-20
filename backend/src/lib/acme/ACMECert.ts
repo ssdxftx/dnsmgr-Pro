@@ -1,0 +1,675 @@
+import { execFileSync } from 'node:child_process';
+import {
+  createHash,
+  createHmac,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPair,
+  sign,
+  X509Certificate,
+  type KeyObject,
+} from 'node:crypto';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ACMEException, ACMEv2 } from './ACMEv2.js';
+
+function b64u(data: Buffer | string): string {
+  return Buffer.from(data).toString('base64url');
+}
+
+function pem2der(pem: string): Buffer {
+  return Buffer.from(pem.replace(/-----BEGIN [^-]+-----/g, '').replace(/-----END [^-]+-----/g, '').replace(/\s+/g, ''), 'base64');
+}
+
+function extractCN(subject: string): string {
+  const m = subject.match(/(?:^|,\s*)CN\s*=\s*([^,]+)/i);
+  return m ? m[1].trim() : '';
+}
+
+// 极简 ASN.1 DER 编码，用于在进程内构造 PKCS#10 CSR（不依赖外部 openssl 命令）
+function derLength(n: number): Buffer {
+  if (n < 0x80) return Buffer.from([n]);
+  const bytes: number[] = [];
+  let x = n;
+  while (x > 0) {
+    bytes.unshift(x & 0xff);
+    x = Math.floor(x / 256);
+  }
+  return Buffer.from([0x80 | bytes.length, ...bytes]);
+}
+function der(tag: number, content: Buffer): Buffer {
+  return Buffer.concat([Buffer.from([tag]), derLength(content.length), content]);
+}
+function derSeq(...items: Buffer[]): Buffer {
+  return der(0x30, Buffer.concat(items));
+}
+function derSet(...items: Buffer[]): Buffer {
+  return der(0x31, Buffer.concat(items));
+}
+function derOid(dotted: string): Buffer {
+  const parts = dotted.split('.').map((p) => Number(p));
+  const out: number[] = [40 * parts[0] + parts[1]];
+  for (const p of parts.slice(2)) {
+    const chunk: number[] = [p & 0x7f];
+    let x = Math.floor(p / 128);
+    while (x > 0) {
+      chunk.unshift((x & 0x7f) | 0x80);
+      x = Math.floor(x / 128);
+    }
+    out.push(...chunk);
+  }
+  return der(0x06, Buffer.from(out));
+}
+
+// 极简 ASN.1 DER 读取，用于进程内解析证书的 Authority Key Identifier，避免起 openssl 子进程
+function derRead(buf: Buffer, pos: number): { tag: number; start: number; end: number; next: number } | null {
+  if (pos + 2 > buf.length) return null;
+  const tag = buf[pos];
+  let p = pos + 1;
+  let len = buf[p++];
+  if (len & 0x80) {
+    const n = len & 0x7f;
+    if (n === 0 || n > 4 || p + n > buf.length) return null;
+    len = 0;
+    for (let i = 0; i < n; i++) len = (len << 8) | buf[p++];
+  }
+  const start = p;
+  const end = p + len;
+  if (end > buf.length) return null;
+  return { tag, start, end, next: end };
+}
+
+function derChildren(buf: Buffer, start: number, end: number): { tag: number; start: number; end: number }[] {
+  const out: { tag: number; start: number; end: number }[] = [];
+  let p = start;
+  while (p < end) {
+    const el = derRead(buf, p);
+    if (!el) break;
+    out.push({ tag: el.tag, start: el.start, end: el.end });
+    p = el.next;
+  }
+  return out;
+}
+
+function derOidToString(buf: Buffer, start: number, end: number): string {
+  if (end <= start) return '';
+  const first = buf[start];
+  const parts = [Math.floor(first / 40), first % 40];
+  let v = 0;
+  for (let i = start + 1; i < end; i++) {
+    v = (v << 7) | (buf[i] & 0x7f);
+    if (!(buf[i] & 0x80)) {
+      parts.push(v);
+      v = 0;
+    }
+  }
+  return parts.join('.');
+}
+
+/** 从证书 DER 中提取 Authority Key Identifier 的 keyIdentifier，返回冒号分隔大写十六进制；解析失败返回 '' */
+function parseAkiKeyId(der: Buffer): string {
+  const cert = derRead(der, 0);
+  if (!cert || cert.tag !== 0x30) return '';
+  const tbs = derChildren(der, cert.start, cert.end)[0];
+  if (!tbs) return '';
+  const extWrap = derChildren(der, tbs.start, tbs.end).find((c) => c.tag === 0xa3);
+  if (!extWrap) return '';
+  const extensions = derChildren(der, extWrap.start, extWrap.end)[0];
+  if (!extensions) return '';
+  for (const ext of derChildren(der, extensions.start, extensions.end)) {
+    const fields = derChildren(der, ext.start, ext.end);
+    if (!fields.length || fields[0].tag !== 0x06) continue;
+    if (derOidToString(der, fields[0].start, fields[0].end) !== '2.5.29.35') continue;
+    const octet = fields.find((f) => f.tag === 0x04);
+    if (!octet) return '';
+    const akiSeq = derChildren(der, octet.start, octet.end)[0];
+    if (!akiSeq) return '';
+    const kid = derChildren(der, akiSeq.start, akiSeq.end).find((f) => f.tag === 0x80);
+    if (!kid) return '';
+    const hex = der.subarray(kid.start, kid.end).toString('hex').toUpperCase();
+    return hex.replace(/(..)(?=.)/g, '$1:');
+  }
+  return '';
+}
+
+export class ACMECert extends ACMEv2 {
+  private alternateChains: string[] = [];
+
+  async register(termsOfServiceAgreed = false, contacts: string[] = []): Promise<string> {
+    return this._register(termsOfServiceAgreed, contacts);
+  }
+
+  async registerEAB(termsOfServiceAgreed: boolean, eabKid: string, eabHmac: string, contacts: string[] = []): Promise<string> {
+    if (!this.resources) await this.readDirectory();
+
+    const protectedHeader = {
+      alg: 'HS256',
+      kid: eabKid,
+      url: this.unproxiedURL(this.resources!['newAccount']),
+    };
+    const payload = this.jwkHeader!.jwk;
+
+    const protected64 = b64u(JSON.stringify(protectedHeader));
+    const payload64 = b64u(JSON.stringify(payload));
+
+    const hmac = createHmac('sha256', Buffer.from(eabHmac, 'base64url')).update(protected64 + '.' + payload64).digest();
+
+    return this._register(termsOfServiceAgreed, contacts, {
+      externalAccountBinding: {
+        protected: protected64,
+        payload: payload64,
+        signature: b64u(hmac),
+      },
+    });
+  }
+
+  private async _register(termsOfServiceAgreed = false, contacts: string[] = [], extra: Record<string, any> = {}): Promise<string> {
+    this.log('Registering account');
+    // 注册/重注册时清空旧 kid，确保采纳 newAccount 响应头 Location 中的最新账户 URL，
+    // 否则上游账户被吊销/迁移导致 kid 失效后无法自愈
+    this.kidHeader!.kid = null;
+    const ret = await this.request('newAccount', {
+      termsOfServiceAgreed: !!termsOfServiceAgreed,
+      contact: this.makeContactsArray(contacts),
+      ...extra,
+    });
+    this.log(ret.code == 201 ? 'Account registered' : 'Account already registered');
+    return this.kidHeader!.kid!;
+  }
+
+  async update(contacts: string[] = []): Promise<any> {
+    this.log('Updating account');
+    const ret = await this.request(await this.getAccountID(), { contact: this.makeContactsArray(contacts) });
+    this.log('Account updated');
+    return ret.body;
+  }
+
+  async getAccount(): Promise<string> {
+    await super.getAccount();
+    return this.kidHeader!.kid!;
+  }
+
+  setAccount(kid: string): void {
+    this.kidHeader!.kid = kid;
+  }
+
+  async deactivateAccount(): Promise<any> {
+    this.log('Deactivating account');
+    const ret = await this.deactivate(await this.getAccountID());
+    this.log('Account deactivated');
+    return ret;
+  }
+
+  async deactivate(url: string): Promise<any> {
+    this.log('Deactivating resource: ' + url);
+    const ret = await this.request(url, { status: 'deactivated' });
+    this.log('Resource deactivated');
+    return ret.body;
+  }
+
+  async getTermsURL(): Promise<string> {
+    if (!this.resources) await this.readDirectory();
+    if (!this.resources!.meta?.termsOfService) {
+      throw new Error('Failed to get Terms Of Service URL');
+    }
+    return this.resources!.meta.termsOfService;
+  }
+
+  async getCAAIdentities(): Promise<string[]> {
+    if (!this.resources) await this.readDirectory();
+    if (!this.resources!.meta?.caaIdentities) {
+      throw new Error('Failed to get CAA Identities');
+    }
+    return this.resources!.meta.caaIdentities;
+  }
+
+  async revoke(pem: string): Promise<void> {
+    let cert: X509Certificate;
+    try {
+      cert = new X509Certificate(pem);
+    } catch (e: any) {
+      throw new Error('Could not load certificate: ' + e.message);
+    }
+    this.log('Revoking certificate');
+    await this.request('revokeCert', { certificate: b64u(cert.raw) });
+    this.log('Certificate revoked');
+  }
+
+  async createOrder(domainConfig: Record<string, any>, settings: any = {}): Promise<any> {
+    settings = this.parseSettings(settings);
+    const lowerConfig: Record<string, any> = {};
+    for (const [k, v] of Object.entries(domainConfig)) lowerConfig[k.toLowerCase()] = v;
+    const domains = Object.keys(lowerConfig);
+    let authzDeactivated = false;
+
+    this.log('Creating Order');
+    const ret = await this.request('newOrder', this.makeOrder(domains, settings));
+    const order = ret.body;
+    const orderLocation = ret.headers['location'];
+    this.log('Order created: ' + orderLocation);
+    order.location = orderLocation;
+
+    if (order.status === 'ready' && settings.authz_reuse) {
+      this.log('All authorizations already valid, skipping validation altogether');
+    } else {
+      const authCount = order.authorizations.length;
+      const challenges: any[] = [];
+
+      for (let idx = 0; idx < order.authorizations.length; idx++) {
+        const authUrl = order.authorizations[idx];
+        this.log('Fetching authorization ' + (idx + 1) + ' of ' + authCount);
+        const authRet = await this.request(authUrl, '');
+        const authorization = authRet.body;
+
+        const domain = (authorization.wildcard ? '*.' : '') + authorization.identifier.value;
+
+        if (authorization.status === 'valid') {
+          if (settings.authz_reuse) {
+            this.log('Authorization of ' + domain + ' already valid, skipping validation');
+          } else {
+            this.log('Authorization of ' + domain + ' already valid, deactivating authorization');
+            await this.deactivate(authUrl);
+            authzDeactivated = true;
+          }
+          continue;
+        }
+
+        if (lowerConfig[domain] === undefined) {
+          this.log('Domain ' + domain + ' not found in domain_config');
+          continue;
+        }
+
+        const config = lowerConfig[domain];
+        const type = config.challenge;
+
+        let challengeUrl = '';
+        const challenge = this.parseChallenges(authorization, type, (u: string) => (challengeUrl = u));
+
+        challenges.push({
+          domain,
+          type,
+          auth_url: authUrl,
+          challenge_url: challengeUrl,
+          key: challenge[0],
+          value: challenge[1],
+        });
+      }
+
+      if (authzDeactivated) {
+        this.log('Restarting Order after deactivating already valid authorizations');
+        settings.authz_reuse = true;
+        return this.createOrder(domainConfig, settings);
+      }
+
+      order.challenges = challenges;
+    }
+    return order;
+  }
+
+  async authOrder(order: any): Promise<void> {
+    if (order.status !== 'pending' && order.status !== 'ready' && !order.challenges?.length) {
+      throw new Error('No challenges available');
+    }
+
+    if (order.challenges?.length) {
+      for (const opts of order.challenges) {
+        this.log('Notifying server for validation of ' + opts.domain);
+        await this.request(opts.challenge_url, {});
+
+        this.log('Waiting for server challenge validation');
+        await this.sleep(1000);
+
+        let body: any;
+        if (!(await this.poll('pending', opts.auth_url, (b) => (body = b)))) {
+          this.log('Validation failed: ' + opts.domain);
+          const error = body.challenges[0].error;
+          throw this.createACMEException(error.type, 'Challenge validation failed: ' + error.detail);
+        } else {
+          this.log('Validation successful: ' + opts.domain);
+        }
+      }
+    }
+  }
+
+  async finalizeOrder(domains: string[], order: any, pem: string): Promise<string> {
+    let csr: string;
+    if (this.isPrivateKey(pem)) {
+      this.log('Generating CSR');
+      csr = this.generateCSR(pem, domains);
+    } else {
+      this.log('Using provided CSR');
+      csr = pem.startsWith('file://') ? readFileSync(pem.slice(7), 'utf8') : pem;
+    }
+
+    this.log('Finalizing Order');
+    let ret = await this.request(order.finalize, { csr: b64u(pem2der(csr)) });
+    ret = ret.body;
+
+    if (ret.certificate) {
+      return this.requestCertificate(ret);
+    }
+
+    let polled: any = ret;
+    if (await this.poll('processing', order.location, (b) => (polled = b))) {
+      return this.requestCertificate(polled);
+    }
+
+    throw new Error('Order failed');
+  }
+
+  async finalizeOrders(domains: string[], order: any, pem: string): Promise<Record<string, string>> {
+    const defaultChain = await this.finalizeOrder(domains, order, pem);
+    const out: Record<string, string> = {};
+    out[this.getTopIssuerCN(defaultChain)] = defaultChain;
+    for (const link of this.alternateChains) {
+      const chain = await this.requestCertificateRaw({ certificate: link }, true);
+      out[this.getTopIssuerCN(chain)] = chain;
+    }
+    this.log('Received ' + Object.keys(out).length + ' chain(s): ' + Object.keys(out).join(', '));
+    return out;
+  }
+
+  generateCSR(domainKeyPem: string, domains: string[]): string {
+    // 优先在进程内生成（容器环境常常没有 openssl 二进制）
+    try {
+      return this.buildCSR(domainKeyPem, domains);
+    } catch {
+      return this.generateCSROpenSSL(domainKeyPem, domains);
+    }
+  }
+
+  private buildCSR(domainKeyPem: string, domains: string[]): string {
+    const key = createPrivateKey(domainKeyPem);
+    const keyType = key.asymmetricKeyType;
+    let sigAlg: Buffer;
+    let hash: string;
+    if (keyType === 'rsa') {
+      hash = 'sha512';
+      sigAlg = derSeq(derOid('1.2.840.113549.1.1.13'), der(0x05, Buffer.alloc(0)));
+    } else if (keyType === 'ec') {
+      const curve = String((key.asymmetricKeyDetails as any)?.namedCurve || '');
+      if (curve === 'secp384r1') {
+        hash = 'sha384';
+        sigAlg = derSeq(derOid('1.2.840.10045.4.3.3'));
+      } else if (curve === 'secp521r1') {
+        hash = 'sha512';
+        sigAlg = derSeq(derOid('1.2.840.10045.4.3.4'));
+      } else {
+        hash = 'sha256';
+        sigAlg = derSeq(derOid('1.2.840.10045.4.3.2'));
+      }
+    } else {
+      throw new Error('unsupported key type: ' + keyType);
+    }
+
+    const cn = domains[0] && domains[0].length <= 64 ? domains[0] : '';
+    const subject = cn ? derSeq(derSet(derSeq(derOid('2.5.4.3'), der(0x0c, Buffer.from(cn, 'utf8'))))) : derSeq();
+    const spki = createPublicKey(key).export({ type: 'spki', format: 'der' }) as Buffer;
+
+    // subjectAltName（DNS）
+    const generalNames = derSeq(...domains.map((d) => der(0x82, Buffer.from(d, 'ascii'))));
+    const sanExtension = derSeq(derOid('2.5.29.17'), der(0x04, generalNames));
+    const extensions = derSeq(sanExtension);
+    const extensionRequest = derSeq(derOid('1.2.840.113549.1.9.14'), derSet(extensions));
+    const attributes = der(0xa0, extensionRequest);
+
+    const cri = derSeq(der(0x02, Buffer.from([0])), subject, spki, attributes);
+    const signature = sign(hash, cri, key);
+    const csr = derSeq(cri, sigAlg, der(0x03, Buffer.concat([Buffer.from([0]), signature])));
+    const body = csr.toString('base64').replace(/(.{64})/g, '$1\n').replace(/\n+$/, '');
+    return `-----BEGIN CERTIFICATE REQUEST-----\n${body}\n-----END CERTIFICATE REQUEST-----\n`;
+  }
+
+  private generateCSROpenSSL(domainKeyPem: string, domains: string[]): string {
+    const cn = domains[0] || '';
+    const subj = cn && cn.length <= 64 ? '/CN=' + cn : '/';
+    const san = domains.map((d) => 'DNS:' + d).join(',');
+
+    const dir = mkdtempSync(join(tmpdir(), 'csr_'));
+    const keyFile = join(dir, 'key.pem');
+    try {
+      writeFileSync(keyFile, domainKeyPem, { mode: 0o600 });
+      const args = ['req', '-new', '-key', keyFile, '-sha512', '-subj', subj];
+      if (san) args.push('-addext', 'subjectAltName=' + san);
+      const out = execFileSync('openssl', args, { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+      return out;
+    } catch (e: any) {
+      throw new Error('Could not generate CSR! (' + (e.stderr || e.message) + ')');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  // 异步生成密钥对：走 libuv 线程池，避免 RSA-4096（0.5–3s）同步阻塞整个事件循环
+  private generateKeyPairAsync(type: 'rsa' | 'ec', options: any): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      const cb = (err: Error | null, _publicKey: KeyObject, privateKey: KeyObject) => {
+        if (err) reject(err);
+        else resolve(privateKey.export({ type: 'pkcs8', format: 'pem' }).toString());
+      };
+      (generateKeyPair as any)(type, options, cb);
+    });
+  }
+
+  generateRSAKey(bits = 2048): Promise<string> {
+    return this.generateKeyPairAsync('rsa', { modulusLength: bits });
+  }
+
+  generateECKey(curveName = '384'): Promise<string> {
+    const map: Record<string, string> = { '256': 'prime256v1', '384': 'secp384r1', '521': 'secp521r1' };
+    const curve = map[curveName] || curveName;
+    return this.generateKeyPairAsync('ec', { namedCurve: curveMap(curve) });
+  }
+
+  private isPrivateKey(pem: string): boolean {
+    return pem.includes('PRIVATE KEY');
+  }
+
+  parseCertificate(certPem: string): any {
+    let x: X509Certificate;
+    try {
+      x = new X509Certificate(certPem);
+    } catch (e: any) {
+      throw new Error('Could not parse certificate (' + e.message + ')');
+    }
+    return {
+      subject: { CN: extractCN(x.subject) },
+      issuer: { CN: extractCN(x.issuer) },
+      serialNumberHex: x.serialNumber,
+      validFrom_time_t: new Date(x.validFrom).getTime() / 1000,
+      validTo_time_t: new Date(x.validTo).getTime() / 1000,
+      extensions: {
+        subjectAltName: x.subjectAltName || '',
+        authorityKeyIdentifier: this.getAKI(certPem),
+      },
+    };
+  }
+
+  private getAKI(certPem: string): string {
+    // 优先进程内解析，避免每次解析证书都启动 openssl 子进程阻塞事件循环
+    try {
+      const keyid = parseAkiKeyId(new X509Certificate(certPem).raw);
+      if (keyid) return 'keyid:' + keyid;
+    } catch {
+      // 落入下方 openssl 兜底
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'aki_'));
+    const certFile = join(dir, 'c.pem');
+    try {
+      writeFileSync(certFile, certPem);
+      const out = execFileSync('openssl', ['x509', '-in', certFile, '-noout', '-text'], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+      const m = out.match(/Authority Key Identifier[:\s]*\n\s*(?:keyid:)?([0-9A-Fa-f:]{10,})/);
+      return m ? 'keyid:' + m[1].trim() : '';
+    } catch {
+      return '';
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  getSAN(pem: string): string[] {
+    const ret = this.parseCertificate(pem);
+    if (!ret.extensions.subjectAltName) {
+      throw new Error('No Subject Alternative Name (SAN) found in certificate');
+    }
+    const out: string[] = [];
+    for (const line of ret.extensions.subjectAltName.split(',')) {
+      const parts = line.split(':').map((s: string) => s.trim());
+      if (parts[0] === 'DNS') out.push(parts.slice(1).join(':'));
+    }
+    return out;
+  }
+
+  getRemainingDays(certPem: string): number {
+    const ret = this.parseCertificate(certPem);
+    return (ret.validTo_time_t - Date.now() / 1000) / 86400;
+  }
+
+  getRemainingPercent(certPem: string): number {
+    const ret = this.parseCertificate(certPem);
+    const total = ret.validTo_time_t - ret.validFrom_time_t;
+    const used = Date.now() / 1000 - ret.validFrom_time_t;
+    return (1 - Math.max(0, Math.min(1, used / total))) * 100;
+  }
+
+  async getARI(pem: string): Promise<{ body: any; certId: string | null }> {
+    const id = this.getARICertID(pem);
+    if (!this.resources) await this.readDirectory();
+    if (!this.resources!.renewalInfo) throw new Error('ARI not supported');
+    const ret = await this.httpRequest(this.resources!.renewalInfo + '/' + id);
+    const sw = ret.body.suggestedWindow;
+    if (!sw || !sw.start || !sw.end) throw new Error('ARI suggestedWindow not present');
+    sw.start = this.parseDate(sw.start);
+    sw.end = this.parseDate(sw.end);
+    return { body: ret.body, certId: id };
+  }
+
+  private getARICertID(pem: string): string {
+    const ret = this.parseCertificate(pem);
+    const akiKeyid = ret.extensions.authorityKeyIdentifier || '';
+    const aki = akiKeyid.replace(/^keyid:\s*/i, '').replace(/:/g, '');
+    if (!aki) throw new Error('authorityKeyIdentifier missing');
+    const ser = ret.serialNumberHex;
+    if (!ser) throw new Error('serialNumberHex missing');
+    return b64u(Buffer.from(aki, 'hex')) + '.' + b64u(Buffer.from(ser, 'hex'));
+  }
+
+  private parseDate(str: string): number {
+    const t = Date.parse(str.replace(/(\.\d\d)\d+/, '$1'));
+    if (Number.isNaN(t)) throw new Error('Failed to parse date: ' + str);
+    return t / 1000;
+  }
+
+  private parseSettings(opts: any): any {
+    if (!opts || typeof opts !== 'object') opts = { authz_reuse: !!opts };
+    if (opts.authz_reuse === undefined) opts.authz_reuse = true;
+    const allowed = ['authz_reuse', 'notAfter', 'notBefore', 'replaces'];
+    for (const k of Object.keys(opts)) {
+      if (!allowed.includes(k)) {
+        throw new Error('getCertificateChain(s): Invalid option "' + k + '"');
+      }
+    }
+    return opts;
+  }
+
+  private makeOrder(domains: string[], opts: any): any {
+    const order: any = {
+      identifiers: domains.map((domain) => ({ type: 'dns', value: domain })),
+    };
+    if (opts.notAfter) order.notAfter = typeof opts.notAfter === 'string' ? opts.notAfter : new Date(opts.notAfter * 1000).toISOString();
+    if (opts.notBefore) order.notBefore = typeof opts.notBefore === 'string' ? opts.notBefore : new Date(opts.notBefore * 1000).toISOString();
+    if (opts.replaces) {
+      order.replaces = opts.replaces;
+      this.log('Replacing Certificate: ' + opts.replaces);
+    }
+    return order;
+  }
+
+  private parseChallenges(authorization: any, type: string, setUrl: (u: string) => void): [string | null, string] {
+    for (const challenge of authorization.challenges) {
+      if (challenge.type !== type) continue;
+      setUrl(challenge.url);
+
+      switch (challenge.type) {
+        case 'dns-01':
+          return ['_acme-challenge.' + authorization.identifier.value, b64u(createHash('sha256').update(this.keyAuthorization(challenge.token)).digest())];
+        case 'http-01':
+          return ['/.well-known/acme-challenge/' + challenge.token, this.keyAuthorization(challenge.token)];
+        case 'tls-alpn-01':
+          return [null, createHash('sha256').update(this.keyAuthorization(challenge.token)).digest('hex')];
+      }
+    }
+    throw new Error(
+      'Challenge type: "' + type + '" not available, for this challenge use ' +
+        authorization.challenges.map((a: any) => '"' + a.type + '"').join(' or '),
+    );
+  }
+
+  private async poll(initial: string, type: string, setRet: (v: any) => void): Promise<boolean> {
+    const maxTries = 10;
+    for (let i = 0; i < maxTries; i++) {
+      const ret = await this.request(type);
+      const body = ret.body;
+      setRet(body);
+      if (body.status !== initial) return body.status === 'valid';
+      const s = Math.pow(2, Math.min(i, 6));
+      if (i !== maxTries - 1) {
+        this.log('Retrying in ' + s + 's');
+        await this.sleep(s * 1000);
+      }
+    }
+    throw new Error('Aborted after ' + maxTries + ' tries');
+  }
+
+  private async requestCertificate(ret: any): Promise<string> {
+    return this.requestCertificateRaw(ret, false);
+  }
+
+  private async requestCertificateRaw(ret: any, alternate: boolean): Promise<string> {
+    this.log('Requesting ' + (alternate ? 'alternate' : 'default') + ' certificate-chain');
+    const res = await this.request(ret.certificate, '');
+    if (res.headers['content-type'] !== 'application/pem-certificate-chain') {
+      throw new Error('Unexpected content-type: ' + res.headers['content-type']);
+    }
+    const chain: string[] = [];
+    for (const cert of this.splitChain(res.body)) {
+      const info = this.parseCertificate(cert);
+      chain.push('[' + info.issuer.CN + ']');
+    }
+    if (!alternate) {
+      this.alternateChains = res.headers['link']?.alternate || [];
+    }
+    this.log((alternate ? 'Alternate' : 'Default') + ' certificate-chain retrieved: ' + [...chain].reverse().join(' -> '));
+    return res.body;
+  }
+
+  private makeContactsArray(contacts: string[] | string): string[] {
+    if (!Array.isArray(contacts)) contacts = contacts ? [contacts] : [];
+    return contacts.map((c) => 'mailto:' + c);
+  }
+
+  private getTopIssuerCN(chain: string): string {
+    const tmp = this.splitChain(chain);
+    const ret = this.parseCertificate(tmp[tmp.length - 1]);
+    return ret.issuer.CN;
+  }
+
+  splitChain(chain: string): string[] {
+    const delim = '-----END CERTIFICATE-----';
+    return chain
+      .split(delim)
+      .filter((item) => item.includes('-----BEGIN CERTIFICATE-----'))
+      .map((item) => item.trim() + '\n' + delim);
+  }
+}
+
+function curveMap(curve: string): string {
+  const m: Record<string, string> = {
+    prime256v1: 'prime256v1',
+    secp256r1: 'prime256v1',
+    secp384r1: 'secp384r1',
+    secp521r1: 'secp521r1',
+  };
+  return m[curve] || curve;
+}

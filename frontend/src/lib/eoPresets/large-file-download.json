@@ -1,0 +1,61 @@
+{
+  "FormatVersion": "1.0",
+  "Rules": [
+    {
+      "RuleName": "大文件下载",
+      "Branches": [
+        {
+          "Condition": "${http.request.host} in []",
+          "Actions": [
+            {
+              "Name": "Cache",
+              "CacheParameters": {
+                "CustomTime": {
+                  "CacheTime": 1,
+                  "IgnoreCacheControl": "off",
+                  "Switch": "on"
+                }
+              }
+            },
+            {
+              "Name": "CacheKey",
+              "CacheKeyParameters": {
+                "FullURLCache": "off",
+                "QueryString": {
+                  "Switch": "off"
+                }
+              }
+            },
+            {
+              "Name": "RangeOriginPull",
+              "RangeOriginPullParameters": {
+                "Switch": "on"
+              }
+            }
+          ],
+          "SubRules": [
+            {
+              "Branches": [
+                {
+                  "Condition": "${http.request.file_extension} in ['php', 'jsp', 'asp', 'aspx']",
+                  "Actions": [
+                    {
+                      "Name": "Cache",
+                      "CacheParameters": {
+                        "NoCache": {
+                          "Switch": "on"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "Description": []
+            }
+          ]
+        }
+      ],
+      "Description": []
+    }
+  ]
+}

@@ -1,0 +1,390 @@
+/* ===========================================================================
+   响应式适配层（在 tokens.css 之后加载）
+   =========================================================================== */
+
+/* 移动端页面留白收紧 */
+@media (max-width: 767px) {
+  .app-page {
+    gap: 12px;
+  }
+  .n-card {
+    border-radius: var(--app-radius);
+  }
+  /* 卡片弹窗不撑出屏幕 */
+  .n-modal.n-card {
+    max-width: calc(100vw - 24px) !important;
+  }
+  /* 弹窗内边距收紧，把宽度让给内容（如规则编辑器） */
+  .n-modal.n-card .n-card__content {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .n-modal.n-card .n-card-header {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  .n-drawer .n-drawer-content {
+    max-width: 86vw;
+  }
+  /* 表格允许横向滚动，避免列被压扁 */
+  .n-data-table .n-data-table-wrapper,
+  .n-data-table .n-data-table-base-table-body {
+    overflow-x: auto;
+  }
+  /* 日期选择面板不超出手机视口 */
+  .n-date-panel {
+    max-width: calc(100vw - 16px);
+    overflow-x: auto;
+  }
+}
+
+/* 旧版工具栏布局兼容：标题换行、按钮横向滚动不换行 */
+@media (max-width: 768px) {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch !important;
+    justify-content: flex-start !important;
+    gap: 8px;
+  }
+  .toolbar .n-space {
+    width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 2px;
+  }
+  .toolbar .n-space .n-button {
+    flex-shrink: 0;
+    padding: 0 9px;
+    font-size: 13px;
+  }
+  .list-empty {
+    min-height: 40vh;
+    justify-content: flex-end;
+    padding-bottom: 32px;
+  }
+}
+
+/* 触屏：可点击元素去除 300ms 延迟并保证最小点击尺寸 */
+@media (hover: none) and (pointer: coarse) {
+  .n-button,
+  .n-menu-item-content,
+  a {
+    touch-action: manipulation;
+  }
+}
+/* ===========================================================================
+   移动端表单：左标签改为上标签，单选组换行（标签 110px 会把控件压到 210px）
+   =========================================================================== */
+@media (max-width: 767px) {
+  /* 左标签改为上标签：只改 grid-template-columns 会被 areas 的隐式第二列挤成竖排，
+     因此整块改用 flex，不受 naive 的 grid 声明影响 */
+  .n-form-item--left-labelled {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    grid-template-columns: none !important;
+  }
+  .n-form-item--left-labelled > .n-form-item-label {
+    width: auto !important;
+    align-self: flex-start !important;
+    justify-content: flex-start !important;
+    text-align: left;
+    white-space: normal !important;
+    padding: 0 0 4px;
+  }
+  .n-form-item--left-labelled > .n-form-item-blank {
+    width: 100% !important;
+  }
+  .n-radio-group {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    white-space: normal !important;
+    gap: 8px;
+  }
+  .n-radio-group .n-radio-group__splitor {
+    display: none;
+  }
+  .n-radio-button {
+    white-space: nowrap;
+  }
+}
+
+/* 移动端触控尺寸与字号：输入 16px 避免 iOS 聚焦放大，按钮不小于 36px */
+@media (max-width: 767px) {
+  .n-input .n-input__input-el,
+  .n-input .n-input__textarea-el,
+  .n-input-number .n-input__input-el,
+  .n-base-selection .n-base-selection-label,
+  .n-base-selection .n-base-selection-placeholder,
+  input,
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+  .m-card__actions {
+    padding: 8px 12px;
+    gap: 4px;
+  }
+  .m-card__actions .n-button {
+    min-height: 36px;
+    padding: 0 10px;
+    font-size: 13px;
+  }
+  .app-toolbar .n-button,
+  .n-dialog .n-button {
+    min-height: 36px;
+  }
+  .n-pagination .n-pagination-item {
+    min-width: 36px;
+    min-height: 36px;
+  }
+  /* 页面级按钮补足触控高度；表格行内 tiny 按钮与步进器单独控制 */
+  .app-content .n-button {
+    min-height: 36px;
+  }
+  .n-data-table .n-button {
+    min-height: 22px;
+  }
+  .n-input-number .n-button {
+    min-width: 32px;
+    min-height: 32px;
+  }
+  .n-radio,
+  .n-checkbox {
+    min-height: 36px;
+    align-items: center;
+  }
+  .n-dialog__close {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* 移动端信息架构：应用栏标题与页面头重复，隐藏只留汉堡与头像 */
+@media (max-width: 767px) {
+  .app-header__titles {
+    display: none;
+  }
+  .n-tabs {
+    position: relative;
+  }
+  .n-tabs::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 12px;
+    height: 44px;
+    pointer-events: none;
+    opacity: 0.6;
+    background: linear-gradient(to right, transparent, var(--app-surface-2));
+  }
+  /* naive 把滚动宽度写在 nav 上，wrapper 却 overflow:hidden，导致 tabs 无法滑动；
+     把横滚交给 .n-tabs-nav，并放开 wrapper */
+  .n-tabs .n-tabs-nav {
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .n-tabs .n-tabs-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .n-tabs .n-tabs-nav-scroll-wrapper {
+    overflow: visible !important;
+  }
+}
+
+/* 刘海与底部手势条安全区 */
+/* MainLayout 的 scoped 样式特异性更高，必须用 !important 才能生效 */
+@supports (padding: env(safe-area-inset-top)) {
+  .app-header {
+    padding-top: env(safe-area-inset-top) !important;
+    height: calc(var(--app-header-h) + env(safe-area-inset-top)) !important;
+  }
+  .app-content {
+    padding-bottom: calc(20px + env(safe-area-inset-bottom)) !important;
+  }
+  .app-drawer .n-drawer-content {
+    padding-bottom: env(safe-area-inset-bottom) !important;
+  }
+}
+@media (max-width: 767px) {
+  .app-content {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* 移动端数字框：步进 32px 后 110px 宽只剩 22px 输入区，端口号会被裁 */
+@media (max-width: 767px) {
+  .port-input {
+    width: 130px !important;
+  }
+}
+
+/* 移动端 KPI 卡瘦身：175px 宽的卡里图标占 30px，隐去换取首屏可见列表 */
+@media (max-width: 767px) {
+  .tele-card {
+    padding: 10px 12px !important;
+  }
+  .tele-card__top {
+    display: none !important;
+  }
+  .n-checkbox {
+    min-width: 32px;
+  }
+  .n-base-selection {
+    min-height: 36px;
+  }
+  .m-card__actions .n-button {
+    min-width: 32px;
+  }
+  .n-tabs .n-tabs-tab {
+    scroll-snap-align: start;
+  }
+  .n-tabs .n-tabs-nav {
+    scroll-snap-type: x proximity;
+  }
+}
+
+/* 移动端隐藏图标后 tone 只剩图标底色，用左缘色条恢复语义（异常/警告/正常） */
+@media (max-width: 767px) {
+  .tele-card--success::after,
+  .tele-card--warning::after,
+  .tele-card--error::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 12px;
+    bottom: 12px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+  }
+  .tele-card--success::after {
+    background: var(--app-success);
+  }
+  .tele-card--warning::after {
+    background: var(--app-warning);
+  }
+  .tele-card--error::after {
+    background: var(--app-error);
+  }
+  /* 3 张 KPI 卡时排满一行，避免第三张独占一行留下半屏空位。
+     新增 KPI 页面必须给 n-grid 加 class="telemetry-row"，否则此规则不生效 */
+  .telemetry-row:has(> div:nth-child(3):last-child) {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+  .m-card__value .n-button {
+    min-width: 32px;
+  }
+}
+
+/* 移动端剩余触控目标：开关轨道不变形，靠外层 padding 扩大热区 */
+@media (max-width: 767px) {
+  .n-switch {
+    min-height: 36px !important;
+  }
+  .n-base-close {
+    width: 36px !important;
+    height: 36px !important;
+  }
+  .perm-add {
+    min-height: 36px;
+  }
+}
+
+/* 数据统计页的 StatCard 是桌面组件：153px 卡里正文只剩 51px，
+   34px 数值叠加 break-word 会把 Mbps 拆成三行，移动端改上下结构 */
+@media (max-width: 767px) {
+  .stat-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    min-height: 0;
+    padding: 12px 14px;
+    overflow: hidden;
+  }
+  .stat-card__icon {
+    display: none !important;
+  }
+  .stat-card__label {
+    font-size: 12px;
+    line-height: 1.35;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .stat-card__value {
+    font-size: clamp(17px, 5.2vw, 20px);
+    line-height: 1.25;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+  .stat-card__value.is-text {
+    font-size: 15px;
+  }
+  .stat-card__suffix {
+    font-size: 11px;
+    margin-left: 3px;
+  }
+  /* 图标隐藏后用左缘色条保留 tone 语义 */
+  .stat-card::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 10px;
+    bottom: 10px;
+    width: 3px;
+    border-radius: 0 2px 2px 0;
+    background: var(--app-primary);
+  }
+  .stat-card--success::after {
+    background: var(--app-success);
+  }
+  .stat-card--warning::after {
+    background: var(--app-warning);
+  }
+  .stat-card--error::after {
+    background: var(--app-error);
+  }
+  .stat-card--info::after {
+    background: #14b8a6;
+  }
+  /* 5 张卡：2 列 + 末卡跨列，避免第 5 张落单留空 */
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .stat-grid > div:nth-child(5) {
+    grid-column: 1 / -1 !important;
+  }
+  /* 统计详情页：底部安全区 + Tab 触控热区 */
+  .detail-page {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom)) !important;
+  }
+  .n-tabs .n-tabs-tab {
+    min-height: 36px;
+  }
+}
+
+/* KPI 卡窄列（桌面 5 列 / 平板 3 列）：按容器宽度压缩字号，避免长数值折行 */
+.stat-card {
+  container-type: inline-size;
+}
+@media (min-width: 768px) {
+  @container (max-width: 250px) {
+    .stat-card__value {
+      font-size: clamp(15px, 7cqw, 18px);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .stat-card__label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+  }
+}

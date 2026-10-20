@@ -1,0 +1,225 @@
+<template>
+  <div class="app-stack">
+    <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('schedule.policyTitle')" :subtitle="t('schedule.formSubtitle')" back="/schedule-tasks" />
+    <n-card :bordered="false">
+      <n-form label-placement="left" label-width="110" style="max-width: 760px">
+        <n-form-item :label="t('schedule.domainSelect')" required>
+          <n-space :size="4" style="width: 100%">
+            <n-input v-model:value="form.rr" :placeholder="t('schedule.hostRecord')" style="width: 200px" />
+            <span>.</span>
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainChange" style="flex: 1" />
+          </n-space>
+        </n-form-item>
+
+        <n-form-item :label="t('schedule.recordSelect')" required>
+          <n-space style="width: 100%">
+            <n-select v-model:value="form.recordid" :options="recordOptions" :placeholder="t('schedule.recordSelect')" filterable style="flex: 1" @update:value="onRecordChange" />
+            <n-button @click="getRecordList" :loading="recordsLoadBusy">{{ t('schedule.fetch') }}</n-button>
+          </n-space>
+        </n-form-item>
+
+        <n-form-item :label="t('schedule.execType')" required>
+          <n-radio-group v-model:value="form.type">
+            <n-radio-button :value="0">{{ t('schedule.once') }}</n-radio-button>
+            <n-radio-button :value="1">{{ t('schedule.cycle') }}</n-radio-button>
+          </n-radio-group>
+        </n-form-item>
+
+        <n-form-item v-show="form.type === 0" :label="t('schedule.timeSet')" required>
+          <input v-model="form.switchtime" type="datetime-local" class="native-input" />
+        </n-form-item>
+
+        <n-form-item v-show="form.type === 1" :label="t('schedule.timeSet')" required>
+          <n-space>
+            <n-select v-model:value="form.cycle" :options="cycleOptions" style="width: 120px" />
+            <n-select v-if="form.cycle === 1" v-model:value="form.switchdate" :options="weekdayOptions" style="width: 120px" />
+            <n-input-number v-else-if="form.cycle === 2" v-model:value="switchdateNum" :min="1" :max="31" style="width: 120px" :placeholder="t('schedule.dayRange')" />
+            <input v-if="form.cycle !== 2" v-model="form.switchtime" type="time" class="native-input" />
+            <input v-else v-model="form.switchtime" type="time" class="native-input" />
+          </n-space>
+        </n-form-item>
+
+        <n-form-item :label="t('schedule.switchSet')" required>
+          <n-radio-group v-model:value="form.switchtype">
+            <n-radio-button :value="0">{{ t('schedule.modify') }}</n-radio-button>
+            <n-radio-button :value="1">{{ t('schedule.enable') }}</n-radio-button>
+            <n-radio-button :value="2">{{ t('schedule.pause') }}</n-radio-button>
+            <n-radio-button v-if="form.type === 0" :value="3">{{ t('schedule.delete') }}</n-radio-button>
+          </n-radio-group>
+        </n-form-item>
+
+        <n-form-item v-show="form.switchtype === 0" :label="t('schedule.recordValue')" required>
+          <n-input v-model:value="form.value" :placeholder="t('schedule.ipOrCname')" />
+        </n-form-item>
+
+        <n-form-item v-show="form.switchtype === 0 && dnstype === 'cloudflare'" :label="t('schedule.lineLabel')">
+          <n-radio-group v-model:value="form.line">
+            <n-radio value="">{{ t('schedule.lineNone') }}</n-radio>
+            <n-radio value="0">{{ t('schedule.lineDnsOnly') }}</n-radio>
+            <n-radio value="1">{{ t('schedule.lineProxyOnly') }}</n-radio>
+          </n-radio-group>
+        </n-form-item>
+
+        <n-form-item :label="t('common.remark')">
+          <n-input v-model:value="form.remark" :placeholder="t('schedule.optional')" />
+        </n-form-item>
+
+        <n-form-item>
+          <n-button type="primary" :loading="saveBusy" @click="submit">{{ t('common.submit') }}</n-button>
+        </n-form-item>
+      </n-form>
+    </n-card>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
+import { useMessage } from 'naive-ui';
+import { api } from '../api';
+import PageHeader from '../components/PageHeader.vue';
+
+const route = useRoute();
+const router = useRouter();
+const message = useMessage();
+const { t } = useI18n();
+
+const isEdit = computed(() => !!route.params.id && route.path.includes('/edit'));
+const editId = computed(() => Number(route.params.id));
+
+const domainOptions = ref<any[]>([]);
+const domainLoadBusy = ref(false);
+const recordOptions = ref<any[]>([]);
+const dnstype = ref<string | null>(null);
+const recordsLoadBusy = ref(false);
+const saveBusy = ref(false);
+const switchdateNum = ref<number | null>(null);
+
+const form = reactive<any>({
+  rr: '',
+  did: null,
+  recordid: null,
+  recordinfo: '',
+  type: 0,
+  cycle: 0,
+  switchtype: 0,
+  switchdate: '',
+  switchtime: '',
+  value: '',
+  line: '',
+  remark: '',
+});
+
+const cycleOptions = computed(() => [
+  { label: t('schedule.daily'), value: 0 },
+  { label: t('schedule.weekly'), value: 1 },
+  { label: t('schedule.monthly'), value: 2 },
+]);
+const weekdayOptions = computed(() => [
+  { label: t('schedule.weekdaySun'), value: '0' },
+  { label: t('schedule.weekdayMon'), value: '1' },
+  { label: t('schedule.weekdayTue'), value: '2' },
+  { label: t('schedule.weekdayWed'), value: '3' },
+  { label: t('schedule.weekdayThu'), value: '4' },
+  { label: t('schedule.weekdayFri'), value: '5' },
+  { label: t('schedule.weekdaySat'), value: '6' },
+]);
+
+async function loadDomains(kw = '') {
+  domainLoadBusy.value = true;
+  try {
+    const res = await api<any>('GET', '/schedule/domains', kw ? { kw } : undefined);
+    if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id, type: d.type }));
+  } finally {
+    domainLoadBusy.value = false;
+  }
+}
+
+function onDomainChange() {
+  const d = domainOptions.value.find((x) => x.value === form.did);
+  dnstype.value = d ? d.type : null;
+}
+
+async function getRecordList() {
+  if (!form.did) return message.warning(t('schedule.selectDomainFirst'));
+  if (!form.rr) return message.warning(t('schedule.hostRequired'));
+  recordsLoadBusy.value = true;
+  const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
+  recordsLoadBusy.value = false;
+  if (res.code === 0) {
+    const list = res.data.list || [];
+    recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
+    message.success(t('schedule.gotRecords', { count: list.length }));
+    if (form.recordid) {
+      const found = list.find((r: any) => r.RecordId === form.recordid);
+      if (found) fillRecord(found);
+    }
+  } else message.error(res.msg);
+}
+
+function fillRecord(record: any) {
+  form.recordinfo = JSON.stringify({ Value: record.Value, Line: record.Line, TTL: record.TTL });
+}
+
+function onRecordChange() {
+  const opt = recordOptions.value.find((x: any) => x.value === form.recordid);
+  if (opt && opt.record) fillRecord(opt.record);
+}
+
+async function loadTask() {
+  const res = await api<any>('GET', `/schedule/tasks/${editId.value}`);
+  if (res.code === 0) {
+    const t = res.data;
+    form.rr = t.rr;
+    form.did = t.did;
+    form.recordid = t.recordid;
+    form.recordinfo = t.recordinfo || '';
+    form.type = t.type;
+    form.cycle = t.cycle;
+    form.switchtype = t.switchtype;
+    form.switchdate = String(t.switchdate ?? '');
+    form.switchtime = t.switchtime || '';
+    form.value = t.value || '';
+    form.line = t.line || '';
+    form.remark = t.remark || '';
+    if (form.cycle === 2) switchdateNum.value = parseInt(t.switchdate) || null;
+    onDomainChange();
+    let info: any = {};
+    try {
+      info = JSON.parse(t.recordinfo || '{}');
+    } catch {}
+    recordOptions.value = [{ label: info.Value || t.value, value: t.recordid, record: { RecordId: t.recordid, Value: info.Value, Line: info.Line, TTL: info.TTL } }];
+  } else message.error(res.msg);
+}
+
+async function submit() {
+  if (!form.did || !form.rr || !form.recordid) return message.warning(t('schedule.requiredEmpty'));
+  const body: any = { ...form };
+  if (form.type === 1 && form.cycle === 2) body.switchdate = String(switchdateNum.value ?? 1);
+  saveBusy.value = true;
+  const res = isEdit.value ? await api('PUT', `/schedule/tasks/${editId.value}`, body) : await api('POST', '/schedule/tasks', body);
+  saveBusy.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    router.push('/schedule-tasks');
+  } else message.error(res.msg);
+}
+
+onMounted(async () => {
+  // 域名选项与任务详情相互独立，并行拉取
+  await Promise.all([loadDomains(), isEdit.value ? loadTask() : Promise.resolve()]);
+});
+</script>
+
+<style scoped>
+.native-input {
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  font-size: 14px;
+  color: var(--app-text);
+  background: var(--app-surface);
+}
+</style>

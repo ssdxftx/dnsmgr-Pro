@@ -1,0 +1,644 @@
+<template>
+  <div class="app-shell">
+    <!-- 桌面端侧边栏 -->
+    <aside v-if="!isMobile" class="app-sidebar" :class="{ 'is-collapsed': collapsed }">
+      <div class="app-sidebar__brand" @click="router.push('/dashboard')">
+        <div class="brand-mark">
+          <n-icon size="20" :component="GlobeOutline" />
+        </div>
+        <span v-if="!collapsed" class="brand-name font-display">聚合 DNS</span>
+      </div>
+
+      <div class="app-sidebar__nav">
+        <n-menu
+          :value="activeKey"
+          :collapsed="collapsed"
+          :collapsed-width="72"
+          :collapsed-icon-size="20"
+          :options="visibleMenu"
+          :expanded-keys="expandedKeys"
+          :indent="18"
+          accordion
+          @update:value="onMenu"
+          @update:expanded-keys="expandedKeys = $event"
+        />
+      </div>
+
+      <div class="app-sidebar__foot">
+        <n-tooltip :disabled="!collapsed" placement="right">
+          <template #trigger>
+            <button class="foot-btn" @click="toggleTheme">
+              <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
+              <span v-if="!collapsed">{{ isDark ? t('common.lightMode') : t('common.darkMode') }}</span>
+            </button>
+          </template>
+          {{ isDark ? t('common.lightMode') : t('common.darkMode') }}
+        </n-tooltip>
+        <button class="foot-btn" @click="collapsed = !collapsed">
+          <n-icon size="18" :component="collapsed ? ChevronForwardOutline : ChevronBackOutline" />
+          <span v-if="!collapsed">{{ t('common.collapse') }}</span>
+        </button>
+        <div v-if="!collapsed" class="foot-version">v{{ version }}</div>
+      </div>
+    </aside>
+
+    <!-- 移动端抽屉导航 -->
+    <n-drawer v-model:show="drawerShow" placement="left" :width="264" class="app-drawer">
+      <n-drawer-content :native-scrollbar="false" body-content-style="padding:0">
+        <div class="drawer-brand">
+          <div class="brand-mark">
+            <n-icon size="20" :component="GlobeOutline" />
+          </div>
+          <span class="brand-name font-display">聚合 DNS</span>
+        </div>
+        <n-menu
+          :value="activeKey"
+          :options="visibleMenu"
+          :expanded-keys="expandedKeys"
+          accordion
+          :indent="18"
+          @update:value="onMenu"
+          @update:expanded-keys="expandedKeys = $event"
+        />
+        <div class="drawer-foot">
+          <button class="foot-btn" @click="toggleTheme">
+            <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
+            <span>{{ isDark ? t('common.lightMode') : t('common.darkMode') }}</span>
+          </button>
+        </div>
+      </n-drawer-content>
+    </n-drawer>
+
+    <!-- 主区域 -->
+    <div class="app-main">
+      <header class="app-header">
+        <div class="app-header__left">
+          <n-button v-if="isMobile" quaternary circle @click="drawerShow = true">
+            <template #icon><n-icon :component="MenuOutline" /></template>
+          </n-button>
+          <div class="app-header__titles">
+            <div class="app-header__title font-display">{{ pageTitle }}</div>
+            <div v-if="!isMobile" class="app-header__crumb">聚合 DNS · {{ groupLabel }}</div>
+          </div>
+        </div>
+        <div class="app-header__right">
+          <span v-if="!isMobile" ref="clockEl" class="hdr-clock font-mono"></span>
+          <span v-if="!isMobile" class="hdr-pulse"><span class="hdr-pulse__dot"></span>{{ t('layout.online') }}</span>
+          <n-button v-if="!isMobile" quaternary circle @click="toggleTheme">
+            <template #icon><n-icon :component="isDark ? SunnyOutline : MoonOutline" /></template>
+          </n-button>
+          <n-dropdown :options="userOptions" trigger="click" @select="onUserSelect">
+            <button class="user-chip">
+              <n-avatar round :size="30" class="user-chip__avatar">{{ avatarText }}</n-avatar>
+              <span v-if="!isMobile" class="user-chip__name">{{ user?.username || t('common.user') }}</span>
+              <n-icon v-if="!isMobile" size="14" :component="ChevronDownOutline" />
+            </button>
+          </n-dropdown>
+        </div>
+      </header>
+
+      <main class="app-content" :native-scrollbar="true">
+        <div class="app-page">
+          <router-view v-slot="{ Component, route: current }">
+            <transition name="fade-slide" mode="out-in">
+              <keep-alive :include="keepAliveViews">
+                <component :is="Component" :key="current.path" />
+              </keep-alive>
+            </transition>
+          </router-view>
+        </div>
+      </main>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
+import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, ArchiveOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
+import { useAuthStore } from '../stores/auth';
+import { clearToken } from '../api';
+import { isAdminUser, requiresAdmin } from '../lib/admin';
+import { useResponsive } from '../composables/useResponsive';
+import { useThemeMode } from '../composables/useThemeMode';
+import { useLocale } from '../composables/useLocale';
+import { useI18n } from 'vue-i18n';
+import type { AppLocale } from '../i18n';
+
+const route = useRoute();
+const router = useRouter();
+const auth = useAuthStore();
+const user = computed(() => auth.user);
+const { isMobile, isTablet } = useResponsive();
+const { isDark, toggle: toggleTheme } = useThemeMode();
+const { t } = useI18n();
+const { setLocale } = useLocale();
+
+const version = __APP_VERSION__;
+const collapsed = ref(false);
+const drawerShow = ref(false);
+// 平板竖屏（768–1023）侧栏收为图标栏，把宽度让给表格
+watch(
+  isTablet,
+  (v) => {
+    if (v) collapsed.value = true;
+  },
+  { immediate: true },
+);
+// 高频列表页缓存：返回列表零请求、零重渲（组件名由 SFC 文件名推断，带参详情页不缓存）
+const keepAliveViews = ['DomainList', 'CdnDomain', 'UserList', 'CertOrder'];
+
+/* 顶栏实时时钟：直接更新 DOM 文本，避免每秒触发整个布局重渲染 */
+const clockEl = ref<HTMLElement | null>(null);
+let clockTimer: number | undefined;
+function tickClock() {
+  if (!clockEl.value) return;
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  clockEl.value.textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+onMounted(() => {
+  tickClock();
+  clockTimer = window.setInterval(tickClock, 1000);
+});
+onBeforeUnmount(() => {
+  if (clockTimer) window.clearInterval(clockTimer);
+});
+
+const avatarText = computed(() => String(user.value?.username || 'U').slice(0, 1).toUpperCase());
+
+function renderIcon(icon: Component) {
+  return () => h(NIcon, null, { default: () => h(icon) });
+}
+
+const menuOptions = computed<MenuOption[]>(() => [
+  { label: t('nav.dashboard'), key: 'dashboard', icon: renderIcon(SpeedometerOutline) },
+  {
+    label: t('nav.groupDomain'),
+    key: 'group-domain',
+    icon: renderIcon(ServerOutline),
+    children: [
+      { label: t('nav.domains'), key: 'domains', icon: renderIcon(ServerOutline) },
+      { label: t('nav.dnsAccounts'), key: 'dns-accounts', icon: renderIcon(LinkOutline) },
+      { label: t('nav.expireNotice'), key: 'expire-notice', icon: renderIcon(TimeOutline) },
+      { label: t('nav.dnsCheck'), key: 'dns-check', icon: renderIcon(ShieldCheckmarkOutline) },
+    ],
+  },
+  {
+    label: t('nav.groupCdn'),
+    key: 'group-cdn',
+    icon: renderIcon(CloudOutline),
+    children: [
+      { label: t('nav.cdnAccounts'), key: 'cdn-accounts', icon: renderIcon(CloudOutline) },
+      { label: t('nav.cdnDomains'), key: 'cdn-domains', icon: renderIcon(GlobeOutline) },
+      { label: t('nav.cdnZones'), key: 'cdn-zones', icon: renderIcon(FolderOutline) },
+      { label: t('nav.cacheRefresh'), key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
+      { label: t('nav.preheatTasks'), key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
+      { label: t('nav.statistics'), key: 'statistics', icon: renderIcon(BarChartOutline) },
+    ],
+  },
+  {
+    label: t('nav.groupDm'),
+    key: 'group-dm',
+    icon: renderIcon(PulseOutline),
+    children: [
+      { label: t('nav.dmOverview'), key: 'dm-overview', icon: renderIcon(PulseOutline) },
+      { label: t('nav.dmTasks'), key: 'dm-tasks', icon: renderIcon(SwapHorizontalOutline) },
+      { label: t('nav.scheduleTasks'), key: 'schedule-tasks', icon: renderIcon(TimeOutline) },
+    ],
+  },
+  {
+    label: t('nav.groupOptimize'),
+    key: 'group-optimize',
+    icon: renderIcon(FlashOutline),
+    children: [
+      { label: t('nav.optimizeSettings'), key: 'optimize-settings', icon: renderIcon(SettingsOutline) },
+      { label: t('nav.optimizeTasks'), key: 'optimize-tasks', icon: renderIcon(FlashOutline) },
+    ],
+  },
+  {
+    label: t('nav.groupCert'),
+    key: 'group-cert',
+    icon: renderIcon(ShieldCheckmarkOutline),
+    children: [
+      { label: t('nav.certAccounts'), key: 'cert-accounts', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.certCname'), key: 'cert-cname', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.certOrders'), key: 'cert-orders', icon: renderIcon(ShieldCheckmarkOutline) },
+      { label: t('nav.deployAccounts'), key: 'deploy-accounts', icon: renderIcon(RocketOutline) },
+      { label: t('nav.deployTasks'), key: 'deploy-tasks', icon: renderIcon(RocketOutline) },
+      { label: t('nav.certSettings'), key: 'cert-settings', icon: renderIcon(TimeOutline) },
+    ],
+  },
+  {
+    label: t('nav.groupSystem'),
+    key: 'group-system',
+    icon: renderIcon(SettingsOutline),
+    children: [
+      { label: t('nav.systemSettings'), key: 'system-settings', icon: renderIcon(SettingsOutline) },
+      { label: t('nav.users'), key: 'users', icon: renderIcon(PeopleOutline) },
+      { label: t('nav.backup'), key: 'backup', icon: renderIcon(ArchiveOutline) },
+      { label: t('nav.logs'), key: 'logs', icon: renderIcon(DocumentTextOutline) },
+      { label: t('nav.about'), key: 'about', icon: renderIcon(InformationCircleOutline) },
+    ],
+  },
+]);
+
+const visibleMenu = computed<MenuOption[]>(() => {
+  const admin = isAdminUser(user.value);
+  const walk = (opts: MenuOption[]): MenuOption[] => {
+    const out: MenuOption[] = [];
+    for (const o of opts) {
+      const children = (o as any).children as MenuOption[] | undefined;
+      if (children && children.length) {
+        const kept = walk(children);
+        if (kept.length) out.push({ ...o, children: kept } as MenuOption);
+      } else if (admin || !requiresAdmin('/' + String(o.key)) || (String(o.key) === 'statistics' && Number(user.value?.stat_cache) === 1)) {
+        out.push(o);
+      }
+    }
+    return out;
+  };
+  return walk(menuOptions.value);
+});
+
+const activeKey = computed(() => {
+  const matched = [
+    'dashboard', 'domains', 'dns-accounts', 'expire-notice', 'dns-check',
+    'cdn-accounts', 'cdn-domains', 'cdn-zones', 'cf-rules', 'cache-refresh', 'preheat-tasks', 'statistics',
+    'dm-overview', 'dm-tasks', 'schedule-tasks',
+    'optimize-settings', 'optimize-tasks',
+    'cert-accounts', 'cert-orders', 'deploy-accounts', 'deploy-tasks', 'cert-settings',
+    'cert-cname',
+    'backup',
+    'system-settings', 'users', 'logs', 'about',
+  ].find((k) => route.path.startsWith('/' + k));
+  return matched || 'dashboard';
+});
+
+const pageTitle = computed(() => {
+  const key = route.meta.titleKey as string | undefined;
+  return key ? t(key) : t('nav.dashboard');
+});
+
+const activeGroupMap: Record<string, string> = {
+  domains: 'group-domain', 'dns-accounts': 'group-domain', 'expireNotice': 'group-domain', 'expire-notice': 'group-domain', 'dns-check': 'group-domain',
+  'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
+  'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
+  'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
+  'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert', 'cert-cname': 'group-cert',
+  'system-settings': 'group-system', users: 'group-system', logs: 'group-system', backup: 'group-system', about: 'group-system',
+};
+
+const groupLabels = computed<Record<string, string>>(() => ({
+  dashboard: t('nav.dashboard'),
+  'group-domain': t('nav.groupDomain'),
+  'group-cdn': t('nav.groupCdn'),
+  'group-dm': t('nav.groupDm'),
+  'group-optimize': t('nav.groupOptimize'),
+  'group-cert': t('nav.groupCert'),
+  'group-system': t('nav.groupSystem'),
+}));
+
+const groupLabel = computed(() => groupLabels.value[activeGroupMap[activeKey.value] || 'dashboard'] || t('layout.console'));
+
+const expandedKeys = ref<string[]>([]);
+
+watch(
+  activeKey,
+  (key) => {
+    const group = activeGroupMap[key];
+    expandedKeys.value = group ? [group] : [];
+  },
+  { immediate: true },
+);
+
+const userOptions = computed(() => [
+  { label: t('common.preferences'), key: 'preferences' },
+  { label: t('common.security'), key: 'totp' },
+  {
+    label: t('common.language'),
+    key: 'language',
+    children: [
+      { label: t('common.chinese'), key: 'lang:zh-CN' },
+      { label: t('common.english'), key: 'lang:en-US' },
+    ],
+  },
+  { label: t('common.logout'), key: 'logout' },
+]);
+
+function onMenu(key: string) {
+  drawerShow.value = false;
+  router.push('/' + key);
+}
+function onUserSelect(key: string) {
+  if (key.startsWith('lang:')) {
+    setLocale(key.slice(5) as AppLocale);
+  } else if (key === 'preferences') {
+    router.push('/preferences');
+  } else if (key === 'totp') {
+    router.push('/totp');
+  } else if (key === 'logout') {
+    clearToken();
+    auth.logout();
+    router.push('/login');
+  }
+}
+</script>
+
+<style scoped>
+.app-shell {
+  display: flex;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--app-bg);
+}
+
+/* ---------- 入场动画 ---------- */
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-18px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-down {
+  from { opacity: 0; transform: translateY(-12px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ping {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- 侧边栏（玻璃拟态） ---------- */
+.app-sidebar {
+  display: flex;
+  flex-direction: column;
+  width: var(--app-sidebar-w);
+  flex-shrink: 0;
+  /* 侧栏为常驻元素：用半透明近似替代实时 backdrop-filter，避免滚动时反复模糊重采样 */
+  background: color-mix(in srgb, var(--app-surface) 92%, transparent);
+  border-right: 1px solid var(--app-border);
+  transition: width 0.22s var(--app-ease);
+  animation: slide-in-left 0.5s var(--app-ease) both;
+}
+.app-sidebar.is-collapsed {
+  width: 72px;
+}
+.app-sidebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--app-header-h);
+  padding: 0 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.app-sidebar.is-collapsed .app-sidebar__brand {
+  justify-content: center;
+  padding: 0;
+}
+.brand-mark {
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: #04140f;
+  flex-shrink: 0;
+  background: linear-gradient(135deg, #2ee6b6, #0a7a5c);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--app-primary) 42%, transparent);
+}
+.brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: conic-gradient(from 0deg, transparent 0 70%, rgba(255, 255, 255, 0.55) 85%, transparent 100%);
+  animation: spin 3.4s linear infinite;
+}
+.brand-name {
+  font-size: 16px;
+  font-weight: 700;
+  white-space: nowrap;
+  color: var(--app-text);
+}
+.app-sidebar__nav {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 10px;
+}
+.app-sidebar.is-collapsed .app-sidebar__nav {
+  padding: 6px;
+}
+/* 激活菜单：左侧信号条 + 光晕 */
+:deep(.n-menu-item-content) {
+  transition: background 0.18s var(--app-ease), color 0.18s var(--app-ease);
+}
+:deep(.n-menu-item-content--selected) {
+  position: relative;
+}
+:deep(.n-menu-item-content--selected)::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 20%;
+  bottom: 20%;
+  width: 3px;
+  border-radius: 99px;
+  background: var(--app-primary);
+  box-shadow: 0 0 12px var(--app-primary);
+}
+.app-sidebar__foot {
+  flex-shrink: 0;
+  padding: 10px;
+  border-top: 1px solid var(--app-divider);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.foot-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 38px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--app-text-2);
+  font-size: 13.5px;
+  cursor: pointer;
+  transition: background 0.18s var(--app-ease), color 0.18s var(--app-ease);
+}
+.foot-btn:hover {
+  background: var(--app-bg-soft);
+  color: var(--app-text);
+}
+.app-sidebar.is-collapsed .foot-btn {
+  justify-content: center;
+  padding: 0;
+}
+.foot-version {
+  padding: 4px 12px 0;
+  font-size: 12px;
+  color: var(--app-text-3);
+}
+
+/* ---------- 主区域 ---------- */
+.app-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: var(--app-header-h);
+  padding: 0 20px;
+  flex-shrink: 0;
+  /* 顶栏常驻：半透明近似替代实时 backdrop-filter */
+  background: color-mix(in srgb, var(--app-surface) 92%, transparent);
+  border-bottom: 1px solid var(--app-border);
+  animation: fade-down 0.5s 0.08s var(--app-ease) both;
+}
+.app-header__left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.app-header__titles {
+  min-width: 0;
+}
+.app-header__title {
+  font-size: 17px;
+  font-weight: 650;
+  color: var(--app-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-header__crumb {
+  font-size: 12px;
+  color: var(--app-text-3);
+  margin-top: 1px;
+}
+.app-header__right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+/* 顶栏遥测：实时时钟 + 在线脉冲 */
+.hdr-clock {
+  font-size: 13px;
+  color: var(--app-text-2);
+  letter-spacing: 0.05em;
+}
+.hdr-pulse {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 11px;
+  border: 1px solid var(--app-border);
+  border-radius: 99px;
+  background: var(--app-surface-2);
+  font-size: 12px;
+  color: var(--app-text-2);
+  white-space: nowrap;
+}
+.hdr-pulse__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--app-success);
+  position: relative;
+}
+.hdr-pulse__dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--app-success);
+  animation: ping 1.8s var(--app-ease) infinite;
+}
+.user-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 8px 0 4px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--app-text-2);
+  cursor: pointer;
+  transition: background 0.18s var(--app-ease);
+}
+.user-chip:hover {
+  background: var(--app-bg-soft);
+}
+.user-chip__avatar {
+  background: linear-gradient(135deg, #2ee6b6, #0a7a5c);
+  color: #04140f;
+  font-weight: 700;
+}
+.user-chip__name {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--app-text);
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 20px;
+}
+
+/* ---------- 抽屉 ---------- */
+.app-drawer .drawer-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 18px;
+}
+.drawer-foot {
+  padding: 10px;
+  border-top: 1px solid var(--app-divider);
+  margin-top: 8px;
+}
+
+@media (max-width: 767px) {
+  .app-header {
+    padding: 0 12px;
+  }
+  .app-content {
+    padding: 12px;
+  }
+}
+
+/* 降级动效 */
+@media (prefers-reduced-motion: reduce) {
+  .app-sidebar,
+  .app-header {
+    animation: none;
+  }
+  .brand-mark::after,
+  .hdr-pulse__dot::after {
+    animation: none;
+  }
+}
+</style>

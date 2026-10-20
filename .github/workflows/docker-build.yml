@@ -1,0 +1,177 @@
+name: Build and Push Docker Image
+
+# 触发策略：
+#   1) 推送到 main/master —— 自动比对「关于页版本号」（package.json 的 version）
+#      与仓库已有的 vX.Y.Z 标签：仅当版本号发生变更时才构建并推送镜像，
+#      标签与版本号一致；版本号未变则整条流水线跳过，不浪费构建资源。
+#   2) 推送 vX.Y.Z 标签 —— 立即构建，并校验标签与项目版本号一致。
+#   3) 手动触发 —— 可指定平台强制构建。
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: '构建平台（默认仅 amd64；需要 arm64 时选择多架构）'
+        type: choice
+        default: linux/amd64
+        options:
+          - linux/amd64
+          - linux/amd64,linux/arm64
+
+env:
+  IMAGE_NAME: dnsmgr-pro
+  # 标签发布固定只构建 amd64，避免 arm64 QEMU 模拟导致的长时间构建
+  RELEASE_PLATFORMS: linux/amd64
+
+# 同一 ref 只保留最新一次构建，避免排队堆积
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # 需要完整历史与标签，用于比对「版本号是否发生变化」
+          fetch-depth: 0
+
+      # 解析项目版本号（= 关于页展示的版本号，来自 frontend/backend 的 package.json）
+      - name: Resolve project version
+        id: version
+        run: |
+          PKG_VERSION="$(node -p "require('./backend/package.json').version")"
+          FE_VERSION="$(node -p "require('./frontend/package.json').version")"
+          if [[ "${PKG_VERSION}" != "${FE_VERSION}" ]]; then
+            echo "::error::前后端版本号不一致（backend=${PKG_VERSION}, frontend=${FE_VERSION}），请使用 scripts/release.mjs 统一发布"
+            exit 1
+          fi
+          echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "项目版本号：${PKG_VERSION}"
+
+      # 判定本次是否需要构建：核心是「关于页版本号相比上一次提交是否发生变化」
+      # 判定依据为提交历史（上一提交的 package.json 版本号），不依赖标签到达顺序，
+      # 因此 release.mjs 同时推送分支与标签时，两条流水线的判定结果稳定一致。
+      - name: Decide whether to build
+        id: gate
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # 标签推送：直接构建，并校验标签与版本号一致
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_VERSION="${GITHUB_REF_NAME#v}"
+            if [[ "${TAG_VERSION}" != "${VERSION}" ]]; then
+              echo "::error::标签 ${GITHUB_REF_NAME} 与项目版本号 ${VERSION} 不一致，请使用 scripts/release.mjs 发布"
+              exit 1
+            fi
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "原因：推送了发布标签 ${GITHUB_REF_NAME}，构建正式镜像"
+            exit 0
+          fi
+
+          # 手动触发：直接构建
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "原因：手动触发，强制构建"
+            exit 0
+          fi
+
+          # 分支推送：比对本次提交与上一提交的版本号，仅当版本号发生变化时才构建
+          PREV_VERSION=""
+          if git rev-parse -q --verify HEAD~1 >/dev/null; then
+            PREV_VERSION="$(git show HEAD~1:backend/package.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).version||'')}catch{console.log('')}})")"
+          fi
+
+          if [[ "${PREV_VERSION}" == "${VERSION}" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "原因：版本号仍为 ${VERSION}（上一提交为 ${PREV_VERSION:-无}），未发生变化，跳过镜像构建"
+            echo "::notice::关于页版本号未变更（${VERSION}），跳过镜像构建；仅当版本号变更时才构建推送"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+            echo "原因：版本号由 ${PREV_VERSION:-无} 变更为 ${VERSION}，开始构建对应版本镜像"
+          fi
+
+      - name: Resolve build platforms
+        id: platforms
+        if: steps.gate.outputs.build == 'true'
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            echo "platforms=${{ inputs.platforms }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up QEMU
+        if: steps.gate.outputs.build == 'true' && contains(steps.platforms.outputs.platforms, 'arm64')
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        if: steps.gate.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        if: steps.gate.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        if: steps.gate.outputs.build == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # 版本号与关于页一致；同时产出主/次版本与 latest 便于滚动升级
+      - name: Docker metadata
+        id: meta
+        if: steps.gate.outputs.build == 'true'
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+            type=raw,value=${{ github.sha }}
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=${{ env.IMAGE_NAME }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Build and push to Docker Hub & GHCR
+        if: steps.gate.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          platforms: ${{ steps.platforms.outputs.platforms }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 只读缓存，避免 mode=max 缓存导出在并发时拖慢/挂住构建
+          cache-from: type=gha
+          provenance: false
+

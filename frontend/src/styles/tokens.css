@@ -1,0 +1,768 @@
+/* ===========================================================================
+   设计令牌 —— 全站统一的颜色、圆角、阴影、间距与排版基准
+   =========================================================================== */
+:root {
+  /* ---- 表面 ---- */
+  --app-bg: #eef2f8;
+  --app-bg-soft: #e6ecf5;
+  --app-surface: #ffffff;
+  --app-surface-2: #f7fafc;
+  --app-text: #0f1b2d;
+  --app-text-2: #4a5872;
+  --app-text-3: #8593a8;
+  --app-border: #dde5f0;
+  --app-divider: #e8edf5;
+
+  /* ---- 唯一信号强调色：信号青（亮色取深一档保证正文对比度 ≥4.5） ---- */
+  --app-primary: #0a7a5c;
+  --app-primary-hover: #0d9070;
+  --app-primary-weak: #e3f4ee;
+  --app-primary-strong: #086a50;
+  --app-success: #16a34a;
+  --app-success-weak: #e9f9f0;
+  --app-warning: #d97706;
+  --app-warning-weak: #fef5e7;
+  --app-error: #e5484d;
+  --app-error-weak: #fdecec;
+
+  /* ---- 字体 ---- */
+  --app-font-display: 'Chakra Petch', 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
+  --app-font-body: 'Noto Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --app-font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* ---- 圆角 ---- */
+  --app-radius-sm: 8px;
+  --app-radius: 12px;
+  --app-radius-lg: 16px;
+  --app-radius-xl: 20px;
+
+  /* ---- 阴影 ---- */
+  --app-shadow-sm: 0 1px 2px rgba(20, 35, 60, 0.06);
+  --app-shadow: 0 6px 20px rgba(20, 35, 60, 0.10);
+  --app-shadow-lg: 0 18px 48px rgba(20, 35, 60, 0.14);
+
+  /* ---- 玻璃与光晕 ---- */
+  --app-glass: rgba(255, 255, 255, 0.72);
+  --app-glow: 0 0 0 1px rgba(10, 122, 92, 0.30), 0 12px 40px rgba(10, 122, 92, 0.14);
+
+  /* ---- 布局与动效 ---- */
+  --app-header-h: 60px;
+  --app-sidebar-w: 240px;
+  --app-page-gap: 16px;
+  --app-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --app-dur-fast: 160ms;
+  --app-dur-base: 320ms;
+  --app-dur-slow: 640ms;
+}
+
+[data-theme='dark'] {
+  --app-bg: #0a0e16;
+  --app-bg-soft: #0d1320;
+  --app-surface: #111927;
+  --app-surface-2: #161f30;
+  --app-text: #e8edf5;
+  --app-text-2: #9aa7bd;
+  --app-text-3: #5e6b82;
+  --app-border: #24314e;
+  --app-divider: #1b2538;
+
+  --app-primary: #2ee6b6;
+  --app-primary-hover: #5deecb;
+  --app-primary-weak: #123128;
+  --app-primary-strong: #17c39a;
+  --app-success: #34d399;
+  --app-success-weak: #12261d;
+  --app-warning: #fbbf24;
+  --app-warning-weak: #2a2113;
+  --app-error: #fb7185;
+  --app-error-weak: #2a1517;
+  --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --app-shadow: 0 8px 26px rgba(0, 0, 0, 0.42);
+  --app-shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.55);
+
+  --app-glass: rgba(17, 25, 39, 0.72);
+  --app-glow: 0 0 0 1px rgba(46, 230, 182, 0.42), 0 12px 40px rgba(46, 230, 182, 0.18);
+}
+
+/* ===========================================================================
+   基础
+   =========================================================================== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  min-height: 100dvh;
+}
+
+body {
+  background: var(--app-bg);
+  color: var(--app-text);
+  font-family: var(--app-font-body);
+  font-size: 14px;
+  transition: background var(--app-dur-base) var(--app-ease), color var(--app-dur-base) var(--app-ease);
+}
+
+a {
+  color: var(--app-primary);
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--app-primary) 24%, transparent);
+}
+
+/* 滚动条 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--app-text-3) 45%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--app-text-3) 38%, transparent);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--app-text-3) 62%, transparent);
+  background-clip: padding-box;
+}
+
+/* 数字使用等宽字形，避免列表跳动 */
+.tnum,
+.n-statistic-value,
+.n-data-table td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ===========================================================================
+   页面容器与工具类
+   =========================================================================== */
+.app-page {
+  width: 100%;
+  max-width: 1480px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-page-gap);
+}
+
+.app-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-page-gap);
+}
+
+.app-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-sm);
+}
+
+.app-muted {
+  color: var(--app-text-3);
+}
+
+.app-mono {
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.app-hide-mobile {
+  display: initial;
+}
+@media (max-width: 767px) {
+  .app-hide-mobile {
+    display: none !important;
+  }
+}
+
+/* 让 Naive 卡片默认更柔和、无边线硬感 */
+.n-card {
+  transition: box-shadow 0.2s var(--app-ease), transform 0.2s var(--app-ease);
+}
+.n-card.n-card--bordered {
+  border-color: var(--app-divider);
+}
+.n-card:hover {
+  box-shadow: var(--app-shadow-sm);
+}
+
+/* ===========================================================================
+   统计卡片
+   =========================================================================== */
+.stat-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 100%;
+  min-height: 132px;
+  padding: 18px 20px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  box-shadow: var(--app-shadow-sm);
+  transition: transform 0.2s var(--app-ease), box-shadow 0.2s var(--app-ease);
+}
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--app-shadow);
+}
+.stat-card__icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  flex-shrink: 0;
+  color: #fff;
+}
+.stat-card__icon--primary {
+  background: linear-gradient(135deg, #0d9070, #086a50);
+}
+.stat-card__icon--success {
+  background: linear-gradient(135deg, #34c778, #14833f);
+}
+.stat-card__icon--warning {
+  background: linear-gradient(135deg, #f7b23b, #d97706);
+}
+.stat-card__icon--error {
+  background: linear-gradient(135deg, #f0686c, #c0272c);
+}
+.stat-card__icon--info {
+  background: linear-gradient(135deg, #14b8a6, #0d9488);
+}
+.stat-card__body {
+  min-width: 0;
+}
+.stat-card__label {
+  font-size: 13px;
+  color: var(--app-text-3);
+  margin-bottom: 2px;
+}
+.stat-card__value {
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.05;
+  color: var(--app-text);
+  font-variant-numeric: tabular-nums;
+  word-break: break-word;
+}
+.stat-card__value.is-text {
+  font-size: 20px;
+  line-height: 1.35;
+  font-family: inherit;
+  letter-spacing: 0;
+}
+.stat-card__suffix {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--app-text-3);
+  margin-left: 4px;
+}
+
+/* ===========================================================================
+   空状态
+   =========================================================================== */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 56px 20px;
+  text-align: center;
+  color: var(--app-text-3);
+}
+.empty-state__icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 20px;
+  background: var(--app-bg-soft);
+  color: var(--app-text-3);
+}
+.empty-state__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text-2);
+}
+.empty-state__desc {
+  font-size: 13px;
+  max-width: 380px;
+}
+.empty-state--error .empty-state__icon {
+  background: var(--app-error-weak);
+  color: var(--app-error);
+}
+.empty-state--error .empty-state__title {
+  color: var(--app-error);
+}
+.empty-state--compact {
+  padding: 24px 16px;
+  gap: 8px;
+}
+.empty-state--compact .empty-state__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+/* ===========================================================================
+   移动端数据卡片（ResponsiveDataTable 使用）
+   =========================================================================== */
+.m-table-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.m-card {
+  background: var(--app-surface);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+  box-shadow: var(--app-shadow-sm);
+  overflow: hidden;
+}
+.m-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--app-divider);
+  background: var(--app-surface-2);
+}
+.m-card__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--app-text);
+  word-break: break-all;
+}
+.m-card__rows {
+  display: flex;
+  flex-direction: column;
+}
+.m-card__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--app-divider);
+}
+.m-card__row:last-child {
+  border-bottom: none;
+}
+.m-card__label {
+  flex-shrink: 0;
+  width: 92px;
+  font-size: 13px;
+  color: var(--app-text-3);
+}
+.m-card__value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--app-text-2);
+  word-break: break-word;
+}
+.m-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--app-divider);
+  background: var(--app-surface-2);
+}
+
+/* ===========================================================================
+   动效
+   =========================================================================== */
+.fade-slide-enter-active,
+.fade-slide-leave-active {
+  transition: opacity 0.14s var(--app-ease), transform 0.14s var(--app-ease);
+}
+.fade-slide-enter-from {
+  opacity: 0;
+  transform: translateY(8px);
+}
+.fade-slide-leave-to {
+  opacity: 0;
+  transform: translateY(-6px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ===========================================================================
+   Glass NOC 氛围层 / 字体应用 / 入场动效（追加，不改动既有类）
+   =========================================================================== */
+
+/* 让应用内容位于氛围层之上 */
+#app {
+  position: relative;
+  z-index: 1;
+}
+
+/* 渐变网格氛围（固定背景，不随滚动） */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(46rem 32rem at 8% -8%, color-mix(in srgb, var(--app-primary) 14%, transparent), transparent 60%),
+    radial-gradient(40rem 30rem at 102% 4%, rgba(56, 189, 248, 0.10), transparent 58%),
+    radial-gradient(38rem 38rem at 50% 120%, color-mix(in srgb, var(--app-primary) 8%, transparent), transparent 60%);
+}
+
+/* 颗粒噪点（极淡，仅背景氛围，避免影响正文清晰度） */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* 固定全屏 mix-blend-mode 混合层在滚动时需整视口重绘，是低端设备/触屏掉帧的主因；
+   小屏与触屏设备直接隐藏，仅在大屏指针设备保留氛围层 */
+@media (max-width: 1023px), (hover: none) {
+  body::after {
+    display: none;
+  }
+}
+
+/* 展示字体：仅用于标题与大数字；中文自动回退 Noto Sans SC，不污染正文可读性 */
+h1,
+h2,
+h3,
+.font-display {
+  font-family: var(--app-font-display);
+  letter-spacing: -0.01em;
+}
+
+/* 等宽字体：数字与代码，避免列表跳动 */
+.font-mono,
+.app-mono {
+  font-family: var(--app-font-mono);
+}
+
+/* 玻璃面板工具类（可选） */
+.glass-panel {
+  background: var(--app-glass);
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-lg);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* 入场编排：错峰 reveal（配合 JS 加 .is-in；reduced-motion 下直接可见） */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+}
+.reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition: opacity var(--app-dur-base) var(--app-ease), transform var(--app-dur-base) var(--app-ease);
+}
+.reveal.d1 { transition-delay: 80ms; }
+.reveal.d2 { transition-delay: 160ms; }
+.reveal.d3 { transition-delay: 240ms; }
+.reveal.d4 { transition-delay: 320ms; }
+.reveal.d5 { transition-delay: 400ms; }
+/* 遥测统计条容器：与下方主内容卡片拉开间距 */
+.telemetry-row { margin-bottom: 16px; }
+
+/* 设置分区标题（n-divider.section，用于 CertSet 等）信号强化 */
+.n-divider.section .n-divider__title {
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.n-divider.section .n-divider__title::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  margin-right: 8px;
+  vertical-align: -2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--app-primary) 40%, transparent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ===========================================================================
+   全局内容卡片入场 + 数据表行交互（自动覆盖所有页面，无需逐页修改）
+   =========================================================================== */
+@keyframes app-card-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  /* 主内容卡片：路由进入时上浮渐入（嵌套卡片与弹窗不受影响；含网格布局页） */
+  .app-stack > .n-card,
+  .app-page > .n-card,
+  .app-stack .n-grid-item > .n-card,
+  .app-page .n-grid-item > .n-card {
+    animation: app-card-rise 0.5s var(--app-ease) both;
+  }
+}
+
+/* 数据表行过渡与悬停信号条（作用于所有 n-data-table） */
+.n-data-table tbody tr {
+  transition: background 0.18s var(--app-ease);
+}
+.n-data-table tbody tr:hover td:first-child {
+  box-shadow: inset 3px 0 0 var(--app-primary);
+}
+
+/* ===========================================================================
+   主内容卡片玻璃拟态 + 顶部信号线（作用于所有页面的主卡片，不含嵌套/弹窗）
+   =========================================================================== */
+.app-stack > .n-card,
+.app-page > .n-card,
+.app-stack .n-grid-item > .n-card,
+.app-page .n-grid-item > .n-card {
+  /* 用半透明近似替代每卡片实时 backdrop-filter：视觉差异极小，滚动合成开销降一个数量级 */
+  background: color-mix(in srgb, var(--app-surface) 88%, transparent);
+  border: 1px solid var(--app-border);
+  position: relative;
+  transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
+}
+.app-stack > .n-card::before,
+.app-page > .n-card::before,
+.app-stack .n-grid-item > .n-card::before,
+.app-page .n-grid-item > .n-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--app-primary) 60%, transparent), transparent);
+  opacity: 0;
+  transition: opacity 0.25s var(--app-ease);
+  pointer-events: none;
+}
+.app-stack > .n-card:hover,
+.app-page > .n-card:hover,
+.app-stack .n-grid-item > .n-card:hover,
+.app-page .n-grid-item > .n-card:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 30%, var(--app-border));
+  box-shadow: var(--app-shadow);
+}
+.app-stack > .n-card:hover::before,
+.app-page > .n-card:hover::before,
+.app-stack .n-grid-item > .n-card:hover::before,
+.app-page .n-grid-item > .n-card:hover::before {
+  opacity: 1;
+}
+
+/* 数据表表头：遥测等宽 + 大写字距（作用于所有 n-data-table） */
+.n-data-table th {
+  font-family: var(--app-font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 11px;
+}
+
+/* ===========================================================================
+   CDN 站点设置体系（CdnZoneSetting / RuleEditor / CdnZoneGlobalSetting）
+   Tab 面板内的分区与表单，与主卡片玻璃体系保持同一观感层级：
+   玻璃主卡片（app-stack > .n-card）→ 浅色分区面板（.zone-panel）→
+   虚线创建表单条（.zone-form-strip）
+   =========================================================================== */
+
+/* Tab 内分区面板：替代嵌套裸卡片，给出清晰的视觉分组边界 */
+.zone-panel {
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  padding: 16px 18px;
+  transition: border-color 0.2s var(--app-ease);
+}
+.zone-panel + .zone-panel {
+  margin-top: 12px;
+}
+.zone-panel__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.zone-panel__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--app-text);
+}
+.zone-panel__title::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 4px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--app-primary);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--app-primary) 40%, transparent);
+}
+.zone-panel__extra {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 内联创建表单条：与下方列表分层，虚线边框呼应「新建」语义 */
+.zone-form-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--app-bg-soft);
+  border: 1px dashed var(--app-border);
+  border-radius: var(--app-radius);
+}
+.zone-form-strip .zone-form-strip__wide {
+  flex: 1 1 100%;
+}
+
+/* 只读 JSON / 配置视图：遥测等宽排版，替代裸 textarea */
+.code-view {
+  margin: 0;
+  padding: 12px 14px;
+  max-height: 340px;
+  overflow: auto;
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: var(--app-bg-soft);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+  color: var(--app-text-2);
+}
+/* 可编辑 JSON 输入框统一等宽字体（配合 n-input 使用） */
+.mono-input .n-input__textarea-el,
+.mono-input .n-input__input-el,
+.mono-input textarea {
+  font-family: var(--app-font-mono) !important;
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+
+/* 提示文字（此前多处误用不存在的 --app-muted 变量，统一收敛） */
+.hint-text {
+  color: var(--app-text-3);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+/* 概览页顶部状态条：状态徽章 + 站点标识 + 操作集合 */
+.zone-status-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 16px;
+  background: var(--app-surface-2);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+}
+.zone-status-strip__id {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.zone-status-strip__name {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--app-text);
+  word-break: break-all;
+}
+.zone-status-strip__sub {
+  font-family: var(--app-font-mono);
+  font-size: 12px;
+  color: var(--app-text-3);
+  word-break: break-all;
+}
+.zone-status-strip__actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 站点设置页主卡片：Tab 栏贴顶，pane 内容区内边距由面板自理 */
+.zone-card > .n-card__content {
+  padding-top: 4px !important;
+}
+.zone-card .n-tabs-nav {
+  padding: 0 2px;
+}
+.zone-card .n-tab-pane {
+  padding-top: 14px;
+}
