@@ -2036,7 +2036,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       // 各服务商的接入规模：用于「只展示已接入」与卡片副标题（不读取、不解密 config）
       const routeStats = new Map<string, { accounts: number; domains: number }>();
       const acctCountRows: any[] = await query(
-        `SELECT type, COUNT(*) c FROM ${table('cdn_account')} GROUP BY type`,
+        `SELECT type, COUNT(*) c FROM ${table('cdn_account')} WHERE visibility = 'shared' GROUP BY type`,
       );
       for (const r of acctCountRows) {
         routeStats.set(String(r.type), { accounts: Number(r.c), domains: 0 });
@@ -2062,7 +2062,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
           let basics: ProviderCard['basics'] = [];
           let status: ProviderCard['status'] = 'empty';
           if (cacheEnabled) {
-            const accts = await query(`SELECT id FROM ${table('cdn_account')} WHERE type = ?`, [catalog.route]);
+            const accts = await query(`SELECT id FROM ${table('cdn_account')} WHERE type = ? AND visibility = 'shared'`, [catalog.route]);
             const ids = (accts as any[]).map((a) => Number(a.id));
             const cached = ids.length
               ? await loadCachedStatistics(start, end, 'All', ids).catch(() => null)
@@ -2088,7 +2088,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         return { code: 0, data: { dataUntil, providers } };
       }
 
-      const acctWhere: string[] = [];
+      const acctWhere: string[] = ["visibility = 'shared'"];
       const acctParams: any[] = [];
       if (aid) {
         acctWhere.push('id = ?');
@@ -2193,7 +2193,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         if (!cacheEnabled) return { code: -1, msg: '数据统计缓存未开启，暂无法查看统计' };
         if (aid || domainNames.length || q.filters) return { code: -1, msg: '普通用户不支持筛选' };
         if (start.getTime() < Date.now() - STAT_COVER_MS) return { code: 0, data: emptyDetail('该时间范围暂未缓存，请稍后再试') };
-        const accts: any[] = await query(`SELECT id FROM ${table('cdn_account')} WHERE type = ?`, [route]);
+        const accts: any[] = await query(`SELECT id FROM ${table('cdn_account')} WHERE type = ? AND visibility = 'shared'`, [route]);
         const ids = accts.map((a) => Number(a.id));
         const cached = ids.length
           ? await loadCachedStatistics(start, end, 'All', ids).catch(() => null)
@@ -2364,7 +2364,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
         if (!hasCdnStatistics(row.route)) continue;
         if (!accounts[row.aid]) accounts[row.aid] = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [row.aid]);
         const acct = accounts[row.aid];
-        if (!acct) continue;
+        // 私有账户不提供统计（含本人），避免多一条按用户聚合的链路
+        if (!acct || acct.visibility === 'private') continue;
         const groupKey = `${row.route}#${row.aid}`;
         if (!groups[groupKey]) {
           groups[groupKey] = { route: row.route, aid: Number(row.aid), ...readConfigSafe(acct.config), domains: [] };

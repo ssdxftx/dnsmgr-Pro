@@ -46,6 +46,35 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'PUT /api/cdn/accounts/:id': { module: 'account', action: 'account.cdn.update', targetType: 'account' },
   'DELETE /api/cdn/accounts/:id': { module: 'account', action: 'account.cdn.delete', targetType: 'account' },
 
+  // 备份与恢复
+  'POST /api/backup/export': { module: 'backup', action: 'backup.export' },
+  'POST /api/backup/import': { module: 'backup', action: 'backup.import' },
+  'POST /api/backup/restore': { module: 'backup', action: 'backup.restore' },
+  'DELETE /api/backup/jobs/:id': { module: 'backup', action: 'backup.delete', targetType: 'backup' },
+  'POST /api/backup/key': { module: 'backup', action: 'backup.key.rotate' },
+  'POST /api/backup/destinations': { module: 'backup', action: 'backup.destination.create' },
+  'PUT /api/backup/destinations/:id': { module: 'backup', action: 'backup.destination.update' },
+  'DELETE /api/backup/destinations/:id': { module: 'backup', action: 'backup.destination.delete' },
+  'POST /api/backup/destinations/:id/test': { module: 'backup', action: 'backup.destination.test' },
+  'POST /api/backup/schedules': { module: 'backup', action: 'backup.schedule.create' },
+  'PUT /api/backup/schedules/:id': { module: 'backup', action: 'backup.schedule.update' },
+  'DELETE /api/backup/schedules/:id': { module: 'backup', action: 'backup.schedule.delete' },
+  'POST /api/backup/schedules/:id/run': { module: 'backup', action: 'backup.schedule.run' },
+  'POST /api/backup/remote/:destId/pull': { module: 'backup', action: 'backup.remote.pull' },
+
+  // 个人凭证保险库
+  'POST /api/vault/init': { module: 'vault', action: 'vault.init' },
+  'POST /api/vault/unlock': { module: 'vault', action: 'vault.unlock' },
+  'POST /api/vault/lock': { module: 'vault', action: 'vault.lock' },
+  'POST /api/vault/passphrase': { module: 'vault', action: 'vault.passphrase' },
+  'POST /api/vault/upgrade': { module: 'vault', action: 'vault.upgrade' },
+  'POST /api/vault/downgrade': { module: 'vault', action: 'vault.downgrade' },
+  'POST /api/vault/recover': { module: 'vault', action: 'vault.recover' },
+  'POST /api/vault/recovery': { module: 'vault', action: 'vault.recovery' },
+  'POST /api/vault/destroy': { module: 'vault', action: 'vault.destroy' },
+  'POST /api/vault/backup-exclude': { module: 'vault', action: 'vault.backupExclude' },
+  'POST /api/vault/auto-unlock': { module: 'vault', action: 'vault.autoUnlock' },
+
   // 系统
   'POST /api/system/settings': { module: 'system', action: 'system.settings.update' },
   'POST /api/system/stat-cache-clear': { module: 'system', action: 'system.cache.clear' },

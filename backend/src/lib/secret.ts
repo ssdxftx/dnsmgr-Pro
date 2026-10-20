@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { encryptWithDek, isUserEncrypted, U1_PREFIX } from './vault/keys.js';
 
 // 账号凭据（AK/SK、密码、Token 等）加密存储：AES-256-GCM，密钥由 sys_key 派生。
 // 历史明文数据仍可直接解析，读取后下次保存即自动加密，无需迁移脚本。
@@ -35,6 +36,8 @@ export function encryptText(plain: string): string {
 
 export function decryptText(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
+  // 个人凭证保险库密文：绝不能拿 sys_key 去试，否则会被误判为「配置损坏」
+  if (raw.startsWith(U1_PREFIX)) return null;
   if (!raw.startsWith(ENC_PREFIX)) return raw;
   if (!secretKey) return null;
   try {
@@ -133,4 +136,33 @@ export function mergeMaskedConfig(input: any, existing: any): any {
     }
   }
   return next;
+}
+
+
+/** 保险库已锁定：需要先输入口令解锁才能读写私有凭证 */
+export class VaultLockedError extends Error {
+  code = 423;
+  constructor() {
+    super('保险库已锁定，请先解锁');
+  }
+}
+
+export type ConfigState = 'ok' | 'locked' | 'error';
+
+/** 读取账户配置并区分「可解密 / 保险库锁定 / 密文损坏」三种状态 */
+export function readConfigState(raw: any): { config: Record<string, any>; state: ConfigState } {
+  if (raw && typeof raw === 'object') return { config: raw, state: 'ok' };
+  if (isUserEncrypted(raw)) return { config: {}, state: 'locked' };
+  const cfg = decryptConfig(raw);
+  if (cfg) return { config: cfg, state: 'ok' };
+  return { config: {}, state: isEncryptedConfig(raw) ? 'error' : 'ok' };
+}
+
+/** 私有账户写入保险库密文；共享账户继续用 sys_key 加密 */
+export function encryptAccountConfig(rawConfig: any, isPrivate: boolean, dek: Buffer | null): string {
+  if (isPrivate) {
+    if (!dek) throw new VaultLockedError();
+    return encryptWithDek(dek, JSON.stringify(rawConfig ?? {}));
+  }
+  return encryptConfig(rawConfig);
 }

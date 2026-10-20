@@ -66,6 +66,25 @@ export interface InstallResult {
   ok: boolean;
   bound: boolean;
   message: string;
+  /** 安装后一次性导入令牌（10 分钟内有效，绑定数据库名） */
+  installToken?: string;
+}
+
+// 安装后导入备份的一次性令牌：内存保存，绑定 db_name，用完即删
+const installTokens = new Map<string, { dbName: string; exp: number }>();
+
+function issueInstallToken(dbName: string): string {
+  const token = randomBytes(24).toString('hex');
+  installTokens.set(token, { dbName, exp: Date.now() + 10 * 60_000 });
+  return token;
+}
+
+export function consumeInstallToken(token: string, dbName: string): boolean {
+  const hit = installTokens.get(String(token || ''));
+  if (!hit) return false;
+  installTokens.delete(token);
+  if (hit.exp <= Date.now() || hit.dbName !== dbName) return false;
+  return true;
 }
 
 // 执行安装：全新空库则建表+初始数据+创建管理员；检测到已有表（彩虹 DNS 现库）则直接绑定、补齐 sys_key，不破坏现有数据。
@@ -146,6 +165,7 @@ export async function performInstall(cfg: DbConfig, adminUsername: string, admin
     ok: true,
     bound: existed,
     message: existed ? '已绑定现有数据库，可直接用原管理员账号登录' : '安装完成',
+    installToken: issueInstallToken(cfg.db_name),
   };
 }
 

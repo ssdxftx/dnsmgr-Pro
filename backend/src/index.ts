@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import compress from '@fastify/compress';
+import multipart from '@fastify/multipart';
 import cors from '@fastify/cors';
 import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
@@ -45,6 +46,11 @@ import { query, table } from './db.js';
 import { registerAuditHooks } from './lib/audit/hooks.js';
 import { shutdownAudit } from './lib/audit/store.js';
 import auditRoutes from './routes/audit.js';
+import backupRoutes, { runDueBackupSchedules } from './routes/backup.js';
+import vaultRoutes from './routes/vault.js';
+import { cleanTmpFiles } from './lib/backup/export.js';
+import { ensureDataDirs } from './lib/backup/archive.js';
+import { isMaintenance } from './lib/backup/maintenance.js';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[backend] 未捕获的异步异常:', reason?.message || reason);
@@ -112,6 +118,18 @@ await app.register(compress, {
   global: true,
   threshold: 1024,
   encodings: ['br', 'gzip', 'deflate'],
+});
+
+// 备份导入：单文件上限 200MB，流式落盘，避免大文件进内存
+await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024, files: 1 } });
+
+// 在线恢复期间只放行读请求与备份接口，写请求统一 503
+app.addHook('onRequest', async (req: any, reply: any) => {
+  if (!isMaintenance()) return;
+  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
+  const url = String(req.raw?.url || '').split('?')[0];
+  if (url.startsWith('/api/backup')) return;
+  return reply.code(503).send({ code: -1, msg: '系统正在恢复数据，请稍后再试' });
 });
 
 // 保留原始请求体，供 QQ 机器人 Webhook 的 Ed25519 签名校验使用
@@ -262,6 +280,8 @@ if (installed) {
   await app.register(aboutRoutes);
   await app.register(qqbotRoutes);
   await app.register(auditRoutes);
+  await app.register(backupRoutes);
+  await app.register(vaultRoutes);
 }
 
 // 静态资源与 SPA 回退（容器内 serve 前端构建产物；本地未构建则不注册）
@@ -351,6 +371,14 @@ try {
       60 * 1000,
     );
     console.log('[dnsmgr-backend] CDN 数据统计缓存调度器已启动');
+
+    // 备份目录与临时文件清理（每小时）
+    await ensureDataDirs().catch(() => undefined);
+    setInterval(distributed('backuptmp', cleanTmpFiles, '[backup] 临时文件清理异常:'), 60 * 60 * 1000);
+
+    // 备份计划任务：每分钟检查 next_run
+    setInterval(distributed('backup', runDueBackupSchedules, '[backup] 计划备份执行异常:'), 60 * 1000);
+    console.log('[dnsmgr-backend] 备份调度器已启动');
 
     // 审计日志保留策略：每天 03:20 后首次触发，分批删除超期数据
     setInterval(distributed('auditclean', cleanAuditLog, '[audit] 清理异常:'), 10 * 60 * 1000);

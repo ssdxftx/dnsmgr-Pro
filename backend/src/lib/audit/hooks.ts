@@ -75,7 +75,7 @@ function collect(req: any, reply: any): void {
     target_id: ctx.targetId != null ? String(ctx.targetId).slice(0, 64) : '',
     target_name: String(ctx.targetName || '').slice(0, 255),
     summary: String(ctx.summary || defaultSummary(ctx.module || meta.module, ctx.action || meta.action)).slice(0, 500),
-    detail: buildDetail(req, ctx.detail),
+    detail: buildDetail(req, ctx.detail, ctx.scrubBody === true),
     changes: ctx.changes?.length ? JSON.stringify(ctx.changes) : null,
     result: ok ? 1 : 0,
     errmsg,
@@ -88,11 +88,11 @@ function collect(req: any, reply: any): void {
   enqueueAudit(row);
 }
 
-function buildDetail(req: any, extra?: Record<string, any>): string | null {
+function buildDetail(req: any, extra?: Record<string, any>, scrubBody = false): string | null {
   const detail = {
     params: req.params && Object.keys(req.params).length ? maskBody(req.params) : undefined,
     query: req.query && Object.keys(req.query).length ? maskBody(req.query) : undefined,
-    body: maskBody(req.body),
+    body: scrubBody ? { _scrubbed: 'sensitive' } : maskBody(req.body),
     ...(extra ? { extra: maskBody(extra) } : {}),
   };
   const size = Buffer.byteLength(JSON.stringify(detail));
@@ -115,6 +115,8 @@ const MODULE_LABEL: Record<string, string> = {
   optimize: '优选 IP',
   preheat: '预热',
   expire: '到期提醒',
+  backup: '备份',
+  vault: '凭证保险库',
 };
 
 function defaultSummary(module: string, action: string): string {

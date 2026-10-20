@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "check:audit": "tsx scripts/check-audit-coverage.ts"
+    "check:audit": "tsx scripts/check-audit-coverage.ts",
+    "check:backup": "tsx scripts/check-backup.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1153.0",
     "@fastify/compress": "^8.3.1",
     "@fastify/cors": "^11.3.0",
     "@fastify/jwt": "^10.2.2",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/static": "^10.1.5",
     "basic-ftp": "^6.2.1",
     "bcryptjs": "^2.4.3",

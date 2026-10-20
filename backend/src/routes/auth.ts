@@ -1,9 +1,11 @@
+import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { findUserByUsername, verifyPassword, findUserById, DUMMY_PASSWORD_HASH } from '../auth.js';
 import { query, table } from '../db.js';
 import { generateSecret, provisioningUri, verifyTOTP } from '../lib/totp.js';
 import { decryptText, encryptText } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
+import { autoUnlockConvenient } from '../lib/vault/service.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 
@@ -94,8 +96,10 @@ export default async function authRoutes(app: FastifyInstance) {
       });
       return { code: -1, msg: '需要验证动态口令', vcode: 2, data: { pre_token: preToken } };
     }
-    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session' };
+    const jti = randomUUID();
+    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session', jti };
     const token = (app as any).jwt.sign(payload);
+    await autoUnlockConvenient(user.id, jti);
     await query(`UPDATE ${table('user')} SET lasttime = NOW() WHERE id = ?`, [user.id]);
     await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES (?, ?, ?, NOW())`, [
       user.id,
@@ -149,8 +153,10 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!verifyTOTP(totpSecret, code)) return totpFail('bad_code', '动态口令错误', user);
     if (!markTotpUsed(user.id, String(code).trim())) return totpFail('code_reused', '动态口令已被使用，请稍后再试', user);
 
-    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session' };
+    const jti = randomUUID();
+    const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session', jti };
     const token = (app as any).jwt.sign(payload);
+    await autoUnlockConvenient(user.id, jti);
     await query(`UPDATE ${table('user')} SET lasttime = NOW() WHERE id = ?`, [user.id]);
     await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES (?, ?, ?, NOW())`, [
       user.id,

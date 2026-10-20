@@ -1,6 +1,13 @@
+import { unlink } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
-import { beginInstall, endInstall, getInstallState, performInstall, testConnection } from '../installer.js';
-import { getDbConfig } from '../db.js';
+import { beginInstall, consumeInstallToken, endInstall, getInstallState, performInstall, testConnection } from '../installer.js';
+import { getDbConfig, query, queryOne, table } from '../db.js';
+import { loadConfig } from '../config.js';
+import { getSysKey } from '../config.js';
+import { setSecretKey } from '../lib/secret.js';
+import { importArchive } from '../lib/backup/import.js';
+import { keyForArchive } from '../lib/backup/key.js';
+import { fieldValue, saveUpload } from '../lib/backup/upload.js';
 
 export default async function setupRoutes(app: FastifyInstance) {
   // 安装状态（前端据此决定展示安装页还是登录页）
@@ -63,13 +70,60 @@ export default async function setupRoutes(app: FastifyInstance) {
     }
     if (!result.ok) return { code: -1, msg: result.message };
 
-    // 安装完成：保存配置后优雅退出，由容器编排/守护进程重启加载完整业务路由与调度器
+    // 安装完成：保存配置后优雅退出，由容器编排/守护进程重启加载完整业务路由与调度器。
+    // 返回一次性令牌，允许在重启前导入已有备份；令牌 10 分钟未使用则自动重启。
     const message = result.bound
       ? '已绑定现有数据库（彩虹 DNS 数据），应用即将重启，请稍候…'
       : '安装完成，应用即将重启，请稍候…';
-    setTimeout(() => {
-      process.exit(0);
-    }, 500);
-    return { code: 0, msg: message, data: { bound: result.bound } };
+    if (result.installToken) {
+      setTimeout(() => process.exit(0), 10 * 60_000).unref?.();
+    } else {
+      setTimeout(() => process.exit(0), 500);
+    }
+    return {
+      code: 0,
+      msg: message,
+      data: { bound: result.bound, install_token: result.installToken || null },
+    };
+  });
+
+  // 安装向导导入已有备份（仅安装后 10 分钟内、持有一次性令牌时可用）
+  app.post('/api/setup/import', async (req: any, reply: any) => {
+    const cfg = getDbConfig();
+    let tmp = '';
+    try {
+      const up = await saveUpload(req);
+      tmp = up.file;
+      const token = String(fieldValue(up.fields, 'install_token') || '');
+      if (!consumeInstallToken(token, cfg.db_name)) {
+        return { code: -1, msg: '导入令牌无效或已过期，请跳过此步' };
+      }
+      // 安装后 sys_key 才写入数据库，必须刷新缓存并重置进程内密钥，否则导入时写入的密文重启后无法解密
+      await loadConfig(true);
+      setSecretKey(await getSysKey());
+      const pass = fieldValue(up.fields, 'passphrase');
+      const key = await keyForArchive(tmp, pass ? String(pass) : undefined);
+      const tempAdmin: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 ORDER BY id LIMIT 1`);
+      const report = await importArchive(tmp, { key, mode: 'install' });
+
+      if (tempAdmin?.id) {
+        const admins = await query(
+          `SELECT id FROM ${table('user')} WHERE level >= 2 AND id <> ? ORDER BY id`,
+          [tempAdmin.id],
+        );
+        if ((admins as any[]).length) {
+          await query(`DELETE FROM ${table('user')} WHERE id = ?`, [tempAdmin.id]);
+          await query(`UPDATE ${table('user')} SET is_super = 0`);
+          await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = ?`, [(admins as any[])[0].id]);
+        }
+      }
+
+      setTimeout(() => process.exit(0), 800);
+      return { code: 0, msg: '导入完成，应用即将重启', data: report };
+    } catch (e: any) {
+      return reply.send({ code: -1, msg: String(e?.message || e) });
+    } finally {
+      if (tmp) await unlink(tmp).catch(() => undefined);
+    }
   });
 }

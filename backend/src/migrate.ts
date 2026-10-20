@@ -14,6 +14,8 @@ export async function migrate(): Promise<void> {
   // 用户名唯一约束：防止并发注册/建号绕过「先查后插」判重产生重复账号
   await ensureUniqueIndex('user', 'username', 'uniq_username');
 
+  await migrateBackupAndVault();
+
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('reg_code')} (
       id int(11) unsigned NOT NULL AUTO_INCREMENT,
@@ -299,5 +301,98 @@ async function ensureColumn(tableName: string, column: string, definition: strin
   );
   if (rows.length === 0) {
     await query(`ALTER TABLE ${table(tableName)} ADD COLUMN ${column} ${definition}`);
+  }
+}
+
+// 备份与个人凭证保险库：表结构 + 账户归属字段（幂等）
+async function migrateBackupAndVault(): Promise<void> {
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('backup_job')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      kind varchar(16) NOT NULL DEFAULT 'manual',
+      scope varchar(8) NOT NULL DEFAULT 'site',
+      owner_uid int(11) unsigned NOT NULL DEFAULT '0',
+      status varchar(12) NOT NULL DEFAULT 'running',
+      file_name varchar(255) DEFAULT NULL,
+      file_size bigint(20) NOT NULL DEFAULT '0',
+      checksum char(64) DEFAULT NULL,
+      dest varchar(12) NOT NULL DEFAULT 'local',
+      dest_id int(11) unsigned NOT NULL DEFAULT '0',
+      include_logs tinyint(1) NOT NULL DEFAULT '1',
+      error varchar(500) DEFAULT NULL,
+      meta text DEFAULT NULL,
+      created_at datetime DEFAULT NULL,
+      finished_at datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      KEY idx_scope_owner (scope, owner_uid),
+      KEY idx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('backup_destination')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      name varchar(100) NOT NULL,
+      type varchar(10) NOT NULL,
+      config text NOT NULL,
+      enabled tinyint(1) NOT NULL DEFAULT '1',
+      last_test_at datetime DEFAULT NULL,
+      last_test_ok tinyint(1) DEFAULT NULL,
+      last_test_msg varchar(300) DEFAULT NULL,
+      addtime datetime DEFAULT NULL,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('backup_schedule')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      name varchar(100) NOT NULL,
+      scope varchar(8) NOT NULL DEFAULT 'site',
+      freq varchar(10) NOT NULL DEFAULT 'daily',
+      hour tinyint(4) NOT NULL DEFAULT '3',
+      minute tinyint(4) NOT NULL DEFAULT '0',
+      weekday tinyint(4) NOT NULL DEFAULT '1',
+      include_logs tinyint(1) NOT NULL DEFAULT '0',
+      dest_id int(11) unsigned NOT NULL DEFAULT '0',
+      keep_count int(11) NOT NULL DEFAULT '7',
+      keep_days int(11) NOT NULL DEFAULT '30',
+      enabled tinyint(1) NOT NULL DEFAULT '1',
+      next_run datetime DEFAULT NULL,
+      last_run datetime DEFAULT NULL,
+      last_result varchar(300) DEFAULT NULL,
+      addtime datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      KEY idx_next (enabled, next_run)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('user_vault')} (
+      uid int(11) unsigned NOT NULL,
+      mode varchar(12) NOT NULL DEFAULT 'none',
+      kdf varchar(16) NOT NULL DEFAULT 'scrypt',
+      kdf_params varchar(120) NOT NULL DEFAULT '{"N":32768,"r":8,"p":1}',
+      salt varbinary(32) DEFAULT NULL,
+      wrapped_dek varbinary(128) DEFAULT NULL,
+      wrapped_dek_sys varbinary(128) DEFAULT NULL,
+      salt_recovery varbinary(32) DEFAULT NULL,
+      wrapped_dek_recovery varbinary(128) DEFAULT NULL,
+      recovery_hash char(64) DEFAULT NULL,
+      hint varchar(100) DEFAULT NULL,
+      exclude_from_site_backup tinyint(1) NOT NULL DEFAULT '0',
+      fail_count int(11) NOT NULL DEFAULT '0',
+      locked_until datetime DEFAULT NULL,
+      created_at datetime DEFAULT NULL,
+      updated_at datetime DEFAULT NULL,
+      PRIMARY KEY (uid),
+      KEY idx_mode (mode)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  for (const t of ['account', 'cdn_account', 'cert_account']) {
+    await ensureColumn(t, 'owner_uid', "int(11) unsigned NOT NULL DEFAULT '0'");
+    await ensureColumn(t, 'visibility', "varchar(10) NOT NULL DEFAULT 'shared'");
+    await ensureIndex(t, 'idx_owner', '(`owner_uid`, `visibility`)');
   }
 }

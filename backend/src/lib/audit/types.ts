@@ -18,6 +18,8 @@ export interface AuditCtx {
   detail?: Record<string, any>;
   /** true 表示这条请求不记录（如健康检查、内部探测） */
   skip?: boolean;
+  /** 请求体含明文凭证时置 true，只记录 _scrubbed 标记 */
+  scrubBody?: boolean;
 }
 
 export interface AuditRow {
