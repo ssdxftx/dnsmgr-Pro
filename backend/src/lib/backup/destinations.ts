@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -36,7 +37,25 @@ export async function getDestination(id: number): Promise<DestinationRow | null>
 }
 
 function joinUrl(base: string, name: string): string {
-  return base.replace(/\/+$/, '') + '/' + encodeURIComponent(name);
+  return base.trim().replace(/\/+$/, '') + '/' + encodeURIComponent(name);
+}
+
+function urlPath(url: string): string {
+  try {
+    const u = new URL(url);
+    return u.pathname + (u.search ? u.search : '');
+  } catch {
+    return url;
+  }
+}
+
+async function responseSnippet(res: Response): Promise<string> {
+  try {
+    const text = (await res.text()).replace(/\s+/g, ' ').trim();
+    return text ? `：${text.slice(0, 160)}` : '';
+  } catch {
+    return '';
+  }
 }
 
 function basicAuth(user: string, pass: string): string {
@@ -49,15 +68,67 @@ async function webdavFetch(cfg: any, url: string, init: RequestInit = {}): Promi
   return safeFetch(url, { ...init, headers });
 }
 
+interface WebdavDirState {
+  ok: boolean;
+  status: number;
+  detail: string;
+}
+
+// 校验目标地址确实是 WebDAV 目录：仅看 HTTP 200 会把普通网页/反向代理首页误判为可用
+async function webdavDirState(cfg: any, url: string): Promise<WebdavDirState> {
+  const base = url.trim().replace(/\/+$/, '');
+  const res = await webdavFetch(cfg, base || url, { method: 'PROPFIND', headers: { Depth: '0' } });
+  if (res.status !== 200 && res.status !== 207) {
+    return { ok: false, status: res.status, detail: (await responseSnippet(res)) || '目录不存在或无权访问' };
+  }
+  const xml = await res.text();
+  // PROPFIND 的 resourcetype 为空表示这是文件，不能作为上传目录
+  if (!/<(?:[A-Za-z0-9_-]+:)?collection[\s/>]/i.test(xml)) {
+    return { ok: false, status: res.status, detail: '该地址指向文件或不是 WebDAV 目录，请填写目录地址' };
+  }
+  return { ok: true, status: res.status, detail: '' };
+}
+
+async function ensureWebdavDir(cfg: any, url: string): Promise<WebdavDirState> {
+  const state = await webdavDirState(cfg, url);
+  if (state.ok || state.status !== 404) return state;
+  const base = url.trim().replace(/\/+$/, '');
+  const res = await webdavFetch(cfg, base + '/', { method: 'MKCOL' });
+  if (res.status >= 200 && res.status < 300) return { ok: true, status: res.status, detail: '' };
+  // MKCOL 返回 405 通常表示目录已被并发创建，交给后续写入判断
+  if (res.status === 405) return { ok: true, status: res.status, detail: '' };
+  return { ok: false, status: res.status, detail: (await responseSnippet(res)) || '创建目录失败' };
+}
+
+async function webdavPut(cfg: any, url: string, localPath: string): Promise<Response> {
+  const size = (await stat(localPath)).size;
+  return webdavFetch(cfg, url, {
+    method: 'PUT',
+    headers: { 'Content-Length': String(size), 'Content-Type': 'application/octet-stream' },
+    body: Readable.toWeb(createReadStream(localPath)) as any,
+    duplex: 'half',
+  } as any);
+}
+
 export async function testDestination(row: DestinationRow): Promise<{ ok: boolean; message: string }> {
   try {
     if (row.type === 'webdav') {
       const url = String(row.config.url || '');
       if (!url) return { ok: false, message: '请填写 WebDAV 地址' };
-      const res = await webdavFetch(row.config, url, { method: 'PROPFIND', headers: { Depth: '0' } });
-      return res.status === 200 || res.status === 207
-        ? { ok: true, message: '连接成功' }
-        : { ok: false, message: `连接失败（HTTP ${res.status}）` };
+      const dir = await ensureWebdavDir(row.config, url);
+      if (!dir.ok) return { ok: false, message: `连接失败（HTTP ${dir.status}）：${dir.detail}` };
+      // 只做 PROPFIND 无法发现「可读不可写」，用一次真实写入探测
+      const probeUrl = joinUrl(url, `.dnsmgr-write-test-${randomBytes(4).toString('hex')}`);
+      const put = await webdavFetch(row.config, probeUrl, {
+        method: 'PUT',
+        headers: { 'Content-Length': '2', 'Content-Type': 'text/plain' },
+        body: 'ok',
+      });
+      if (put.status >= 300) {
+        return { ok: false, message: `目录可读但无法写入（HTTP ${put.status}）${await responseSnippet(put)}` };
+      }
+      await webdavFetch(row.config, probeUrl, { method: 'DELETE' }).catch(() => undefined);
+      return { ok: true, message: '连接成功（可读写）' };
     }
     const client = s3Client(row.config);
     await client.send(new ListObjectsV2Command({ Bucket: row.config.bucket, MaxKeys: 1 }));
@@ -88,17 +159,23 @@ function s3Key(cfg: any, name: string): string {
 export async function uploadToDestination(destId: number, localPath: string, name: string): Promise<void> {
   const row = await getDestination(destId);
   if (!row) throw new Error('备份目的地不存在');
-  const size = (await stat(localPath)).size;
   if (row.type === 'webdav') {
-    const res = await webdavFetch(row.config, joinUrl(String(row.config.url), name), {
-      method: 'PUT',
-      headers: { 'Content-Length': String(size) },
-      body: Readable.toWeb(createReadStream(localPath)) as any,
-      duplex: 'half',
-    } as any);
-    if (res.status >= 300) throw new Error(`WebDAV 上传失败（HTTP ${res.status}）`);
+    const base = String(row.config.url || '');
+    if (!base) throw new Error('请填写 WebDAV 地址');
+    const fileUrl = joinUrl(base, name);
+    let res = await webdavPut(row.config, fileUrl, localPath);
+    // 目标目录可能尚未创建（或服务端要求目录以 / 结尾），先补建目录再重试一次
+    if (res.status === 404 || res.status === 409) {
+      const dir = await ensureWebdavDir(row.config, base);
+      if (dir.ok) res = await webdavPut(row.config, fileUrl, localPath);
+      else throw new Error(`WebDAV 上传失败（HTTP ${res.status}，路径 ${urlPath(fileUrl)}）：${dir.detail}`);
+    }
+    if (res.status >= 300) {
+      throw new Error(`WebDAV 上传失败（HTTP ${res.status}，路径 ${urlPath(fileUrl)}）${await responseSnippet(res)}`);
+    }
     return;
   }
+  const size = (await stat(localPath)).size;
   const client = s3Client(row.config);
   await client.send(
     new PutObjectCommand({
@@ -116,7 +193,9 @@ export async function listRemote(destId: number): Promise<RemoteItem[]> {
   if (!row) throw new Error('备份目的地不存在');
   if (row.type === 'webdav') {
     const res = await webdavFetch(row.config, String(row.config.url), { method: 'PROPFIND', headers: { Depth: '1' } });
-    if (res.status !== 207 && res.status !== 200) throw new Error(`WebDAV 列表失败（HTTP ${res.status}）`);
+    if (res.status !== 207 && res.status !== 200) {
+      throw new Error(`WebDAV 列表失败（HTTP ${res.status}，路径 ${urlPath(String(row.config.url))}）${await responseSnippet(res)}`);
+    }
     const xml = await res.text();
     const items: RemoteItem[] = [];
     const re = /<(?:d:)?response>([\s\S]*?)<\/(?:d:)?response>/gi;
@@ -148,8 +227,12 @@ export async function downloadRemote(destId: number, name: string, localPath: st
   const row = await getDestination(destId);
   if (!row) throw new Error('备份目的地不存在');
   if (row.type === 'webdav') {
-    const res = await webdavFetch(row.config, joinUrl(String(row.config.url), name), { method: 'GET' });
-    if (!res.ok || !res.body) throw new Error(`WebDAV 下载失败（HTTP ${res.status}）`);
+    const url = joinUrl(String(row.config.url), name);
+    const res = await webdavFetch(row.config, url, { method: 'GET' });
+    if (res.status === 404) throw new Error(`WebDAV 下载失败：远端文件不存在（${urlPath(url)}）`);
+    if (!res.ok || !res.body) {
+      throw new Error(`WebDAV 下载失败（HTTP ${res.status}，路径 ${urlPath(url)}）${await responseSnippet(res)}`);
+    }
     await pipeline(Readable.fromWeb(res.body as any), createWriteStream(localPath));
     return;
   }
