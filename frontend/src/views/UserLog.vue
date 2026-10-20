@@ -172,7 +172,7 @@
       </n-drawer-content>
     </n-drawer>
 
-    <n-drawer v-model:show="showFilters" placement="bottom" height="auto" :style="{ maxHeight: '70vh' }" @update:show="onFilterShow">
+    <n-drawer v-model:show="showFilters" placement="bottom" height="420px" @update:show="onFilterShow">
       <n-drawer-content :title="t('audit.filter')" closable>
         <div class="audit-filter">
           <n-select
@@ -391,14 +391,16 @@ const columns = computed<any[]>(() => [
       h(
         NButton,
         {
-          size: 'tiny',
+          size: isMobile.value ? 'small' : 'tiny',
           quaternary: true,
           type: 'primary',
-          circle: true,
+          circle: !isMobile.value,
           title: t('audit.detailBtn'),
           onClick: () => openDetail(row),
         },
-        { icon: () => h(NIcon, { component: ChevronForwardOutline }) },
+        isMobile.value
+          ? { default: () => t('audit.detailBtn') }
+          : { icon: () => h(NIcon, { component: ChevronForwardOutline }) },
       ),
   },
 ]);
