@@ -58,8 +58,8 @@ async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
 async function canAccessCertOrder(id: any, user: any): Promise<boolean> {
   const row: any = await queryOne(`SELECT aid FROM ${table('cert_order')} WHERE id = ?`, [Number(id)]);
   if (!row) return false;
-  // aid=0 为手工上传证书，沿用全站可见的既有行为
-  if (!Number(row.aid)) return true;
+  // aid=0 为手工上传证书，缺少上传者字段，按站点资产仅管理员可读
+  if (!Number(row.aid)) return checkLevel(user, 2);
   return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
 }
 
@@ -351,9 +351,8 @@ export default async function certRoutes(app: FastifyInstance) {
     // 与账户列表同口径：管理员看共享 + 自己的私有，普通用户只看自己的私有
     const visibleCertAccounts = await listVisibleAccounts('cert_account', req.user);
     const allowedCertAids = visibleCertAccounts.map((a: any) => Number(a.id));
-    where += allowedCertAids.length
-      ? ` AND (A.aid = 0 OR A.aid IN (${allowedCertAids.map(() => '?').join(',')}))`
-      : ' AND A.aid = 0';
+    const certAidCond = allowedCertAids.length ? `A.aid IN (${allowedCertAids.map(() => '?').join(',')})` : '1=0';
+    where += checkLevel(req.user, 2) ? ` AND (A.aid = 0 OR ${certAidCond})` : ` AND ${certAidCond}`;
     params.push(...allowedCertAids);
     if (id) {
       where += ' AND A.id = ?';

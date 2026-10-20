@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv } from 'node:crypto';
+import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -60,6 +60,12 @@ function u32le(n: number): Buffer {
 
 export function keyCheck(key: Buffer): Buffer {
   return createHmac('sha256', key).update('dnsmgr-backup').digest().subarray(0, 16);
+}
+
+/** 归档头签名：覆盖除 sig 外的全部字段，防止 scope/ownerUid 等元数据被篡改 */
+function headerSignature(key: Buffer, header: Record<string, any>): Buffer {
+  const { sig: _sig, ...rest } = header;
+  return createHmac('sha256', key).update(JSON.stringify(rest)).digest();
 }
 
 /** 生成归档文件名：<scope>-<yyyyMMdd-HHmmss>-<rand>.dnsmgrbk */
@@ -125,7 +131,7 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
 
   const checksum = hash.digest('hex');
   const iv = randomBytes(12);
-  const header = {
+  const header: Record<string, any> = {
     ...draft.header,
     formatVersion: FORMAT_VERSION,
     appVersion: APP_VERSION,
@@ -136,6 +142,7 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     checksum,
     ...stats,
   };
+  header.sig = headerSignature(key, header).toString('base64');
   const headerBuf = Buffer.from(JSON.stringify(header), 'utf8');
 
   const fd = await open(outPath, 'w');
@@ -167,6 +174,7 @@ export interface ArchiveHeader {
   cipher?: string;
   iv: string;
   check: string;
+  sig?: string;
   plainSize?: number;
   checksum?: string;
   tables?: Record<string, { rows: number; columns: string[] }>;
@@ -214,6 +222,14 @@ export function verifyArchiveKey(header: ArchiveHeader, key: Buffer): void {
   const got = Buffer.from(String(header.check || ''), 'base64');
   if (got.length !== expect.length || !got.equals(expect)) {
     throw new Error('备份密钥错误');
+  }
+  // 兼容旧归档：无 sig 时只做密钥校验；新归档必须通过头签名校验
+  if (header.sig) {
+    const want = headerSignature(key, header);
+    const gotSig = Buffer.from(String(header.sig), 'base64');
+    if (gotSig.length !== want.length || !timingSafeEqual(gotSig, want)) {
+      throw new Error('归档头校验失败，文件可能被篡改');
+    }
   }
 }
 

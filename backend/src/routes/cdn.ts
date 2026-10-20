@@ -416,9 +416,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
     const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
     const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
-    const rows = (await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params)).filter((r: any) =>
-      allowedAids.has(Number(r.aid)),
-    );
+    const allRows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
+    // 管理员可见全部记录（含他人私有账户），写操作仍由账户可见性守卫返回 404
+    const rows = checkLevel(req.user, 2) ? allRows : allRows.filter((r: any) => allowedAids.has(Number(r.aid)));
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const cdnAccounts = visibleAccounts;
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));

@@ -277,6 +277,11 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               const owner = Number(row.owner_uid || 0);
               row.owner_uid = uidMap.get(owner) ?? 0;
+              if (row.visibility === 'private' && !row.owner_uid) {
+                rep.dropped++;
+                report.warnings.push(`私有账户「${row.name}」的用户未导入，已跳过`);
+                continue;
+              }
               const hit = await q(
                 `SELECT id FROM ${table(name)} WHERE type = ? AND name = ? AND visibility = ? AND owner_uid = ? LIMIT 1`,
                 [row.type, row.name, row.visibility || 'shared', row.owner_uid],
@@ -284,10 +289,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               if (hit.length) {
                 const id = Number((hit as any[])[0].id);
                 (name === 'account' ? aidMap : name === 'cdn_account' ? caidMap : xaidMap).set(origAid, id);
-                const existing: any = (await q(`SELECT * FROM ${table(name)} WHERE id = ?`, [id]))[0];
-                if (existing && credentialsDiffer(existing, row)) {
-                  report.warnings.push(`账户「${row.name}」已存在但配置不同，已复用原账户（未覆盖凭证）`);
-                }
+                report.warnings.push(`账户「${row.name}」已存在，已复用原账户且未覆盖凭证`);
                 rep.reused++;
                 continue;
               }
@@ -488,7 +490,7 @@ async function mapUser(
     isSuper = 1;
   } else if (ctx.scope === 'user' && ctx.actorUid > 0 && !ctx.actorIsAdmin) {
     throw new Error('该备份不属于当前账号，无法导入');
-  } else if (ctx.mode === 'merge' && ctx.scope === 'site') {
+  } else if (ctx.mode === 'merge' && ctx.scope === 'site' && !ctx.isEmptySite) {
     level = 1;
     isSuper = 0;
   } else if (ctx.mode === 'install' && ctx.scope === 'site') {
@@ -535,30 +537,4 @@ async function unwrapTargetDek(row: any, passphrase?: string): Promise<Buffer | 
     params = KDF_PARAMS;
   }
   return unwrapDek(await deriveKek(String(passphrase), Buffer.from(row.salt), params), Buffer.from(row.wrapped_dek), Number(row.uid));
-}
-
-const ACCOUNT_COMPARE_SKIP = new Set(['id', 'addtime', 'updatetime', 'created_at', 'updated_at']);
-
-/** 只比较非密文配置项：密文每次加密 IV 不同，且导入会重新加密，不能直接比对 */
-function comparable(v: any): any {
-  if (v && typeof v === 'object' && ('__encv1' in v || '__b64' in v)) return null;
-  if (typeof v === 'string' && (v.startsWith('enc:v1:') || v.startsWith('enc:u1:'))) return null;
-  if (Buffer.isBuffer(v)) return null;
-  return v;
-}
-
-function credentialsDiffer(existing: any, incoming: any): boolean {
-  for (const [k, v] of Object.entries(incoming)) {
-    if (k.startsWith('__') || ACCOUNT_COMPARE_SKIP.has(k)) continue;
-    const b = comparable(v);
-    if (b === null || b === undefined) continue;
-    const a = comparable(existing[k]);
-    if (a === null || a === undefined) continue;
-    if (typeof a === 'object' || typeof b === 'object') {
-      if (JSON.stringify(a) !== JSON.stringify(b)) return true;
-    } else if (String(a) !== String(b)) {
-      return true;
-    }
-  }
-  return false;
 }
