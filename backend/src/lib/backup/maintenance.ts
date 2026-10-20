@@ -1,3 +1,5 @@
+import { configGet, configSet } from '../../config.js';
+
 export interface RestoreStatus {
   running: boolean;
   stage: string;
@@ -22,8 +24,14 @@ export function isMaintenance(): boolean {
   return maintenance;
 }
 
-export function setMaintenance(v: boolean): void {
+/** 启动时恢复维护标志，避免恢复中重启后继续对外服务 */
+export async function initMaintenance(): Promise<void> {
+  maintenance = (await configGet('maintenance', '0')) === '1';
+}
+
+export async function setMaintenance(v: boolean): Promise<void> {
   maintenance = v;
+  await configSet('maintenance', v ? '1' : '0').catch(() => undefined);
 }
 
 export function getRestoreStatus(): RestoreStatus {

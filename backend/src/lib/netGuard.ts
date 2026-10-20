@@ -10,6 +10,9 @@ export function privateFetchAllowed(): boolean {
 }
 
 export function isPrivateIp(ip: string): boolean {
+  const raw = String(ip || '').replace(/^\[|\]$/g, '');
+  const mapped = mappedV4(raw);
+  if (mapped && mapped !== raw) return isPrivateIp(mapped);
   if (net.isIPv4(ip)) {
     const [a, b] = ip.split('.').map(Number);
     if (a === 0 || a === 10 || a === 127) return true;
@@ -25,7 +28,6 @@ export function isPrivateIp(ip: string): boolean {
     if (low === '::1' || low === '::') return true;
     if (low.startsWith('fc') || low.startsWith('fd')) return true; // 唯一本地地址
     if (low.startsWith('fe80')) return true; // 链路本地
-    if (low.startsWith('::ffff:')) return isPrivateIp(low.slice(7));
     return false;
   }
   return true;
@@ -61,17 +63,33 @@ const REDIRECT_STATUS = new Set([301, 302, 303, 307, 308]);
 // 云元数据服务地址：部署商/外部请求指向这些地址可用于窃取云主机临时凭据
 const METADATA_HOSTS = new Set(['169.254.169.254', '100.100.100.200', '169.254.0.23', 'fd00:ec2::254']);
 
-function normalizeIp(ip: string): string {
-  const low = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '');
-  const dotted = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(low);
+function expandV6(ip: string): number[] | null {
+  const v = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!net.isIPv6(v)) return null;
+  const [head, tail] = v.split('::');
+  const h = head ? head.split(':').filter(Boolean) : [];
+  const t = tail ? tail.split(':').filter(Boolean) : [];
+  const fill = 8 - h.length - t.length;
+  if (fill < 0) return null;
+  const groups = [...h, ...Array(fill).fill('0'), ...t].map((g) => parseInt(g || '0', 16));
+  return groups.length === 8 && groups.every((n) => !Number.isNaN(n)) ? groups : null;
+}
+
+/** 将 IPv4-mapped IPv6（含完整展开形式）还原为点分 IPv4 */
+function mappedV4(ip: string): string | null {
+  const v = String(ip || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (net.isIPv4(v)) return v;
+  const dotted = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(v);
   if (dotted) return dotted[1];
-  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(low);
-  if (hex) {
-    const hi = parseInt(hex[1], 16);
-    const lo = parseInt(hex[2], 16);
-    return [hi >> 8, hi & 255, lo >> 8, lo & 255].join('.');
+  const g = expandV6(v);
+  if (g && g.slice(0, 5).every((n) => n === 0) && g[5] === 0xffff) {
+    return [g[6] >> 8, g[6] & 255, g[7] >> 8, g[7] & 255].join('.');
   }
-  return low;
+  return null;
+}
+
+function normalizeIp(ip: string): string {
+  return mappedV4(ip) || String(ip || '').toLowerCase().replace(/^\[|\]$/g, '');
 }
 
 export function isMetadataIp(ip: string): boolean {

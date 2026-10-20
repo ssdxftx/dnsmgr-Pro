@@ -5,6 +5,7 @@ import { importArchive } from './import.js';
 import { getBackupKey } from './key.js';
 import { getRestoreStatus, setMaintenance, setRestoreStatus } from './maintenance.js';
 import { resolveArchivePath } from './archive.js';
+import { withDistributedLock } from '../scheduler/distLock.js';
 
 export interface RestoreOptions {
   fileName: string;
@@ -14,9 +15,18 @@ export interface RestoreOptions {
 
 /** 在线恢复：先自动快照，再进入维护模式执行导入；失败保留维护模式以便重试或回滚 */
 export async function restoreBackup(opts: RestoreOptions): Promise<any> {
+  let result: any;
+  const locked = await withDistributedLock('dnsmgr:backup:restore', async () => {
+    result = await runRestore(opts);
+  });
+  if (!locked) throw new Error('已有恢复任务正在执行');
+  return result;
+}
+
+async function runRestore(opts: RestoreOptions): Promise<any> {
   if (getRestoreStatus().running) throw new Error('已有恢复任务正在执行');
   setRestoreStatus({ running: true, stage: 'snapshot', message: '正在创建恢复前快照', startedAt: Date.now(), finishedAt: 0, ok: false });
-  setMaintenance(true);
+  await setMaintenance(true);
 
   try {
     const snapshot = await exportBackup({ scope: 'site', kind: 'pre_restore', includeLogs: true });
@@ -41,7 +51,7 @@ export async function restoreBackup(opts: RestoreOptions): Promise<any> {
       ok: true,
       report: { snapshot: snapshot.file, import: report },
     });
-    setMaintenance(false);
+    await setMaintenance(false);
     return { snapshot: snapshot.file, report };
   } catch (e: any) {
     setRestoreStatus({

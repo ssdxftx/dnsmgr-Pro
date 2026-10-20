@@ -33,7 +33,7 @@ import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
 import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
-import { checkLevel, getUserPermissions, matchPermission } from '../auth.js';
+import { checkLevel, getUserPermissions, isRecordInScope } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
 import { canAccessCertOrder, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findAnyVaultDekForUser } from '../lib/vault/service.js';
@@ -116,7 +116,14 @@ async function assertDnsDomainUsable(user: any, did: number, accelName: string):
   if (name !== base && !name.endsWith('.' + base)) return null;
   const recordName = name === base ? '@' : name.slice(0, name.length - base.length - 1);
   const perms = await getUserPermissions(Number(user?.uid));
-  return matchPermission(perms, String(d.name), recordName) === 0 ? d : null;
+  // 权限表可能存小写域名，比较时统一大小写；只读授权不能写入
+  const hit = perms.find(
+    (p: any) =>
+      String(p.domain).toLowerCase() === base &&
+      Number(p.readonly) !== 1 &&
+      isRecordInScope(recordName, p.sub || null),
+  );
+  return hit ? d : null;
 }
 
 function calcRecordName(accelDomain: string, dnsDomain: string): string {

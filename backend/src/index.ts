@@ -49,7 +49,7 @@ import backupRoutes, { runDueBackupSchedules } from './routes/backup.js';
 import vaultRoutes from './routes/vault.js';
 import { cleanTmpFiles } from './lib/backup/export.js';
 import { ensureDataDirs } from './lib/backup/archive.js';
-import { isMaintenance } from './lib/backup/maintenance.js';
+import { initMaintenance, isMaintenance } from './lib/backup/maintenance.js';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[backend] 未捕获的异步异常:', reason?.message || reason);
@@ -319,6 +319,7 @@ async function cleanAuditLog(): Promise<void> {
 
 const port = Number(process.env.PORT || 8082);
 try {
+  if (installed) await initMaintenance();
   await app.listen({ port, host: '0.0.0.0' });
   console.log(`[dnsmgr-backend] 已启动，端口 ${port}${installed ? '' : '（未安装，等待初始化）'}`);
 

@@ -162,7 +162,7 @@ export const dnsProviders: Record<string, DnsProviderMeta> = {
           { value: 'https', label: 'HTTPS（推荐）' },
           { value: 'http', label: 'HTTP（仅内网）' },
         ],
-        value: 'http',
+        value: 'https',
         required: true,
       },
       apikey: { name: 'API KEY', type: 'input', required: true },
