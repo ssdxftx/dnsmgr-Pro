@@ -35,7 +35,7 @@ import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/c
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
-import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
+import { canAccessCertOrder, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findAnyVaultDekForUser } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
@@ -1409,7 +1409,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const r: any = (await runCertLink([newId], false))[0];
       if (r) msg += `；证书申请：${r.message || r.status}`;
     } else if (newId && certMode === 'certlink') {
-      const r = await applyCertLink(newId, provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
+      const r = await applyCertLink(newId, provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default }, req.user);
       certResult = r;
       msg += `；证书：${r.message}`;
     }
@@ -1765,7 +1765,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // ===== 与项目联动：精确子域名证书选择 / 签发 / 自动部署 =====
 
   // 为加速域名选择已有证书或新建精确子域名证书，并创建自动部署任务
-  async function applyCertLink(domainId: number, provider: any, opts: { certOrderId?: any; certAid?: any; useDefault?: boolean }): Promise<any> {
+  async function applyCertLink(domainId: number, provider: any, opts: { certOrderId?: any; certAid?: any; useDefault?: boolean }, user: any): Promise<any> {
     const row = await loadCdnDomain(domainId);
     if (!row) return { status: 'failed', message: '加速域名不存在' };
     if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.getCertDeployPlan !== 'function') {
@@ -1781,6 +1781,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
     const orderId = Number(opts.certOrderId || 0);
     if (orderId) {
+      if (!(await canAccessCertOrder(orderId, user))) return { status: 'failed', message: '所选证书不存在' };
       const order = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [orderId]);
       if (!order) return { status: 'failed', message: '所选证书不存在' };
       if (Number(order.status) !== 3 || !order.fullchain || !order.privatekey) return { status: 'failed', message: '所选证书尚未签发完成' };
@@ -1810,8 +1811,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
     let aid = Number(opts.certAid || 0);
     if (!aid && opts.useDefault) aid = await ensureDefaultLetsEncrypt();
     if (!aid) return { status: 'failed', message: '请选择证书提供商' };
-    const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0`, [aid]);
-    if (!account) return { status: 'failed', message: '证书提供商不存在' };
+    const account = await getVisibleAccount('cert_account', aid, user);
+    if (!account || Number(account.deploy) !== 0) return { status: 'failed', message: '证书提供商不存在' };
     if (!providerReady(account.type, await accountConfigOf(account))) return { status: 'failed', message: `证书提供商「${account.name}」密钥未配置完整` };
     const order = await ensureExactOrder(aid, row.name, JSON.stringify({ cdnDomainId: domainId }));
     if (Number(order.status) === 3) {
@@ -1836,8 +1837,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.get('/api/cdn/cert/candidates', adminAuth, async (req: any) => {
     const raw = String(req.query?.name || '').trim();
     if (!raw) return { code: -1, msg: '请提供加速域名' };
-    const exact = await findExactCertOrders(raw);
-    const accts = await query(`SELECT * FROM ${table('cert_account')} WHERE deploy = 0 ORDER BY id ASC`);
+    const visibleAccts = await listVisibleAccounts('cert_account', req.user);
+    const visibleAids = new Set(visibleAccts.map((a: any) => Number(a.id)));
+    const exact = (await findExactCertOrders(raw)).filter((o: any) => visibleAids.has(Number(o.aid)));
+    const accts = visibleAccts.filter((a: any) => Number(a.deploy) === 0);
     const providers = (accts as any[])
       .filter((a) => {
         const { config, configError } = readConfigSafe(a.config);
@@ -1859,7 +1862,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const provider: any = await cdnForRow(row);
     const { cert_order_id, cert_aid, cert_use_default } = req.body || {};
-    const r = await applyCertLink(Number(id), provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default });
+    const r = await applyCertLink(Number(id), provider, { certOrderId: cert_order_id, certAid: cert_aid, useDefault: !!cert_use_default }, req.user);
     if (r.status !== 'failed') await setCertMode(Number(id), 'certlink');
     audit(req, {
       targetType: 'cdn_domain',

@@ -19,6 +19,15 @@ export async function getVisibleAccount(t: AccountTable, aid: number, user: any)
   return checkLevel(user, 2) ? row : null;
 }
 
+/** 证书订单越权守卫：订单归属账户对当前用户不可见时按不存在处理 */
+export async function canAccessCertOrder(orderId: number, user: any): Promise<boolean> {
+  const row: any = await queryOne(`SELECT aid FROM ${table('cert_order')} WHERE id = ?`, [Number(orderId)]);
+  if (!row) return false;
+  // aid=0 为手工上传证书，缺少上传者字段，按站点资产仅管理员可读
+  if (!Number(row.aid)) return checkLevel(user, 2);
+  return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
+}
+
 /** 列表：管理员看共享 + 自己的私有；普通用户只看自己的私有 */
 export async function listVisibleAccounts(t: AccountTable, user: any): Promise<any[]> {
   if (checkLevel(user, 2)) {

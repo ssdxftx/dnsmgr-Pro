@@ -36,7 +36,7 @@ function keySpecError(keytype: any, keysize: any): string | null {
 }
 
 import { decryptConfig, encryptAccountConfig, encryptConfig, maskConfig, mergeMaskedConfig, readAccountConfig, encryptText, decryptText } from '../lib/secret.js';
-import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
+import { canAccessCertOrder, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { getDekForWrite } from '../lib/vault/service.js';
 
 // 批量取多个订单绑定的域名，避免证书/部署列表逐条查询（N+1）
@@ -52,15 +52,6 @@ async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
     map.set(Number(r.oid), arr);
   }
   return map;
-}
-
-/** 证书订单越权守卫：订单归属账户对当前用户不可见时按不存在处理 */
-async function canAccessCertOrder(id: any, user: any): Promise<boolean> {
-  const row: any = await queryOne(`SELECT aid FROM ${table('cert_order')} WHERE id = ?`, [Number(id)]);
-  if (!row) return false;
-  // aid=0 为手工上传证书，缺少上传者字段，按站点资产仅管理员可读
-  if (!Number(row.aid)) return checkLevel(user, 2);
-  return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
 }
 
 /** 部署任务越权守卫：任务绑定的证书账户对当前用户不可见时按不存在处理 */

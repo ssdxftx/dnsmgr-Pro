@@ -99,7 +99,7 @@ export async function resolveCertAccount(
 export async function findExactCertOrders(name: string, q: QueryFn = query): Promise<any[]> {
   const need = domainToASCII(name.toLowerCase());
   const rows = await q(
-    `SELECT O.id AS oid, O.issuer, O.expiretime, GROUP_CONCAT(D.domain ORDER BY D.sort SEPARATOR ',') AS doms
+    `SELECT O.id AS oid, O.aid, O.issuer, O.expiretime, GROUP_CONCAT(D.domain ORDER BY D.sort SEPARATOR ',') AS doms
        FROM ${table('cert_order')} O JOIN ${table('cert_domain')} D ON D.oid = O.id
       WHERE O.status = 3 AND O.expiretime IS NOT NULL AND O.expiretime > NOW()
       GROUP BY O.id
@@ -109,7 +109,7 @@ export async function findExactCertOrders(name: string, q: QueryFn = query): Pro
   );
   return (rows as any[]).map((r) => {
     const domains = String(r.doms || '').split(',').filter(Boolean);
-    return { oid: Number(r.oid), name: domains[0] || name, issuer: r.issuer || '', expiretime: r.expiretime, domains };
+    return { oid: Number(r.oid), aid: Number(r.aid), name: domains[0] || name, issuer: r.issuer || '', expiretime: r.expiretime, domains };
   });
 }
 
