@@ -22,7 +22,7 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('certOrder.listTitle') }}</h3>
         </div>
-        <ResponsiveDataTable :columns="columns" :data="orders" :loading="loadBusy" :empty-text="t('certOrder.empty')" />
+        <ResponsiveDataTable :columns="columns" :data="orders" title-key="domains" :loading="loadBusy" :empty-text="t('certOrder.empty')" />
       </div>
     </n-card>
 

@@ -40,6 +40,7 @@
           v-model:checked-row-keys="checkedRowKeys"
           :columns="columns"
           :data="tasks"
+          title-key="rr"
           :loading="loadBusy"
           :pagination="pagination"
           :row-key="(row: any) => row.id"

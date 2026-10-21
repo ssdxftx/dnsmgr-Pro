@@ -239,7 +239,7 @@ const columns = computed(() => {
       const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
       const children: any[] = [h('span', { style: { whiteSpace: 'nowrap', ...(color ? { color } : {}) } }, text || '-')];
       if (isAdmin.value) {
-        const refreshLabel = t('domain.refreshExpire');
+        const refreshLabel = isMobile.value ? t('common.refresh') : t('domain.refreshExpire');
         children.push(
           h(
             NButton,
@@ -271,7 +271,7 @@ const columns = computed(() => {
           isMobile.value ? { default: () => noticeLabel } : { icon: () => h(NotificationsOutline) },
         ),
       );
-      return h(NSpace, { size: 4, align: 'center', wrap: false }, { default: () => children });
+      return h(NSpace, { size: 4, align: 'center', wrap: isMobile.value }, { default: () => children });
     },
   });
   cols.push({

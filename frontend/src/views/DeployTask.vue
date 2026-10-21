@@ -29,7 +29,7 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('deployTask.listTitle') }}</h3>
         </div>
-        <ResponsiveDataTable :columns="columns" :data="tasks" :loading="loadBusy" :empty-text="t('deployTask.empty')" />
+        <ResponsiveDataTable :columns="columns" :data="tasks" title-key="domains" :loading="loadBusy" :empty-text="t('deployTask.empty')" />
       </div>
     </n-card>
 

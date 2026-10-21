@@ -708,9 +708,9 @@ async function fetchCertStatus(): Promise<any | null> {
 }
 
 async function refreshCertStatus() {
+  // 失败提示由 fetchCertStatus 统一处理，此处只补成功反馈，避免重复 toast
   const data = await fetchCertStatus();
   if (data) message.success(t('cdnDomain.refreshed'));
-  else message.error(t('common.loadFailed'));
 }
 
 async function onCertMgrModeChange(mode: string) {

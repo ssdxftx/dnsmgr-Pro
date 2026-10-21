@@ -169,12 +169,18 @@ const actionColumn = computed(
 );
 const dataColumns = computed(() => props.columns.filter((c) => !isSystemColumn(c) && c !== actionColumn.value));
 
-const TITLE_KEYS = ['name', 'domain', 'title', 'label', 'hostname', 'routename', 'username', 'email', 'subject', 'remark'];
+const TITLE_KEYS = [
+  'name', 'domain', 'domains', 'title', 'label', 'hostname',
+  'routename', 'username', 'email', 'subject', 'rr', 'remark',
+];
 const titleColumn = computed(() => {
   if (props.titleKey) return props.columns.find((c) => c.key === props.titleKey);
   const cols = dataColumns.value.filter((c: any) => c.mobile !== 'hide');
-  const preferred = cols.find((c) => TITLE_KEYS.includes(String(c.key)));
-  if (preferred) return preferred;
+  // 按 TITLE_KEYS 的优先级挑选，避免后置的 remark 等列抢占卡片标题
+  for (const key of TITLE_KEYS) {
+    const hit = cols.find((c) => String(c.key) === key);
+    if (hit) return hit;
+  }
   return cols.find((c) => String(c.key) !== 'id') || cols[0];
 });
 // 移动端卡片只保留主字段：列可声明 mobile: 'hide' 排除在卡片行之外
