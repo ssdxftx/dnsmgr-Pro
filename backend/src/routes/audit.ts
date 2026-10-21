@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
+import { escapeLike } from '../lib/util.js';
 
 function parseJson(v: any): any {
   if (v == null) return null;
@@ -53,12 +54,12 @@ export default async function auditRoutes(app: FastifyInstance) {
       params.push(Number(q.result));
     }
     if (q.target) {
-      where += ' AND target_name LIKE ?';
-      params.push(`%${q.target}%`);
+      where += " AND target_name LIKE ? ESCAPE '!'";
+      params.push(`%${escapeLike(String(q.target))}%`);
     }
     if (q.kw) {
-      where += ' AND (summary LIKE ? OR target_name LIKE ? OR ip LIKE ? OR username LIKE ?)';
-      const like = `%${q.kw}%`;
+      where += " AND (summary LIKE ? ESCAPE '!' OR target_name LIKE ? ESCAPE '!' OR ip LIKE ? ESCAPE '!' OR username LIKE ? ESCAPE '!')";
+      const like = `%${escapeLike(String(q.kw))}%`;
       params.push(like, like, like, like);
     }
 

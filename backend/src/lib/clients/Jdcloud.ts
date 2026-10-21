@@ -1,5 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 export class JdcloudError extends Error {}
 
 function escape(str: string): string {
@@ -62,7 +63,7 @@ export class Jdcloud {
     let url = 'https://' + this.endpoint + path;
     if (Object.keys(query).length) url += '?' + new URLSearchParams(query).toString();
 
-    const res = await fetch(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
+    const res = await fetchWithProxy(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
     const json = await res.json();
     if (res.status === 200) {
       if (json.result !== undefined) return json.result;

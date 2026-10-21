@@ -6,6 +6,7 @@ import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 import { SECRET_MASK } from '../lib/secret.js';
+import { purgeUserData } from '../lib/users/purge.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -143,8 +144,8 @@ export default async function userRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const b = req.body || {};
     const username = String(b.username ?? '').trim();
-    const password = String(b.password ?? '').trim();
-    const isApi = Number(b.is_api || 0);
+    const password = String(b.password ?? '');
+    const isApi = Number(b.is_api) === 1 ? 1 : 0;
     const apikey = String(b.apikey ?? '').trim();
     const level = Number(b.level || 1);
     const checkWhole = Number(b.check_whole || 0);
@@ -152,6 +153,7 @@ export default async function userRoutes(app: FastifyInstance) {
 
     if (!username || !password) return { code: -1, msg: '用户名或密码不能为空' };
     if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
+    if (!Number.isFinite(level) || level < 1) return { code: -1, msg: '用户等级不合法' };
     if (level >= 2 && !isSuper(req)) return { code: -1, msg: '仅超级管理员可创建管理员账号' };
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ?`, [username]);
@@ -193,34 +195,37 @@ export default async function userRoutes(app: FastifyInstance) {
     if (blocked) return { code: -1, msg: blocked };
 
     const b = req.body || {};
-    const username = String(b.username ?? '').trim();
-    const isApi = Number(b.is_api || 0);
-    const apikeyRaw = String(b.apikey ?? '').trim();
-    let level = Number(b.level || 1);
-    const repwd = String(b.repwd ?? '').trim();
-    const permission = Array.isArray(b.permission) ? b.permission : [];
+    // PUT 采用“显式字段才更新”的语义：未提交的字段沿用数据库原值，
+    // 避免前端局部更新时把 is_api / apikey / level / 子域名授权静默清空。
+    const username = b.username !== undefined && b.username !== null ? String(b.username).trim() : String(row.username || '');
+    const isApi = b.is_api !== undefined ? (Number(b.is_api) === 1 ? 1 : 0) : (Number(row.is_api) === 1 ? 1 : 0);
+    const apikeyProvided = b.apikey !== undefined && b.apikey !== null;
+    const apikeyRaw = apikeyProvided ? String(b.apikey).trim() : '';
+    let level = b.level !== undefined ? Number(b.level) : Number(row.level || 1);
+    const repwd = b.repwd !== undefined && b.repwd !== null ? String(b.repwd) : '';
+    const permissionProvided = Array.isArray(b.permission);
+    const permission = permissionProvided ? b.permission : [];
 
     if (!username) return { code: -1, msg: '用户名不能为空' };
-    if (isApi === 1 && !apikeyRaw) return { code: -1, msg: 'API密钥不能为空' };
+    if (!Number.isFinite(level) || level < 1) return { code: -1, msg: '用户等级不合法' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? AND id <> ?`, [username, id]);
     if (exists) return { code: -1, msg: '用户名已存在' };
     // 密码校验前置，避免主 UPDATE 已落库后才因密码不合规而报错，产生部分更新
     if (repwd && repwd.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
-    // 任何管理员（含超级管理员本人）都不能把当前登录账号降级为普通用户，避免自锁
-    if (level === 1 && id === req.user.uid) {
-      level = 2;
-    }
+    // 当前登录账号不得被降级（含超级管理员本人），避免自锁
+    if (id === req.user.uid && level < 2) level = 2;
     const levelBlocked = adminManageBlocked(req, row as any, level);
     if (levelBlocked) return { code: -1, msg: levelBlocked };
 
     // check_whole / stat_cache 仅在请求体显式携带时才更新，避免「编辑用户」这一独立接口
-// 因前端未提交该字段而把授权静默重置为 0（与 /users/:id/stat-cache 互相覆盖）
+    // 因前端未提交该字段而把授权静默重置为 0（与 /users/:id/stat-cache 互相覆盖）
     // apikey 为掩码时表示前端未修改，沿用库中原值，避免把「**********」写回
-    let apikey = apikeyRaw;
-    if (apikeyRaw === SECRET_MASK) {
+    let apikey = apikeyProvided ? apikeyRaw : String(row.apikey ?? '');
+    if (apikeyProvided && apikeyRaw === SECRET_MASK) {
       const curKey = await queryOne(`SELECT apikey FROM ${table('user')} WHERE id = ?`, [id]);
       apikey = String(curKey?.apikey ?? '');
     }
+    if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     const sets: string[] = ['username = ?', 'is_api = ?', 'apikey = ?', 'level = ?'];
     const params: any[] = [username, isApi, apikey, level];
     if (b.check_whole !== undefined) {
@@ -248,8 +253,10 @@ export default async function userRoutes(app: FastifyInstance) {
     }
     const prevPerm = await queryOne<any>(`SELECT COUNT(*) AS c FROM ${table('permission')} WHERE uid = ?`, [id]);
     if (level === 1) {
-      await savePermissions(id, permission);
-    } else {
+      // 只有显式提交 permission 时才替换，避免局部更新清空已有授权
+      if (permissionProvided) await savePermissions(id, permission);
+    } else if (Number(row.level) === 1 || permissionProvided) {
+      // 从普通用户提升为管理员，或显式提交了空权限时才清空
       await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
     }
     if (repwd) {
@@ -283,9 +290,9 @@ export default async function userRoutes(app: FastifyInstance) {
       changes.push({ field: 'API 密钥', to: '已更新' });
     }
     const prevCount = Number(prevPerm?.c || 0);
-    if (level === 1 && prevCount !== permission.length) {
+    if (level === 1 && permissionProvided && prevCount !== permission.length) {
       changes.push({ field: '子域名授权', to: `${permission.length} 条` });
-    } else if (level !== 1 && prevCount > 0) {
+    } else if (level !== 1 && prevCount > 0 && (Number(row.level) === 1 || permissionProvided)) {
       changes.push({ field: '子域名授权', to: '已清空' });
     }
     audit(req, {
@@ -351,8 +358,7 @@ export default async function userRoutes(app: FastifyInstance) {
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法删除' };
     const deleteBlocked = adminManageBlocked(req, { id, level: (row as any).level });
     if (deleteBlocked) return { code: -1, msg: deleteBlocked };
-    await query(`DELETE FROM ${table('user')} WHERE id = ?`, [id]);
-    await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
+    await purgeUserData(id);
     audit(req, {
       targetType: 'user',
       targetId: id,
@@ -384,8 +390,8 @@ export default async function userRoutes(app: FastifyInstance) {
       params.push(req.user.uid);
     }
     if (kw) {
-      where += ' AND (action LIKE ? OR data LIKE ?)';
-      params.push('%' + kw + '%', '%' + kw + '%');
+      where += " AND (action LIKE ? ESCAPE '!' OR data LIKE ? ESCAPE '!')";
+      params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%');
     }
     if (domain) {
       where += ' AND domain = ?';

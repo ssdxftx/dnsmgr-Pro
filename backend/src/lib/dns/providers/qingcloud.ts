@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class QingcloudDns implements DnsProvider {
   private access_key_id: string;
   private secret_access_key: string;
@@ -57,7 +58,7 @@ export class QingcloudDns implements DnsProvider {
       } else if (params && Object.keys(params).length > 0) {
         url += '?' + signPath.split('?')[1];
       }
-      const res = await fetch(url, init);
+      const res = await fetchWithProxy(url, init);
       const text = await res.text();
       let arr: any = null;
       try {

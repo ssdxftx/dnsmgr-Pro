@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 export class BaiduCloudError extends Error {}
 
 function escape(str: string): string {
@@ -51,7 +52,7 @@ export class BaiduCloud {
     let url = 'https://' + this.endpoint + path;
     if (query && Object.keys(query).length) url += '?' + new URLSearchParams(query).toString();
 
-    const res = await fetch(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
+    const res = await fetchWithProxy(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
     const text = await res.text();
     if (!text && res.status === 200) return true;
     let json: any;

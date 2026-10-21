@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 export class Ucloud {
   private apiUrl = 'https://api.ucloud.cn/';
   private publicKey: string;
@@ -13,7 +14,7 @@ export class Ucloud {
   async request(action: string, params: Record<string, any>): Promise<any> {
     const param: Record<string, any> = { ...params, Action: action, PublicKey: this.publicKey };
     param.Signature = this.ucloudSignature(param);
-    const res = await fetch(this.apiUrl, {
+    const res = await fetchWithProxy(this.apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(param),

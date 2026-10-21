@@ -93,14 +93,17 @@ export function isSecretKey(key: string): boolean {
 }
 
 // 返回给前端的配置：敏感字段以掩码替换，避免明文回显（递归处理嵌套对象/数组）
-export function maskConfig(config: any): any {
+// 限制递归深度，避免恶意/损坏配置造成栈溢出。
+const MAX_CONFIG_DEPTH = 12;
+export function maskConfig(config: any, depth = 0): any {
   if (config === null || config === undefined) return config;
-  if (Array.isArray(config)) return config.map((v) => maskConfig(v));
+  if (depth > MAX_CONFIG_DEPTH) return '[深层对象已省略]';
+  if (Array.isArray(config)) return config.map((v) => maskConfig(v, depth + 1));
   if (typeof config === 'object') {
     const out: Record<string, any> = {};
     for (const [k, v] of Object.entries(config)) {
       if (isSecretKey(k) && v) out[k] = SECRET_MASK;
-      else if (v && typeof v === 'object') out[k] = maskConfig(v);
+      else if (v && typeof v === 'object') out[k] = maskConfig(v, depth + 1);
       else out[k] = v;
     }
     return out;
@@ -109,18 +112,19 @@ export function maskConfig(config: any): any {
 }
 
 // 更新配置时，以原配置为底：敏感字段缺失/掩码/空值一律沿用原值，避免前端未改密钥却把它覆盖为空
-export function mergeMaskedConfig(input: any, existing: any): any {
+export function mergeMaskedConfig(input: any, existing: any, depth = 0): any {
   if (input === null || input === undefined) return input;
+  if (depth > MAX_CONFIG_DEPTH) throw new Error('配置嵌套层级过深');
   if (Array.isArray(input)) {
     const ex = Array.isArray(existing) ? existing : [];
     return input.map((v, i) => {
-      if (!v || typeof v !== 'object') return mergeMaskedConfig(v, ex[i]);
+      if (!v || typeof v !== 'object') return mergeMaskedConfig(v, ex[i], depth + 1);
       const key = (v as any).id ?? (v as any).name ?? (v as any).key;
       const match =
         key === undefined
           ? ex[i]
           : ex.find((e: any) => e && typeof e === 'object' && ((e.id ?? e.name ?? e.key) === key));
-      return mergeMaskedConfig(v, match ?? {});
+      return mergeMaskedConfig(v, match ?? {}, depth + 1);
     });
   }
   if (typeof input !== 'object') return input;
@@ -140,7 +144,7 @@ export function mergeMaskedConfig(input: any, existing: any): any {
   for (const k of Object.keys(next)) {
     const v = next[k];
     if (v && typeof v === 'object' && !isSecretKey(k)) {
-      next[k] = mergeMaskedConfig(v, ex[k]);
+      next[k] = mergeMaskedConfig(v, ex[k], depth + 1);
     }
   }
   // 新条目（无匹配原值）里的掩码占位符不能落库，要求用户重新填写

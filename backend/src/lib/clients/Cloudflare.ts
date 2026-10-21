@@ -1,3 +1,4 @@
+import { fetchWithProxy } from '../http.js';
 export class CloudflareError extends Error {}
 
 export class Cloudflare {
@@ -35,7 +36,7 @@ export class Cloudflare {
       if (qs.toString()) url += '?' + qs.toString();
     }
 
-    const res = await fetch(url, {
+    const res = await fetchWithProxy(url, {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,

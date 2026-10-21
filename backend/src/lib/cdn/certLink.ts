@@ -10,6 +10,7 @@ type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 
 import { decryptConfig, encryptConfig } from '../secret.js';
 import { CertOrderService } from '../certService.js';
+import { canAccessCertOrder } from '../accounts/visibility.js';
 
 function safeJson(s: any): Record<string, any> {
   return decryptConfig(s) || {};
@@ -348,7 +349,7 @@ export async function logDeployResult(taskId: number, status: number, error?: st
 
 // 删除与指定 CDN 加速域名联动的证书订单：先吊销全部已签发证书，全部成功后才删除
 // （部署任务、订单、域名、联动日志）。任一吊销失败则抛出异常，不删除任何记录。
-export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number): Promise<{ orders: number; deployTasks: number }> {
+export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, user?: any): Promise<{ orders: number; deployTasks: number }> {
   const did = Number(cdnDomainId || 0);
   if (!did) return { orders: 0, deployTasks: 0 };
   // 走 cdn_domain_id 生成列索引精确匹配；生成列不可用时降级为 link LIKE 粗筛 + 解析
@@ -367,6 +368,16 @@ export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number): Pr
         return false;
       }
     });
+  }
+
+  // 只处理调用者有权访问的订单：普通用户删除自己的 CDN 域名时，
+  // 不能吊销/删除管理员或其他用户挂接的证书订单。
+  if (user) {
+    const allowed: any[] = [];
+    for (const o of targets) {
+      if (await canAccessCertOrder(Number(o.id), user)) allowed.push(o);
+    }
+    targets = allowed;
   }
 
   // 阶段一：先吊销所有已签发（status=3）的联动证书，任一失败则整体中止

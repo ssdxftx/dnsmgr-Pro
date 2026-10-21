@@ -1,5 +1,6 @@
 import { createHash, createPrivateKey, createPublicKey, sign as edSign, verify as edVerify } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 const TOKEN_URL = 'https://api.bot.qq.com/app/getAppAccessToken';
 const API_BASE = 'https://api.bot.qq.com';
 const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
@@ -109,7 +110,7 @@ export class QqBot {
     const cached = tokenCache.get(cacheKey);
     if (cached && cached.expireAt > Date.now()) return cached.token;
 
-    const res = await fetch(TOKEN_URL, {
+    const res = await fetchWithProxy(TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ appId: this.appId, clientSecret: this.appSecret }),
@@ -136,7 +137,7 @@ export class QqBot {
   private async apiRequest(method: string, path: string, body: Record<string, any>): Promise<any> {
     const token = await this.getAccessToken();
     const upper = method.toUpperCase();
-    const res = await fetch(API_BASE + path, {
+    const res = await fetchWithProxy(API_BASE + path, {
       method: upper,
       headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
       body: upper === 'GET' ? undefined : JSON.stringify(body),

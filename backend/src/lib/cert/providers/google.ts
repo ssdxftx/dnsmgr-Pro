@@ -1,5 +1,6 @@
 import { AcmeCertBase } from '../acmeBase.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class GoogleCert extends AcmeCertBase {
   private static directories: Record<string, string> = {
     live: 'https://dv.acme-v02.api.pki.goog',
@@ -34,7 +35,7 @@ export class GoogleCert extends AcmeCertBase {
   }
 
   private async getEAB(): Promise<{ kid: string; key: string }> {
-    const res = await fetch('https://gts.rat.dev/eab', { signal: AbortSignal.timeout(15000) });
+    const res = await fetchWithProxy('https://gts.rat.dev/eab', { signal: AbortSignal.timeout(15000) });
     const text = await res.text();
     let result: any;
     try {

@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { safeFetchDeploy } from '../netGuard.js';
+import { safeFetch } from '../netGuard.js';
 
 function percentEncode(str: string): string {
   return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
@@ -34,7 +34,7 @@ export class Aliyun {
     const url = 'https://' + this.endpoint + '/';
     const body = new URLSearchParams(data).toString();
     // 目标主机由 region 等字段拼接而来，统一走部署防护（逐跳复校 + 禁止云元数据 + IP pin）
-    const res = await safeFetchDeploy(method === 'GET' ? url + '?' + body : url, {
+    const res = await safeFetch(method === 'GET' ? url + '?' + body : url, {
       method,
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: method === 'POST' ? body : undefined,

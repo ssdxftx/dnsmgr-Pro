@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 
+import { fetchWithProxy } from '../../http.js';
 const sessionCache = new Map<string, { cookie: string; expire: number }>();
 const SESSION_TTL = 12 * 3600 * 1000;
 
@@ -74,7 +75,7 @@ export class HenetDns implements DnsProvider {
       init.body = body;
     }
     try {
-      const res = await fetch(this.baseUrl + path, init);
+      const res = await fetchWithProxy(this.baseUrl + path, init);
       const setCookies = (res.headers as any).getSetCookie?.() ?? [];
       if (setCookies.length) {
         const cookies: Record<string, string> = {};

@@ -1,6 +1,7 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 const typeList: Record<number, string> = { 1: 'A', 2: 'NS', 5: 'CNAME', 15: 'MX', 16: 'TXT', 28: 'AAAA', 33: 'SRV', 257: 'CAA', 256: 'URL转发' };
 
 function formatTime(sec: number): string {
@@ -57,7 +58,7 @@ export class Dnsla implements DnsProvider {
         }
         url += '?' + qs.toString();
       }
-      const res = await fetch(url, init);
+      const res = await fetchWithProxy(url, init);
       if (res.status === 401) {
         this.error = '认证失败';
         return false;

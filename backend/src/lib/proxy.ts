@@ -1,4 +1,4 @@
-import { ProxyAgent } from 'undici';
+import { Agent, ProxyAgent, setGlobalDispatcher } from 'undici';
 import { configGet } from '../config.js';
 
 export interface ProxySettings {
@@ -23,9 +23,17 @@ export async function getProxySettings(): Promise<ProxySettings> {
 // 按配置串缓存 Agent，复用连接（配置变化时自动重建）
 let cachedProxyUrl = '';
 let cachedProxyAgent: ProxyAgent | undefined;
+let directAgent: Agent | undefined;
 export async function getConfiguredProxyAgent(): Promise<ProxyAgent | undefined> {
   const { server, port, user, pwd, type } = await getProxySettings();
-  if (!server || !port) return undefined;
+  if (!server || !port) {
+    if (cachedProxyAgent) {
+      cachedProxyAgent.close().catch(() => undefined);
+      cachedProxyAgent = undefined;
+      cachedProxyUrl = '';
+    }
+    return undefined;
+  }
   let scheme = 'http';
   if (type === 'https') scheme = 'https';
   else if (type === 'sock4' || type === 'socks4') scheme = 'socks4';
@@ -38,4 +46,15 @@ export async function getConfiguredProxyAgent(): Promise<ProxyAgent | undefined>
     cachedProxyUrl = url;
   }
   return cachedProxyAgent;
+}
+
+/**
+ * 把系统代理应用到 undici 全局 dispatcher。
+ * 直接调用 fetch() 的客户端无需逐个改代码即可走代理；显式传入 dispatcher 的请求仍以自身为准。
+ * 保存系统设置后调用本函数可立即生效，无需重启进程。
+ */
+export async function refreshGlobalProxyDispatcher(): Promise<void> {
+  if (!directAgent) directAgent = new Agent();
+  const proxy = await getConfiguredProxyAgent();
+  setGlobalDispatcher(proxy ?? directAgent);
 }

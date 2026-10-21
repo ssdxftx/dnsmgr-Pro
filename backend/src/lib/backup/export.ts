@@ -16,6 +16,8 @@ export interface ExportOptions {
   includeLogs?: boolean;
   kind?: 'manual' | 'schedule' | 'pre_restore';
   passphrase?: string;
+  /** 计划备份所属的 backup_schedule.id，用于按计划执行保留策略 */
+  scheduleId?: number;
 }
 
 export interface ExportResult {
@@ -182,9 +184,9 @@ export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
   if (scope === 'user' && !ownerUid) throw new Error('个人备份缺少用户标识');
 
   const jobRows: any = await query(
-    `INSERT INTO ${table('backup_job')} (kind, scope, owner_uid, status, include_logs, dest, created_at)
-     VALUES (?, ?, ?, 'running', ?, 'local', NOW())`,
-    [opts.kind || 'manual', scope, ownerUid, includeLogs ? 1 : 0],
+    `INSERT INTO ${table('backup_job')} (kind, scope, owner_uid, status, include_logs, dest, schedule_id, created_at)
+     VALUES (?, ?, ?, 'running', ?, 'local', ?, NOW())`,
+    [opts.kind || 'manual', scope, ownerUid, includeLogs ? 1 : 0, Number(opts.scheduleId || 0)],
   );
   const jobId = Number(jobRows?.insertId || 0);
 
@@ -348,12 +350,19 @@ export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
 export async function cleanTmpFiles(): Promise<void> {
   const { readdir, stat, unlink } = await import('node:fs/promises');
   const dir = path.join(process.env.DNSMGR_DATA_DIR || path.resolve(process.cwd(), 'data'), 'tmp');
-  const files = await readdir(dir).catch(() => [] as string[]);
+  const dirs: Array<{ dir: string; onlyTmp: boolean }> = [
+    { dir, onlyTmp: false },
+    { dir: backupsDir(), onlyTmp: true },
+  ];
   const now = Date.now();
-  for (const f of files) {
-    const p = path.join(dir, f);
-    const st = await stat(p).catch(() => null);
-    if (st && now - st.mtimeMs > 3600_000) await unlink(p).catch(() => undefined);
+  for (const item of dirs) {
+    const files = await readdir(item.dir).catch(() => [] as string[]);
+    for (const f of files) {
+      if (item.onlyTmp && !f.endsWith('.tmp')) continue;
+      const p = path.join(item.dir, f);
+      const st = await stat(p).catch(() => null);
+      if (st && now - st.mtimeMs > 3600_000) await unlink(p).catch(() => undefined);
+    }
   }
 }
 

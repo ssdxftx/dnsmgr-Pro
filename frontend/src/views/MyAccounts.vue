@@ -78,7 +78,7 @@
             <CdnAccount v-if="ready" />
             <EmptyState v-else :icon="LockClosedOutline" :title="t('vault.locked')" compact />
           </n-tab-pane>
-          <n-tab-pane name="cert" :tab="t('vault.tabsCert')">
+          <n-tab-pane v-if="admin" name="cert" :tab="t('vault.tabsCert')">
             <CertAccount v-if="ready" />
             <EmptyState v-else :icon="LockClosedOutline" :title="t('vault.locked')" compact />
           </n-tab-pane>
@@ -209,7 +209,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
-import { api } from '../api';
+import { api, getUser } from '../api';
+import { isAdminUser } from '../lib/admin';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import { LockClosedOutline } from '@vicons/ionicons5';
@@ -219,6 +220,7 @@ import CertAccount from './CertAccount.vue';
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
 const embedded = computed(() => props.embedded);
+const admin = computed(() => isAdminUser(getUser()));
 
 const { t } = useI18n();
 const message = useMessage();

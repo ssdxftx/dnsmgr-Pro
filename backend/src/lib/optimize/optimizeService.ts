@@ -4,6 +4,7 @@ import { getDnsProvider } from '../dns/factory.js';
 import { fmtDateTime } from '../util.js';
 
 // 通用线路代码 -> 各 DNS 服务商线路值
+import { fetchWithProxy } from '../http.js';
 const LINE_NAME: Record<string, Record<string, string>> = {
   aliyun: { DEF: 'default', CT: 'telecom', CU: 'unicom', CM: 'mobile', AB: 'oversea' },
   dnspod: { DEF: '0', CT: '10=0', CU: '10=1', CM: '10=3', AB: '3=0' },
@@ -39,7 +40,7 @@ export async function getLicense(api: number, key: string): Promise<string> {
   if (api === 1) url = 'https://api.hostmonit.com/get_license?license=' + key;
   else url = 'https://www.wetest.vip/api/cf2dns/get_license?license=' + key;
 
-  const res = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  const res = await fetchWithProxy(url, { signal: AbortSignal.timeout(15000) });
   const text = await res.text();
   if (!text) throw new Error('接口请求失败');
   let arr: any;
@@ -73,7 +74,7 @@ async function getIpAddressXingpingcn(ipType: string): Promise<Record<string, an
   } else {
     url = 'https://raw.githubusercontent.com/xingpingcn/enhanced-FaaS-in-China/refs/heads/main/Cf.json';
   }
-  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  const res = await fetchWithProxy(url, { signal: AbortSignal.timeout(20000) });
   const text = await res.text();
   let arr: any;
   try {
@@ -112,7 +113,7 @@ async function getIpAddress(cdnType: number, ipType: string): Promise<Record<str
     const key = String((await configGet('optimize_ip_key', 'o1zrmHAF')) || '').trim();
     if (key) params.key = key;
   }
-  const res = await fetch(url, {
+  const res = await fetchWithProxy(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify(params),

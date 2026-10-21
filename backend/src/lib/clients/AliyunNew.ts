@@ -90,10 +90,8 @@ export class AliyunNew {
   }
 
   private escape(str: string): string {
-    return encodeURIComponent(str)
-      .replace(/\+/g, '%20')
-      .replace(/\*/g, '%2A')
-      .replace(/%7E/g, '~');
+    // RFC3986：encodeURIComponent 不会编码 !'()*，这里统一补上
+    return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
   }
 
   private getCanonicalURI(path: string): string {

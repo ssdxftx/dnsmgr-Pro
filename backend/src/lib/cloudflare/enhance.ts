@@ -20,9 +20,8 @@ function normalizeHostname(hostname: any): string {
 }
 
 async function getDispatcher(proxy: boolean): Promise<any> {
-  if (!proxy) return undefined;
   const agent = await getConfiguredProxyAgent();
-  if (!agent) throw new EnhanceError('代理服务器或端口未配置', 400);
+  if (proxy && !agent) throw new EnhanceError('代理服务器或端口未配置', 400);
   return agent;
 }
 

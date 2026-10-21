@@ -13,6 +13,11 @@ export interface CheckResult {
 
 // 强制解析到指定 IP 的 Agent 按 host|ip 缓存复用连接，避免每次监控请求都新建 Agent
 const ipAgentCache = new Map<string, Agent>();
+let directAgent: Agent | undefined;
+function getDirectAgent(): Agent {
+  if (!directAgent) directAgent = new Agent();
+  return directAgent;
+}
 function getIpForcingAgent(host: string, ip: string, family: number): Agent {
   const key = `${host}|${ip}`;
   const cached = ipAgentCache.get(key);
@@ -45,7 +50,8 @@ async function buildDispatcher(host: string, ip: string | null, proxy: boolean):
     const family = ip.includes(':') ? 6 : 4;
     return getIpForcingAgent(host, ip, family);
   }
-  return undefined;
+  // 未勾选代理时显式直连，避免被全局系统代理接管
+  return getDirectAgent();
 }
 
 function isIp(s: string): boolean {

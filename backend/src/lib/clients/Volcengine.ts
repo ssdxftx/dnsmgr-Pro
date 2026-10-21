@@ -1,5 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 export class VolcengineError extends Error {}
 
 function escape(str: string): string {
@@ -60,7 +61,7 @@ export class Volcengine {
     headers.Authorization = this.sign(method, '/', query, headers, body, time);
 
     const url = 'https://' + this.endpoint + '/?' + new URLSearchParams(query).toString();
-    const res = await fetch(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
+    const res = await fetchWithProxy(url, { method, headers, body: body || undefined, signal: AbortSignal.timeout(15000) });
     const json = await res.json();
     if (res.status === 200) {
       const err = json?.ResponseMetadata?.Error;

@@ -1,6 +1,7 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class SpaceshipDns implements DnsProvider {
   private apiKey: string;
   private apiSecret: string;
@@ -36,7 +37,7 @@ export class SpaceshipDns implements DnsProvider {
         headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(params);
       }
-      const res = await fetch(url, init);
+      const res = await fetchWithProxy(url, init);
       const text = await res.text();
       let arr: any = null;
       if (text) {

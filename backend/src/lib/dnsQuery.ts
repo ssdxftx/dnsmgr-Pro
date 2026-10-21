@@ -1,5 +1,6 @@
 import { promises as dns } from 'node:dns';
 
+import { fetchWithProxy } from './http.js';
 const dohServers = ['https://dns.alidns.com/resolve', 'https://doh.pub/resolve'];
 const typeToRrtype: Record<string, number> = { A: 1, AAAA: 28, CNAME: 5, MX: 15, TXT: 16, SOA: 6, NS: 2, PTR: 12, SRV: 33, CAA: 257 };
 
@@ -21,7 +22,7 @@ export async function queryDnsDoh(domain: string, type: string): Promise<string[
   if (!rrtype) return false;
   for (const server of dohServers) {
     try {
-      const res = await fetch(`${server}?name=${encodeURIComponent(domain)}&type=${rrtype}`, {
+      const res = await fetchWithProxy(`${server}?name=${encodeURIComponent(domain)}&type=${rrtype}`, {
         headers: { Accept: 'application/dns-json' },
         signal: AbortSignal.timeout(6000),
       });

@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class WestDns implements DnsProvider {
   private username: string;
   private apiPassword: string;
@@ -25,7 +26,7 @@ export class WestDns implements DnsProvider {
     params.time = time;
     params.token = createHash('md5').update(this.username + this.apiPassword + time).digest('hex');
     try {
-      const res = await fetch(this.baseUrl + '/domain/', {
+      const res = await fetchWithProxy(this.baseUrl + '/domain/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams(params).toString(),

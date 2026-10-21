@@ -1,6 +1,7 @@
 import { createHash, createHmac } from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 
+import { fetchWithProxy } from '../http.js';
 export class AWS {
   private AccessKeyId: string;
   private SecretAccessKey: string;
@@ -234,7 +235,7 @@ export class AWS {
   }
 
   private async curl(method: string, url: string, body: string, headers: Record<string, string>, xml = false, etag = false): Promise<any> {
-    const res = await fetch(url, {
+    const res = await fetchWithProxy(url, {
       method,
       headers,
       body: body || undefined,

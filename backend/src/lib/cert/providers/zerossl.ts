@@ -1,5 +1,6 @@
 import { AcmeCertBase } from '../acmeBase.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class ZerosslCert extends AcmeCertBase {
   private directory = 'https://acme.zerossl.com/v2/DV90';
 
@@ -28,7 +29,7 @@ export class ZerosslCert extends AcmeCertBase {
   }
 
   private async getEAB(email: string): Promise<{ kid: string; key: string }> {
-    const res = await fetch('https://api.zerossl.com/acme/eab-credentials-email', {
+    const res = await fetchWithProxy('https://api.zerossl.com/acme/eab-credentials-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ email }).toString(),

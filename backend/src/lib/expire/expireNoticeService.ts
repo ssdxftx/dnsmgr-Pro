@@ -4,6 +4,7 @@ import { configGet, configSet } from '../../config.js';
 import { sendExpireNotice } from '../monitor/msgNotice.js';
 import { fmtDateTime } from '../util.js';
 
+import { fetchWithProxy } from '../http.js';
 const MONTHS: Record<string, string> = {
   jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
   jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
@@ -27,7 +28,7 @@ async function rdapLookup(domain: string): Promise<{ creationDate: string | null
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 20000);
   try {
-    const res = await fetch(`https://rdap.org/domain/${encodeURIComponent(domain)}`, {
+    const res = await fetchWithProxy(`https://rdap.org/domain/${encodeURIComponent(domain)}`, {
       headers: { Accept: 'application/json', 'User-Agent': 'dnsmgr-pro' },
       signal: controller.signal,
     });

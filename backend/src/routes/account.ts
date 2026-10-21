@@ -16,6 +16,18 @@ function isAdmin(user: any): boolean {
   return checkLevel(user, 2);
 }
 
+// 这些 provider 的目标地址完全由账户配置决定，且底层使用允许内网的部署级 fetch。
+// 为避免普通用户把服务器当内网探测/代理节点，仅允许管理员创建（共享账户）。
+const ADMIN_ONLY_DNS_TYPES = new Set(['dnsmgr', 'goedge', 'powerdns', 'technitium']);
+
+function privateDnsTypeBlocked(user: any, type: string): string | null {
+  if (isAdmin(user)) return null;
+  if (ADMIN_ONLY_DNS_TYPES.has(String(type || ''))) {
+    return '该 DNS 平台支持自定义内网地址，仅管理员可接入';
+  }
+  return null;
+}
+
 export default async function accountRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
@@ -46,6 +58,8 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { type, name, config, remark } = req.body || {};
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
     const isPrivate = !isAdmin(req.user);
+    const typeBlocked = privateDnsTypeBlocked(req.user, String(type));
+    if (typeBlocked) return { code: -1, msg: typeBlocked };
     const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
     if (isPrivate && !dek) return { code: -1, msg: '保险库已锁定，请先解锁' };
     const exists = await queryOne(
@@ -88,6 +102,10 @@ export default async function accountRoutes(app: FastifyInstance) {
     const row: any = await getVisibleAccount('account', Number(id), req.user);
     if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
     const isPrivate = row.visibility === 'private';
+    if (isPrivate) {
+      const typeBlocked = privateDnsTypeBlocked(req.user, String(type));
+      if (typeBlocked) return { code: -1, msg: typeBlocked };
+    }
     const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
     const base = readAccountConfig(row.config, dek);
     if (base.state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });

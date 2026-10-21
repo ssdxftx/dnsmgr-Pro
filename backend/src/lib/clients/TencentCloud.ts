@@ -1,5 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 function sha256Hex(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
@@ -36,7 +37,7 @@ export class TencentCloud {
     };
     if (this.region) headers['X-TC-Region'] = this.region;
 
-    const res = await fetch('https://' + this.endpoint + '/', {
+    const res = await fetchWithProxy('https://' + this.endpoint + '/', {
       method: 'POST',
       headers,
       body: payload,

@@ -65,9 +65,9 @@ async function applyRetention(schedule: any): Promise<void> {
   const keepDays = Math.max(1, Number(schedule.keep_days || 30));
   const rows = await query<any>(
     `SELECT * FROM ${table('backup_job')}
-     WHERE kind = 'schedule' AND scope = ? AND status = 'success' AND file_name IS NOT NULL
+     WHERE kind = 'schedule' AND scope = ? AND schedule_id = ? AND status = 'success' AND file_name IS NOT NULL
      ORDER BY id DESC`,
-    [String(schedule.scope || 'site')],
+    [String(schedule.scope || 'site'), Number(schedule.id || 0)],
   );
   const cutoff = Date.now() - keepDays * 86400_000;
   for (let i = 0; i < rows.length; i++) {
@@ -172,19 +172,23 @@ export default async function backupRoutes(app: FastifyInstance) {
       tmp = up.file;
       const fields: any = {};
       for (const [k, v] of Object.entries(up.fields)) fields[k] = (v as any)?.value;
+      const admin = isAdmin(req.user);
       const mode = fields.mode === 'replace' ? 'replace' : 'merge';
-      if (mode === 'replace' && !isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+      if (mode === 'replace' && !admin) return reply.code(403).send({ code: -1, msg: '无权限' });
       if (!hitRateLimit(`backup:import:${req.user.uid}`, 3, 10 * 60_000)) {
         return reply.code(429).send({ code: -1, msg: '备份导入过于频繁，请稍后再试' });
       }
       const key = await keyForArchive(tmp, fields.passphrase ? String(fields.passphrase) : undefined);
       const header = (await readArchiveHeader(tmp)).header;
-      if (String(header.scope) === 'site' && !isAdmin(req.user)) {
+      if (mode === 'replace' && String(header.scope) !== 'site') {
+        return reply.code(400).send({ code: -1, msg: 'replace 模式仅支持整站备份' });
+      }
+      if (String(header.scope) === 'site' && !admin) {
         return reply.code(403).send({ code: -1, msg: '无权限导入整站备份' });
       }
       if (
         String(header.scope) === 'user' &&
-        !isAdmin(req.user) &&
+        !admin &&
         Number(header.ownerUid || 0) !== Number(req.user.uid)
       ) {
         return reply.code(403).send({ code: -1, msg: '只能导入自己的备份' });
@@ -197,11 +201,13 @@ export default async function backupRoutes(app: FastifyInstance) {
         mode,
         dryRun: fields.dry_run === true || fields.dry_run === 'true',
         actor: { uid: Number(req.user.uid), username: String(req.user.username || '') },
-        actorIsAdmin: isAdmin(req.user),
+        actorIsAdmin: admin,
         passphrase: fields.passphrase ? String(fields.passphrase) : undefined,
-        overwriteConfig: fields.overwrite_config === true,
+        // overwrite_config 只对管理员开放；multipart 字段是字符串，必须显式兼容 'true'
+        overwriteConfig:
+          admin && (fields.overwrite_config === true || fields.overwrite_config === 'true'),
       });
-      const autoExit = !report.dryRun && isAdmin(req.user);
+      const autoExit = !report.dryRun && admin;
       if (autoExit) await setMaintenance(false);
       audit(req, {
         module: 'backup',
@@ -463,6 +469,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         scope: 'site',
         kind: 'schedule',
         includeLogs: Number(row.include_logs) === 1,
+        scheduleId: Number(row.id),
       });
       if (Number(row.dest_id) > 0) {
         await uploadToDestination(Number(row.dest_id), resolveArchivePath(r.file), r.file);
@@ -518,13 +525,20 @@ export default async function backupRoutes(app: FastifyInstance) {
 
 /** 每分钟检查计划任务（由 index.ts 调度） */
 export async function runDueBackupSchedules(): Promise<void> {
+  // 在线恢复期间不要创建新的整站备份，避免与恢复事务/维护模式互相干扰
+  if (isMaintenance()) return;
   const rows = await query<any>(
     `SELECT * FROM ${table('backup_schedule')} WHERE enabled = 1 AND next_run IS NOT NULL AND next_run <= NOW()`,
   );
   for (const row of rows) {
     await query(`UPDATE ${table('backup_schedule')} SET next_run = ? WHERE id = ?`, [computeNextRun(row), row.id]);
     try {
-      const r = await exportBackup({ scope: 'site', kind: 'schedule', includeLogs: Number(row.include_logs) === 1 });
+      const r = await exportBackup({
+        scope: 'site',
+        kind: 'schedule',
+        includeLogs: Number(row.include_logs) === 1,
+        scheduleId: Number(row.id),
+      });
       if (Number(row.dest_id) > 0) {
         await uploadToDestination(Number(row.dest_id), resolveArchivePath(r.file), r.file);
         await query(`UPDATE ${table('backup_job')} SET dest_id = ? WHERE id = ?`, [Number(row.dest_id), r.jobId]);

@@ -51,6 +51,7 @@ import vaultRoutes from './routes/vault.js';
 import { cleanTmpFiles } from './lib/backup/export.js';
 import { ensureDataDirs } from './lib/backup/archive.js';
 import { initMaintenance, isMaintenance } from './lib/backup/maintenance.js';
+import { refreshGlobalProxyDispatcher } from './lib/proxy.js';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[backend] 未捕获的异步异常:', reason?.message || reason);
@@ -275,6 +276,10 @@ if (installed) {
   } catch (e: any) {
     console.error('[dnsmgr-backend] 迁移失败:', e?.message);
   }
+  // 系统代理配置在启动时应用到全局 fetch；保存设置时还会再次刷新
+  await refreshGlobalProxyDispatcher().catch((e: any) =>
+    console.error('[dnsmgr-backend] 应用系统代理失败:', e?.message || e),
+  );
   await app.register(authRoutes);
   await app.register(accountRoutes);
   await app.register(domainRoutes);

@@ -1,6 +1,7 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class NamesiloDns implements DnsProvider {
   private apikey: string;
   private baseUrl = 'https://www.namesilo.com/api/';
@@ -29,7 +30,7 @@ export class NamesiloDns implements DnsProvider {
       for (const [k, v] of Object.entries(params)) {
         if (v !== null && v !== undefined) qs.append(k, String(v));
       }
-      const res = await fetch(this.baseUrl + operation + '?' + qs.toString(), { signal: AbortSignal.timeout(15000) });
+      const res = await fetchWithProxy(this.baseUrl + operation + '?' + qs.toString(), { signal: AbortSignal.timeout(15000) });
       const text = await res.text();
       let arr: any;
       try {

@@ -35,14 +35,22 @@ export interface ImportReport {
 
 type Q = <R = any>(sql: string, params?: any[]) => Promise<R[]>;
 
-const DELETE_SKIP = new Set(['config', 'backup_destination', 'backup_schedule']);
+// config 中的 sys_key/backup_key/maintenance 不能由归档覆盖；其余表在 replace 模式下全部重建。
+const DELETE_SKIP = new Set(['config']);
+
+// 个人备份（包括管理员代为导入）只允许恢复私有资产：
+// 账户与保险库可以恢复；权限、域名、全局定时任务、证书订单/部署、备份计划等
+// 一律不允许由个人归档写入，否则归档会变成绕过授权与调度器边界的数据通道。
+const USER_IMPORT_TABLES = new Set<string>([
+  'user',
+  'user_vault',
+  'account',
+  'cdn_account',
+  'cert_account',
+]);
 
 function emptyReport(): TableReport {
   return { inserted: 0, reused: 0, skipped: 0, dropped: 0 };
-}
-
-function rowsOf(v: any): any[] {
-  return Array.isArray(v?.data) ? v.data : [];
 }
 
 /** 目标表实际列，避免归档里版本较新的列导致 INSERT 失败 */
@@ -89,14 +97,25 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
     warnings: [],
   };
 
-  try {
-    const names = TABLES.filter((t) => archive.tableNames.includes(t));
+  const actorUid = Number(opts.actor?.uid || 0);
+  const userSafe = scope === 'user' && actorUid > 0;
+  const selfImport = scope === 'user' && opts.actorIsAdmin !== true && actorUid > 0;
+  const names = TABLES.filter((t) => archive.tableNames.includes(t)).filter(
+    (t) => !userSafe || USER_IMPORT_TABLES.has(t),
+  );
+  if (userSafe) {
+    const ignored = archive.tableNames.filter((t) => (TABLES as readonly string[]).includes(t) && !USER_IMPORT_TABLES.has(t));
+    if (ignored.length) {
+      report.warnings.push(`个人备份中的全局数据已忽略：${ignored.join('、')}`);
+    }
+  }
 
+  try {
     if (opts.dryRun) {
       for (const name of names) {
-        const data = archive.readTable(name);
         const r = emptyReport();
-        r.inserted = rowsOf(data).length;
+        const stream = archive.readTable(name);
+        if (stream) for await (const _row of stream) r.inserted++;
         report.tables[name] = r;
       }
       return report;
@@ -113,8 +132,16 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       // 安装向导导入：归档内存在管理员时，先删除临时管理员，让用户名与 ID 可被归档用户复用；
       // 删除与导入在同一事务内，导入失败会整体回滚，临时管理员仍在，不会出现无法登录
       if (mode === 'install') {
-        const userTable = archive.readTable('user');
-        const hasAdmin = rowsOf(userTable).some((r) => Number(r.level) >= 2);
+        let hasAdmin = false;
+        const userStream = archive.readTable('user');
+        if (userStream) {
+          for await (const r of userStream) {
+            if (Number(r.level) >= 2) {
+              hasAdmin = true;
+              break;
+            }
+          }
+        }
         if (hasAdmin) {
           await q(`DELETE FROM ${table('user')} WHERE is_super = 1`);
         }
@@ -151,13 +178,13 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       };
 
       for (const name of names) {
-        const data = archive.readTable(name);
-        const rows = rowsOf(data);
+        const stream = archive.readTable(name);
+        if (!stream) continue;
         const rep = emptyReport();
         report.tables[name] = rep;
         const columns = await cols(name);
 
-        for (const raw of rows) {
+        for await (const raw of stream) {
           const row = { ...raw };
 
           switch (name) {
@@ -190,6 +217,11 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 rep.reused++;
                 continue;
               }
+              if (scope === 'user' && origId !== ownerUid) {
+                // 个人备份只恢复所有者本人，忽略归档里混入的其他用户
+                rep.skipped++;
+                continue;
+              }
               const mapped = await mapUser(q, row, {
                 scope,
                 mode,
@@ -199,6 +231,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 actorIsAdmin,
                 uniqueName,
                 cols: columns,
+                warn: (msg: string) => report.warnings.push(msg),
               });
               uidMap.set(origId, mapped);
               rep.inserted++;
@@ -215,6 +248,15 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               const dek = dekBk ? unwrapDek(opts.key, dekBk, origUid) : null;
               let wrappedSys: Buffer | null = null;
               let wrappedPass: Buffer | null = null;
+              if (userSafe && !selfMerge) {
+                // 管理员恢复他人个人备份时，目标用户可能已有保险库；
+                // 直接复用，避免 user_vault 主键冲突导致整次导入回滚。
+                const target = await q(`SELECT uid FROM ${table('user_vault')} WHERE uid = ?`, [uid]);
+                if (target.length) {
+                  rep.reused++;
+                  continue;
+                }
+              }
               if (selfMerge) {
                 if (!dek) {
                   privateBlocked = true;
@@ -271,12 +313,19 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'cdn_account':
             case 'cert_account': {
               const origAid = Number(row.id);
+              if (selfImport) {
+                row.visibility = 'private';
+                row.owner_uid = actorUid;
+              } else if (userSafe) {
+                // 个人备份里的账户一律按私有账户恢复；管理员导入时归属映射到归档中的所有者
+                row.visibility = 'private';
+              }
               if (privateBlocked && row.visibility === 'private') {
                 rep.dropped++;
                 continue;
               }
               const owner = Number(row.owner_uid || 0);
-              row.owner_uid = uidMap.get(owner) ?? 0;
+              if (!selfImport) row.owner_uid = uidMap.get(owner) ?? 0;
               if (row.visibility === 'private' && !row.owner_uid) {
                 rep.dropped++;
                 report.warnings.push(`私有账户「${row.name}」的用户未导入，已跳过`);
@@ -477,10 +526,20 @@ async function mapUser(
     actorIsAdmin: boolean;
     uniqueName: (q: Q, base: string) => Promise<string>;
     cols: Set<string>;
+    warn?: (msg: string) => void;
   },
 ): Promise<number> {
   const origId = Number(row.id);
   const isOwner = ctx.scope === 'user' && origId === ctx.ownerUid;
+  // 管理员导入某个用户的个人备份时，优先复用已存在的用户，避免创建重复账号；
+  // 账户/保险库随后会映射到该用户 ID。
+  if (ctx.scope === 'user' && ctx.mode === 'merge' && ctx.actorIsAdmin) {
+    const existing = await q(`SELECT id FROM ${table('user')} WHERE id = ? OR username = ? LIMIT 1`, [
+      origId,
+      String(row.username || ''),
+    ]);
+    if (existing.length) return Number((existing as any[])[0].id);
+  }
   let level = Number(row.level || 1);
   let isSuper = Number(row.is_super || 0);
   // 只有「安装向导 + 空站 + 个人备份」才允许所有者成为管理员；
@@ -501,14 +560,34 @@ async function mapUser(
     isSuper = 0;
   }
   const username = await ctx.uniqueName(q, String(row.username || 'user'));
-  const data = {
+  const data: any = {
     ...row,
     id: undefined,
     username,
     level,
     is_super: isSuper,
   };
-  delete (data as any).id;
+  delete data.id;
+
+  // 站点 merge 恢复：同一 ID 且用户名一致视为同一用户，直接复用，避免重复账号；
+  // ID 被其他用户占用时继续走新用户名 + 新 ID 的路径。
+  if (ctx.mode === 'merge' && ctx.scope === 'site') {
+    if (origId > 0) {
+      const byId: any[] = await q(`SELECT id, username FROM ${table('user')} WHERE id = ? LIMIT 1`, [origId]);
+      if (byId.length && String(byId[0].username) === String(row.username || '')) {
+        ctx.warn?.(`用户「${row.username}」已存在，已复用原账号`);
+        return Number(byId[0].id);
+      }
+    }
+    const email = String(row.email || '').trim();
+    if (email) {
+      const byEmail: any[] = await q(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
+      if (byEmail.length) {
+        data.email = null;
+        ctx.warn?.(`用户「${row.username}」的邮箱已被占用，恢复时已清空邮箱`);
+      }
+    }
+  }
 
   // 尽量保留原 ID：保险库包裹层 AAD 绑定 uid，ID 不变才能继续解包
   const canKeepId = origId > 0 && ctx.cols.has('id');
@@ -516,6 +595,10 @@ async function mapUser(
     try {
       const id = await insertRow(q, 'user', { ...data, id: origId }, ctx.cols);
       if (id) return origId;
+      // MySQL 对显式插入 AUTO_INCREMENT 值的语句可能返回 insertId=0，
+      // 不能据此判断失败；回查一次，避免同一用户被重复插入。
+      const exists = await q(`SELECT id FROM ${table('user')} WHERE id = ? LIMIT 1`, [origId]);
+      if (exists.length) return origId;
     } catch (e: any) {
       if (e?.code !== 'ER_DUP_ENTRY') throw e;
     }

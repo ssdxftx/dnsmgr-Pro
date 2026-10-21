@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 function formatTime(s: string | null): string | null {
   if (!s) return null;
   const d = new Date(s.replace(' ', 'T'));
@@ -42,7 +43,7 @@ export class BtDns implements DnsProvider {
       const body = JSON.stringify(params ?? {});
       const signingString = [this.accountId, timestamp, 'POST', path, body].join('\n');
       const signature = createHmac('sha256', this.secretKey).update(signingString).digest('hex');
-      const res = await fetch(this.baseUrl + path, {
+      const res = await fetchWithProxy(this.baseUrl + path, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

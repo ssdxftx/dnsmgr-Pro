@@ -1,5 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 export class Ksyun {
   private AccessKeyId: string;
   private SecretAccessKey: string;
@@ -46,7 +47,7 @@ export class Ksyun {
     const qs = this.buildQuery(query);
     if (qs) url += '?' + qs;
 
-    const res = await fetch(url, {
+    const res = await fetchWithProxy(url, {
       method,
       headers,
       body: body || undefined,

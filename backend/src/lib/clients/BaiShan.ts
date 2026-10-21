@@ -1,3 +1,4 @@
+import { fetchWithProxy } from '../http.js';
 export class BaiShanError extends Error {}
 
 function filterNull(obj: Record<string, any>): Record<string, any> {
@@ -23,7 +24,7 @@ export class BaiShan {
       payload = JSON.stringify({ ...filterNull(body), token: this.token });
       headers['Content-Type'] = 'application/json';
     }
-    const res = await fetch(url, { method, headers, body: payload, signal: AbortSignal.timeout(15000) });
+    const res = await fetchWithProxy(url, { method, headers, body: payload, signal: AbortSignal.timeout(15000) });
     const text = await res.text();
     let json: any = null;
     try {

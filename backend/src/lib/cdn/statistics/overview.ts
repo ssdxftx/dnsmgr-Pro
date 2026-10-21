@@ -28,6 +28,7 @@ const BASIC_ALIAS: Record<string, string[]> = {
 
 const cache = new Map<string, { at: number; data: ProviderCard }>();
 const CACHE_TTL_MS = 120_000;
+const MAX_ENTRIES = 200;
 
 export function clearOverviewCache(): void {
   cache.clear();
@@ -155,7 +156,13 @@ export async function buildProviderCard(
     card.status = 'ok';
   }
   card.tookMs = Date.now() - started;
-  if (card.status === 'ok' || card.status === 'partial') cache.set(key, { at: Date.now(), data: card });
+  if (card.status === 'ok' || card.status === 'partial') {
+    if (!cache.has(key) && cache.size >= MAX_ENTRIES) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+    cache.set(key, { at: Date.now(), data: card });
+  }
   return card;
 }
 

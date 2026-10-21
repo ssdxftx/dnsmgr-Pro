@@ -1,6 +1,7 @@
 import dns from 'node:dns';
 import { promisify } from 'node:util';
 
+import { fetchWithProxy } from '../http.js';
 const resolve4 = promisify(dns.resolve4);
 const resolve6 = promisify(dns.resolve6);
 const resolveCname = promisify(dns.resolveCname);
@@ -29,7 +30,7 @@ async function resolveDoh(domain: string, type: string): Promise<string[]> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 6000);
     try {
-      const res = await fetch(`${base}?name=${encodeURIComponent(domain)}&type=${tid}`, {
+      const res = await fetchWithProxy(`${base}?name=${encodeURIComponent(domain)}&type=${tid}`, {
         headers: { Accept: 'application/dns-json' },
         signal: controller.signal,
       });

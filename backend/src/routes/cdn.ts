@@ -33,7 +33,7 @@ import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
 import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
-import { checkLevel, getUserPermissions, isRecordInScope } from '../auth.js';
+import { checkLevel, getUserPermissions, isRecordInScope, matchPermission } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
 import { canAccessCertOrder, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findAnyVaultDekForUser } from '../lib/vault/service.js';
@@ -156,6 +156,32 @@ async function removeLinkedDnsRecord(row: any, user: any): Promise<{ ok: boolean
     if (hit) recordId = String(hit.RecordId);
   }
   if (!recordId) return { ok: false, message: '未找到联动创建的解析记录（可能已手动删除）' };
+
+  // dns_record 可能来自历史数据或导入，不能直接按 ID 删除。
+  // 删除前核对记录确实属于当前域名、类型/名称/值与联动信息一致。
+  const infoFn = (dns as any).getDomainRecordInfo;
+  if (typeof infoFn !== 'function') return { ok: false, message: '该 DNS 类型不支持记录校验，需手动删除' };
+  const current = await infoFn(recordId).catch(() => null);
+  if (!current) return { ok: false, message: '联动解析记录不存在或无法查询，需手动处理' };
+  const shortName = (v: any) => {
+    let s = norm(v).replace(/\.+$/, '');
+    const base = norm(dnsDomain.name).replace(/\.+$/, '');
+    if (!s || s === base) return '@';
+    if (s.endsWith('.' + base)) s = s.slice(0, -(base.length + 1));
+    return s;
+  };
+  if (shortName(current.Name) !== shortName(calcRecordName(row.name, dnsDomain.name))) {
+    return { ok: false, message: '联动记录名称已变化，需手动处理' };
+  }
+  if (current.Domain && norm(current.Domain).replace(/\.+$/, '') !== norm(dnsDomain.name).replace(/\.+$/, '')) {
+    return { ok: false, message: '联动记录不属于当前域名，已拒绝删除' };
+  }
+  if (current.Type && String(current.Type).toUpperCase() !== 'CNAME') {
+    return { ok: false, message: '联动记录类型已变化，需手动处理' };
+  }
+  if (row.cname && norm(current.Value).replace(/\.+$/, '') !== norm(row.cname).replace(/\.+$/, '')) {
+    return { ok: false, message: '联动记录值已变化，需手动处理' };
+  }
 
   const ok = await dns.deleteDomainRecord(recordId);
   if (!ok) return { ok: false, message: (dns.getError?.() || '删除解析记录失败') + '，需手动处理' };
@@ -441,8 +467,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
     const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
     const allRows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
-    // 管理员可见全部记录（含他人私有账户），写操作仍由账户可见性守卫返回 404
-    const rows = checkLevel(req.user, 2) ? allRows : allRows.filter((r: any) => allowedAids.has(Number(r.aid)));
+    // 私有账户只对所有者可见；管理员看到的也是共享账户 + 自己的私有账户
+    const rows = allRows.filter((r: any) => allowedAids.has(Number(r.aid)));
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const cdnAccounts = visibleAccounts;
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
@@ -1430,7 +1456,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       : `接入成功，但自动添加解析失败（${dnsError}），请手动添加 CNAME ${recordName} → ${cname}`;
     if (originError) msg += `；回源配置应用失败（${originError}），可在域名详情页重试`;
 
-    const sync = await syncFromCloud(aid, did);
+    const sync = await syncFromCloud(aid, did, req.user);
     if (sync.code === 0 && sync.added > 0) msg += `；同时从云端同步了 ${sync.added} 个已有加速域名`;
 
     // 按接入时选择的证书配置处理：平台免费证书 / 联动证书申请 / 与项目联动
@@ -1459,7 +1485,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 删除：可选同时删除云端加速域名（delete_cloud=1）、可选同时删除联动 DNS 解析记录（delete_dns=1）；
-  // 云端删除失败时不删除本地记录，便于重试；联动证书需先吊销成功才会删除，吊销失败则整体中止
+  // 先删除云端域名；成功后再吊销联动证书并清理本地/DNS。
+  // 云端删除失败时不改动本地；证书吊销失败时保留本地记录便于重试。
   app.delete('/api/cdn/domains/:id', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const deleteCloud = ['1', 'true'].includes(String(req.query?.delete_cloud || '').toLowerCase());
@@ -1467,20 +1494,25 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '加速域名不存在' };
 
-    // 先吊销并删除联动证书；吊销失败则中止，不删除云端/本地记录
-    let linked = { orders: 0, deployTasks: 0 };
-    try {
-      linked = await removeCertOrdersLinkedToCdnDomain(Number(id));
-    } catch (e: any) {
-      return { code: -1, msg: (e?.message || '联动证书吊销失败') + '（未删除加速域名，可稍后重试）' };
-    }
-
     if (deleteCloud) {
       const provider = await cdnForRow(row);
       if (!provider) return { code: -1, msg: 'CDN账户不存在，无法删除云端加速域名' };
       if (!(await provider.deleteDomain(row.name))) {
         return { code: -1, msg: `删除云端加速域名失败：${provider.getError() || '未知错误'}（本地记录未删除，可重试或改为仅删除本地）` };
       }
+    }
+
+    // 云端删除成功后再处理联动证书；避免云端删除失败时证书已经被误删。
+    let linked = { orders: 0, deployTasks: 0 };
+    try {
+      linked = await removeCertOrdersLinkedToCdnDomain(Number(id), req.user);
+    } catch (e: any) {
+      return {
+        code: -1,
+        msg:
+          (e?.message || '联动证书吊销失败') +
+          (deleteCloud ? '（云端域名已删除，本地记录保留；可改用 delete_cloud=0 重试清理）' : '（未删除本地记录，可稍后重试）'),
+      };
     }
     // 可选删除联动创建的解析记录；删除失败不阻断加速域名删除，仅提示手动处理
     let dnsMsg = '';
@@ -2090,7 +2122,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!(await getVisibleAccount('cdn_account', Number(aid || 0), req.user))) {
       return reply.code(404).send({ code: -1, msg: '账户不存在' });
     }
-    const r = await syncFromCloud(Number(aid || 0), Number(did || 0));
+    const r = await syncFromCloud(Number(aid || 0), Number(did || 0), req.user);
     audit(req, {
       targetType: 'account',
       targetId: Number(aid || 0) || undefined,
@@ -2174,6 +2206,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const isConnected = (route: string) => (routeStats.get(route)?.domains ?? 0) > 0;
 
       if (!isAdmin) {
+        // 普通用户只读取统计缓存覆盖期内的数据，避免超长时间范围构造大量标签/查询
+        if (start.getTime() < Date.now() - STAT_COVER_MS) {
+          return { code: 0, data: { dataUntil, providers: [] } };
+        }
         const providers: ProviderCard[] = [];
         for (const catalog of listCatalogs()) {
           if (routeFilter && catalog.route !== routeFilter) continue;
@@ -2661,7 +2697,7 @@ const CDN_SYNC_COLUMNS = new Set([
   'http_port', 'https_port', 'cname', 'https_enabled', 'force_redirect',
 ]);
 
-async function syncFromCloud(aid: number, did: number): Promise<any> {
+async function syncFromCloud(aid: number, did: number, user?: any): Promise<any> {
   const account = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
   if (!account) return { code: -1, msg: 'CDN账户不存在', added: 0, skipped: 0, updated: 0 };
   const provider: any = getCdnProvider(account.type, await accountConfigOf(account));
@@ -2683,6 +2719,10 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
   let filterDnsName: string | null = null;
   for (const d of dnsRows as any[]) if (d.id == did) filterDnsName = d.name;
 
+  // 普通用户同步云端域名时，DNS 写入必须逐条校验其子域名授权；
+  // 管理员/未传 user 的旧调用保持原有全量同步能力。
+  const perms = user && !checkLevel(user, 2) ? await getUserPermissions(Number(user.uid)) : null;
+
   let added = 0;
   let skipped = 0;
   let updated = 0;
@@ -2698,6 +2738,11 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
     }
     const exists = cdnByName.get(name);
     if (exists) {
+      // 同名加速域名可能属于其他账户（不同 CDN 厂商允许同名）；只允许更新当前账户自己的记录
+      if (Number(exists.aid) !== Number(aid)) {
+        skipped++;
+        continue;
+      }
       const upd: Record<string, any> = {};
       if (!exists.origin && item.origin) {
         upd.origin = item.origin;
@@ -2744,6 +2789,14 @@ async function syncFromCloud(aid: number, did: number): Promise<any> {
         belongDomain = d;
         recordName = name.slice(0, name.length - suffix.length);
         break;
+      }
+    }
+
+    if (perms) {
+      if (!belongDomain || matchPermission(perms, belongDomain.name, recordName) !== 0) {
+        // 无权限或只读授权：不落 cdn_domain，也不写 DNS 记录
+        skipped++;
+        continue;
       }
     }
 

@@ -55,21 +55,23 @@ export default async function registerRoutes(app: FastifyInstance) {
     const email = String((req.body?.email) ?? '').trim().toLowerCase();
     if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
 
+    // 防账号枚举：无论邮箱是否已注册、是否触发频率限制、邮件是否发送成功，
+    // 对外都返回同一句提示，避免用错误分支判断邮箱是否存在。
+    const sent = { code: 0, msg: '验证码已发送，请查收邮箱' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
-    // 防账号枚举：不区分邮箱是否已注册，统一返回相同提示（已注册则不再发送）
-    if (exists) return { code: 0, msg: '验证码已发送，请查收邮箱' };
+    if (exists) return sent;
 
     const latest = await queryOne<any>(`SELECT addtime FROM ${table('reg_verify')} WHERE email = ? ORDER BY id DESC LIMIT 1`, [email]);
     if (latest?.addtime) {
       const last = new Date(latest.addtime).getTime();
-      if (Date.now() - last < RESEND_INTERVAL_MS) return { code: -1, msg: '发送过于频繁，请稍后再试' };
+      if (Date.now() - last < RESEND_INTERVAL_MS) return sent;
     }
     // 同一邮箱 24 小时内发信上限，防止被用作发信放大
     const daily = await queryOne<any>(
       `SELECT COUNT(*) AS c FROM ${table('reg_verify')} WHERE email = ? AND addtime > DATE_SUB(NOW(), INTERVAL 1 DAY)`,
       [email]
     );
-    if ((daily?.c || 0) >= 10) return { code: -1, msg: '该邮箱今日验证码发送次数已达上限，请稍后再试' };
+    if ((daily?.c || 0) >= 10) return sent;
 
     const code = genDigitCode(6);
     await query(
@@ -79,9 +81,10 @@ export default async function registerRoutes(app: FastifyInstance) {
 
     const content = `尊敬的用户，您好：<br/><br/>您正在注册 <b>${SITENAME}</b>，本次邮箱验证码为：<br/><br/><b style="font-size:24px;color:#3b6df0;">${code}</b><br/><br/>验证码 ${CODE_TTL_SECONDS / 60} 分钟内有效，请勿泄露给他人。<br/><br/><font color="grey">${SITENAME}</font>`;
     const result = await sendMail(email, '【' + SITENAME + '】邮箱验证码', content);
-    if (result === true) return { code: 0, msg: '验证码已发送，请查收邮箱' };
-    if (result === false) return { code: -1, msg: '邮件发送失败，请检查系统发信邮箱配置' };
-    return { code: -1, msg: '邮件发送失败：' + result };
+    if (result !== true) {
+      console.error('[register] 验证码邮件发送失败:', result);
+    }
+    return sent;
   });
 
   // 公开：注册
@@ -197,8 +200,8 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const b = req.body || {};
     const count = Math.min(Math.max(Math.floor(Number(b.count) || 1), 1), 100);
-    const days = Math.max(0, Math.floor(Number(b.days) || 0));
-    const maxUse = Math.max(0, Math.floor(Number(b.max_use) || 0));
+    const days = Math.max(0, Math.min(36500, Math.floor(Number(b.days) || 0)));
+    const maxUse = Math.max(0, Math.min(1_000_000, Math.floor(Number(b.max_use) || 0)));
     const remark = String(b.remark ?? '').trim();
 
     const codes: string[] = [];
@@ -209,10 +212,11 @@ export default async function registerRoutes(app: FastifyInstance) {
         code = genRegCode();
       }
       codes.push(code);
-      const expiretime = days > 0 ? `DATE_ADD(NOW(), INTERVAL ${days} DAY)` : 'NULL';
+      const expireSql = days > 0 ? 'DATE_ADD(NOW(), INTERVAL ? DAY)' : 'NULL';
+      const params = days > 0 ? [code, days, maxUse, remark || null] : [code, maxUse, remark || null];
       await query(
-        `INSERT INTO ${table('reg_code')} (code, expiretime, max_use, used, status, remark, addtime) VALUES (?, ${expiretime}, ?, 0, 1, ?, NOW())`,
-        [code, maxUse, remark || null]
+        `INSERT INTO ${table('reg_code')} (code, expiretime, max_use, used, status, remark, addtime) VALUES (?, ${expireSql}, ?, 0, 1, ?, NOW())`,
+        params
       );
     }
     return { code: 0, msg: '注册码生成成功', data: { codes } };

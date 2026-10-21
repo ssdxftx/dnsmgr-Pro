@@ -1,6 +1,7 @@
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 import { findRecordById } from '../recordLookup.js';
 
+import { fetchWithProxy } from '../../http.js';
 export class Dynv6Dns implements DnsProvider {
   private token: string;
   private baseUrl = 'https://dynv6.com/api/v2';
@@ -43,7 +44,7 @@ export class Dynv6Dns implements DnsProvider {
         headers['Content-Type'] = 'application/json';
         init.body = JSON.stringify(params);
       }
-      const res = await fetch(url, init);
+      const res = await fetchWithProxy(url, init);
       if (res.status === 204) return true;
       const text = await res.text();
       let arr: any = null;

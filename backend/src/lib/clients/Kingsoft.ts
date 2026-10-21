@@ -1,5 +1,6 @@
 import { createHash, createHmac } from 'node:crypto';
 
+import { fetchWithProxy } from '../http.js';
 export class KingsoftError extends Error {}
 
 const EMPTY_SHA256 = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
@@ -79,7 +80,7 @@ export class Kingsoft {
     const query = finalKeys.map((k) => encodeValue(k) + '=' + encodeValue(allParams[k])).join('&');
     const url = 'https://' + this.endpoint + encodePath(path) + '?' + query;
 
-    const res = await fetch(url, {
+    const res = await fetchWithProxy(url, {
       method: 'GET',
       headers: { Host: this.endpoint, 'X-Amz-Date': ts, 'X-Action': action, 'X-Version': version },
       signal: AbortSignal.timeout(15000),
@@ -112,7 +113,7 @@ export class Kingsoft {
     const signature = this.sign(signingKey(this.secretKey, date, this.region), stringToSign);
     const authorization = ALGORITHM + ' Credential=' + this.accessKey + '/' + credentialScope + ', SignedHeaders=' + signedHeaders + ', Signature=' + signature;
 
-    const res = await fetch('https://' + this.endpoint + encodePath(path), {
+    const res = await fetchWithProxy('https://' + this.endpoint + encodePath(path), {
       method: 'POST',
       headers: {
         Host: this.endpoint,

@@ -13,6 +13,7 @@ import { runGuarded } from '../lib/scheduler/guards.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
+import { refreshGlobalProxyDispatcher } from '../lib/proxy.js';
 
 // 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
 function safeEqual(a: string, b: string): boolean {
@@ -79,6 +80,11 @@ export default async function systemRoutes(app: FastifyInstance) {
       if (isSecretKey(key) && String(value) === SECRET_MASK) continue;
       if (String(before[key] ?? '') !== String(value)) changed.push(key);
       await configSet(key, String(value));
+    }
+    if (changed.some((k) => k.startsWith('proxy_'))) {
+      await refreshGlobalProxyDispatcher().catch((e: any) =>
+        console.error('[dnsmgr-backend] 应用系统代理失败:', e?.message || e),
+      );
     }
     if (changed.length) {
       audit(req, {

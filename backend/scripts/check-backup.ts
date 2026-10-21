@@ -50,13 +50,15 @@ assert(head.header.tables?.user?.rows === 2, '文件头可读取行数');
 assert(head.header.scope === 'site', '文件头保留 scope');
 
 const opened = await openArchive(out, key);
-const userTable = opened.readTable('user')!;
-assert(userTable.data.length === 2, '解析 user 表');
-assert(Buffer.from(userTable.data[0].blob.__b64, 'base64').toString() === 'secret-bytes', 'Buffer 以 base64 往返');
-assert(userTable.data[0].cfg === 'enc:u1:aaa:bbb:ccc', 'enc:u1: 密文原样保留');
-const domainTable = opened.readTable('domain')!;
-assert(domainTable.data[0].note === '包含 } 和 ] 的字符串', '字符串中的括号不影响按表解析');
-assert(decodeStoredValue(userTable.data[0].blob).toString() === 'secret-bytes', 'Buffer 还原');
+const userRows: any[] = [];
+for await (const row of opened.readTable('user')!) userRows.push(row);
+assert(userRows.length === 2, '解析 user 表');
+assert(Buffer.from(userRows[0].blob.__b64, 'base64').toString() === 'secret-bytes', 'Buffer 以 base64 往返');
+assert(userRows[0].cfg === 'enc:u1:aaa:bbb:ccc', 'enc:u1: 密文原样保留');
+const domainRows: any[] = [];
+for await (const row of opened.readTable('domain')!) domainRows.push(row);
+assert(domainRows[0].note === '包含 } 和 ] 的字符串', '字符串中的括号不影响按表解析');
+assert(decodeStoredValue(userRows[0].blob).toString() === 'secret-bytes', 'Buffer 还原');
 await opened.dispose();
 
 let wrongKeyMsg = '';

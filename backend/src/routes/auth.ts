@@ -9,21 +9,19 @@ import { autoUnlockConvenient } from '../lib/vault/service.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 
-// TOTP 防重放：记录每个用户在有效窗口内已使用过的动态口令，拒绝重复提交
+// TOTP 防重放：记录每个用户在有效窗口内已使用过的动态口令，拒绝重复提交。
+// 使用数据库唯一键而不是进程内 Map，保证多副本部署时同一口令也只能成功一次。
 const TOTP_REPLAY_WINDOW_MS = 90_000;
-const usedTotp = new Map<number, Map<string, number>>();
 
-function markTotpUsed(uid: number, code: string): boolean {
+async function markTotpUsed(uid: number, code: string): Promise<boolean> {
   const now = Date.now();
-  let m = usedTotp.get(uid);
-  if (!m) {
-    m = new Map();
-    usedTotp.set(uid, m);
-  }
-  for (const [k, t] of m) if (now - t > TOTP_REPLAY_WINDOW_MS) m.delete(k);
-  if (m.has(code)) return false;
-  m.set(code, now);
-  return true;
+  // 每次校验前清理过期记录；表上建有 expire_at 索引，成本很低
+  await query(`DELETE FROM ${table('totp_replay')} WHERE expire_at < ?`, [now]).catch(() => undefined);
+  const res: any = await query(
+    `INSERT IGNORE INTO ${table('totp_replay')} (uid, code, expire_at) VALUES (?, ?, ?)`,
+    [uid, code, now + TOTP_REPLAY_WINDOW_MS],
+  );
+  return Number(res?.affectedRows || 0) === 1;
 }
 
 function publicUser(user: any) {
@@ -32,7 +30,11 @@ function publicUser(user: any) {
 
 export default async function authRoutes(app: FastifyInstance) {
   app.post('/api/auth/login', async (req: any) => {
-    const { username, password } = req.body || {};
+    // 强制字符串化：mysql2 会把对象参数展开成 key = value 表达式，
+    // 直接透传 req.body 里的对象会改变查询语义并产生 500。
+    const b = req.body || {};
+    const username = String(b.username ?? '').trim().slice(0, 128);
+    const password = String(b.password ?? '');
     if (!username || !password) {
       audit(req, {
         module: 'auth',
@@ -152,7 +154,7 @@ export default async function authRoutes(app: FastifyInstance) {
     if (user.totp_open != 1 || !user.totp_secret) return totpFail('totp_not_enabled', '未开启TOTP二次验证', user);
     const totpSecret = decryptText(user.totp_secret) || '';
     if (!verifyTOTP(totpSecret, code)) return totpFail('bad_code', '动态口令错误', user);
-    if (!markTotpUsed(user.id, String(code).trim())) return totpFail('code_reused', '动态口令已被使用，请稍后再试', user);
+    if (!(await markTotpUsed(user.id, String(code).trim()))) return totpFail('code_reused', '动态口令已被使用，请稍后再试', user);
 
     const jti = randomUUID();
     const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session', jti };

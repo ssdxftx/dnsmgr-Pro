@@ -197,6 +197,13 @@ async function getDomainWithAccount(domainId: number) {
   return { domain: d, account: acct };
 }
 
+/** 域名被删除/重新接入时清理同名权限，避免旧授权在新域名上继续生效 */
+async function clearDomainPermissions(names: string[]): Promise<void> {
+  const list = [...new Set(names.map((n) => String(n || '').trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))];
+  if (!list.length) return;
+  await query(`DELETE FROM ${table('permission')} WHERE LOWER(domain) IN (${list.map(() => '?').join(',')})`, list);
+}
+
 export default async function domainRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
@@ -413,21 +420,24 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.post('/api/domains', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { aid, domain, thirdid, recordcount } = req.body || {};
-    if (!aid || !domain) return { code: -1, msg: '参数不完整' };
-    const exists = await queryOne(`SELECT id FROM ${table('domain')} WHERE name = ?`, [domain]);
+    const domainName = String(domain ?? '').trim().toLowerCase().replace(/\.$/, '');
+    if (!aid || !domainName) return { code: -1, msg: '参数不完整' };
+    const exists = await queryOne(`SELECT id FROM ${table('domain')} WHERE name = ?`, [domainName]);
     if (exists) return { code: -1, msg: '域名已存在' };
     const acct = await getVisibleAccount('account', Number(aid), req.user);
     if (!acct) return { code: -1, msg: '账户不存在' };
+    // 历史数据可能残留同名域名的权限行；重新接入前清掉，避免旧用户自动获得新域名权限
+    await clearDomainPermissions([domainName]);
     const id = await query(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      aid, domain, thirdid || '', recordcount || 0,
+      aid, domainName, String(thirdid || ''), Number(recordcount) || 0,
     ]).then((r: any) => r.insertId || 0);
     audit(req, {
       targetType: 'domain',
       targetId: id,
-      targetName: String(domain),
-      summary: `接入域名 ${domain}`,
-      changes: [{ field: '域名', to: String(domain) }],
-      detail: { aid, domain, thirdid, recordcount },
+      targetName: domainName,
+      summary: `接入域名 ${domainName}`,
+      changes: [{ field: '域名', to: domainName }],
+      detail: { aid, domain: domainName, thirdid, recordcount },
     });
     return { code: 0, msg: '添加域名成功', data: id };
   });
@@ -437,8 +447,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const row = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [id]);
     // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名
+    await clearDomainPermissions([row?.name || '']);
     await query(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
+    await query(`DELETE FROM ${table('cert_cname')} WHERE did = ?`, [id]);
+    await query(`DELETE FROM ${table('cert_link_log')} WHERE did = ?`, [id]);
     await query(`DELETE FROM ${table('dmtask')} WHERE did = ?`, [id]);
     await query(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
     await query(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
@@ -496,8 +509,12 @@ export default async function domainRoutes(app: FastifyInstance) {
       ? (req.body.ids as any[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
       : [];
     if (!ids.length) return { code: -1, msg: '请选择域名' };
+    const names = await query(`SELECT name FROM ${table('domain')} WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+    await clearDomainPermissions((names as any[]).map((r) => r.name));
     const ph = ids.map(() => '?').join(',');
     await query(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('cert_cname')} WHERE did IN (${ph})`, ids);
+    await query(`DELETE FROM ${table('cert_link_log')} WHERE did IN (${ph})`, ids);
     await query(`DELETE FROM ${table('domain_alias')} WHERE did IN (${ph})`, ids);
     await query(`DELETE FROM ${table('dmtask')} WHERE did IN (${ph})`, ids);
     await query(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);

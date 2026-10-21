@@ -9,6 +9,7 @@ import { STATUS_LABEL } from '../certService.js';
 import { QqBot } from './qqbot.js';
 import { safeFetch } from '../netGuard.js';
 
+import { fetchWithProxy } from '../http.js';
 const SITENAME = '聚合DNS管理系统';
 
 // 通知邮件 HTML 转义，避免域名/记录值/错误信息/备注注入标记
@@ -44,7 +45,7 @@ export async function sendMail(to: string, sub: string, msg: string): Promise<bo
     const apiKey = await configGet('mail_apikey');
     const from = await configGet('mail_name');
     if (!apiUser || !apiKey) return false;
-    const res = await fetch('https://api.sendcloud.net/apiv2/mail/send', {
+    const res = await fetchWithProxy('https://api.sendcloud.net/apiv2/mail/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ apiUser, apiKey, from: from || '', fromName: SITENAME, to, subject: sub, html: msg }),
@@ -107,7 +108,7 @@ export async function sendWechat(sub: string, content: string): Promise<boolean 
   const apptoken = await configGet('wechat_apptoken');
   const appuid = await configGet('wechat_appuid');
   if (!apptoken || !appuid) return false;
-  const res = await fetch('https://wxpusher.zjiecode.com/api/send/message', {
+  const res = await fetchWithProxy('https://wxpusher.zjiecode.com/api/send/message', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=UTF-8' },
     body: JSON.stringify({ appToken: apptoken, content, summary: sub, contentType: 3, uids: [appuid] }),
@@ -355,7 +356,7 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
 export async function sendExpireNotice(day: number, list: { name: string; expiretime: string }[]): Promise<void> {
   const title = `您有${list.length}个域名即将在${day}天后到期`;
   let content = `尊敬的用户，您好：您有${list.length}个域名即将在${day}天后到期！<br/><b>域名&到期时间：</b><br/>`;
-  for (const d of list) content += `<b>${d.name}</b> - ${d.expiretime}<br/>`;
+  for (const d of list) content += `<b>${esc(d.name)}</b> - ${esc(d.expiretime)}<br/>`;
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
   // 与原项目一致：值 1 与 2 均视为开启（2 表示「始终发送」）

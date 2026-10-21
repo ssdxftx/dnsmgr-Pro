@@ -21,6 +21,19 @@ export async function migrate(): Promise<void> {
   await migrateBackupAndVault();
 
   await query(
+    `CREATE TABLE IF NOT EXISTS ${table('totp_replay')} (
+      id bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+      uid int(11) unsigned NOT NULL,
+      code varchar(16) NOT NULL,
+      expire_at bigint(20) NOT NULL,
+      created_at datetime DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_uid_code (uid, code),
+      KEY idx_expire (expire_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
     `CREATE TABLE IF NOT EXISTS ${table('reg_code')} (
       id int(11) unsigned NOT NULL AUTO_INCREMENT,
       code varchar(32) NOT NULL,
@@ -323,6 +336,7 @@ async function migrateBackupAndVault(): Promise<void> {
       dest varchar(12) NOT NULL DEFAULT 'local',
       dest_id int(11) unsigned NOT NULL DEFAULT '0',
       include_logs tinyint(1) NOT NULL DEFAULT '1',
+      schedule_id int(11) unsigned NOT NULL DEFAULT '0',
       error varchar(500) DEFAULT NULL,
       meta text DEFAULT NULL,
       created_at datetime DEFAULT NULL,
@@ -332,6 +346,7 @@ async function migrateBackupAndVault(): Promise<void> {
       KEY idx_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  await ensureColumn('backup_job', 'schedule_id', "int(11) unsigned NOT NULL DEFAULT '0'");
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('backup_destination')} (

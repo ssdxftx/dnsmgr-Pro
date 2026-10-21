@@ -1,7 +1,7 @@
 import { query, queryOne, table } from '../../db.js';
 import { getDnsProvider } from './factory.js';
 import { localResolve, recordValueMatches } from './localResolve.js';
-import { getUserPermissions, sameDomain } from '../../auth.js';
+import { getUserPermissions, matchPermission, sameDomain } from '../../auth.js';
 import { configGet } from '../../config.js';
 import { sendMail } from '../monitor/msgNotice.js';
 import { fmtDateTime } from '../util.js';
@@ -99,8 +99,14 @@ export async function checkDomainRecords(
     const access = perms
       .filter((p) => sameDomain(p.domain, d.name))
       .map((p) => (p.sub ? `${p.sub}.${d.name}` : d.name).toLowerCase());
-    if (subNorm) targets = [`${subNorm}.${d.name}`.toLowerCase()];
-    else targets = access;
+    if (subNorm) {
+      // 不能只信任任务里保存的 sub：导入/历史任务可能带着越权子域名。
+      // 只读权限允许检测，但必须落在当前用户的授权范围内。
+      const m = matchPermission(perms, d.name, subNorm);
+      targets = m >= 0 ? [`${subNorm}.${d.name}`.toLowerCase()] : [];
+    } else {
+      targets = access;
+    }
   }
   const wholeDomain = scopeAdmin && !subNorm;
 

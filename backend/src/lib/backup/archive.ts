@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -11,7 +11,7 @@ export const MAGIC = Buffer.from('DNSMGRBK', 'utf8');
 export const FORMAT_VERSION = 1;
 const TAG_LEN = 16;
 const IMPORT_TMP_TTL_MS = 3600_000;
-const MAX_IMPORT_JSON_BYTES = Number(process.env.DNSMGR_MAX_IMPORT_BYTES || 512 * 1024 * 1024);
+const MAX_IMPORT_JSON_BYTES = Number(process.env.DNSMGR_MAX_IMPORT_BYTES || 128 * 1024 * 1024);
 // 旧格式归档没有头签名，scope/ownerUid 可被篡改；默认拒绝，仅在明确信任旧文件时通过环境变量临时放行
 const ALLOW_LEGACY_ARCHIVE = String(process.env.DNSMGR_ALLOW_LEGACY_BACKUP || '').trim() === '1';
 
@@ -102,69 +102,74 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
   const stats: ArchiveStats = { tables: {} };
   const hash = createHash('sha256');
   let size = 0;
+  let checksum = '';
 
   const gz = createGzip({ level: 6 });
-  const ws = createWriteStream(tmp);
-  gz.on('data', (c: Buffer) => {
-    hash.update(c);
-    size += c.length;
-  });
-  gz.pipe(ws);
-
-  await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{');
-  let firstTable = true;
-  for await (const t of draft.tables()) {
-    stats.tables[t.name] = { rows: t.rows.length, columns: t.columns };
-    if (!firstTable) await writeChunk(gz, ',');
-    firstTable = false;
-    await writeChunk(gz, JSON.stringify(t.name) + ':{"rows":' + t.rows.length + ',"columns":' + JSON.stringify(t.columns) + ',"data":[');
-    for (let i = 0; i < t.rows.length; i++) {
-      if (i) await writeChunk(gz, ',');
-      await writeChunk(gz, JSON.stringify(t.rows[i]));
-    }
-    await writeChunk(gz, ']}');
-  }
-  if (draft.header.vault) stats.vault = draft.header.vault;
-  await writeChunk(gz, '}}');
-  gz.end();
-  await new Promise<void>((resolve, reject) => {
-    ws.once('finish', resolve);
-    ws.once('error', reject);
-    gz.once('error', reject);
-  });
-
-  const checksum = hash.digest('hex');
-  const iv = randomBytes(12);
-  const header: Record<string, any> = {
-    ...draft.header,
-    formatVersion: FORMAT_VERSION,
-    appVersion: APP_VERSION,
-    cipher: 'aes-256-gcm',
-    iv: iv.toString('base64'),
-    check: keyCheck(key).toString('base64'),
-    plainSize: size,
-    checksum,
-    ...stats,
-  };
-  header.sig = headerSignature(key, header).toString('base64');
-  const headerBuf = Buffer.from(JSON.stringify(header), 'utf8');
-
-  const fd = await open(outPath, 'w');
+  const ws = createWriteStream(tmp, { mode: 0o600 });
   try {
-    await fd.write(Buffer.concat([MAGIC, Buffer.from([FORMAT_VERSION]), u32le(headerBuf.length), headerBuf]));
-    const cipher = createCipheriv('aes-256-gcm', key, iv);
-    const rs = createReadStream(tmp);
-    for await (const chunk of rs) {
-      const enc = cipher.update(chunk as Buffer);
-      if (enc.length) await fd.write(enc);
+    gz.on('data', (c: Buffer) => {
+      hash.update(c);
+      size += c.length;
+    });
+    gz.pipe(ws);
+
+    await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{');
+    let firstTable = true;
+    for await (const t of draft.tables()) {
+      stats.tables[t.name] = { rows: t.rows.length, columns: t.columns };
+      if (!firstTable) await writeChunk(gz, ',');
+      firstTable = false;
+      await writeChunk(gz, JSON.stringify(t.name) + ':{"rows":' + t.rows.length + ',"columns":' + JSON.stringify(t.columns) + ',"data":[');
+      for (let i = 0; i < t.rows.length; i++) {
+        if (i) await writeChunk(gz, ',');
+        await writeChunk(gz, JSON.stringify(t.rows[i]));
+      }
+      await writeChunk(gz, ']}');
     }
-    const tail = cipher.final();
-    if (tail.length) await fd.write(tail);
-    await fd.write(cipher.getAuthTag());
+    if (draft.header.vault) stats.vault = draft.header.vault;
+    await writeChunk(gz, '}}');
+    gz.end();
+    await new Promise<void>((resolve, reject) => {
+      ws.once('finish', resolve);
+      ws.once('error', reject);
+      gz.once('error', reject);
+    });
+
+    checksum = hash.digest('hex');
+    const iv = randomBytes(12);
+    const header: Record<string, any> = {
+      ...draft.header,
+      formatVersion: FORMAT_VERSION,
+      appVersion: APP_VERSION,
+      cipher: 'aes-256-gcm',
+      iv: iv.toString('base64'),
+      check: keyCheck(key).toString('base64'),
+      plainSize: size,
+      checksum,
+      ...stats,
+    };
+    header.sig = headerSignature(key, header).toString('base64');
+    const headerBuf = Buffer.from(JSON.stringify(header), 'utf8');
+
+    const fd = await open(outPath, 'w');
+    try {
+      await fd.write(Buffer.concat([MAGIC, Buffer.from([FORMAT_VERSION]), u32le(headerBuf.length), headerBuf]));
+      const cipher = createCipheriv('aes-256-gcm', key, iv);
+      const rs = createReadStream(tmp);
+      for await (const chunk of rs) {
+        const enc = cipher.update(chunk as Buffer);
+        if (enc.length) await fd.write(enc);
+      }
+      const tail = cipher.final();
+      if (tail.length) await fd.write(tail);
+      await fd.write(cipher.getAuthTag());
+    } finally {
+      await fd.close();
+    }
   } finally {
-    await fd.close();
+    // 无论成功失败都清理包含明文的 gzip 临时文件
+    await unlink(tmp).catch(() => undefined);
   }
-  await unlink(tmp).catch(() => undefined);
   const st = await stat(outPath);
   return { size: st.size, checksum, plainSize: size, stats };
 }
@@ -244,73 +249,222 @@ export function verifyArchiveKey(header: ArchiveHeader, key: Buffer): void {
 export interface OpenedArchive {
   header: ArchiveHeader;
   tableNames: string[];
-  readTable: (name: string) => { rows: number; columns: string[]; data: any[] } | null;
+  readTable: (name: string) => AsyncGenerator<Record<string, any>> | null;
   dispose: () => Promise<void>;
 }
 
-function skipWs(s: string, i: number): number {
-  while (i < s.length && (s[i] === ' ' || s[i] === '\n' || s[i] === '\r' || s[i] === '\t')) i++;
-  return i;
-}
+type FileHandle = Awaited<ReturnType<typeof open>>;
 
-/** 从 i（指向值的首字符）返回该 JSON 值的结束位置（不含） */
-function scanValueEnd(s: string, i: number): number {
-  const c = s[i];
-  if (c === '"') {
-    i++;
-    while (i < s.length) {
-      if (s[i] === '\\') i += 2;
-      else if (s[i] === '"') return i + 1;
-      else i++;
-    }
-    throw new Error('备份 JSON 损坏（字符串未闭合）');
+/** 按字节读取临时 JSON 文件，避免把整个解压结果读进内存 */
+class ByteCursor {
+  private buf = Buffer.alloc(0);
+  private pos = 0;
+  private bufStart = 0;
+  private nextRead = 0;
+  private eof = false;
+  private fh: FileHandle;
+  private start: number;
+  private end: number;
+
+  constructor(fh: FileHandle, start: number, end: number) {
+    this.fh = fh;
+    this.start = start;
+    this.end = end;
+    this.bufStart = start;
+    this.nextRead = start;
   }
-  if (c === '{' || c === '[') {
-    const open = c;
-    const close = c === '{' ? '}' : ']';
-    let depth = 0;
+
+  private async fill(): Promise<void> {
+    if (this.pos < this.buf.length) return;
+    if (this.eof || this.nextRead >= this.end) {
+      this.eof = true;
+      this.buf = Buffer.alloc(0);
+      this.pos = 0;
+      return;
+    }
+    const size = Math.min(64 * 1024, this.end - this.nextRead);
+    const b = Buffer.allocUnsafe(size);
+    const { bytesRead } = await this.fh.read(b, 0, size, this.nextRead);
+    if (!bytesRead) {
+      this.eof = true;
+      this.buf = Buffer.alloc(0);
+      this.pos = 0;
+      return;
+    }
+    this.buf = b.subarray(0, bytesRead);
+    this.bufStart = this.nextRead;
+    this.nextRead += bytesRead;
+    this.pos = 0;
+  }
+
+  async peek(): Promise<number> {
+    await this.fill();
+    return this.pos < this.buf.length ? this.buf[this.pos] : -1;
+  }
+
+  async read(): Promise<number> {
+    const c = await this.peek();
+    if (c >= 0) this.pos++;
+    return c;
+  }
+
+  offset(): number {
+    return this.bufStart + this.pos;
+  }
+
+  async skipWs(): Promise<void> {
+    for (;;) {
+      const c = await this.peek();
+      if (c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09) this.pos++;
+      else return;
+    }
+  }
+
+  async expect(ch: number): Promise<void> {
+    await this.skipWs();
+    if ((await this.read()) !== ch) throw new Error('备份 JSON 结构异常');
+  }
+
+  async scanComposite(open: number): Promise<void> {
+    const close = open === 0x7b ? 0x7d : 0x5d;
+    let depth = 1;
     let inStr = false;
-    for (; i < s.length; i++) {
-      const ch = s[i];
+    for (;;) {
+      const c = await this.read();
+      if (c < 0) throw new Error('备份 JSON 损坏（括号未闭合）');
       if (inStr) {
-        if (ch === '\\') i++;
-        else if (ch === '"') inStr = false;
+        if (c === 0x5c) await this.read();
+        else if (c === 0x22) inStr = false;
         continue;
       }
-      if (ch === '"') inStr = true;
-      else if (ch === open) depth++;
-      else if (ch === close) {
+      if (c === 0x22) inStr = true;
+      else if (c === open) depth++;
+      else if (c === close) {
         depth--;
-        if (depth === 0) return i + 1;
+        if (depth === 0) return;
       }
     }
-    throw new Error('备份 JSON 损坏（括号未闭合）');
   }
-  // 数字 / true / false / null
-  while (i < s.length && !',}] \n\r\t'.includes(s[i])) i++;
-  return i;
+
+  /** 读取一个完整 JSON 值，返回原始字节（用于逐行 JSON.parse） */
+  async readRawValue(): Promise<Buffer> {
+    await this.skipWs();
+    const first = await this.read();
+    if (first < 0) throw new Error('备份 JSON 提前结束');
+    const parts: Buffer[] = [Buffer.from([first])];
+    if (first === 0x22) {
+      for (;;) {
+        const c = await this.read();
+        if (c < 0) throw new Error('备份 JSON 损坏（字符串未闭合）');
+        parts.push(Buffer.from([c]));
+        if (c === 0x5c) {
+          const n = await this.read();
+          if (n < 0) throw new Error('备份 JSON 损坏（转义未闭合）');
+          parts.push(Buffer.from([n]));
+        } else if (c === 0x22) {
+          return Buffer.concat(parts);
+        }
+      }
+    }
+    if (first === 0x7b || first === 0x5b) {
+      const open = first;
+      const close = first === 0x7b ? 0x7d : 0x5d;
+      let depth = 1;
+      let inStr = false;
+      for (;;) {
+        const c = await this.read();
+        if (c < 0) throw new Error('备份 JSON 损坏（括号未闭合）');
+        parts.push(Buffer.from([c]));
+        if (inStr) {
+          if (c === 0x5c) {
+            const n = await this.read();
+            if (n < 0) throw new Error('备份 JSON 损坏（转义未闭合）');
+            parts.push(Buffer.from([n]));
+          } else if (c === 0x22) inStr = false;
+          continue;
+        }
+        if (c === 0x22) inStr = true;
+        else if (c === open) depth++;
+        else if (c === close) {
+          depth--;
+          if (depth === 0) return Buffer.concat(parts);
+        }
+      }
+    }
+    for (;;) {
+      const c = await this.peek();
+      if (c < 0 || c === 0x2c || c === 0x7d || c === 0x5d || c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09) {
+        return Buffer.concat(parts);
+      }
+      parts.push(Buffer.from([await this.read()]));
+    }
+  }
+
+  async readString(): Promise<string> {
+    const raw = await this.readRawValue();
+    return String(JSON.parse(raw.toString('utf8')));
+  }
+
+  async skipValue(): Promise<void> {
+    await this.readRawValue();
+  }
 }
 
-/** 解析对象内的键值位置：返回 key -> [valueStart, valueEnd] */
-function objectMembers(s: string, objStart: number): Map<string, [number, number]> {
-  const out = new Map<string, [number, number]>();
-  let i = skipWs(s, objStart);
-  if (s[i] !== '{') throw new Error('备份 JSON 结构异常');
-  i++;
+async function eachObjectMember(cur: ByteCursor, fn: (key: string) => Promise<void>): Promise<void> {
+  await cur.expect(0x7b);
   for (;;) {
-    i = skipWs(s, i);
-    if (s[i] === '}') return out;
-    if (s[i] !== '"') throw new Error('备份 JSON 结构异常');
-    const keyEnd = scanValueEnd(s, i);
-    const key = JSON.parse(s.slice(i, keyEnd));
-    i = skipWs(s, keyEnd);
-    if (s[i] !== ':') throw new Error('备份 JSON 结构异常');
-    i = skipWs(s, i + 1);
-    const valEnd = scanValueEnd(s, i);
-    out.set(String(key), [i, valEnd]);
-    i = skipWs(s, valEnd);
-    if (s[i] === ',') i++;
+    await cur.skipWs();
+    const c = await cur.peek();
+    if (c === 0x7d) {
+      await cur.read();
+      return;
+    }
+    if (c === 0x2c) {
+      await cur.read();
+      continue;
+    }
+    const key = await cur.readString();
+    await cur.expect(0x3a);
+    await fn(key);
   }
+}
+
+interface TableRange {
+  start: number;
+  end: number;
+}
+
+async function buildTableIndex(file: string): Promise<{ ranges: Map<string, TableRange>; names: string[] }> {
+  const st = await stat(file);
+  const fh = await open(file, 'r');
+  const ranges = new Map<string, TableRange>();
+  const names: string[] = [];
+  const cur = new ByteCursor(fh, 0, st.size);
+  try {
+    await eachObjectMember(cur, async (topKey) => {
+      if (topKey !== 'tables') {
+        await cur.skipValue();
+        return;
+      }
+      await eachObjectMember(cur, async (table) => {
+        names.push(table);
+        await eachObjectMember(cur, async (field) => {
+          if (field !== 'data') {
+            await cur.skipValue();
+            return;
+          }
+          await cur.skipWs();
+          const start = cur.offset();
+          if ((await cur.read()) !== 0x5b) throw new Error('备份 JSON 结构异常');
+          await cur.scanComposite(0x5b);
+          ranges.set(table, { start, end: cur.offset() });
+        });
+      });
+    });
+  } finally {
+    await fh.close();
+  }
+  return { ranges, names };
 }
 
 /** 清理异常退出遗留的导入临时文件（含全站明文凭据），避免长期驻留数据卷 */
@@ -335,7 +489,27 @@ async function cleanStaleImportFiles(): Promise<void> {
   }
 }
 
-/** 解密 + 解压到临时文件，供按表解析；调用方负责 dispose */
+async function* readTableRows(file: string, range: TableRange | undefined): AsyncGenerator<Record<string, any>> {
+  if (!range) return;
+  const fh = await open(file, 'r');
+  const cur = new ByteCursor(fh, range.start + 1, range.end - 1);
+  try {
+    for (;;) {
+      await cur.skipWs();
+      const c = await cur.peek();
+      if (c < 0 || c === 0x5d) return;
+      if (c === 0x2c) {
+        await cur.read();
+        continue;
+      }
+      const raw = await cur.readRawValue();
+      yield JSON.parse(raw.toString('utf8'));
+    }
+  } finally {
+    await fh.close();
+  }
+}
+
 export async function openArchive(file: string, key: Buffer): Promise<OpenedArchive> {
   const { header, headerEnd, fileSize } = await readArchiveHeader(file);
   verifyArchiveKey(header, key);
@@ -381,21 +555,23 @@ export async function openArchive(file: string, key: Buffer): Promise<OpenedArch
     throw new Error('文件校验失败：内容摘要不一致');
   }
 
-  const json = await readFile(tmp, 'utf8');
-  const top = objectMembers(json, skipWs(json, 0));
-  const tablesRange = top.get('tables');
-  if (!tablesRange) throw new Error('备份内容缺少数据表');
-  const members = objectMembers(json, tablesRange[0]);
-  const tableNames = [...members.keys()];
+  let index: { ranges: Map<string, TableRange>; names: string[] };
+  try {
+    index = await buildTableIndex(tmp);
+  } catch (e) {
+    await unlink(tmp).catch(() => undefined);
+    throw e;
+  }
+  const { ranges, names } = index;
+  if (!names.length) {
+    await unlink(tmp).catch(() => undefined);
+    throw new Error('备份内容缺少数据表');
+  }
 
   return {
     header,
-    tableNames,
-    readTable: (name: string) => {
-      const r = members.get(name);
-      if (!r) return null;
-      return JSON.parse(json.slice(r[0], r[1]));
-    },
+    tableNames: names,
+    readTable: (name: string) => (names.includes(name) ? readTableRows(tmp, ranges.get(name)) : null),
     dispose: async () => {
       await unlink(tmp).catch(() => undefined);
     },

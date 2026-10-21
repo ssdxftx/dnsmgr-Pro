@@ -1,7 +1,8 @@
 import { lookup } from 'node:dns/promises';
 import dns from 'node:dns';
 import net from 'node:net';
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici';
+import { getConfiguredProxyAgent } from './proxy.js';
 
 // SSRF 防护：默认禁止请求内网/回环/链路本地/云元数据地址。
 // 如需访问内网目标（自建服务等），显式设置 DNSMGR_ALLOW_PRIVATE_FETCH=1。
@@ -227,9 +228,26 @@ async function resolveForPin(host: string, blocked: (ip: string) => boolean, blo
   return value;
 }
 
-// 供非 safeFetch 路径复用：校验并返回 pin 到已解析 IP 的 dispatcher（无需 pin 或允许内网时返回 undefined）
-export async function pinnedDispatcherFor(host: string, blocked: (ip: string) => boolean = isPrivateIp, blockMsg = '禁止访问内网地址'): Promise<Agent | undefined> {
-  if (privateFetchAllowed()) return undefined;
+// 供非 safeFetch 路径复用：优先使用系统代理；未配置代理时 pin 到已解析 IP。
+// 代理模式下仍尽量校验目标解析结果，防止通过可控域名访问内网/云元数据地址；
+// 若本地无法解析（代理端可解析），则交给代理完成解析。
+export async function pinnedDispatcherFor(host: string, blocked: (ip: string) => boolean = isPrivateIp, blockMsg = '禁止访问内网地址'): Promise<Agent | ProxyAgent | undefined> {
+  const proxy = await getConfiguredProxyAgent();
+  if (privateFetchAllowed()) return proxy;
+  if (proxy) {
+    const h = String(host || '').replace(/^\[|\]$/g, '');
+    if (!h) throw new Error('地址不能为空');
+    if (net.isIP(h)) {
+      if (blocked(h)) throw new Error(blockMsg);
+      return proxy;
+    }
+    try {
+      await resolveForPin(h, blocked, blockMsg);
+    } catch (e: any) {
+      if (!String(e?.message || '').includes('域名解析失败')) throw e;
+    }
+    return proxy;
+  }
   const pin = await resolveForPin(host, blocked, blockMsg);
   return pin ? getPinnedAgent(host.replace(/^\[|\]$/g, ''), pin.address, pin.family) : undefined;
 }
@@ -246,8 +264,15 @@ export async function pinnedLookupFor(
   return makePinnedLookup(target, pin.address, pin.family);
 }
 
+let directDispatcher: Agent | undefined;
+function getDirectDispatcher(): Agent {
+  if (!directDispatcher) directDispatcher = new Agent();
+  return directDispatcher;
+}
+
 // 统一的逐跳跳转处理：仅 http/https、逐跳复校目标、跨主机剥离敏感头、跨域 307/308 丢弃请求体、IP pin 防重绑定
-async function followFetch(raw: string, init: RequestInit, maxRedirects: number, resolve: PinResolver): Promise<Response> {
+async function followFetch(raw: string, init: RequestInit, maxRedirects: number, resolve: PinResolver, useProxy = true): Promise<Response> {
+  const proxy = useProxy ? await getConfiguredProxyAgent() : undefined;
   let current = raw;
   let method = String(init.method || 'GET').toUpperCase();
   let body = init.body;
@@ -267,8 +292,10 @@ async function followFetch(raw: string, init: RequestInit, maxRedirects: number,
     };
     // 始终校验目标地址（协议在上方已校验）；仅当调用方未自带 dispatcher 时注入 pinned dispatcher
     const pin = await resolve(u);
-    if (!reqInit.dispatcher && pin) {
-      reqInit.dispatcher = getPinnedAgent(u.hostname.replace(/^\[|\]$/g, ''), pin.address, pin.family);
+    if (!reqInit.dispatcher) {
+      if (proxy) reqInit.dispatcher = proxy;
+      else if (pin) reqInit.dispatcher = getPinnedAgent(u.hostname.replace(/^\[|\]$/g, ''), pin.address, pin.family);
+      else if (!useProxy) reqInit.dispatcher = getDirectDispatcher();
     }
     const res = (await undiciFetch(current, reqInit as any)) as unknown as Response;
     if (!REDIRECT_STATUS.has(res.status)) return res;
@@ -296,7 +323,7 @@ export async function safeFetch(raw: string, init: RequestInit = {}, maxRedirect
   const resolve: PinResolver = privateFetchAllowed()
     ? async () => null
     : (u) => resolveForPin(u.hostname, isPrivateIp, '禁止访问内网地址');
-  return followFetch(raw, init, maxRedirects, resolve);
+  return followFetch(raw, init, maxRedirects, resolve, true);
 }
 
 // 跳转时会随请求转发的敏感凭据头，跨主机跳转时必须剥离，避免被 302 带到攻击者/元数据地址
@@ -349,5 +376,5 @@ function buildFetchHeaders(pairs: [string, string][], stripSensitive: boolean): 
 // 防止凭据/私钥经跳转外泄；并 pin 校验通过的 IP 防 DNS 重绑定。
 export async function safeFetchDeploy(raw: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
   const resolve: PinResolver = (u) => resolveForPin(u.hostname, isMetadataIp, '禁止访问链路本地/云元数据地址');
-  return followFetch(raw, init, maxRedirects, resolve);
+  return followFetch(raw, init, maxRedirects, resolve, false);
 }
