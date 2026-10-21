@@ -39,7 +39,8 @@ export interface ApiOptions {
   force?: boolean;
 }
 
-const GET_DEFAULT_TTL = 5000;
+// 默认 GET 缓存 15s：写操作会整体失效，跨页读取全量列表时减少重复请求
+const GET_DEFAULT_TTL = 15000;
 const GET_CACHE_MAX = 200;
 const getCache = new Map<string, { at: number; data: any }>();
 const inflight = new Map<string, Promise<any>>();

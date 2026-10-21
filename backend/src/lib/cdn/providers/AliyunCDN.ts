@@ -1,6 +1,7 @@
 import { Aliyun } from '../../clients/Aliyun.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
+import { mapPool } from '../../util.js';
 
 const scopeMap: Record<string, string> = { mainland_china: 'domestic', overseas: 'overseas', global: 'global' };
 
@@ -73,7 +74,8 @@ export class AliyunCDN implements CdnProvider {
       const data = await this.call({ Action: 'DescribeUserDomains', PageSize: size, CurrentPage: page });
       if (!data) return false;
       const pageData = data.Domains?.PageData || [];
-      for (const d of pageData) {
+      // 单个域名的详情/配置查询彼此独立，用 4 并发替代逐域名串行 2N 次请求
+      const pageItems = await mapPool(pageData, 4, async (d: any) => {
         let detail: any = {};
         const dr = await this.call({ Action: 'DescribeCdnDomainDetail', DomainName: d.DomainName });
         if (dr) detail = dr.GetDomainDetailModel || {};
@@ -99,7 +101,7 @@ export class AliyunCDN implements CdnProvider {
             }
           }
         }
-        list.push({
+        return {
           domain: d.DomainName,
           cname: d.Cname || detail.Cname || '',
           status: d.DomainStatus === 'offline' ? 'offline' : 'online',
@@ -112,8 +114,9 @@ export class AliyunCDN implements CdnProvider {
           https_port: 443,
           https_enabled: forceRedirect,
           force_redirect: forceRedirect,
-        });
-      }
+        };
+      });
+      list.push(...pageItems);
       const total = Number(data.TotalCount || 0);
       if (pageData.length < size || list.length >= total) break;
       page++;

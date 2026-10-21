@@ -9,6 +9,7 @@ import { archiveFileName, backupsDir, ensureDataDirs, writeArchive, type Archive
 import { ensureBackupKey, getBackupKey } from './key.js';
 import { encodeRow, EXCLUDE_COLUMNS, TABLES, type BackupTable } from './manifest.js';
 import { readSnapshot, type SnapshotRead } from './snapshot.js';
+import { withDistributedLockResult } from '../scheduler/distLock.js';
 
 export interface ExportOptions {
   scope: 'site' | 'user';
@@ -154,22 +155,46 @@ async function tableChunk(
   name: string,
   keep: (row: any) => boolean,
   transform?: (row: any) => void,
+  extraColumns: string[] = [],
 ): Promise<ArchiveTableChunk> {
   const cols = (await read(`SHOW COLUMNS FROM ${table(name)}`)) as any[];
   const excluded = EXCLUDE_COLUMNS[name] || [];
   const columns = cols.map((c) => String(c.Field)).filter((c) => !excluded.includes(c));
-  const raw = (await read(`SELECT * FROM ${table(name)}`)) as any[];
-  const kept = raw.filter(keep);
-  for (const r of kept) transform?.(r);
-  // 导出期附加的合成列（如保险库的 __dek_bk）必须在 encodeRow 之前写进 columns，否则会被丢弃
-  for (const r of kept) {
-    for (const k of Object.keys(r)) {
-      if (k.startsWith('__') && !columns.includes(k)) columns.push(k);
+  for (const col of extraColumns) if (!columns.includes(col)) columns.push(col);
+  const pk = cols.find((c) => String(c.Key || '').toUpperCase() === 'PRI')?.Field as string | undefined;
+  const pageSize = 500;
+
+  // 按主键 keyset 分页读取：每页只保留 500 行，避免整表 SELECT * 进入内存。
+  // 无主键的历史表退回 LIMIT/OFFSET，仍然保持内存有界。
+  async function* rows(): AsyncGenerator<Record<string, any>> {
+    let last: any = null;
+    let offset = 0;
+    for (;;) {
+      let page: any[];
+      if (pk) {
+        page = last === null
+          ? await read(`SELECT * FROM ${table(name)} ORDER BY \`${pk}\` ASC LIMIT ?`, [pageSize])
+          : await read(`SELECT * FROM ${table(name)} WHERE \`${pk}\` > ? ORDER BY \`${pk}\` ASC LIMIT ?`, [last, pageSize]);
+      } else {
+        page = await read(`SELECT * FROM ${table(name)} ORDER BY 1 ASC LIMIT ? OFFSET ?`, [pageSize, offset]);
+      }
+      for (const r of page) {
+        if (!keep(r)) continue;
+        transform?.(r);
+        yield encodeRow(r, columns);
+      }
+      if (page.length < pageSize) return;
+      if (pk) last = page[page.length - 1][pk];
+      else offset += pageSize;
     }
   }
-  const rows = kept.map((r) => encodeRow(r, columns));
-  return { name, columns, rows };
+
+  return { name, columns, rows: rows() };
 }
+
+// 导出是内存/CPU 密集型任务：同一进程内串行执行，避免手动备份、计划备份与恢复前快照
+// 同时读取大表导致峰值内存叠加。后到的任务排队等待，不改变其最终执行结果。
+let exportChain: Promise<unknown> = Promise.resolve();
 
 /**
  * 导出备份。
@@ -177,7 +202,19 @@ async function tableChunk(
  * - user：仅本人账户 / 授权域名 / 任务 / 审计
  * 归档强制加密：整站与便捷模式用 bk_，口令模式用保险库口令派生（不落库）。
  */
-export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
+export function exportBackup(opts: ExportOptions): Promise<ExportResult> {
+  const run = async (): Promise<ExportResult> => {
+    // 跨实例串行：手动备份、计划备份、恢复前快照共用同一把命名锁
+    const { locked, result } = await withDistributedLockResult('dnsmgr:backup:export', () => exportBackupInner(opts));
+    if (!locked) throw new Error('已有备份任务正在执行，请稍后再试');
+    return result as ExportResult;
+  };
+  const task = exportChain.then(run, run);
+  exportChain = task.catch(() => undefined);
+  return task;
+}
+
+async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
   const scope = opts.scope;
   const ownerUid = Number(opts.ownerUid || 0);
   const includeLogs = opts.includeLogs !== false;
@@ -305,6 +342,7 @@ export async function exportBackup(opts: ExportOptions): Promise<ExportResult> {
                     }
                   }
                 : undefined,
+              name === 'user_vault' ? ['__dek_bk'] : [],
             );
             if (!chunk.columns.length) continue;
             yield chunk;

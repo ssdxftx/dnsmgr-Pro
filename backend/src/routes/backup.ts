@@ -14,6 +14,7 @@ import {
 } from '../lib/backup/archive.js';
 import { exportBackup } from '../lib/backup/export.js';
 import { importArchive } from '../lib/backup/import.js';
+import { applyBackupRetention, applyScheduleRetention } from '../lib/backup/retention.js';
 import { hasBackupKey, rotateBackupKey, keyForArchive } from '../lib/backup/key.js';
 import { getRestoreStatus, isMaintenance, setMaintenance } from '../lib/backup/maintenance.js';
 import { restoreBackup } from '../lib/backup/restore.js';
@@ -60,27 +61,6 @@ function computeNextRun(row: any, from = new Date()): string {
   return fmt(next);
 }
 
-async function applyRetention(schedule: any): Promise<void> {
-  const keepCount = Math.max(1, Number(schedule.keep_count || 7));
-  const keepDays = Math.max(1, Number(schedule.keep_days || 30));
-  const rows = await query<any>(
-    `SELECT * FROM ${table('backup_job')}
-     WHERE kind = 'schedule' AND scope = ? AND schedule_id = ? AND status = 'success' AND file_name IS NOT NULL
-     ORDER BY id DESC`,
-    [String(schedule.scope || 'site'), Number(schedule.id || 0)],
-  );
-  const cutoff = Date.now() - keepDays * 86400_000;
-  for (let i = 0; i < rows.length; i++) {
-    const r = rows[i];
-    const at = new Date(String(r.created_at).replace(' ', 'T')).getTime();
-    const expired = i >= keepCount || at < cutoff;
-    if (!expired) continue;
-    if (r.dest_id) await deleteRemote(Number(r.dest_id), String(r.file_name));
-    await unlink(resolveArchivePath(String(r.file_name))).catch(() => undefined);
-    await query(`DELETE FROM ${table('backup_job')} WHERE id = ?`, [r.id]);
-  }
-}
-
 export default async function backupRoutes(app: FastifyInstance) {
   const auth = { preHandler: (app as any).authenticate };
   app.addHook('onSend', async (_req: any, reply: any, payload: any) => {
@@ -93,6 +73,8 @@ export default async function backupRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const scope = b.scope === 'user' ? 'user' : 'site';
     if (scope === 'site' && !isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    // 恢复/维护期间表数据正在被替换，此时导出会得到不一致快照
+    if (isMaintenance()) return reply.code(409).send({ code: -1, msg: '系统维护中，暂不能导出备份' });
     if (!hitRateLimit(`backup:export:${req.user.uid}`, 5, 10 * 60_000)) {
       return reply.code(429).send({ code: -1, msg: '备份导出过于频繁，请稍后再试' });
     }
@@ -115,6 +97,13 @@ export default async function backupRoutes(app: FastifyInstance) {
           r.jobId,
         ]);
       }
+      await applyBackupRetention({
+        kind: 'manual',
+        scope,
+        ownerUid: scope === 'user' ? Number(req.user.uid) : 0,
+        keepCount: Number(process.env.DNSMGR_BACKUP_KEEP_COUNT || 10),
+        keepDays: Number(process.env.DNSMGR_BACKUP_KEEP_DAYS || 30),
+      }).catch(() => undefined);
       audit(req, { module: 'backup', action: 'backup.export', targetType: 'backup', targetId: r.jobId, summary: `导出${scope === 'site' ? '整站' : '个人'}备份` });
       return { code: 0, msg: '备份完成', data: r };
     } catch (e: any) {
@@ -462,6 +451,7 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.post('/api/backup/schedules/:id/run', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    if (isMaintenance()) return reply.code(409).send({ code: -1, msg: '系统维护中，暂不能执行备份' });
     const row: any = await queryOne(`SELECT * FROM ${table('backup_schedule')} WHERE id = ?`, [Number(req.params.id)]);
     if (!row) return { code: -1, msg: '计划不存在' };
     try {
@@ -480,7 +470,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         computeNextRun(row),
         row.id,
       ]);
-      await applyRetention(row);
+      await applyScheduleRetention(row);
       return { code: 0, msg: '备份完成', data: r };
     } catch (e: any) {
       await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ? WHERE id = ?`, [
@@ -544,7 +534,7 @@ export async function runDueBackupSchedules(): Promise<void> {
         await query(`UPDATE ${table('backup_job')} SET dest_id = ? WHERE id = ?`, [Number(row.dest_id), r.jobId]);
       }
       await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ? WHERE id = ?`, ['成功', row.id]);
-      await applyRetention(row);
+      await applyScheduleRetention(row);
     } catch (e: any) {
       await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ? WHERE id = ?`, [
         String(e?.message || e).slice(0, 300),

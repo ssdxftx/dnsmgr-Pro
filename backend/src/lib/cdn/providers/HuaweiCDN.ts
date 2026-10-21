@@ -1,6 +1,7 @@
 import { HuaweiCloud } from '../../clients/HuaweiCloud.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
+import { mapPool } from '../../util.js';
 
 const serviceAreaMap: Record<string, string> = {
   mainland_china: 'mainland_china',
@@ -96,9 +97,10 @@ export class HuaweiCDN implements CdnProvider {
       const data = await this.call('GET', '/v1.0/cdn/domains', { page_size: 100, page_number: page });
       if (!data) return false;
       const domains = data.domains || [];
-      for (const d of domains) {
+      // 域名详情彼此独立，4 并发拉取，避免逐域名串行 N 次请求
+      const pageItems = await mapPool(domains, 4, async (d: any) => {
         const name = d.domain_name || d.DomainName || '';
-        if (!name) continue;
+        if (!name) return null;
         const detail = await this.getDomainDetail(name);
         const info = detail?.domain || {};
         const sources = info.sources || [];
@@ -115,7 +117,7 @@ export class HuaweiCDN implements CdnProvider {
           if (s.http_port != null) httpPort = Number(s.http_port);
           if (s.https_port != null) httpsPort = Number(s.https_port);
         }
-        list.push({
+        return {
           domain: name,
           cname: info.cname || d.cname || '',
           status: String(info.domain_status || d.domain_status || '').toLowerCase() === 'offline' ? 'offline' : 'online',
@@ -127,8 +129,9 @@ export class HuaweiCDN implements CdnProvider {
           http_port: httpPort,
           https_port: httpsPort,
           https_enabled: String(info.https_status || '').toLowerCase() === 'on',
-        });
-      }
+        } as CdnDomainItem;
+      });
+      list.push(...pageItems.filter((x): x is CdnDomainItem => !!x));
       const total = Number(data.total || 0);
       if (domains.length < 100 || list.length >= total) break;
       page++;

@@ -1,14 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
+import { pipeline } from 'node:stream/promises';
 import { query, table } from '../../db.js';
 import { fmtDateTime } from '../util.js';
 import type { AuditRow } from './types.js';
 
 const FLUSH_INTERVAL_MS = 1000;
 const FLUSH_BATCH = 50;
-const MAX_QUEUE = 5000;
+const MAX_QUEUE = 2000;
 const SPOOL_PATH = path.join(process.env.DNSMGR_DATA_DIR || path.resolve(process.cwd(), 'data'), 'audit-spool.ndjson');
-const SPOOL_MAX_BYTES = Number(process.env.DNSMGR_AUDIT_SPOOL_MAX || 64 * 1024 * 1024);
+const SPOOL_MAX_BYTES = Number(process.env.DNSMGR_AUDIT_SPOOL_MAX || 32 * 1024 * 1024);
 
 let queue: AuditRow[] = [];
 let timer: NodeJS.Timeout | null = null;
@@ -103,48 +105,56 @@ async function insertBatch(batch: AuditRow[]): Promise<void> {
 async function drainSpool(): Promise<void> {
   if (draining || spoolBytes <= 0) return;
   draining = true;
-  let data = '';
+  const rows: AuditRow[] = [];
+  let consumed = 0;
+  let bad = 0;
+  let rl: ReturnType<typeof createInterface> | null = null;
   try {
-    data = await fs.promises.readFile(SPOOL_PATH, 'utf8');
+    // 逐行读取，只保留一批待写库的记录；剩余内容用流复制回临时文件，
+    // 避免数据库故障时把整个 spool（最大 32MB）读进内存再 split。
+    rl = createInterface({
+      input: fs.createReadStream(SPOOL_PATH),
+      crlfDelay: Infinity,
+    });
+    for await (const line of rl) {
+      if (rows.length >= FLUSH_BATCH * 4) {
+        rl.close();
+        break;
+      }
+      consumed += Buffer.byteLength(line) + 1;
+      if (!line.trim()) continue;
+      try {
+        rows.push(JSON.parse(line));
+      } catch {
+        bad++;
+      }
+    }
+    if (rows.length) await insertBatch(rows);
+    failCount = 0;
+    retryAfter = 0;
+    if (bad) reportDead(bad, '审计 spool 解析失败');
+
+    const st = await fs.promises.stat(SPOOL_PATH).catch(() => null);
+    if (!st || consumed >= st.size) {
+      await fs.promises.unlink(SPOOL_PATH).catch(() => undefined);
+      spoolBytes = 0;
+      return;
+    }
+    const tmp = SPOOL_PATH + '.tmp';
+    await pipeline(
+      fs.createReadStream(SPOOL_PATH, { start: consumed }),
+      fs.createWriteStream(tmp, { mode: 0o600 }),
+    );
+    await fs.promises.rename(tmp, SPOOL_PATH);
+    spoolBytes = st.size - consumed;
   } catch (e: any) {
-    draining = false;
     if (e?.code === 'ENOENT') {
       spoolBytes = 0;
       return;
     }
     throw e;
-  }
-  const lines = data.split('\n');
-  const rows: AuditRow[] = [];
-  let consumed = 0;
-  let bad = 0;
-  for (const line of lines) {
-    if (rows.length >= FLUSH_BATCH * 4) break;
-    consumed += line.length + 1;
-    if (!line.trim()) continue;
-    try {
-      rows.push(JSON.parse(line));
-    } catch {
-      bad++;
-    }
-  }
-  try {
-    if (rows.length) await insertBatch(rows);
-    failCount = 0;
-    retryAfter = 0;
-    if (bad) reportDead(bad, '审计 spool 解析失败');
-    const rest = data.slice(consumed);
-    const nextBytes = Buffer.byteLength(rest);
-    if (nextBytes > 0) {
-      const tmp = SPOOL_PATH + '.tmp';
-      await fs.promises.writeFile(tmp, rest, { mode: 0o600 });
-      await fs.promises.rename(tmp, SPOOL_PATH);
-      spoolBytes = nextBytes;
-    } else {
-      await fs.promises.unlink(SPOOL_PATH).catch(() => undefined);
-      spoolBytes = 0;
-    }
   } finally {
+    rl?.close();
     draining = false;
   }
 }

@@ -62,3 +62,18 @@ export function appendLog(file: string, line: string): void {
     if (logChains.get(file) === next) logChains.delete(file);
   });
 }
+
+/** 有界并发映射：保持结果与输入同序，用于云厂商批量只读请求，避免串行 N+1 或无上限 Promise.all */
+export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const workers = new Array(Math.min(Math.max(1, limit), items.length)).fill(0).map(async () => {
+    for (;;) {
+      const i = cursor++;
+      if (i >= items.length) return;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}

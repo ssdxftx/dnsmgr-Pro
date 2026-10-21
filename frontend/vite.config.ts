@@ -9,6 +9,8 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
   },
   build: {
+    // ECharts 已按需注册并独立成懒加载 chunk；其体积阈值放宽到 600KB，避免误报
+    chunkSizeWarningLimit: 600,
     // 小于 4KB 的图标/小图内联进 JS/CSS，减少请求数（请求数越少，CDN 缓存命中率越高）
     assetsInlineLimit: 4096,
     rollupOptions: {
@@ -18,6 +20,7 @@ export default defineConfig({
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: 'assets/[name]-[hash][extname]',
         manualChunks(id: string) {
+          // ECharts 已按需注册并独立成懒加载 chunk，首屏不加载；体积阈值见 chunkSizeWarningLimit
           if (id.includes('/node_modules/echarts/') || id.includes('/node_modules/zrender/')) return 'vendor-charts';
           // naive-ui / vueuc / seemly / css-render 不再强制并入单一 vendor-ui：
           // 交给 rollup 按引用图自然分块，避免整块组件库被入口静态拉成首屏强依赖。

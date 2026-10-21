@@ -131,6 +131,7 @@
 
 <script setup lang="ts">
 import { computed, h, reactive, ref } from 'vue';
+import { useRouter } from 'vue-router';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
 import { NButton, NTag, NText, NDropdown, NModal, NForm, NFormItem, NInput, NSelect, useMessage, useDialog } from 'naive-ui';
@@ -170,6 +171,7 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{ (e: 'refresh'): void }>();
+const router = useRouter();
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
@@ -363,7 +365,7 @@ function jumpToDomain(row: any, name: string) {
   const target = resolveDomainTarget(row, name);
   if (!target) return;
   const sub = target.sub ? `?sub=${encodeURIComponent(target.sub)}` : '';
-  window.open(`/domains/${target.id}/records${sub}`, '_self');
+  router.push(`/domains/${target.id}/records${sub}`);
 }
 
 async function ensureLines(did: number | null) {

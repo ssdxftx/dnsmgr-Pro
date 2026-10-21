@@ -10,7 +10,7 @@
       >
         <MetricChart
           :labels="labels"
-          :series="chartSeries(cfg.keys)"
+          :series="chartSeriesList[idx] || []"
           :dual="cfg.dual"
           :stack="cfg.stack"
           :height="280"
@@ -80,18 +80,22 @@ const { t } = useI18n();
 
 const byKey = computed(() => new Map(props.series.map((s) => [s.key, s])));
 
-function chartSeries(keys: string[]) {
-  return keys
-    .map((key) => byKey.value.get(key))
-    .filter((s): s is SeriesInput => !!s)
-    .map((s) => ({
-      key: s.key,
-      label: t(`statistics.metric.${s.key}`),
-      values: s.values,
-      unit: s.unit,
-      chart: s.chart as 'line' | 'bar' | 'area',
-    }));
-}
+// 按图表配置一次性生成稳定引用，避免模板每次渲染都新建 series 数组，
+// 触发 MetricChart 的浅监听与 ECharts 全量重绘。
+const chartSeriesList = computed(() =>
+  props.charts.map((cfg) =>
+    cfg.keys
+      .map((key) => byKey.value.get(key))
+      .filter((s): s is SeriesInput => !!s)
+      .map((s) => ({
+        key: s.key,
+        label: t(`statistics.metric.${s.key}`),
+        values: s.values,
+        unit: s.unit,
+        chart: s.chart as 'line' | 'bar' | 'area',
+      })),
+  ),
+);
 
 const shownBreakdowns = computed(() => {
   if (props.group !== 'top') return props.breakdowns;

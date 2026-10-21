@@ -16,6 +16,7 @@ import { migrate } from './migrate.js';
 import authRoutes from './routes/auth.js';
 import accountRoutes from './routes/account.js';
 import domainRoutes from './routes/domain.js';
+import dashboardRoutes from './routes/dashboard.js';
 import cdnRoutes from './routes/cdn.js';
 import certRoutes from './routes/cert.js';
 import dmonitorRoutes from './routes/dmonitor.js';
@@ -118,7 +119,8 @@ app.setErrorHandler((err: any, _req: any, reply: any) => {
 await app.register(compress, {
   global: true,
   threshold: 1024,
-  encodings: ['br', 'gzip', 'deflate'],
+  // deflate 已被 br/gzip 完全覆盖，去掉可减少协商与压缩分支开销
+  encodings: ['br', 'gzip'],
 });
 
 // 备份导入：单文件上限 200MB，流式落盘，避免大文件进内存
@@ -137,7 +139,9 @@ app.addHook('onRequest', async (req: any, reply: any) => {
 
 // 保留原始请求体，供 QQ 机器人 Webhook 的 Ed25519 签名校验使用
 app.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, body: string, done: any) => {
-  req.rawBody = body;
+  // 只有 QQ Webhook 需要原始报文做 Ed25519 验签，其余 JSON 请求不保留第二份 body
+  const url = String(req.raw?.url || '').split('?')[0];
+  if (url === '/api/qqbot/webhook') req.rawBody = body;
   if (!body) return done(null, {});
   try {
     done(null, JSON.parse(body));
@@ -287,6 +291,7 @@ if (installed) {
   await app.register(authRoutes);
   await app.register(accountRoutes);
   await app.register(domainRoutes);
+  await app.register(dashboardRoutes);
   await app.register(cdnRoutes);
   await app.register(certRoutes);
   await app.register(dmonitorRoutes);

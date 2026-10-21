@@ -1,5 +1,4 @@
 import { request as httpRequest } from 'node:https';
-import { parse as parseYaml } from 'yaml';
 import { pinnedLookupFor } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
@@ -38,9 +37,10 @@ export class K8sDeploy implements DeployProvider {
     return out;
   }
 
-  private parse(): void {
+  private async parse(): Promise<void> {
     let kcfg: any;
     try {
+      const { parse: parseYaml } = await import('yaml');
       kcfg = parseYaml(this.kubeconfig);
     } catch {
       throw new Error('Kubeconfig格式错误');
@@ -122,7 +122,7 @@ export class K8sDeploy implements DeployProvider {
   }
 
   private async verify(): Promise<void> {
-    this.parse();
+    await this.parse();
     const { code, body, err } = await this.k8sRequest('GET', '/version');
     if (err) throw new Error('连接Kubernetes API服务器失败: ' + err);
     if (code !== 200) throw new Error('连接Kubernetes API服务器失败: HTTP ' + code + ' ' + body);
@@ -141,7 +141,7 @@ export class K8sDeploy implements DeployProvider {
     const safeNamespace = K8sDeploy.safeName(namespace, '命名空间');
     const safeSecretName = K8sDeploy.safeName(secretNameRaw, 'Secret名称');
 
-    this.parse();
+    await this.parse();
 
     const secretPayload = {
       apiVersion: 'v1',

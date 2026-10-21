@@ -10,5 +10,8 @@ export async function fetchWithProxy(input: any, init: any = {}): Promise<Respon
   const dispatcher = init?.dispatcher ?? (await getConfiguredProxyAgent());
   const opts: any = { ...(init || {}) };
   if (dispatcher) opts.dispatcher = dispatcher;
+  // 调用方未显式设置超时时给 60s 兜底，避免上游无响应导致连接和请求上下文长期悬挂。
+  // 需要更长时限的调用方仍可自行传入 signal 覆盖。
+  if (!opts.signal) opts.signal = AbortSignal.timeout(60_000);
   return (await undiciFetch(input, opts)) as unknown as Response;
 }

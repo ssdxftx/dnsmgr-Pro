@@ -3,7 +3,7 @@ import type { MetricSeries, ProviderCard } from './catalog/result.js';
 import type { StatisticsDomain } from './types.js';
 import { getCatalog, listCatalogs } from './catalog/index.js';
 import { fetchDetail } from './detail/index.js';
-import { buildTimeline, combineSeries, aggregate, mergeRateSeries } from './detail/shared.js';
+import { buildTimeline, combineSeries, aggregate, mergeRateSeries, runPool } from './detail/shared.js';
 import { BASIC_KEYS, basicUnit } from './validate.js';
 
 export interface OverviewAccount {
@@ -107,8 +107,10 @@ export async function buildProviderCard(
     return card;
   }
 
-  const parts = await Promise.all(
-    input.accounts.map((acct) =>
+  // 账户之间彼此独立，但每个账户内部还会扇出多个上游请求；
+  // 用 4 并发上限避免账户多时瞬间打满云 API 配额与连接池
+  const parts = await runPool(
+    input.accounts.map((acct) => () =>
       acct.configError
         ? Promise.resolve({
             series: [],
@@ -133,6 +135,7 @@ export async function buildProviderCard(
             requests: 0,
           })),
     ),
+    4,
   );
 
   const merged = mergeSeriesList(parts.flatMap((p) => p.series));

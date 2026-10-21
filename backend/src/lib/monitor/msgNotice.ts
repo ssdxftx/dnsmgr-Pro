@@ -1,4 +1,3 @@
-import nodemailer from 'nodemailer';
 import { configGet } from '../../config.js';
 import { query, table } from '../../db.js';
 import { Aliyun } from '../clients/Aliyun.js';
@@ -82,6 +81,8 @@ export async function sendMail(to: string, sub: string, msg: string): Promise<bo
     const mailSmtp = await configGet('mail_smtp');
     const mailPwd = await configGet('mail_pwd');
     if (!mailName || !mailPort || !mailSmtp || !mailPwd) return false;
+    // nodemailer 仅在 SMTP 发信时加载，避免未启用邮件时占用常驻内存
+    const { default: nodemailer } = await import('nodemailer');
     const transporter = nodemailer.createTransport({
       host: mailSmtp,
       port: mailPort,

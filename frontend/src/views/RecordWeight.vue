@@ -163,12 +163,17 @@ async function saveWeights() {
   } else message.error(res.msg);
 }
 
-onMounted(async () => {
+async function loadDomainName() {
   const dl = await api<any>('GET', '/domains', undefined, { cache: true });
   if (dl.code === 0) {
     const d = (dl.data || []).find((x: any) => x.id === domainId);
     if (d) domainName.value = d._base_name || d.name;
   }
+}
+
+onMounted(() => {
+  // 名称和列表互不依赖，并行请求，避免页面首屏多等一个 RTT
+  void loadDomainName();
   load();
 });
 </script>

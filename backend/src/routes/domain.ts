@@ -118,6 +118,22 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
   return { list, ok };
 }
 
+/** 一次拉取域名下的全部解析记录并建立 RecordId 索引，供批量判权复用，避免逐条全量翻页 */
+async function fetchProviderRecordMap(provider: any): Promise<Map<string, any> | null> {
+  const map = new Map<string, any>();
+  let pageSize = 500;
+  for (let page = 1; page <= 10; page++) {
+    const r = await provider.getDomainRecords(page, 500, null, null, null, null, null, null).catch(() => false);
+    if (r === false) return null;
+    if (!r.list || !r.list.length) return map;
+    for (const item of r.list) map.set(String(item.RecordId), item);
+    if (page === 1) pageSize = r.list.length;
+    if (r.list.length < pageSize) break;
+    if (typeof (r as any).total === 'number' && page * pageSize >= Number((r as any).total)) break;
+  }
+  return map;
+}
+
 const recordTotalCache = new Map<string, { at: number; total: number }>();
 const RECORD_TOTAL_CACHE_MAX = 500;
 
@@ -211,11 +227,18 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.get('/api/domains', auth, async (req: any) => {
     const acc = await getUserPerms(req);
     const kw = String(req.query?.kw || '').trim();
-    const rows = await query(
-      `SELECT A.*, B.type AS account_type, B.name AS account_name,
+    const select = `SELECT A.*, B.type AS account_type, B.name AS account_name,
               B.visibility AS account_visibility, B.owner_uid AS account_owner
-       FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
-    );
+       FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id`;
+    // 普通用户先在 SQL 层按授权域名收口，避免把全站域名读入内存后再过滤
+    const permNames = acc.admin
+      ? []
+      : [...new Set(acc.perms.map((p) => domainKey(p.domain)).filter(Boolean))];
+    const rows = acc.admin
+      ? await query(`${select} ORDER BY A.id DESC`)
+      : permNames.length
+        ? await query(`${select} WHERE LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)
+        : [];
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     let data = rows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
@@ -336,19 +359,16 @@ export default async function domainRoutes(app: FastifyInstance) {
     const acc = await getUserPerms(req);
     const kw = String(req.query?.kw || '').trim().toLowerCase();
     if (!kw) return { code: 0, data: [] };
-    const rows = await query(
-      `SELECT A.* FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id ORDER BY A.id DESC`,
-    );
-    let targets = rows as any[];
-    if (!acc.admin) {
-      const byName = new Map(targets.map((r: any) => [domainKey(r.name), r]));
-      const uniq = new Map<string, any>();
-      for (const p of acc.perms) {
-        const d = byName.get(domainKey(p.domain));
-        if (d) uniq.set(d.name, d);
-      }
-      targets = Array.from(uniq.values());
-    }
+    const permNames = acc.admin
+      ? []
+      : [...new Set(acc.perms.map((p) => domainKey(p.domain)).filter(Boolean))];
+    // 只取搜索实际需要的列，并在 SQL 层按授权域名收口
+    const select = `SELECT A.id, A.name, A.aid, A.thirdid FROM ${table('domain')} A`;
+    const targets = acc.admin
+      ? ((await query(`${select} ORDER BY A.id DESC`)) as any[])
+      : permNames.length
+        ? ((await query(`${select} WHERE LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)) as any[])
+        : [];
     // 批量取账户，避免逐个域名查 account
     const acctMap = await fetchAccountMap(targets.map((t: any) => Number(t.aid)));
     const LIMIT = 200;
@@ -658,10 +678,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    let cur: any = null;
     {
       const acc = await getUserPerms(req);
       if (!acc.admin) {
-        const cur = await provider.getDomainRecordInfo(recordId);
+        cur = await provider.getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
         if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const err = writeErr(acc, info.domain.name, cur.Name);
@@ -680,7 +701,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       });
       return { code: 0, msg: '备注修改成功' };
     }
-    const cur = await provider.getDomainRecordInfo(recordId);
+    cur = cur || (await provider.getDomainRecordInfo(recordId));
     if (!cur) return { code: -1, msg: provider.getError?.() || '获取记录信息失败' };
     const ok = await provider.updateDomainRecord(recordId, cur.Name, cur.Type, cur.Value, cur.Line, cur.TTL, cur.MX, cur.Weight, remark);
     if (!ok) return { code: -1, msg: provider.getError?.() || '备注修改失败' };
@@ -701,10 +722,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    let cur: any = null;
     {
       const acc = await getUserPerms(req);
       if (!acc.admin) {
-        const cur = await (provider as any).getDomainRecordInfo(recordId);
+        cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
         if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         let e = writeErr(acc, info.domain.name, cur.Name);
@@ -713,10 +735,9 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (e) return { code: -1, msg: '新记录超出授权子域名范围' };
       }
     }
-    const cur =
-      typeof (provider as any).getDomainRecordInfo === 'function'
-        ? await (provider as any).getDomainRecordInfo(recordId).catch(() => null)
-        : null;
+    if (!cur && typeof (provider as any).getDomainRecordInfo === 'function') {
+      cur = await (provider as any).getDomainRecordInfo(recordId).catch(() => null);
+    }
     const ok = await provider.updateDomainRecord(recordId, name, type, value, line || 'default', Number(ttl || 600), Number(mx || 1), weight ?? null, remark || null);
     if (!ok) return { code: -1, msg: provider.getError() };
     audit(req, {
@@ -740,20 +761,20 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    let cur: any = null;
     {
       const acc = await getUserPerms(req);
       if (!acc.admin) {
-        const cur = await (provider as any).getDomainRecordInfo(recordId);
+        cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
         if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }
     }
-    const cur =
-      typeof (provider as any).getDomainRecordInfo === 'function'
-        ? await (provider as any).getDomainRecordInfo(recordId).catch(() => null)
-        : null;
+    if (!cur && typeof (provider as any).getDomainRecordInfo === 'function') {
+      cur = await (provider as any).getDomainRecordInfo(recordId).catch(() => null);
+    }
     const ok = await provider.deleteDomainRecord(recordId);
     if (!ok) return { code: -1, msg: provider.getError() };
     await bumpRecordCount(id, -1);
@@ -774,20 +795,20 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    let cur: any = null;
     {
       const acc = await getUserPerms(req);
       if (!acc.admin) {
-        const cur = await (provider as any).getDomainRecordInfo(recordId);
+        cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
         if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }
     }
-    const cur =
-      typeof (provider as any).getDomainRecordInfo === 'function'
-        ? await (provider as any).getDomainRecordInfo(recordId).catch(() => null)
-        : null;
+    if (!cur && typeof (provider as any).getDomainRecordInfo === 'function') {
+      cur = await (provider as any).getDomainRecordInfo(recordId).catch(() => null);
+    }
     const ok = await provider.setDomainRecordStatus(recordId, status);
     if (!ok) return { code: -1, msg: provider.getError() };
     audit(req, {
@@ -830,15 +851,17 @@ export default async function domainRoutes(app: FastifyInstance) {
       // 以云端真实记录名判权，避免客户端用 r.Name 通过校验、却用 r.RecordId 越权操作
       const fn = provider.getDomainRecordInfo;
       if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持批量操作' };
+      // 批量记录数较多时先拉一次全量列表建立索引，避免每条记录都从第 1 页翻到目标记录
+      const recordMap = records.length >= 10 ? await fetchProviderRecordMap(makeProvider()) : null;
       try {
-        await runPool(records, 8, async (r: any) => {
+        await runPool(records, recordMap ? records.length : 8, async (r: any) => {
           // 本地范围预筛：目标名明显越权时直接拒绝，无需打云端
           if ((action === 'value' || action === 'line') && r.Name) {
             const le = writeErr(acc, info.domain.name, r.Name);
             if (le) throw new Error('新记录超出授权子域名范围');
           }
           const p: any = makeProvider();
-          const cur = await p.getDomainRecordInfo(r.RecordId);
+          const cur = recordMap ? recordMap.get(String(r.RecordId)) : await p.getDomainRecordInfo(r.RecordId);
           if (!cur) throw new Error('无权限操作该记录');
           if (!recordOwnedByDomain(cur, info.domain.name)) throw new Error('无权限操作该记录');
           const e = writeErr(acc, info.domain.name, cur.Name);

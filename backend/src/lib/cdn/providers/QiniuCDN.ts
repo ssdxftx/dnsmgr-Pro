@@ -1,6 +1,7 @@
 import { Qiniu } from '../../clients/Qiniu.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
+import { mapPool } from '../../util.js';
 
 const geoCoverMap: Record<string, string> = { mainland_china: 'china', global: 'global' };
 
@@ -80,13 +81,14 @@ export class QiniuCDN implements CdnProvider {
       const data = await this.call('GET', '/domain', query);
       if (!data) return false;
       const domains = data.domains || [];
-      for (const d of domains) {
+      // 域名详情彼此独立，4 并发拉取，避免逐域名串行 N 次请求
+      const items = await mapPool(domains, 4, async (d: any) => {
         const name = d.name || '';
-        if (!name) continue;
+        if (!name) return null;
         const detail = await this.call('GET', `/domain/${name}`);
-        if (!detail) continue;
-        list.push(this.mapDomain(detail));
-      }
+        return detail ? this.mapDomain(detail) : null;
+      });
+      list.push(...items.filter((x): x is CdnDomainItem => !!x));
       const nextMarker = data.marker || '';
       // 无数据或游标不前进时终止，避免死循环
       if (!domains.length || !nextMarker || nextMarker === marker) break;

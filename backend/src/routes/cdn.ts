@@ -463,12 +463,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
       conds.push('zone_id = ?');
       params.push(String(q.zone_id));
     }
-    const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
     const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
     const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
-    const allRows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
-    // 私有账户只对所有者可见；管理员看到的也是共享账户 + 自己的私有账户
-    const rows = allRows.filter((r: any) => allowedAids.has(Number(r.aid)));
+    if (!allowedAids.size) return { code: 0, data: [] };
+    // 显式传 aid 时也必须先通过可见性校验，避免用 aid 绕过账户归属过滤
+    const qAid = Number(q.aid || 0);
+    if (qAid && !allowedAids.has(qAid)) return { code: 0, data: [] };
+    // 可见账户直接下推到 SQL，避免先读全表再在内存里过滤
+    if (!conds.some((c) => c.startsWith('aid ='))) {
+      conds.push(`aid IN (${[...allowedAids].map(() => '?').join(',')})`);
+      params.push(...allowedAids);
+    }
+    const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+    const rows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const cdnAccounts = visibleAccounts;
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
@@ -515,16 +522,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
     const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
     const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
-    const rows = (await query(
+    if (!allowedAids.size) return { code: 0, data: [] };
+    const rows = await query(
       `SELECT aid, zone_id, MIN(route) AS route,
               MIN(name) AS primary_name,
               COUNT(*) AS domain_count,
               GROUP_CONCAT(name ORDER BY id ASC SEPARATOR ',') AS domains
        FROM ${table('cdn_domain')}
        WHERE zone_id IS NOT NULL AND zone_id != ''
+         AND aid IN (${[...allowedAids].map(() => '?').join(',')})
        GROUP BY aid, zone_id
        ORDER BY aid ASC, zone_id ASC`,
-    )).filter((r: any) => allowedAids.has(Number(r.aid)));
+      [...allowedAids],
+    );
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const localItem = (r: any) => ({
       aid: r.aid,
@@ -636,18 +646,20 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点管理' };
     const zones = await provider.getZones();
     if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
-    // 尽力补齐暂停状态：provider 已在列表里返回布尔 paused 时直接沿用，避免逐站再查一次（N+1）
+    // 尽力补齐暂停状态：provider 已在列表里返回布尔 paused 时直接沿用，避免逐站再查一次（N+1）。
+    // 缺失状态时用 4 并发补齐，站点多时不再串行等待。
     if (typeof provider.getZonePaused === 'function') {
-      for (const z of zones as any[]) {
-        if (!z.zoneId) continue;
-        if (typeof z.paused === 'boolean') continue;
-        try {
-          const p = await provider.getZonePaused(String(z.zoneId));
-          z.paused = p === true;
-        } catch {
-          z.paused = false;
-        }
-      }
+      const pending = (zones as any[]).filter((z) => z.zoneId && typeof z.paused !== 'boolean');
+      await runPool(
+        pending.map((z) => async () => {
+          try {
+            z.paused = (await provider.getZonePaused(String(z.zoneId))) === true;
+          } catch {
+            z.paused = false;
+          }
+        }),
+        4,
+      );
     }
     return { code: 0, data: zones };
   });
@@ -2563,16 +2575,32 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 按域名分组分发刷新/预热操作
   async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: string[], user: any) {
-    const grouped: Record<string, { route: string; provider: any; urls: string[] }> = {};
+    const grouped = new Map<string, { route: string; provider: any; urls: string[] }>();
     const failed: { url: string; msg: string }[] = [];
+    const domains = dedupe(urls.map((u) => domainFromUrl(u)).filter(Boolean));
+    // 一次 IN 查询预取本次涉及的全部加速域名，避免每个 URL 都做一次点查
+    const rows = domains.length
+      ? await query(`SELECT * FROM ${table('cdn_domain')} WHERE name IN (${domains.map(() => '?').join(',')})`, domains)
+      : [];
+    const rowByName = new Map((rows as any[]).map((r) => [String(r.name), r]));
+    const visibleCache = new Map<number, boolean>();
+
     for (const url of urls) {
       const domain = domainFromUrl(url);
       if (!domain) {
         failed.push({ url, msg: 'URL 格式错误' });
         continue;
       }
-      const row = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE name = ?`, [domain]);
-      if (!row || !(await getVisibleAccount('cdn_account', Number(row.aid), user))) {
+      const row: any = rowByName.get(domain);
+      if (!row) {
+        failed.push({ url, msg: `未找到加速域名 ${domain}` });
+        continue;
+      }
+      const aid = Number(row.aid);
+      if (!visibleCache.has(aid)) {
+        visibleCache.set(aid, !!(await getVisibleAccount('cdn_account', aid, user)));
+      }
+      if (!visibleCache.get(aid)) {
         failed.push({ url, msg: `未找到加速域名 ${domain}` });
         continue;
       }
@@ -2584,13 +2612,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
       // 按「账户 + 站点(zone)」分组：同一账户下不同站点的 provider 实例（站点上下文）不同，
       // 若仅按账户分组，会把 URL 提交到首个域名所属的站点，导致跨站点误刷
       const key = `${row.route}#${row.aid}#${row.zone_id || ''}`;
-      if (!grouped[key]) grouped[key] = { route: row.route, provider, urls: [] };
-      grouped[key].urls.push(url);
+      if (!grouped.has(key)) grouped.set(key, { route: row.route, provider, urls: [] });
+      grouped.get(key)!.urls.push(url);
     }
 
     const success: { url: string; taskId: string | null }[] = [];
-    for (const key of Object.keys(grouped)) {
-      const g = grouped[key];
+    const taskRows: any[][] = [];
+    const addtime = new Date();
+    for (const g of grouped.values()) {
       const fn = g.provider ? g.provider[op] : undefined;
       if (typeof fn !== 'function') {
         for (const u of g.urls) failed.push({ url: u, msg: '该厂商暂不支持此操作' });
@@ -2599,18 +2628,27 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const taskId = op === 'purge' ? await fn(g.urls, type) : await fn(g.urls);
       const status = taskId === false ? 1 : 0;
       const errMsg = taskId === false ? g.provider.getError?.() || '提交失败' : null;
+      const taskType = type === 'dir' ? 'dir' : op === 'preheat' ? 'preheat' : 'url';
       for (const u of g.urls) {
-        if (taskId === false) {
-          failed.push({ url: u, msg: errMsg || '提交失败' });
-        } else {
-          success.push({ url: u, taskId: typeof taskId === 'string' ? taskId : null });
-        }
-        const taskType = type === 'dir' ? 'dir' : op === 'preheat' ? 'preheat' : 'url';
-        await query(
-          `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [u, taskType, g.route, typeof taskId === 'string' ? taskId : null, status, errMsg],
-        );
+        if (taskId === false) failed.push({ url: u, msg: errMsg || '提交失败' });
+        else success.push({ url: u, taskId: typeof taskId === 'string' ? taskId : null });
+        taskRows.push([
+          u,
+          taskType,
+          g.route,
+          typeof taskId === 'string' ? taskId : null,
+          status,
+          errMsg,
+          addtime,
+        ]);
       }
+    }
+    // 批量写入任务历史，最多 100 行，减少逐条 INSERT 的数据库往返
+    if (taskRows.length) {
+      await query(
+        `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime) VALUES ?`,
+        [taskRows],
+      );
     }
     return { success, failed };
   }

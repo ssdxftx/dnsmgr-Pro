@@ -3,6 +3,7 @@ import { loadConfig } from '../../config.js';
 import { exportBackup } from './export.js';
 import { importArchive } from './import.js';
 import { getBackupKey } from './key.js';
+import { applyBackupRetention } from './retention.js';
 import { getRestoreStatus, setMaintenance, setRestoreStatus } from './maintenance.js';
 import { resolveArchivePath } from './archive.js';
 import { withDistributedLock } from '../scheduler/distLock.js';
@@ -35,6 +36,13 @@ async function runRestore(opts: RestoreOptions): Promise<any> {
     const key = await getBackupKey();
     if (!key) throw new Error('未设置备份密钥，无法恢复');
     const report = await importArchive(resolveArchivePath(opts.fileName), { key, mode: opts.mode, actor: opts.actor });
+    // 导入完成后再清理旧快照：本次恢复可能正在读取其中一个旧 pre_restore 文件
+    await applyBackupRetention({
+      kind: 'pre_restore',
+      scope: 'site',
+      keepCount: Number(process.env.DNSMGR_PRE_RESTORE_KEEP_COUNT || 5),
+      keepDays: Number(process.env.DNSMGR_PRE_RESTORE_KEEP_DAYS || 14),
+    }).catch(() => undefined);
 
     setRestoreStatus({ stage: 'cleanup', message: '正在刷新缓存' });
     await loadConfig(true);

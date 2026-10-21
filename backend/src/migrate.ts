@@ -248,6 +248,10 @@ export async function migrate(): Promise<void> {
   await ensureIndex('cert_order', 'idx_aid', '(`aid`)');
   await ensureIndex('cert_domain', 'idx_domain', '(`domain`)');
   await ensureIndex('cert_cname', 'idx_did_domain', '(`did`, `domain`)');
+  // 调度/统计热点：证书部署按启用+未锁+状态扫描、CDN 统计按 route 过滤、备份保留按计划筛选
+  await ensureIndex('cert_deploy', 'idx_due', '(`active`, `islock`, `status`, `retry`)');
+  await ensureIndex('cdn_domain', 'idx_route', '(`route`)');
+  await ensureIndex('backup_job', 'idx_schedule', '(`schedule_id`, `kind`, `status`)');
 }
 
 // cert_order.link 的 cdnDomainId 生成列 + 索引：MySQL 5.7+ 生成列；

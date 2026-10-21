@@ -262,21 +262,42 @@ const CellRender = (p: any) => renderCell(p.col, p.row, p.index);
 // 客户端分页（页面只传 `{ pageSize: 20 }`）在移动端卡片模式下需要本地切片与页码，
 // 否则会渲染全量数据且没有分页器，与桌面端「每页 20 条」的语义不一致。
 const localPage = ref(1);
+const MOBILE_AUTO_PAGE_SIZE = 20;
 const isClientPaged = computed(() => {
   const p = props.pagination;
   return isMobile.value && !!p && typeof p === 'object' && (p as any).itemCount === undefined;
 });
+// 未传分页的大列表在移动端自动本地分页：卡片 DOM 从全量降为每页 20 条，
+// 数据仍完整保留，翻页即可访问，避免上千条数据一次创建数千个卡片与按钮。
+const autoMobilePaged = computed(
+  () => isMobile.value && !props.pagination && props.data.length > 100,
+);
 const mobileRows = computed(() => {
+  if (!isMobile.value) return props.data;
   const p = props.pagination;
-  if (!isClientPaged.value || !p || typeof p !== 'object') return props.data;
-  const size = Number(p.pageSize || 10);
-  const start = (localPage.value - 1) * size;
-  return props.data.slice(start, start + size);
+  if (isClientPaged.value && p && typeof p === 'object') {
+    const size = Number(p.pageSize || 10);
+    const start = (localPage.value - 1) * size;
+    return props.data.slice(start, start + size);
+  }
+  if (autoMobilePaged.value) {
+    const start = (localPage.value - 1) * MOBILE_AUTO_PAGE_SIZE;
+    return props.data.slice(start, start + MOBILE_AUTO_PAGE_SIZE);
+  }
+  return props.data;
 });
 
 const mobilePagination = computed(() => {
+  if (!isMobile.value) return null;
   const p = props.pagination;
-  if (!isMobile.value || !p || typeof p !== 'object') return null;
+  if (!p || typeof p !== 'object') {
+    if (!autoMobilePaged.value) return null;
+    return {
+      page: localPage.value,
+      pageSize: MOBILE_AUTO_PAGE_SIZE,
+      itemCount: props.data.length,
+    };
+  }
   // 只传 itemCount/pageSize，naive-ui 会自行推导总页数，避免 page-count 与 item-count 同时出现触发告警
   const pageSize = Number(p.pageSize || 10);
   const itemCount = Number((p as any).itemCount ?? props.data.length);
@@ -290,7 +311,10 @@ const mobilePagination = computed(() => {
 
 function onMobilePage(page: number) {
   const p = props.pagination;
-  if (!p || typeof p !== 'object') return;
+  if (!p || typeof p !== 'object') {
+    if (autoMobilePaged.value) localPage.value = page;
+    return;
+  }
   if ((p as any).itemCount === undefined) localPage.value = page;
   p.onChange?.(page);
   p.onUpdatePage?.(page);

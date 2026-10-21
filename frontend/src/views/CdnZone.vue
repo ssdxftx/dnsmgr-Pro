@@ -158,19 +158,26 @@ async function loadAll() {
       }
       return;
     }
-    // 全账户并行拉取云端站点（含尚未接入域名的站点）
-    const results = await Promise.all(
-      targets.map(async (a: any) => {
+    // 全账户拉取云端站点（含尚未接入域名的站点）。账号多时限制 4 并发，
+    // 避免浏览器同时排队几十个请求、抢占当前页面带宽。
+    const results = new Array<any[]>(targets.length);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const i = cursor++;
+        const a = targets[i];
         const res = await api<any>('GET', '/cdn/zones', { aid: a.id });
-        if (res.code !== 0) return [];
-        return (res.data || []).map((z: any) => ({
-          ...z,
-          typename: z.typename || a.typename || a.type,
-          accountName: a.name,
-          key: `${z.aid ?? a.id}:${z.zone_id}`,
-        }));
-      }),
-    );
+        results[i] = res.code === 0
+          ? (res.data || []).map((z: any) => ({
+              ...z,
+              typename: z.typename || a.typename || a.type,
+              accountName: a.name,
+              key: `${z.aid ?? a.id}:${z.zone_id}`,
+            }))
+          : [];
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
     zoneList.value = results.flat();
   } finally {
     loadBusy.value = false;

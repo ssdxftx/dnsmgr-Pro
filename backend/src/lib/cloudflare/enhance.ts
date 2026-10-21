@@ -492,6 +492,8 @@ export class CloudflareEnhanceService {
         headers,
         body: body !== null ? JSON.stringify(body) : undefined,
         dispatcher,
+        // 上游卡住时尽快释放连接与请求上下文，避免长期占用事件循环资源
+        signal: AbortSignal.timeout(15000),
       } as any);
       status = res.status;
       text = await res.text();

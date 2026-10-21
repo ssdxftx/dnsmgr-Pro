@@ -3,7 +3,7 @@ import { query, queryOne, table } from '../db.js';
 import { configGet, configSet } from '../config.js';
 import { fmtDateTime, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
-import { tryAcquire, release } from '../lib/scheduler/guards.js';
+import { withDistributedLock } from '../lib/scheduler/distLock.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK } from '../lib/secret.js';
 
@@ -219,18 +219,22 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const task = await queryOne(`SELECT * FROM ${table('optimizeip')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '任务不存在' };
-    // 与周期任务共享同一把锁，避免并发执行基于同一份过期快照重复写入/误删记录
-    if (!tryAcquire('optimize')) return { code: -1, msg: '优选任务正在执行，请稍后再试' };
-    try {
-      const result = await executeOne(task);
-      await query(`UPDATE ${table('optimizeip')} SET status = 1, errmsg = NULL, updatetime = ? WHERE id = ?`, [fmtDateTime(), id]);
-      return { code: 0, msg: '优选任务执行成功：' + result };
-    } catch (e: any) {
-      await query(`UPDATE ${table('optimizeip')} SET status = 2, errmsg = ?, updatetime = ? WHERE id = ?`, [e.message || String(e), fmtDateTime(), id]);
-      return { code: -1, msg: '优选任务执行失败：' + e.message };
-    } finally {
-      release('optimize');
-    }
+    // 与周期任务共享同一把分布式锁：多副本下手动执行也不会与调度器并发写同一份记录
+    let ok = false;
+    let message = '';
+    const locked = await withDistributedLock('dnsmgr:optimize', async () => {
+      try {
+        const result = await executeOne(task);
+        await query(`UPDATE ${table('optimizeip')} SET status = 1, errmsg = NULL, updatetime = ? WHERE id = ?`, [fmtDateTime(), id]);
+        ok = true;
+        message = '优选任务执行成功：' + result;
+      } catch (e: any) {
+        await query(`UPDATE ${table('optimizeip')} SET status = 2, errmsg = ?, updatetime = ? WHERE id = ?`, [e.message || String(e), fmtDateTime(), id]);
+        message = '优选任务执行失败：' + e.message;
+      }
+    });
+    if (!locked) return { code: -1, msg: '优选任务正在执行，请稍后再试' };
+    return { code: ok ? 0 : -1, msg: message };
   });
 
   // 运行状态

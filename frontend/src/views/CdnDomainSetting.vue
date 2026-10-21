@@ -125,7 +125,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute } from 'vue-router';
-import { useMessage } from 'naive-ui';
+import { NDynamicInput, NDynamicTags, useMessage } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';

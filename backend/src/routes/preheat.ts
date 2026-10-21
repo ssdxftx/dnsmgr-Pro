@@ -3,6 +3,7 @@ import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { preheatUrls, purgeUrls, calcNextRun, loadUrls } from '../lib/cdn/preheatService.js';
 import { fmtDateTime } from '../lib/util.js';
+import { withDistributedLock } from '../lib/scheduler/distLock.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -71,11 +72,15 @@ export default async function preheatRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT * FROM ${table('cdn_preheat_task')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
-    const urls = loadUrls(row.urls);
-    const result = row.op === 'purge' ? await purgeUrls(urls) : await preheatUrls(urls);
-    const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
-    await query(`UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [next, id]);
-    return { code: 0, ...result };
+    let result: { success: number; failed: number } | null = null;
+    const locked = await withDistributedLock('dnsmgr:preheat', async () => {
+      const urls = loadUrls(row.urls);
+      result = row.op === 'purge' ? await purgeUrls(urls) : await preheatUrls(urls);
+      const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
+      await query(`UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [next, id]);
+    });
+    if (!locked) return { code: -1, msg: '自动预热任务正在执行，请稍后再试' };
+    return { code: 0, ...(result || { success: 0, failed: 0 }) };
   });
 
   // 删除任务

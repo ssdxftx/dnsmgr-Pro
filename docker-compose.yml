@@ -3,13 +3,26 @@ name: dnsmgr-refactor
 services:
   app:
     build: .
-    image: dnsmgr-refactor:${IMAGE_TAG:-1.10.1}
+    image: dnsmgr-refactor:${IMAGE_TAG:-latest}
     container_name: dnsmgr-app
     restart: always
+    init: true
+    stop_grace_period: 30s
     ports:
       - "${APP_PORT:-8082}:8082"
     volumes:
       - app-data:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8082/api/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     environment:
       TZ: Asia/Shanghai
       # 数据库连接信息建议通过首次启动的“系统安装”页面填写（写入持久化卷 /app/data/config.json）。

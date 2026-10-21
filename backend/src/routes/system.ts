@@ -9,7 +9,7 @@ import { clearOverviewCache } from '../lib/cdn/statistics/overview.js';
 import { clearDetailCache } from '../lib/cdn/statistics/detail/cache.js';
 import { executeAll as runScheduleAll } from '../lib/schedule/scheduleService.js';
 import { executeAll as runOptimizeAll } from '../lib/optimize/optimizeService.js';
-import { runGuarded } from '../lib/scheduler/guards.js';
+import { withDistributedLock } from '../lib/scheduler/distLock.js';
 import { checkLevel } from '../auth.js';
 import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
@@ -217,8 +217,13 @@ export default async function systemRoutes(app: FastifyInstance) {
     if (!safeEqual(key, cronKey)) {
       return { code: -1, msg: '访问密钥错误' };
     }
-    await runGuarded('schedule', runScheduleAll, '[schedule] 定时切换解析异常:');
-    await runGuarded('optimize', runOptimizeAll, '[optimize] 优选IP调度异常:');
+    // 与内嵌调度器共用分布式锁，避免外部 cron 与进程内定时器同时执行同一任务
+    await withDistributedLock('dnsmgr:schedule', runScheduleAll).catch((e: any) =>
+      console.error('[schedule] 定时切换解析异常:', e?.message || e),
+    );
+    await withDistributedLock('dnsmgr:optimize', runOptimizeAll).catch((e: any) =>
+      console.error('[optimize] 优选IP调度异常:', e?.message || e),
+    );
     return { code: 0, data: 'success!' };
   });
 

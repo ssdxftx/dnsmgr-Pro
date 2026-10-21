@@ -4,6 +4,7 @@ import { checkLevel, getUserPermissions, matchPermission, sameDomain } from '../
 import { checkDomainRecords, calcNextRun, listSubDomains } from '../lib/dns/checkService.js';
 import { fmtDateTime, escapeLike } from '../lib/util.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
+import { withDistributedLock } from '../lib/scheduler/distLock.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -134,14 +135,18 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     if (!hitRateLimit(`dnscheck:${req.user.uid}`, 6, 10 * 60_000)) {
       return { code: -1, msg: '检测执行过于频繁，请稍后再试' };
     }
-    const types = String(row.types || '').split(/[,;，；]/).map((x: string) => x.trim().toUpperCase()).filter(Boolean);
-    const result = await checkDomainRecords(row.did, types.length ? types : undefined, row.uid, row.sub);
-    const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
-    const issueCount = result.issues ? result.issues.length : 0;
-    await query(
-      `UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ?, last_status = ?, issue_count = ? WHERE id = ?`,
-      [next, issueCount ? 1 : 0, issueCount, id],
-    );
+    let result: any = null;
+    const locked = await withDistributedLock('dnsmgr:dnscheck', async () => {
+      const types = String(row.types || '').split(/[,;，；]/).map((x: string) => x.trim().toUpperCase()).filter(Boolean);
+      result = await checkDomainRecords(row.did, types.length ? types : undefined, row.uid, row.sub);
+      const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
+      const issueCount = result.issues ? result.issues.length : 0;
+      await query(
+        `UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ?, last_status = ?, issue_count = ? WHERE id = ?`,
+        [next, issueCount ? 1 : 0, issueCount, id],
+      );
+    });
+    if (!locked) return { code: -1, msg: '自动检测任务正在执行，请稍后再试' };
     return { code: 0, ...result };
   });
 

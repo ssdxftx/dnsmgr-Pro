@@ -108,7 +108,7 @@
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NDropdown, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NDropdown, NDynamicInput, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ShieldCheckmarkOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';

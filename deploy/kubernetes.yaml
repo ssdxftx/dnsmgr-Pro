@@ -60,15 +60,30 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 128Mi
+              # 编译前基线空闲 RSS 约 135MiB，128Mi 会低于实际需求
+              memory: 256Mi
             limits:
               memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8082
+            failureThreshold: 30
+            periodSeconds: 2
           readinessProbe:
             httpGet:
               path: /api/health
               port: 8082
             initialDelaySeconds: 5
             periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8082
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
           volumeMounts:
             - name: data
               mountPath: /app/data

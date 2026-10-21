@@ -4,13 +4,6 @@ import { readFile, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import {
-  DeleteObjectCommand,
-  GetObjectCommand,
-  ListObjectsV2Command,
-  PutObjectCommand,
-  S3Client,
-} from '@aws-sdk/client-s3';
 import { queryOne, table } from '../../db.js';
 import { decryptConfig } from '../secret.js';
 import { assertDeployTargetAllowed, assertUrlAllowed, safeFetch } from '../netGuard.js';
@@ -150,6 +143,7 @@ export async function testDestination(row: DestinationRow): Promise<{ ok: boolea
       return { ok: true, message: '连接成功（可读写）' };
     }
     const client = await s3Client(row.config);
+    const { ListObjectsV2Command } = await s3Module();
     await client.send(new ListObjectsV2Command({ Bucket: row.config.bucket, MaxKeys: 1 }));
     return { ok: true, message: '连接成功' };
   } catch (e: any) {
@@ -157,9 +151,17 @@ export async function testDestination(row: DestinationRow): Promise<{ ok: boolea
   }
 }
 
-async function s3Client(cfg: any): Promise<S3Client> {
+// S3 SDK 体积较大，仅在真正使用 S3 目的地时加载，降低空闲常驻内存
+let s3ModulePromise: Promise<typeof import('@aws-sdk/client-s3')> | null = null;
+function s3Module() {
+  if (!s3ModulePromise) s3ModulePromise = import('@aws-sdk/client-s3');
+  return s3ModulePromise;
+}
+
+async function s3Client(cfg: any): Promise<import('@aws-sdk/client-s3').S3Client> {
   // 自建 S3 常在内网，允许内网目标但拒绝链路本地/云元数据地址
   if (cfg.endpoint) await assertDeployTargetAllowed(String(cfg.endpoint));
+  const { S3Client } = await s3Module();
   return new S3Client({
     region: cfg.region || 'us-east-1',
     endpoint: cfg.endpoint || undefined,
@@ -201,6 +203,7 @@ export async function uploadToDestination(destId: number, localPath: string, nam
   }
   const size = (await stat(localPath)).size;
   const client = await s3Client(row.config);
+  const { PutObjectCommand } = await s3Module();
   await client.send(
     new PutObjectCommand({
       Bucket: row.config.bucket,
@@ -236,6 +239,7 @@ export async function listRemote(destId: number): Promise<RemoteItem[]> {
     return items;
   }
   const client = await s3Client(row.config);
+  const { ListObjectsV2Command } = await s3Module();
   const prefix = String(row.config.prefix || '').replace(/^\/+|\/+$/g, '');
   const res = await client.send(new ListObjectsV2Command({ Bucket: row.config.bucket, Prefix: prefix || undefined }));
   return (res.Contents || [])
@@ -261,6 +265,7 @@ export async function downloadRemote(destId: number, name: string, localPath: st
     return;
   }
   const client = await s3Client(row.config);
+  const { GetObjectCommand } = await s3Module();
   const res = await client.send(new GetObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
   if (!res.Body) throw new Error('S3 下载失败');
   await pipeline(res.Body as any, createWriteStream(localPath));
@@ -275,6 +280,7 @@ export async function deleteRemote(destId: number, name: string): Promise<void> 
       return;
     }
     const client = await s3Client(row.config);
+    const { DeleteObjectCommand } = await s3Module();
     await client.send(new DeleteObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
   } catch {
     // 远端删除失败不应阻断本地清理

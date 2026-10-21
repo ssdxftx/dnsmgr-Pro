@@ -3,6 +3,7 @@ import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, DomainCertI
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 import { toEnabled, fromEnabled } from '../vendorSwitch.js';
+import { mapPool } from '../../util.js';
 
 // params 透传时禁止覆盖的服务端控制键（由 provider 依业务语义设定）
 const ESA_RESERVED_PARAM_KEYS = new Set(['Action', 'SiteId', 'Id', 'ApplicationId', 'ConfigId', 'SiteVersion']);
@@ -155,55 +156,62 @@ export class AliyunESA implements CdnProvider {
   }
 
   async listDomains(): Promise<CdnDomainItem[] | false> {
-    const list: CdnDomainItem[] = [];
+    const sites: any[] = [];
     let page = 1;
     const size = 100;
     while (page < 50) {
       const data = await this.call({ Action: 'ListSites', PageNumber: page, PageSize: size });
       if (!data) return false;
       for (const s of data.Sites || []) {
-        const siteId = String(s.SiteId || '');
-        const siteName = s.SiteName || '';
-        if (!siteId || !siteName) continue;
-        let rp = 1;
-        while (rp < 50) {
-          const rr = await this.call({ Action: 'ListRecords', SiteId: siteId, PageNumber: rp, PageSize: size });
-          if (!rr) break;
-          const records = rr.Records || [];
-          for (const r of records) {
-            if (!r.Proxied) continue;
-            if (r.RecordType !== 'A/AAAA' && r.RecordType !== 'CNAME') continue;
-            const recordName = r.RecordName || '';
-            const domain = recordName;
-            const dataObj = r.Data && typeof r.Data === 'object' ? r.Data : {};
-            const origin = dataObj.value ? String(dataObj.value) : '';
-            const originType = r.RecordType === 'A/AAAA' ? 'ipaddr' : 'domain';
-            // 注意：ESA 的站点/记录列表无法反映「域名级 HTTPS 开关」与「强制跳转」的真实状态，
-            // 这里刻意不返回 https_enabled / force_redirect，避免云端同步（syncFromCloud）把它们回写成
-            // false 从而清空本地已启用的 HTTPS 状态（其真实值由证书联动/HTTPS 规则维护）。
-            list.push({
-              domain,
-              cname: r.RecordCname || '',
-              status: 'online',
-              zoneId: siteId,
-              origin,
-              origin_type: originType,
-              origin_host: r.HostPolicy || '',
-              origin_protocol: 'follow',
-              http_port: 80,
-              https_port: 443,
-            });
-          }
-          const rtotal = Number(rr.TotalCount || 0);
-          if (records.length < size || rp * size >= rtotal) break;
-          rp++;
-        }
+        if (s.SiteId && s.SiteName) sites.push(s);
       }
       const stotal = Number(data.TotalCount || 0);
       if ((data.Sites || []).length < size || page * size >= stotal) break;
       page++;
     }
-    return list;
+
+    // 站点间 4 并发：每个站点的记录分页仍需串行，但不同站点可并行拉取
+    const results = await mapPool(sites, 4, async (s: any) => {
+      const out: CdnDomainItem[] = [];
+      const siteId = String(s.SiteId || '');
+      const siteName = s.SiteName || '';
+      if (!siteId || !siteName) return out;
+      let rp = 1;
+      while (rp < 50) {
+        const rr = await this.call({ Action: 'ListRecords', SiteId: siteId, PageNumber: rp, PageSize: size });
+        if (!rr) break;
+        const records = rr.Records || [];
+        for (const r of records) {
+          if (!r.Proxied) continue;
+          if (r.RecordType !== 'A/AAAA' && r.RecordType !== 'CNAME') continue;
+          const recordName = r.RecordName || '';
+          const domain = recordName;
+          const dataObj = r.Data && typeof r.Data === 'object' ? r.Data : {};
+          const origin = dataObj.value ? String(dataObj.value) : '';
+          const originType = r.RecordType === 'A/AAAA' ? 'ipaddr' : 'domain';
+          // 注意：ESA 的站点/记录列表无法反映「域名级 HTTPS 开关」与「强制跳转」的真实状态，
+          // 这里刻意不返回 https_enabled / force_redirect，避免云端同步（syncFromCloud）把它们回写成
+          // false 从而清空本地已启用的 HTTPS 状态（其真实值由证书联动/HTTPS 规则维护）。
+          out.push({
+            domain,
+            cname: r.RecordCname || '',
+            status: 'online',
+            zoneId: siteId,
+            origin,
+            origin_type: originType,
+            origin_host: r.HostPolicy || '',
+            origin_protocol: 'follow',
+            http_port: 80,
+            https_port: 443,
+          });
+        }
+        const rtotal = Number(rr.TotalCount || 0);
+        if (records.length < size || rp * size >= rtotal) break;
+        rp++;
+      }
+      return out;
+    });
+    return results.flat();
   }
 
   async deleteDomain(domain: string) {

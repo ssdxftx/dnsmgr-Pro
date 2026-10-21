@@ -1,6 +1,7 @@
 import { BaiduCloud } from '../../clients/BaiduCloud.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
+import { mapPool } from '../../util.js';
 
 function parsePeer(peer: string): { host: string; port: number } | null {
   const m = String(peer).match(/^https?:\/\/(\[[^\]]+\]|[^/:]+)(?::(\d+))?/);
@@ -86,12 +87,12 @@ export class BaiduCDN implements CdnProvider {
     const data = await this.call('GET', '/v2/domain');
     if (!data) return false;
     const domains = data.domains || [];
-    const list: CdnDomainItem[] = [];
-    for (const d of domains) {
+    // 域名详情彼此独立，4 并发拉取，避免逐域名串行 N 次请求
+    const items = await mapPool(domains, 4, async (d: any) => {
       const name = d.domain || d.Domain || '';
-      if (!name) continue;
+      if (!name) return null;
       const detail = await this.getDomainDetail(name);
-      if (!detail) continue;
+      if (!detail) return null;
       const origins: string[] = [];
       let httpPort = 80;
       let httpsPort = 443;
@@ -105,7 +106,7 @@ export class BaiduCDN implements CdnProvider {
         originType = isIp(p.host) ? 'ipaddr' : 'domain';
       }
       const https = detail.https || {};
-      list.push({
+      return {
         domain: name,
         cname: detail.cname || '',
         status: String(detail.status || '').toUpperCase() === 'STOPPED' ? 'offline' : 'online',
@@ -118,9 +119,9 @@ export class BaiduCDN implements CdnProvider {
         https_port: httpsPort,
         https_enabled: https.enabled === true,
         force_redirect: https.httpRedirect === true,
-      });
-    }
-    return list;
+      } as CdnDomainItem;
+    });
+    return items.filter((x): x is CdnDomainItem => !!x);
   }
 
   async deleteDomain(domain: string) {

@@ -24,9 +24,9 @@ export function startMonitorScheduler(): void {
       .finally(() => {
         running = false;
       });
-    // 轮询间隔由 1s 放宽到 3s：任务 frequency 最小为 60s，3s 精度足够，
-    // 可将每秒一次的查询/连接获取频率降低到 1/3
-  }, 3000);
+    // 轮询间隔 5s：任务 frequency 最小为 60s，5s 精度足够；
+    // 相比 3s 进一步减少空载时的连接获取、GET_LOCK 与查询次数
+  }, 5000);
 }
 
 function formatDay(d: Date): string {
@@ -52,9 +52,11 @@ async function tick(): Promise<void> {
   for (const row of rows) {
     // 等待任务完成再推进 checknexttime，避免任务耗时超过 frequency 时重叠执行
     await runMonitorTask(row);
+    // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期
+    const doneAt = Math.floor(Date.now() / 1000);
     await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
-      now,
-      now + (row.frequency || 60),
+      doneAt,
+      doneAt + (row.frequency || 60),
       row.id,
     ]);
     count++;

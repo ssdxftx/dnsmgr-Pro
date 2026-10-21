@@ -5,15 +5,11 @@ import App from './App.vue';
 import router from './router';
 import i18n, { ensureLocale, getInitialLocale } from './i18n';
 import { vReveal } from './directives/reveal';
-import { installMock } from './mock';
 import { isAdminUser, requiresAdmin } from './lib/admin';
 import { getUser } from './api';
 import './styles/tokens.css';
 import './styles/responsive.css';
 import './styles/ui-consistency.css';
-
-// 静态预览构建时启用 Mock（正式构建为空操作）
-installMock();
 
 // 语言包改为按需网络加载，需给加载失败兜底：失败时仍要挂载应用，避免整站白屏
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
@@ -33,6 +29,12 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 async function bootstrap() {
+  // Mock 数据仅在显式开启时动态加载，避免生产入口携带整份演示数据
+  if (import.meta.env.VITE_MOCK === 'true') {
+    const { installMock } = await import('./mock');
+    installMock();
+  }
+
   // 首屏只加载当前语言包，另一种语言在切换时按需下载
   try {
     await withTimeout(ensureLocale(getInitialLocale()), 5000);
@@ -52,31 +54,50 @@ async function bootstrap() {
   prefetchRoutes();
 }
 
-// 空闲时预取各路由 chunk，点击菜单时无需再等网络往返
+// 空闲时只预取少量高频静态路由，避免把全部懒加载 chunk 重新下载一遍
 function prefetchRoutes() {
-  // 尊重省流设置：saveData 或弱网（2G/慢速）时不做路由预取
+  if (document.hidden) return;
+  // 尊重省流设置：saveData、2G/3G 或低内存设备不做路由预取
   const conn: any = (navigator as any)?.connection;
-  if (conn?.saveData || /(^|-)2g$/.test(String(conn?.effectiveType || ''))) return;
+  const lowMemory = Number((navigator as any)?.deviceMemory || 0);
+  if (
+    conn?.saveData ||
+    /(^|-)2g$/.test(String(conn?.effectiveType || '')) ||
+    /(^|-)3g$/.test(String(conn?.effectiveType || '')) ||
+    (lowMemory > 0 && lowMemory < 4)
+  ) return;
   const run = () => {
+    if (document.hidden) return;
     const admin = isAdminUser(getUser());
-    for (const r of router.getRoutes()) {
-      // 不预取普通用户无权访问的管理页 chunk，节省带宽
-      if (requiresAdmin(r.path) && !admin) continue;
-      const comp: any = (r.components as any)?.default;
-      if (typeof comp === 'function') {
+    // 跳过登录/安装页、带参数的详情页以及图表/二维码等重 chunk；
+    // 最多预取 12 个静态高频路由，且限制 2 并发，避免与用户当前导航争抢带宽。
+    const candidates = router
+      .getRoutes()
+      .filter((r) => {
+        if (!r.path.startsWith('/') || r.path.includes(':')) return false;
+        if (['/setup', '/login', '/register', '/totp'].includes(r.path)) return false;
+        if (requiresAdmin(r.path) && !admin) return false;
+        const comp: any = (r.components as any)?.default;
+        return typeof comp === 'function';
+      })
+      .slice(0, 12);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < candidates.length) {
+        const r = candidates[cursor++];
+        const comp: any = (r.components as any)?.default;
         try {
-          const p = comp();
-          // 动态 import 失败是异步 reject，必须显式 catch，否则产生 Uncaught (in promise)
-          if (p && typeof p.catch === 'function') p.catch(() => {});
+          await comp();
         } catch {
           /* 单个 chunk 预取失败忽略 */
         }
       }
-    }
+    };
+    void Promise.all([worker(), worker()]);
   };
   const idle = (window as any).requestIdleCallback;
-  if (typeof idle === 'function') idle(run, { timeout: 3000 });
-  else setTimeout(run, 1200);
+  if (typeof idle === 'function') idle(run, { timeout: 5000 });
+  else setTimeout(run, 2000);
 }
 
 bootstrap().catch((e) => {

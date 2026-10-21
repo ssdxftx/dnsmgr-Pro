@@ -35,7 +35,8 @@ export async function ensureDataDirs(): Promise<void> {
 export interface ArchiveTableChunk {
   name: string;
   columns: string[];
-  rows: Record<string, any>[];
+  /** 行迭代器：导出端按主键分页产出，写入端逐行序列化，避免整表读入内存 */
+  rows: Iterable<Record<string, any>> | AsyncIterable<Record<string, any>>;
 }
 
 export interface ArchiveDraft {
@@ -116,15 +117,19 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{');
     let firstTable = true;
     for await (const t of draft.tables()) {
-      stats.tables[t.name] = { rows: t.rows.length, columns: t.columns };
       if (!firstTable) await writeChunk(gz, ',');
       firstTable = false;
-      await writeChunk(gz, JSON.stringify(t.name) + ':{"rows":' + t.rows.length + ',"columns":' + JSON.stringify(t.columns) + ',"data":[');
-      for (let i = 0; i < t.rows.length; i++) {
-        if (i) await writeChunk(gz, ',');
-        await writeChunk(gz, JSON.stringify(t.rows[i]));
+      // data 必须边读边写；行数只有写完才知道，因此把 rows 统计放到 data 之后。
+      // 导入端按字段名解析，字段顺序不影响兼容性。
+      await writeChunk(gz, JSON.stringify(t.name) + ':{"columns":' + JSON.stringify(t.columns) + ',"data":[');
+      let rowCount = 0;
+      for await (const row of t.rows) {
+        if (rowCount) await writeChunk(gz, ',');
+        await writeChunk(gz, JSON.stringify(row));
+        rowCount++;
       }
-      await writeChunk(gz, ']}');
+      stats.tables[t.name] = { rows: rowCount, columns: t.columns };
+      await writeChunk(gz, '],"rows":' + rowCount + '}');
     }
     if (draft.header.vault) stats.vault = draft.header.vault;
     await writeChunk(gz, '}}');
@@ -314,9 +319,17 @@ class ByteCursor {
 
   async skipWs(): Promise<void> {
     for (;;) {
-      const c = await this.peek();
-      if (c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09) this.pos++;
-      else return;
+      await this.fill();
+      if (this.pos >= this.buf.length) {
+        if (this.eof) return;
+        continue;
+      }
+      while (this.pos < this.buf.length) {
+        const c = this.buf[this.pos];
+        if (c !== 0x20 && c !== 0x0a && c !== 0x0d && c !== 0x09) return;
+        this.pos++;
+      }
+      if (this.eof) return;
     }
   }
 
@@ -325,24 +338,38 @@ class ByteCursor {
     if ((await this.read()) !== ch) throw new Error('备份 JSON 结构异常');
   }
 
+  /** 跳过一段复合值（对象/数组），按块扫描，避免逐字节分配 Buffer */
   async scanComposite(open: number): Promise<void> {
     const close = open === 0x7b ? 0x7d : 0x5d;
     let depth = 1;
     let inStr = false;
+    let escaped = false;
     for (;;) {
-      const c = await this.read();
-      if (c < 0) throw new Error('备份 JSON 损坏（括号未闭合）');
-      if (inStr) {
-        if (c === 0x5c) await this.read();
-        else if (c === 0x22) inStr = false;
+      await this.fill();
+      if (this.pos >= this.buf.length) {
+        if (this.eof) throw new Error('备份 JSON 损坏（括号未闭合）');
         continue;
       }
-      if (c === 0x22) inStr = true;
-      else if (c === open) depth++;
-      else if (c === close) {
-        depth--;
-        if (depth === 0) return;
+      const start = this.pos;
+      for (let i = start; i < this.buf.length; i++) {
+        const c = this.buf[i];
+        if (inStr) {
+          if (escaped) escaped = false;
+          else if (c === 0x5c) escaped = true;
+          else if (c === 0x22) inStr = false;
+          continue;
+        }
+        if (c === 0x22) inStr = true;
+        else if (c === open) depth++;
+        else if (c === close) {
+          depth--;
+          if (depth === 0) {
+            this.pos = i + 1;
+            return;
+          }
+        }
       }
+      this.pos = this.buf.length;
     }
   }
 
@@ -351,52 +378,103 @@ class ByteCursor {
     await this.skipWs();
     const first = await this.read();
     if (first < 0) throw new Error('备份 JSON 提前结束');
+    if (first === 0x22) return this.readStringBytes(first);
+    if (first === 0x7b || first === 0x5b) return this.readCompositeBytes(first);
+    return this.readScalarBytes(first);
+  }
+
+  private async readStringBytes(first: number): Promise<Buffer> {
     const parts: Buffer[] = [Buffer.from([first])];
-    if (first === 0x22) {
-      for (;;) {
-        const c = await this.read();
-        if (c < 0) throw new Error('备份 JSON 损坏（字符串未闭合）');
-        parts.push(Buffer.from([c]));
+    let escaped = false;
+    for (;;) {
+      await this.fill();
+      if (this.pos >= this.buf.length) {
+        if (this.eof) throw new Error('备份 JSON 损坏（字符串未闭合）');
+        continue;
+      }
+      const start = this.pos;
+      for (let i = start; i < this.buf.length; i++) {
+        const c = this.buf[i];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
         if (c === 0x5c) {
-          const n = await this.read();
-          if (n < 0) throw new Error('备份 JSON 损坏（转义未闭合）');
-          parts.push(Buffer.from([n]));
-        } else if (c === 0x22) {
+          escaped = true;
+          continue;
+        }
+        if (c === 0x22) {
+          this.pos = i + 1;
+          parts.push(this.buf.subarray(start, i + 1));
           return Buffer.concat(parts);
         }
       }
+      this.pos = this.buf.length;
+      parts.push(this.buf.subarray(start, this.buf.length));
+      if (this.eof) throw new Error('备份 JSON 损坏（字符串未闭合）');
     }
-    if (first === 0x7b || first === 0x5b) {
-      const open = first;
-      const close = first === 0x7b ? 0x7d : 0x5d;
-      let depth = 1;
-      let inStr = false;
-      for (;;) {
-        const c = await this.read();
-        if (c < 0) throw new Error('备份 JSON 损坏（括号未闭合）');
-        parts.push(Buffer.from([c]));
+  }
+
+  private async readCompositeBytes(open: number): Promise<Buffer> {
+    const close = open === 0x7b ? 0x7d : 0x5d;
+    const parts: Buffer[] = [Buffer.from([open])];
+    let depth = 1;
+    let inStr = false;
+    let escaped = false;
+    for (;;) {
+      await this.fill();
+      if (this.pos >= this.buf.length) {
+        if (this.eof) throw new Error('备份 JSON 损坏（括号未闭合）');
+        continue;
+      }
+      const start = this.pos;
+      for (let i = start; i < this.buf.length; i++) {
+        const c = this.buf[i];
         if (inStr) {
-          if (c === 0x5c) {
-            const n = await this.read();
-            if (n < 0) throw new Error('备份 JSON 损坏（转义未闭合）');
-            parts.push(Buffer.from([n]));
-          } else if (c === 0x22) inStr = false;
+          if (escaped) escaped = false;
+          else if (c === 0x5c) escaped = true;
+          else if (c === 0x22) inStr = false;
           continue;
         }
         if (c === 0x22) inStr = true;
         else if (c === open) depth++;
         else if (c === close) {
           depth--;
-          if (depth === 0) return Buffer.concat(parts);
+          if (depth === 0) {
+            this.pos = i + 1;
+            parts.push(this.buf.subarray(start, i + 1));
+            return Buffer.concat(parts);
+          }
         }
       }
+      this.pos = this.buf.length;
+      parts.push(this.buf.subarray(start, this.buf.length));
+      if (this.eof) throw new Error('备份 JSON 损坏（括号未闭合）');
     }
+  }
+
+  private async readScalarBytes(first: number): Promise<Buffer> {
+    const parts: Buffer[] = [Buffer.from([first])];
     for (;;) {
-      const c = await this.peek();
-      if (c < 0 || c === 0x2c || c === 0x7d || c === 0x5d || c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09) {
-        return Buffer.concat(parts);
+      await this.fill();
+      if (this.pos >= this.buf.length) {
+        if (this.eof) return Buffer.concat(parts);
+        continue;
       }
-      parts.push(Buffer.from([await this.read()]));
+      const start = this.pos;
+      let i = start;
+      while (i < this.buf.length) {
+        const c = this.buf[i];
+        if (c === 0x2c || c === 0x7d || c === 0x5d || c === 0x20 || c === 0x0a || c === 0x0d || c === 0x09) break;
+        i++;
+      }
+      if (i > start) {
+        this.pos = i;
+        parts.push(this.buf.subarray(start, i));
+      }
+      if (i < this.buf.length) return Buffer.concat(parts);
+      this.pos = this.buf.length;
+      if (this.eof) return Buffer.concat(parts);
     }
   }
 

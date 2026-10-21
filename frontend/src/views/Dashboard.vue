@@ -94,16 +94,18 @@ const healthList = computed(() =>
 );
 
 onMounted(async () => {
-  const [d, a, c] = await Promise.all([
-    api<any>('GET', '/domains', undefined, { cache: true }).catch(() => ({ code: -1 })),
+  // 计数走轻量接口，健康面板才需要账户列表，避免首页拉取全部域名/CDN 域名
+  const [s, a] = await Promise.all([
+    api<any>('GET', '/dashboard/summary').catch(() => ({ code: -1 })),
     api<any>('GET', '/dns/accounts').catch(() => ({ code: -1 })),
-    api<any>('GET', '/cdn/domains').catch(() => ({ code: -1 })),
   ]);
-  stats.value = {
-    domains: d.code === 0 && Array.isArray(d.data) ? d.data.length : 0,
-    accounts: a.code === 0 && Array.isArray(a.data) ? a.data.length : 0,
-    cdnDomains: c.code === 0 && Array.isArray(c.data) ? c.data.length : 0,
-  };
+  if (s.code === 0 && s.data) {
+    stats.value = {
+      domains: Number(s.data.domains || 0),
+      accounts: Number(s.data.accounts || 0),
+      cdnDomains: Number(s.data.cdnDomains || 0),
+    };
+  }
   accounts.value = a.code === 0 && Array.isArray(a.data) ? a.data : [];
 });
 </script>

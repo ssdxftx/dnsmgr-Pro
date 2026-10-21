@@ -14,7 +14,7 @@
             <template #icon><n-icon :component="AddOutline" /></template>
             {{ t('cdnDomain.addDomain') }}
           </n-button>
-          <n-button @click="showSync = true">
+          <n-button @click="openSync">
             <template #icon><n-icon :component="CloudDownloadOutline" /></template>
             {{ t('cdnDomain.syncCloud') }}
           </n-button>
@@ -819,14 +819,27 @@ function closeCertMgr() {
   linkLogDomainId.value = null;
 }
 
+let linkLogFetching = false;
 async function fetchLinkLog() {
-  if (!linkLogDomainId.value) return;
+  if (!linkLogDomainId.value || linkLogFetching) return;
+  const targetId = linkLogDomainId.value;
+  linkLogFetching = true;
   linkLogLoadBusy.value = true;
-  const res = await api<any>('GET', `/cdn/domains/${linkLogDomainId.value}/certlink/log`);
-  linkLogLoadBusy.value = false;
-  if (res.code === 0) {
-    linkLog.value = res.data;
-    if (res.data?.done || res.data?.failed) stopLinkLogTimer();
+  try {
+    const res = await api<any>('GET', `/cdn/domains/${targetId}/certlink/log`);
+    // 弹窗已关闭或切换到其他域名时丢弃旧响应，避免回写无效状态
+    if (linkLogDomainId.value !== targetId) return;
+    if (res.code === 0) {
+      const data = res.data || {};
+      linkLog.value = {
+        ...data,
+        logs: Array.isArray(data.logs) ? data.logs.slice(-200) : [],
+      };
+      if (data.done || data.failed) stopLinkLogTimer();
+    }
+  } finally {
+    linkLogFetching = false;
+    linkLogLoadBusy.value = false;
   }
 }
 
@@ -954,7 +967,7 @@ const columns = computed<any[]>(() => [
       if (row.can_freecert || row.can_certapply || row.can_certlink) {
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'info', onClick: () => openCertMgr(row) }, { default: () => t('cdnDomain.certMgrTitle') }));
       }
-      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => (window.location.href = `/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
+      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => router.push(`/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
       return h('div', { class: 'row-actions' }, btns);
     },
@@ -1054,7 +1067,18 @@ function goZones() {
   router.push('/cdn-zones');
 }
 
+function ensureAddData() {
+  if (!dnsDomains.value.length) void loadDnsDomains();
+  if (!Object.keys(providerCaps.value).length) void loadProviders();
+}
+
+function openSync() {
+  showSync.value = true;
+  if (!dnsDomains.value.length) void loadDnsDomains();
+}
+
 function openAdd() {
+  ensureAddData();
   Object.assign(form, {
     aid: null,
     did: null,
@@ -1416,8 +1440,6 @@ async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
 onMounted(() => {
   loadDomains();
   loadAccounts();
-  loadDnsDomains();
-  loadProviders();
 });
 
 onDeactivated(() => {

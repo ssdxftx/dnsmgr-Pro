@@ -215,7 +215,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_cert_deploy` (
   `locktime` datetime DEFAULT NULL,
   `issend` tinyint(1) NOT NULL DEFAULT '0',
   `info` text DEFAULT NULL,
-  PRIMARY KEY (`id`)
+  PRIMARY KEY (`id`),
+  KEY `idx_due` (`active`, `islock`, `status`, `retry`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_cert_cname` (
@@ -302,7 +303,8 @@ CREATE TABLE IF NOT EXISTS `dnsmgr_cdn_domain` (
   `remark` varchar(100) DEFAULT NULL,
   `addtime` datetime DEFAULT NULL,
   PRIMARY KEY (`id`),
-  KEY `name` (`name`)
+  KEY `name` (`name`),
+  KEY `idx_route` (`route`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE IF NOT EXISTS `dnsmgr_cdn_cache_rule` (

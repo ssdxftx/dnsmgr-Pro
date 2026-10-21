@@ -7,11 +7,11 @@
           <n-button v-if="checked.length" size="small" :loading="!!actionBusy['noticeOff']" :disabled="!!actionBusy['noticeOff'] || !!actionBusy['noticeOn']" @click="runAction('noticeOff', () => batchNotice(0))">{{ t('domain.batchNoticeOff') }}</n-button>
           <n-button v-if="checked.length" size="small" type="error" secondary @click="batchDelete">{{ t('domain.batchDelete') }}</n-button>
           <n-button @click="router.push('/expire-notice')">{{ t('domain.expireNotice') }}</n-button>
-          <n-button type="primary" @click="showImport = true">
+          <n-button type="primary" @click="openImport">
             <template #icon><n-icon :component="CloudDownloadOutline" /></template>
             {{ t('domain.importDomains') }}
           </n-button>
-          <n-button @click="showCategory = true">{{ t('domain.addCategory') }}</n-button>
+          <n-button @click="openCategory">{{ t('domain.addCategory') }}</n-button>
         </n-space>
       </template>
     </PageHeader>
@@ -399,7 +399,7 @@ async function doAddCategory() {
 
 function gotoRecords(row: any) {
   const q = row._sub ? `?sub=${encodeURIComponent(row._sub)}` : '';
-  window.open(`/domains/${row.id}/records${q}`, '_self');
+  router.push(`/domains/${row.id}/records${q}`);
 }
 
 const noticePending = new Set<number>();
@@ -458,7 +458,17 @@ async function loadCategories() {
   if (res.code === 0) categories.value = res.data;
 }
 
+function openImport() {
+  showImport.value = true;
+  if (!accountOptions.value.length) void loadAccounts();
+}
+
+function openCategory() {
+  showCategory.value = true;
+}
+
 function openEdit(row: any) {
+  if (!categories.value.length) void loadCategories();
   editRow.value = row;
   editForm.value = {
     remark: row.remark || '',
@@ -545,8 +555,6 @@ function delDomain(row: any) {
 
 onMounted(() => {
   loadDomains();
-  loadAccounts();
-  loadCategories();
 });
 </script>
 

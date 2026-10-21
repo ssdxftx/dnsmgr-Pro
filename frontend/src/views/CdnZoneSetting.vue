@@ -989,8 +989,8 @@ watch(tab, (v) => loadByTab(v));
 onMounted(async () => {
   if (!aid || !zoneId) return;
   loadBusy.value = true;
-  await loadProviders();
-  await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema()]);
+  // 账户能力、站点信息、域名、NS、规则 schema 互不依赖，全部并行加载
+  await Promise.all([loadProviders(), loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema()]);
   loadBusy.value = false;
 });
 </script>

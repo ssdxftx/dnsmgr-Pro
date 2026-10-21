@@ -32,4 +32,9 @@ RUN mkdir -p /app/data
 
 EXPOSE 8082
 
-CMD ["npx", "tsx", "src/index.ts"]
+# 直接用 node 加载 tsx，避免 npx -> tsx CLI -> 应用 三层进程；
+# 同时保留 TypeScript 源码运行方式，不改变现有构建与数据目录布局
+CMD ["node", "--import", "tsx", "src/index.ts"]
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
+  CMD wget -qO- http://127.0.0.1:8082/api/health || exit 1

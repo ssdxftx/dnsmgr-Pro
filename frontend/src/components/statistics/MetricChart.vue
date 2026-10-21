@@ -34,12 +34,16 @@ const props = withDefaults(
 
 const { isDark } = useThemeMode();
 
-// 毫秒轴按当前轴最大值统一小数位：≥100 取整，≥10 一位，其余两位
+// 毫秒轴按当前轴最大值统一小数位：≥100 取整，≥10 一位，其余两位。
+// 用循环求最大值，避免大数据量时 map + 展开分配大数组。
 const msDigits = computed(() => {
-  const maxAbs = props.series.reduce(
-    (m, s) => Math.max(m, ...s.values.map((v) => Math.abs(v ?? 0))),
-    0,
-  );
+  let maxAbs = 0;
+  for (const s of props.series) {
+    for (const v of s.values) {
+      const abs = Math.abs(v ?? 0);
+      if (abs > maxAbs) maxAbs = abs;
+    }
+  }
   return maxAbs >= 100 ? 0 : maxAbs >= 10 ? 1 : 2;
 });
 const axisFmt = (unit: MetricUnit) =>
@@ -47,6 +51,7 @@ const axisFmt = (unit: MetricUnit) =>
 const el = ref<HTMLDivElement>();
 let chart: echarts.ECharts | null = null;
 let observer: ResizeObserver | null = null;
+let resizeRaf = 0;
 let tokenCache: Record<string, string> | null = null;
 
 function tokens(): Record<string, string> {
@@ -131,18 +136,26 @@ function option(): any {
 function render() {
   if (!el.value) return;
   if (!chart) chart = echarts.init(el.value);
-  chart.setOption(option(), { notMerge: true });
+  chart.setOption(option(), { notMerge: true, lazyUpdate: true });
 }
 
 onMounted(() => {
   render();
   if (el.value) {
-    observer = new ResizeObserver(() => chart?.resize());
+    // ResizeObserver 在侧栏动画期间可能每帧触发，合并到一帧只 resize 一次
+    observer = new ResizeObserver(() => {
+      if (resizeRaf) return;
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = 0;
+        chart?.resize();
+      });
+    });
     observer.observe(el.value);
   }
 });
 
-watch(() => [props.labels, props.series, props.dual, props.stack], render, { deep: true });
+// 父组件切换 loading/tab 时会创建新的临时数组；浅监听避免无关渲染触发全量重绘
+watch(() => [props.labels, props.series, props.dual, props.stack], render, { flush: 'post' });
 watch(isDark, () => {
   tokenCache = null;
   render();
@@ -151,6 +164,10 @@ watch(isDark, () => {
 onBeforeUnmount(() => {
   observer?.disconnect();
   observer = null;
+  if (resizeRaf) {
+    cancelAnimationFrame(resizeRaf);
+    resizeRaf = 0;
+  }
   chart?.dispose();
   chart = null;
 });

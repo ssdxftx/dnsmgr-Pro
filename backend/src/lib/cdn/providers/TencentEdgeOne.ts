@@ -3,6 +3,7 @@ import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertRes
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
 import type { PathRuleType } from '../pathRule.js';
 import { fromEnabled, toEnabled } from '../vendorSwitch.js';
+import { mapPool } from '../../util.js';
 
 export class TencentEdgeOne implements CdnProvider {
   private client: TencentCloud;
@@ -173,20 +174,21 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   async listDomains(): Promise<CdnDomainItem[] | false> {
-    const list: CdnDomainItem[] = [];
     this.zoneErrors = [];
     const zones = await this.listAllZones();
     if (zones === false) return false;
-    for (const z of zones) {
+    // 站点间 4 并发：站点多时避免逐站串行拉设置 + 加速域名造成分钟级列表
+    const results = await mapPool(zones, 4, async (z: any) => {
+      const out: CdnDomainItem[] = [];
       const zoneId = z.ZoneId || '';
-      if (!zoneId) continue;
+      if (!zoneId) return out;
       let zoneForceRedirect = false;
       const zs = await this.send('DescribeL7AccSetting', { ZoneId: zoneId });
       if (zs) zoneForceRedirect = zs.ZoneSetting?.ZoneConfig?.ForceRedirectHTTPS?.Switch === 'on';
       const dr = await this.listAllAccelerationDomains(zoneId);
       if (dr === false) {
         this.zoneErrors.push(z.ZoneName + ': ' + this.error);
-        continue;
+        return out;
       }
       for (const d of dr) {
         const originDetail = d.OriginDetail || {};
@@ -196,7 +198,7 @@ export class TencentEdgeOne implements CdnProvider {
         const cert = d.Certificate || {};
         const mode = cert.Mode || '';
         const httpsEnabled = (mode && mode !== 'disable') || cert.ClientCertInfo?.Switch === 'on';
-        list.push({
+        out.push({
           domain: d.DomainName,
           cname: d.Cname || '',
           status: d.DomainStatus === 'offline' ? 'offline' : 'online',
@@ -211,8 +213,9 @@ export class TencentEdgeOne implements CdnProvider {
           force_redirect: zoneForceRedirect,
         });
       }
-    }
-    return list;
+      return out;
+    });
+    return results.flat();
   }
 
   async deleteDomain(domain: string) {
