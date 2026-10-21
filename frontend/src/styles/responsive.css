@@ -136,6 +136,23 @@
   .n-dialog .n-button {
     min-height: 36px;
   }
+  /* 工具条控件统一弹性宽度，避免固定 200–260px 在窄屏把按钮挤成参差多行 */
+  .app-toolbar {
+    gap: 8px;
+  }
+  .app-toolbar > .n-input {
+    flex: 1 1 160px;
+    width: auto !important;
+    min-width: 0;
+  }
+  .app-toolbar > .n-select {
+    flex: 0 1 132px;
+    width: auto !important;
+    min-width: 104px;
+  }
+  .app-toolbar > .n-button {
+    flex: 0 0 auto;
+  }
   .n-pagination .n-pagination-item {
     min-width: 36px;
     min-height: 36px;
@@ -278,6 +295,13 @@
   }
   .m-card__value .n-button {
     min-width: 32px;
+  }
+}
+
+/* 平板竖屏（768–1023）：3 张 KPI 卡排满一行，避免 2+1 留出半屏空位 */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .telemetry-row:has(> div:nth-child(3):last-child) {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
 }
 

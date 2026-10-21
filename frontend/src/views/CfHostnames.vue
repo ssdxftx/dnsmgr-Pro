@@ -30,9 +30,9 @@
           <n-button size="small" :disabled="!selection.length" @click="batchRefresh">{{ t('cfHostnames.batchRefreshVerify') }}</n-button>
           <n-button size="small" :disabled="!selection.length" @click="confirmBatchDelete">{{ t('cfHostnames.batchDelete') }}</n-button>
           <n-divider vertical />
-          <n-button size="small" :disabled="!selection.length" @click="openBatchDcv">{{ t('cfHostnames.batchDcvDelegate') }}</n-button>
-          <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('hostname')">{{ t('cfHostnames.batchHostnameVerify') }}</n-button>
-          <n-button size="small" :disabled="!selection.length" @click="openBatchTxt('cert')">{{ t('cfHostnames.batchCertVerify') }}</n-button>
+          <n-button size="small" :loading="!!busy['batch-dcv']" :disabled="!selection.length || !!busy['batch-dcv']" @click="run('batch-dcv', openBatchDcv)">{{ t('cfHostnames.batchDcvDelegate') }}</n-button>
+          <n-button size="small" :loading="!!busy['batch-hostname']" :disabled="!selection.length || !!busy['batch-hostname']" @click="run('batch-hostname', () => openBatchTxt('hostname'))">{{ t('cfHostnames.batchHostnameVerify') }}</n-button>
+          <n-button size="small" :loading="!!busy['batch-cert']" :disabled="!selection.length || !!busy['batch-cert']" @click="run('batch-cert', () => openBatchTxt('cert'))">{{ t('cfHostnames.batchCertVerify') }}</n-button>
           <n-button size="small" :disabled="!selection.length" @click="openCfOptimized(false)">{{ t('cfHostnames.cfOptimized') }}</n-button>
           <n-button size="small" :loading="!!busy['load']" :disabled="!!busy['load']" @click="run('load', load)"><template #icon><n-icon :component="RefreshOutline" /></template>{{ t('common.refresh') }}</n-button>
         </n-space>

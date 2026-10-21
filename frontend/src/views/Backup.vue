@@ -39,7 +39,7 @@
               <div class="text-dim">{{ destSummary(d) }}</div>
             </div>
             <n-space>
-              <n-button size="small" quaternary @click="testDest(d)">{{ t('backup.destTest') }}</n-button>
+              <n-button size="small" quaternary :loading="!!actionBusy['test:' + d.id]" :disabled="!!actionBusy['test:' + d.id]" @click="runAction('test:' + d.id, () => testDest(d))">{{ t('backup.destTest') }}</n-button>
               <n-button size="small" quaternary @click="openRemote(d)">{{ t('backup.remoteBrowse') }}</n-button>
               <n-button size="small" quaternary @click="openDest(d)">{{ t('backup.save') }}</n-button>
               <n-button size="small" quaternary type="error" @click="removeDest(d)">{{ t('backup.delete') }}</n-button>
@@ -47,7 +47,7 @@
           </n-space>
         </n-list-item>
       </n-list>
-      <n-empty v-else :description="t('backup.destTitle')" />
+      <EmptyState v-else :icon="ArchiveOutline" :title="t('backup.destTitle')" />
     </n-card>
 
     <n-card :bordered="false">
@@ -66,14 +66,14 @@
               <div class="text-dim" v-if="s.last_result">{{ t('backup.lastResult') }}: {{ s.last_result }}</div>
             </div>
             <n-space>
-              <n-button size="small" quaternary @click="runSched(s)">{{ t('backup.runNow') }}</n-button>
+              <n-button size="small" quaternary :loading="!!actionBusy['run:' + s.id]" :disabled="!!actionBusy['run:' + s.id]" @click="runAction('run:' + s.id, () => runSched(s))">{{ t('backup.runNow') }}</n-button>
               <n-button size="small" quaternary @click="openSched(s)">{{ t('backup.save') }}</n-button>
               <n-button size="small" quaternary type="error" @click="removeSched(s)">{{ t('backup.delete') }}</n-button>
             </n-space>
           </n-space>
         </n-list-item>
       </n-list>
-      <n-empty v-else :description="t('backup.schedTitle')" />
+      <EmptyState v-else :icon="TimeOutline" :title="t('backup.schedTitle')" />
     </n-card>
       </n-tab-pane>
       <n-tab-pane name="mine" :tab="t('backup.tabMine')">
@@ -103,7 +103,7 @@
               </div>
             </n-list-item>
           </n-list>
-          <n-empty v-else :description="t('backup.remoteEmpty')" />
+          <EmptyState v-else :icon="FolderOpenOutline" :title="t('backup.remoteEmpty')" compact />
         </n-spin>
       </n-space>
     </n-modal>
@@ -208,10 +208,12 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { NButton, NSpace, useDialog, useMessage } from 'naive-ui';
-import { ArchiveOutline, CloudDownloadOutline, KeyOutline, TimeOutline } from '@vicons/ionicons5';
+import { ArchiveOutline, CloudDownloadOutline, FolderOpenOutline, KeyOutline, TimeOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import { isAdminUser } from '../lib/admin';
+import { useAction } from '../composables/useAction';
 import PageHeader from '../components/PageHeader.vue';
+import EmptyState from '../components/EmptyState.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import MyBackup from './MyBackup.vue';
@@ -241,6 +243,7 @@ watch(tab, (v) => {
 
 const loading = ref(false);
 const busy = ref(false);
+const { busy: actionBusy, run: runAction } = useAction();
 const saving = ref(false);
 const restoring = ref(false);
 const keyReady = ref(false);

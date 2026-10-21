@@ -334,7 +334,6 @@ const columns = computed<any[]>(() => [
     title: t('audit.user'),
     key: 'username',
     width: 108,
-    mobile: 'hide',
     render: (row: any) =>
       row.uid > 0
         ? h('span', { class: 'audit-user' }, row.username || `UID ${row.uid}`)
@@ -344,7 +343,6 @@ const columns = computed<any[]>(() => [
     title: t('audit.module'),
     key: 'module',
     width: 96,
-    mobile: 'hide',
     render: (row: any) =>
       h('span', { class: 'audit-module' }, [
         h('i', { class: 'audit-module__dot', style: `background:${MODULE_TONE[row.module] || 'var(--app-text-3)'}` }),
@@ -355,7 +353,6 @@ const columns = computed<any[]>(() => [
     title: t('audit.action'),
     key: 'action',
     width: 132,
-    mobile: 'hide',
     render: (row: any) => h(NEllipsis, { tooltip: true }, { default: () => actionLabel(row.action) }),
   },
   {

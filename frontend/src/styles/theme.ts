@@ -172,6 +172,8 @@ function buildOverrides(c: Surface, b: Brand, dark: boolean): GlobalThemeOverrid
       textColorPressedPrimary: b.ink,
       textColorFocusPrimary: b.ink,
       textColorDisabledPrimary: dark ? 'rgba(4, 20, 15, 0.5)' : 'rgba(255, 255, 255, 0.6)',
+      // 禁用态在暗色背景上仍可读（原 0.38 叠加后约 2.1:1）
+      opacityDisabled: 0.55,
     },
     Input: {
       borderRadius: '10px',

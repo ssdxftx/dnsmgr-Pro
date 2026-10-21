@@ -696,7 +696,10 @@ async function fetchCertStatus(): Promise<any | null> {
   certMgrCloudLoadBusy.value = true;
   const res = await api<any>('GET', `/cdn/domains/${certMgrTarget.value.id}/cert_status`);
   certMgrCloudLoadBusy.value = false;
-  if (res.code !== 0) return null;
+  if (res.code !== 0) {
+    message.error(res.msg || t('common.loadFailed'));
+    return null;
+  }
   const data = res.data || {};
   certMgrCloud.value = data.cloud || null;
   const inferred = inferModeFromCloud(data, certMgrTarget.value);
@@ -707,6 +710,7 @@ async function fetchCertStatus(): Promise<any | null> {
 async function refreshCertStatus() {
   const data = await fetchCertStatus();
   if (data) message.success(t('cdnDomain.refreshed'));
+  else message.error(t('common.loadFailed'));
 }
 
 async function onCertMgrModeChange(mode: string) {
@@ -928,7 +932,6 @@ const columns = computed<any[]>(() => [
   {
     title: 'CNAME',
     key: 'cname',
-    mobile: 'hide',
     width: 200,
     render(row: any) {
       return h(NEllipsis, { expandTrigger: 'click' }, { default: () => row.cname || '' });

@@ -74,7 +74,7 @@
     </n-card>
 
     <n-card v-if="emptyAccount" :bordered="false">
-      <n-empty :description="t('cfRules.noDomainInAccount')" />
+      <EmptyState :icon="ListOutline" :title="t('cfRules.noDomainInAccount')" />
     </n-card>
 
     <!-- 规则编辑 -->
@@ -232,6 +232,7 @@ import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import { ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
+import EmptyState from '../components/EmptyState.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import { useAction } from '../composables/useAction';

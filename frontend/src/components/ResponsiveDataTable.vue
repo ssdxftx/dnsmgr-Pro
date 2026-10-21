@@ -2,7 +2,7 @@
   <div ref="wrapRef" class="rdt" :class="{ 'rdt--scrollable': scrollable && !isMobile }">
     <n-data-table
       v-if="!isMobile"
-      :columns="columns"
+      :columns="tableColumns"
       :data="data"
       :loading="loading"
       :row-key="rowKey"
@@ -56,7 +56,7 @@
       <EmptyState v-else-if="!data.length && !loading" :icon="FolderOpenOutline" :title="emptyText || t('common.noData')" :description="emptyDescription" :tone="emptyTone" />
       <div v-else class="m-table-cards">
         <div
-          v-for="(row, index) in data"
+          v-for="(row, index) in mobileRows"
           :key="String(rowKey ? rowKey(row) : (row.id ?? index))"
           v-bind="rowProps ? rowProps(row) : {}"
           class="m-card"
@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NButton, NCheckbox, NDataTable, NPagination, NSpin } from 'naive-ui';
 import { AlertCircleOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { useResponsive } from '../composables/useResponsive';
@@ -208,6 +208,15 @@ const resolvedScrollX = computed(() => {
 });
 const scrollable = computed(() => resolvedScrollX.value != null);
 
+// 横向滚动时把操作列钉在右侧，避免平板/小屏必须滚动才能点到行内主操作。
+// naive-ui 的固定列依赖 scroll-x，且该列需要有 width（现有操作列均满足）。
+const tableColumns = computed(() => {
+  if (!actionColumn.value || resolvedScrollX.value == null) return props.columns;
+  return props.columns.map((c: any) =>
+    c === actionColumn.value ? { ...c, fixed: 'right' as const } : c,
+  );
+});
+
 const checkedSet = computed(() => new Set(props.checkedRowKeys || []));
 
 // 服务端分页由调用方传入 itemCount（当前页数据仅一页的条数）并自行翻页；
@@ -244,27 +253,49 @@ function renderCell(col: any, row: any, index: number) {
 const CellRender = (p: any) => renderCell(p.col, p.row, p.index);
 (CellRender as any).props = { col: {}, row: {}, index: {} };
 
+// 客户端分页（页面只传 `{ pageSize: 20 }`）在移动端卡片模式下需要本地切片与页码，
+// 否则会渲染全量数据且没有分页器，与桌面端「每页 20 条」的语义不一致。
+const localPage = ref(1);
+const isClientPaged = computed(() => {
+  const p = props.pagination;
+  return isMobile.value && !!p && typeof p === 'object' && (p as any).itemCount === undefined;
+});
+const mobileRows = computed(() => {
+  const p = props.pagination;
+  if (!isClientPaged.value || !p || typeof p !== 'object') return props.data;
+  const size = Number(p.pageSize || 10);
+  const start = (localPage.value - 1) * size;
+  return props.data.slice(start, start + size);
+});
+
 const mobilePagination = computed(() => {
   const p = props.pagination;
   if (!isMobile.value || !p || typeof p !== 'object') return null;
   // 只传 itemCount/pageSize，naive-ui 会自行推导总页数，避免 page-count 与 item-count 同时出现触发告警
   const pageSize = Number(p.pageSize || 10);
-  const itemCount = Number(p.itemCount ?? 0);
-  if (!itemCount || itemCount <= (pageSize > 0 ? pageSize : 10)) return null;
+  const itemCount = Number((p as any).itemCount ?? props.data.length);
+  if (itemCount <= pageSize) return null;
   return {
-    page: Number(p.page ?? 1),
-    pageSize: p.pageSize,
-    itemCount: p.itemCount,
+    page: Number((p as any).page ?? localPage.value),
+    pageSize,
+    itemCount,
   };
 });
 
 function onMobilePage(page: number) {
   const p = props.pagination;
-  if (p && typeof p === 'object') {
-    p.onChange?.(page);
-    p.onUpdatePage?.(page);
-  }
+  if (!p || typeof p !== 'object') return;
+  if ((p as any).itemCount === undefined) localPage.value = page;
+  p.onChange?.(page);
+  p.onUpdatePage?.(page);
 }
+
+watch(
+  () => props.data.length,
+  () => {
+    localPage.value = 1;
+  },
+);
 </script>
 
 <style scoped>
@@ -288,5 +319,11 @@ function onMobilePage(page: number) {
   display: flex;
   justify-content: center;
   padding: 14px 0 4px;
+}
+
+/* 固定操作列默认没有左分隔，钉住后会与相邻列看起来贴在一起 */
+:deep(.n-data-table-th--fixed-right),
+:deep(.n-data-table-td--fixed-right) {
+  box-shadow: inset 1px 0 0 var(--app-divider), -8px 0 12px -8px rgba(0, 0, 0, 0.35);
 }
 </style>

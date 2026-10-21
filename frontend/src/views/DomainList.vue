@@ -145,6 +145,7 @@ import TelemetryCard from '../components/TelemetryCard.vue';
 import RecordTable from '../components/RecordTable.vue';
 import EmptyState from '../components/EmptyState.vue';
 import { useAction } from '../composables/useAction';
+import { useResponsive } from '../composables/useResponsive';
 
 const router = useRouter();
 const { t } = useI18n();
@@ -160,6 +161,7 @@ function expireTs(val: string): number {
 const message = useMessage();
 const dialog = useDialog();
 const { busy: actionBusy, run: runAction } = useAction();
+const { isMobile } = useResponsive();
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const loadBusy = ref(false);
 const loadError = ref(false);
@@ -218,7 +220,6 @@ const columns = computed(() => {
     title: t('common.remark'),
     key: 'remark',
     width: 112,
-    mobile: 'hide',
     render: (row: any) => h(NEllipsis, { style: 'max-width:102px' }, { default: () => row.remark || '' }),
   });
   cols.push({
@@ -238,21 +239,36 @@ const columns = computed(() => {
       const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
       const children: any[] = [h('span', { style: { whiteSpace: 'nowrap', ...(color ? { color } : {}) } }, text || '-')];
       if (isAdmin.value) {
-        children.push(h(NButton, { size: 'tiny', quaternary: true, title: t('domain.refreshExpire'), onClick: () => updateDate(row) }, { icon: () => h(RefreshOutline) }));
+        const refreshLabel = t('domain.refreshExpire');
+        children.push(
+          h(
+            NButton,
+            {
+              size: isMobile.value ? 'small' : 'tiny',
+              quaternary: true,
+              title: refreshLabel,
+              'aria-label': refreshLabel,
+              onClick: () => updateDate(row),
+            },
+            isMobile.value ? { default: () => refreshLabel } : { icon: () => h(RefreshOutline) },
+          ),
+        );
       }
       // 到期提醒开关并入本格，避免单独占一列
+      const noticeLabel = row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff');
       children.push(
         h(
           NButton,
           {
-            size: 'tiny',
+            size: isMobile.value ? 'small' : 'tiny',
             quaternary: true,
             type: row.is_notice == 1 ? 'success' : 'default',
-            title: row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff'),
+            title: noticeLabel,
+            'aria-label': noticeLabel,
             disabled: !isAdmin.value,
             onClick: isAdmin.value ? () => toggleNotice(row) : undefined,
           },
-          { icon: () => h(NotificationsOutline) },
+          isMobile.value ? { default: () => noticeLabel } : { icon: () => h(NotificationsOutline) },
         ),
       );
       return h(NSpace, { size: 4, align: 'center', wrap: false }, { default: () => children });

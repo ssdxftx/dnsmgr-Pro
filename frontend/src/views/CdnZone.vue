@@ -8,7 +8,16 @@
 
     <n-spin :show="loadBusy && !zoneList.length">
       <div v-if="zoneList.length" class="zone-grid">
-        <div v-for="row in zoneList" :key="row.key" class="zone-tile" @click="openSetting(row)">
+        <div
+          v-for="row in zoneList"
+          :key="row.key"
+          class="zone-tile"
+          role="button"
+          tabindex="0"
+          @click="openSetting(row)"
+          @keydown.enter="openSetting(row)"
+          @keydown.space.prevent="openSetting(row)"
+        >
           <div class="zone-tile__head">
             <span class="zone-tile__name">{{ row.zone_name || row.name || '-' }}</span>
             <n-tag size="small" :type="statusTagType(row)">{{ statusLabel(row) }}</n-tag>
@@ -42,7 +51,16 @@
         </div>
       </template>
       <div class="cf-grid">
-        <div v-for="a in cfAccounts" :key="a.aid" class="cf-tile" @click="openCfRules(a)">
+        <div
+          v-for="a in cfAccounts"
+          :key="a.aid"
+          class="cf-tile"
+          role="button"
+          tabindex="0"
+          @click="openCfRules(a)"
+          @keydown.enter="openCfRules(a)"
+          @keydown.space.prevent="openCfRules(a)"
+        >
           <div class="cf-tile__head">
             <span class="cf-tile__name">{{ a.name }}</span>
             <n-tag size="tiny" :type="a.credential === 'ready' ? 'success' : 'warning'" :bordered="false">
@@ -214,6 +232,13 @@ onMounted(() => {
 .zone-tile:hover::before {
   opacity: 1;
 }
+.zone-tile:active {
+  transform: translateY(0) scale(0.995);
+}
+.zone-tile:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+}
 
 .zone-tile__head {
   display: flex;
@@ -301,6 +326,13 @@ onMounted(() => {
   border-color: color-mix(in srgb, #f6821f 40%, var(--app-border));
   transform: translateY(-2px);
   box-shadow: var(--app-shadow);
+}
+.cf-tile:active {
+  transform: translateY(0) scale(0.995);
+}
+.cf-tile:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
 }
 .cf-tile__head {
   display: flex;

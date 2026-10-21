@@ -39,14 +39,14 @@
       />
     </div>
 
-    <div v-if="!busy && !errors.length && !providers.length" class="empty-state">
-      <n-empty :description="t('statistics.noProviders')">
-        <template #extra>
+    <div v-if="!busy && !errors.length && !providers.length" class="empty-panel">
+      <EmptyState :icon="CloudOutline" :title="t('statistics.noProviders')">
+        <template #actions>
           <n-button type="primary" @click="router.push('/cdn-accounts')">
             {{ t('statistics.goConnect') }}
           </n-button>
         </template>
-      </n-empty>
+      </EmptyState>
     </div>
 
     <p v-if="providers.length" class="data-note">{{ t('statistics.dataNote', { time: dataUntil || '—' }) }}</p>
@@ -57,10 +57,11 @@
 import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { NAlert, NButton, NCard, NEmpty, NIcon } from 'naive-ui';
-import { RefreshOutline } from '@vicons/ionicons5';
+import { NAlert, NButton, NCard, NIcon } from 'naive-ui';
+import { CloudOutline, RefreshOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import EmptyState from '../components/EmptyState.vue';
 import RangeFilter from '../components/statistics/RangeFilter.vue';
 import ProviderCard, { type ProviderCardData } from '../components/statistics/ProviderCard.vue';
 
@@ -145,8 +146,7 @@ onMounted(() => {
 }
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 420px));
-  justify-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   gap: 16px;
 }
 .data-note {
@@ -154,7 +154,7 @@ onMounted(() => {
   font-size: 12px;
   color: var(--app-text-3);
 }
-.empty-state {
+.empty-panel {
   display: flex;
   justify-content: center;
   padding: 48px 0;
@@ -170,7 +170,7 @@ onMounted(() => {
     grid-template-columns: 1fr;
     gap: 12px;
   }
-  .empty-state {
+  .empty-panel {
     padding: 32px 0;
   }
 }

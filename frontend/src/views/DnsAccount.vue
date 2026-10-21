@@ -106,7 +106,6 @@ const columns = computed(() => [
     title: t('dnsAccount.configStatusCol'),
     key: 'config_error',
     width: 110,
-    mobile: 'hide',
     render: (row: any) =>
       row.config_error
         ? h(NTag, { type: 'error', size: 'small', bordered: false }, { default: () => t('dnsAccount.configErrorTag') })

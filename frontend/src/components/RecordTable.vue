@@ -3,12 +3,12 @@
     <div v-if="checked.length" class="record-batch">
       <n-space size="small" align="center">
         <n-text depth="3">{{ t('record.selected', { count: checked.length }) }}</n-text>
-        <n-button size="tiny" type="success" @click="runBatch('open')">{{ t('common.enable') }}</n-button>
-        <n-button size="tiny" @click="runBatch('pause')">{{ t('record.paused') }}</n-button>
-        <n-dropdown trigger="click" :options="batchMoreOptions" @select="onBatchMore">
-          <n-button size="tiny">{{ t('record.batchMore') }}</n-button>
+        <n-button size="tiny" type="success" :loading="batchBusy" :disabled="batchBusy" @click="runBatch('open')">{{ t('common.enable') }}</n-button>
+        <n-button size="tiny" :loading="batchBusy" :disabled="batchBusy" @click="runBatch('pause')">{{ t('record.paused') }}</n-button>
+        <n-dropdown trigger="click" :options="batchMoreOptions" :disabled="batchBusy" @select="onBatchMore">
+          <n-button size="tiny" :disabled="batchBusy">{{ t('record.batchMore') }}</n-button>
         </n-dropdown>
-        <n-button size="tiny" type="error" @click="batchDelete">{{ t('common.delete') }}</n-button>
+        <n-button size="tiny" type="error" :loading="batchBusy" :disabled="batchBusy" @click="batchDelete">{{ t('common.delete') }}</n-button>
       </n-space>
     </div>
     <ResponsiveDataTable
@@ -184,6 +184,7 @@ const batchForm = reactive<any>({ type: 'A', value: '', line: '', remark: '', gr
 const groups = ref<any[]>([]);
 
 const saveBusy = ref(false);
+const batchBusy = ref(false);
 const showEdit = ref(false);
 const editingId = ref<string | null>(null);
 const editingDid = ref<number | null>(null);
@@ -245,16 +246,22 @@ async function runBatch(action: string, extra: Record<string, any> = {}) {
   if (!rows.length) return;
   const did = rowDid(rows[0]);
   if (!did || rows.some((r) => rowDid(r) !== did)) return message.warning(t('record.batchSameDomain'));
-  const res = await api('POST', `/domains/${did}/records/batch`, {
-    action,
-    records: rows.map((r) => ({ RecordId: r.RecordId, Name: r.Name, Type: r.Type, Value: r.Value, Line: r.Line, TTL: r.TTL, MX: r.MX, Weight: r.Weight, Remark: r.Remark })),
-    ...extra,
-  });
-  if (res.code === 0) {
-    message.success(res.msg);
-    checked.value = [];
-    emit('refresh');
-  } else message.error(res.msg);
+  if (batchBusy.value) return;
+  batchBusy.value = true;
+  try {
+    const res = await api('POST', `/domains/${did}/records/batch`, {
+      action,
+      records: rows.map((r) => ({ RecordId: r.RecordId, Name: r.Name, Type: r.Type, Value: r.Value, Line: r.Line, TTL: r.TTL, MX: r.MX, Weight: r.Weight, Remark: r.Remark })),
+      ...extra,
+    });
+    if (res.code === 0) {
+      message.success(res.msg);
+      checked.value = [];
+      emit('refresh');
+    } else message.error(res.msg);
+  } finally {
+    batchBusy.value = false;
+  }
 }
 
 function batchDelete() {

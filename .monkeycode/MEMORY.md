@@ -36,6 +36,7 @@ Entries discovered by the Agent during task execution should follow this format:
 - Context: 用户要求将代码推送到仓库时指定 Git 身份，并要求长期沿用
 - Instructions:
   - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（已写入本仓库本地配置）
+  - 禁止在提交信息中添加 `Co-authored-by` 尾注（原 coauthor 配置与 prepare-commit-msg 钩子已移除）
   - 远端仓库：`https://github.com/ssdxftx/dnsmgr-Pro`，主分支 `main`
 
 [Project Knowledge Summary]

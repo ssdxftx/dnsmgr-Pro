@@ -2,7 +2,14 @@
   <div class="app-shell">
     <!-- 桌面端侧边栏 -->
     <aside v-if="!isMobile" class="app-sidebar" :class="{ 'is-collapsed': collapsed }">
-      <div class="app-sidebar__brand" @click="router.push('/dashboard')">
+      <div
+        class="app-sidebar__brand"
+        role="button"
+        tabindex="0"
+        @click="router.push('/dashboard')"
+        @keydown.enter="router.push('/dashboard')"
+        @keydown.space.prevent="router.push('/dashboard')"
+      >
         <div class="brand-mark">
           <n-icon size="20" :component="GlobeOutline" />
         </div>
@@ -195,6 +202,7 @@ const menuOptions = computed<MenuOption[]>(() => [
       { label: t('nav.cdnZones'), key: 'cdn-zones', icon: renderIcon(FolderOutline) },
       { label: t('nav.cacheRefresh'), key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
       { label: t('nav.preheatTasks'), key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
+      { label: t('nav.cfRules'), key: 'cf-rules', icon: renderIcon(ShieldCheckmarkOutline) },
       { label: t('nav.statistics'), key: 'statistics', icon: renderIcon(BarChartOutline) },
     ],
   },
@@ -262,7 +270,17 @@ const visibleMenu = computed<MenuOption[]>(() => {
   return walk(menuOptions.value);
 });
 
+const ROUTE_ALIAS: Array<[RegExp, string]> = [
+  [/^\/cf-rules/, 'cf-rules'],
+  [/^\/cloudflare\/domains\//, 'cdn-domains'],
+  [/^\/cloudflare\/accounts\//, 'cdn-accounts'],
+  [/^\/preferences/, 'preferences'],
+  [/^\/totp/, 'totp'],
+];
+
 const activeKey = computed(() => {
+  const alias = ROUTE_ALIAS.find(([re]) => re.test(route.path))?.[1];
+  if (alias) return alias;
   const matched = [
     'dashboard', 'domains', 'dns-accounts', 'expire-notice', 'dns-check',
     'cdn-accounts', 'cdn-domains', 'cdn-zones', 'cf-rules', 'cache-refresh', 'preheat-tasks', 'statistics',
@@ -273,7 +291,7 @@ const activeKey = computed(() => {
     'backup',
     'system-settings', 'users', 'logs', 'about',
   ].find((k) => route.path.startsWith('/' + k));
-  return matched || 'dashboard';
+  return matched || '';
 });
 
 const pageTitle = computed(() => {
@@ -283,11 +301,12 @@ const pageTitle = computed(() => {
 
 const activeGroupMap: Record<string, string> = {
   domains: 'group-domain', 'dns-accounts': 'group-domain', 'expireNotice': 'group-domain', 'expire-notice': 'group-domain', 'dns-check': 'group-domain',
-  'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
+  'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cf-rules': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
   'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
   'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
   'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert', 'cert-cname': 'group-cert',
   'system-settings': 'group-system', users: 'group-system', logs: 'group-system', backup: 'group-system', about: 'group-system',
+  preferences: 'group-system', totp: 'group-system',
 };
 
 const groupLabels = computed<Record<string, string>>(() => ({
@@ -300,7 +319,7 @@ const groupLabels = computed<Record<string, string>>(() => ({
   'group-system': t('nav.groupSystem'),
 }));
 
-const groupLabel = computed(() => groupLabels.value[activeGroupMap[activeKey.value] || 'dashboard'] || t('layout.console'));
+const groupLabel = computed(() => groupLabels.value[activeGroupMap[activeKey.value]] || t('layout.console'));
 
 const expandedKeys = ref<string[]>([]);
 
@@ -398,6 +417,13 @@ function onUserSelect(key: string) {
 .app-sidebar.is-collapsed .app-sidebar__brand {
   justify-content: center;
   padding: 0;
+}
+.app-sidebar__brand:active {
+  transform: scale(0.995);
+}
+.app-sidebar__brand:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: -2px;
 }
 .brand-mark {
   position: relative;

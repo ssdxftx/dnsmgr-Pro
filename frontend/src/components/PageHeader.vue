@@ -96,6 +96,13 @@ function goBack() {
     align-items: flex-start;
     flex-direction: column;
   }
+  .page-header__left {
+    align-items: flex-start;
+  }
+  .page-header__back {
+    margin-left: 0;
+    margin-top: -5px;
+  }
   .page-header__actions {
     width: 100%;
     flex-wrap: nowrap;

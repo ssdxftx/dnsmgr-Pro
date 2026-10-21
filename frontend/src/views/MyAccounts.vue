@@ -72,15 +72,15 @@
         <n-tabs type="line" animated>
           <n-tab-pane name="dns" :tab="t('vault.tabsDns')">
             <DnsAccount v-if="ready" />
-            <n-empty v-else :description="t('vault.locked')" />
+            <EmptyState v-else :icon="LockClosedOutline" :title="t('vault.locked')" compact />
           </n-tab-pane>
           <n-tab-pane name="cdn" :tab="t('vault.tabsCdn')">
             <CdnAccount v-if="ready" />
-            <n-empty v-else :description="t('vault.locked')" />
+            <EmptyState v-else :icon="LockClosedOutline" :title="t('vault.locked')" compact />
           </n-tab-pane>
           <n-tab-pane name="cert" :tab="t('vault.tabsCert')">
             <CertAccount v-if="ready" />
-            <n-empty v-else :description="t('vault.locked')" />
+            <EmptyState v-else :icon="LockClosedOutline" :title="t('vault.locked')" compact />
           </n-tab-pane>
         </n-tabs>
       </n-card>
@@ -211,6 +211,8 @@ import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import EmptyState from '../components/EmptyState.vue';
+import { LockClosedOutline } from '@vicons/ionicons5';
 import DnsAccount from './DnsAccount.vue';
 import CdnAccount from './CdnAccount.vue';
 import CertAccount from './CertAccount.vue';
@@ -391,7 +393,14 @@ async function generateRecovery() {
 }
 
 async function toggleExclude(v: boolean) {
-  await api<any>('POST', '/vault/backup-exclude', { exclude: v });
+  const prev = status.value.excludeFromSiteBackup;
+  status.value.excludeFromSiteBackup = v;
+  const res = await api<any>('POST', '/vault/backup-exclude', { exclude: v });
+  if (res.code !== 0) {
+    status.value.excludeFromSiteBackup = prev;
+    message.error(res.msg || t('common.loadFailed'));
+    return;
+  }
   await load();
 }
 

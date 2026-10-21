@@ -144,7 +144,7 @@
           <n-card :title="t('systemSet.loginCardTitle')" :bordered="false" size="small" style="max-width:520px">
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.loginVcode')">
-                <n-switch :value="cfg.vcode !== '2'" @update:value="setVcode" />
+                <n-switch :value="cfg.vcode !== '2'" :disabled="saveBusy" @update:value="setVcode" />
               </n-form-item>
             </n-form>
           </n-card>
@@ -155,7 +155,7 @@
           <n-card :title="t('systemSet.regConfigTitle')" :bordered="false" size="small" class="mb-16" style="max-width:520px">
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.regEnable')">
-                <n-switch :value="(cfg.register_enable || '0') === '1'" @update:value="setRegisterEnable" />
+                <n-switch :value="(cfg.register_enable || '0') === '1'" :disabled="saveBusy" @update:value="setRegisterEnable" />
               </n-form-item>
               <n-form-item :label="t('systemSet.regMode')">
                 <n-select v-model:value="cfg.register_mode" :options="registerModeOptions" style="width: 200px" />
@@ -212,7 +212,7 @@
             </n-alert>
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.cronExternal')">
-                <n-switch :value="(cfg.cron_type || '0') === '1'" @update:value="setCronType" />
+                <n-switch :value="(cfg.cron_type || '0') === '1'" :disabled="saveBusy" @update:value="setCronType" />
               </n-form-item>
               <n-form-item :label="t('systemSet.cronAccessKey')">
                 <n-input :value="cronKey" readonly />
@@ -232,7 +232,7 @@
             </n-alert>
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.statCacheEnable')">
-                <n-switch :value="(cfg.cdn_stats_cache || '0') === '1'" @update:value="setStatCache" />
+                <n-switch :value="(cfg.cdn_stats_cache || '0') === '1'" :disabled="saveBusy" @update:value="setStatCache" />
               </n-form-item>
               <n-form-item :label="t('systemSet.statCacheInterval')">
                 <n-input-number v-model:value="statCacheInterval" :min="5" :max="1440" style="width: 180px" />
@@ -384,14 +384,18 @@ async function loadSettings() {
   if (res.code === 0) Object.assign(cfg, res.data);
 }
 
-async function saveFields(fields: string[]) {
+async function saveFields(fields: string[]): Promise<boolean> {
   const body: Record<string, string> = {};
   for (const f of fields) body[f] = cfg[f] ?? '';
   saveBusy.value = true;
   const res = await api('POST', '/system/settings', body);
   saveBusy.value = false;
-  if (res.code === 0) message.success(t('systemSet.saveSuccess'));
-  else message.error(res.msg);
+  if (res.code === 0) {
+    message.success(t('systemSet.saveSuccess'));
+    return true;
+  }
+  message.error(res.msg);
+  return false;
 }
 
 async function saveMail() {
@@ -412,12 +416,14 @@ async function copyQqbotWebhook() {
   }
 }
 async function setVcode(v: boolean) {
+  const prev = cfg.vcode;
   cfg.vcode = v ? '1' : '2';
-  await saveFields(['vcode']);
+  if (!(await saveFields(['vcode']))) cfg.vcode = prev;
 }
 async function setCronType(v: boolean) {
+  const prev = cfg.cron_type;
   cfg.cron_type = v ? '1' : '0';
-  await saveFields(['cron_type']);
+  if (!(await saveFields(['cron_type']))) cfg.cron_type = prev;
 }
 
 const statCacheInterval = computed<number>({
@@ -427,8 +433,9 @@ const statCacheInterval = computed<number>({
   },
 });
 async function setStatCache(v: boolean) {
+  const prev = cfg.cdn_stats_cache;
   cfg.cdn_stats_cache = v ? '1' : '0';
-  await saveFields(['cdn_stats_cache']);
+  if (!(await saveFields(['cdn_stats_cache']))) cfg.cdn_stats_cache = prev;
 }
 async function saveStatCache() {
   await saveFields(['cdn_stats_cache', 'cdn_stats_cache_interval']);
@@ -509,8 +516,9 @@ async function loadRegCodes() {
 }
 
 async function setRegisterEnable(v: boolean) {
+  const prev = cfg.register_enable;
   cfg.register_enable = v ? '1' : '0';
-  await saveFields(['register_enable']);
+  if (!(await saveFields(['register_enable']))) cfg.register_enable = prev;
 }
 
 async function saveRegister() {

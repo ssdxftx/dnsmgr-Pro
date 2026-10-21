@@ -18,16 +18,15 @@
         </n-form-item>
 
         <n-form-item :label="t('optimize.typeSelect')" required>
-          <n-radio-group v-model:value="form.type">
-            <n-radio-button :value="0">
-              {{ t('optimize.lineType0') }}
-              <n-tooltip trigger="hover">{{ t('optimize.lineType0Tip') }}</n-tooltip>
-            </n-radio-button>
-            <n-radio-button :value="1">
-              {{ t('optimize.lineType1') }}
-              <n-tooltip trigger="hover">{{ t('optimize.lineType1Tip') }}</n-tooltip>
-            </n-radio-button>
-          </n-radio-group>
+          <div style="width: 100%">
+            <n-radio-group v-model:value="form.type">
+              <n-radio-button :value="0">{{ t('optimize.lineType0') }}</n-radio-button>
+              <n-radio-button :value="1">{{ t('optimize.lineType1') }}</n-radio-button>
+            </n-radio-group>
+            <p class="hint-text" style="margin: 6px 0 0">
+              {{ form.type === 0 ? t('optimize.lineType0Tip') : t('optimize.lineType1Tip') }}
+            </p>
+          </div>
         </n-form-item>
 
         <n-form-item :label="t('optimize.ipTypeSelect')" required>

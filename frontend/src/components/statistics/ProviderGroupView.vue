@@ -30,14 +30,16 @@
         <BreakdownTable :rows="bd.rows" :unit="bd.unit" :title-key="bd.titleKey" />
       </n-card>
     </div>
-    <n-empty v-if="!charts.length && !shownBreakdowns.length" :description="t('statistics.noData')" class="tab-empty" />
+    <EmptyState v-if="!charts.length && !shownBreakdowns.length" :icon="BarChartOutline" :title="t('statistics.noData')" class="tab-empty" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NCard, NEmpty, NSelect } from 'naive-ui';
+import { NCard, NSelect } from 'naive-ui';
+import { BarChartOutline } from '@vicons/ionicons5';
+import EmptyState from '../EmptyState.vue';
 import MetricChart from './MetricChart.vue';
 import BreakdownTable from './BreakdownTable.vue';
 import type { ChartConfig } from '../../lib/statistics/catalog';

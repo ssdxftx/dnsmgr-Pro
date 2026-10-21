@@ -181,7 +181,6 @@ const columns = computed(() => [
     title: t('certOrder.typeCol'),
     key: 'typename',
     width: 100,
-    mobile: 'hide',
     render(row: any) {
       return h(NTag, { size: 'small', bordered: false }, { default: () => row.typename || t('certOrder.manualImport') });
     },

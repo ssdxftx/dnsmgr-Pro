@@ -7,7 +7,7 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="LinkOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <div class="app-toolbar">
-      <n-input v-model:value="alias" :placeholder="t('record.aliasPlaceholder')" size="small" style="width: 320px" />
+      <n-input v-model:value="alias" :placeholder="t('record.aliasPlaceholder')" size="small" style="width: 320px" @keyup.enter="add" />
       <n-button type="primary" size="small" :loading="saveBusy" @click="add">{{ t('record.aliasAdd') }}</n-button>
     </div>
     <n-card :bordered="false">
@@ -59,7 +59,10 @@ async function load() {
 }
 
 async function add() {
-  if (!alias.value.trim()) return;
+  if (!alias.value.trim()) {
+    message.warning(t('record.aliasRequired'));
+    return;
+  }
   saveBusy.value = true;
   const res = await api('POST', `/domains/${domainId}/aliases`, { alias: alias.value.trim() });
   saveBusy.value = false;
