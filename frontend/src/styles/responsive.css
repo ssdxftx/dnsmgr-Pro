@@ -188,6 +188,11 @@
     flex: 1 1 100px;
     min-width: 96px;
   }
+  /* 选择器变窄后让下拉菜单按内容展开，避免长选项被省略 */
+  .n-base-select-menu {
+    min-width: 168px;
+    max-width: calc(100vw - 16px);
+  }
 }
 
 /* 移动端信息架构：应用栏标题与页面头重复，隐藏只留汉堡与头像 */
