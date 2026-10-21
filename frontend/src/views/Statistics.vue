@@ -146,8 +146,13 @@ onMounted(() => {
 }
 .provider-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+@media (max-width: 899px) {
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
 }
 .data-note {
   margin: 0;

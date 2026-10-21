@@ -179,6 +179,17 @@
   }
 }
 
+/* 超窄屏（≤359px）：压缩筛选控件基准宽度，避免 3 控件 + 2 按钮排成 4 行 */
+@media (max-width: 359px) {
+  .app-toolbar > .n-input {
+    flex-basis: 150px;
+  }
+  .app-toolbar > .n-select {
+    flex: 1 1 100px;
+    min-width: 96px;
+  }
+}
+
 /* 移动端信息架构：应用栏标题与页面头重复，隐藏只留汉堡与头像 */
 @media (max-width: 767px) {
   .app-header__titles {
