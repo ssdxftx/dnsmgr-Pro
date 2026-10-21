@@ -16,15 +16,25 @@ const HTML_CSP = [
 
 // 浏览器侧缓存策略（Cache-Control）
 const IMMUTABLE = 'public, max-age=31536000, immutable, stale-while-revalidate=86400, stale-if-error=604800';
-const SHORT_PUBLIC = 'public, max-age=604800, stale-while-revalidate=86400, stale-if-error=604800';
-const REVALIDATE = 'no-cache, must-revalidate, stale-while-revalidate=120, stale-if-error=86400';
+// 根目录公开静态文件（favicon / robots / manifest 等）：内容稳定但文件名不带哈希，给 30 天
+const ROOT_STATIC = 'public, max-age=2592000, stale-while-revalidate=604800, stale-if-error=604800';
+// 无法识别的内容：浏览器保守 1 天，CDN 侧再放宽到 7 天
+const SHORT_PUBLIC = 'public, max-age=86400, stale-while-revalidate=86400, stale-if-error=604800';
+// CDN 分层关闭时的 HTML 回退策略：浏览器与共享缓存都立即校验
+const REVALIDATE = 'public, max-age=0, must-revalidate';
+// 文档默认策略：浏览器立即校验；同时在 Cache-Control 内写 s-maxage，
+// 让只认 Cache-Control、不认 CDN-Cache-Control 的 CDN（如 CloudFront）也能缓存边缘副本
+const DOCUMENT = 'public, max-age=0, s-maxage=60, must-revalidate';
 const NO_STORE = 'no-store, no-cache, must-revalidate';
+// Service Worker 必须每次校验，避免旧 worker 长期驻留导致发版不生效
+const SERVICE_WORKER = 'no-cache, max-age=0, must-revalidate';
 
 // CDN 边缘侧缓存策略（CDN-Cache-Control）：可独立于浏览器更长，提升边缘命中率
 const CDN_IMMUTABLE = 'public, s-maxage=31536000, immutable, stale-while-revalidate=86400, stale-if-error=604800';
-const CDN_ROOT_STATIC = 'public, s-maxage=2592000, immutable, stale-while-revalidate=604800, stale-if-error=604800';
-// 文档（index.html / SPA 回退）：CDN 可短缓存并按 stale-while-revalidate 异步回源刷新，浏览器仍以 no-cache 强校验
-const CDN_DOCUMENT = 'public, s-maxage=60, stale-while-revalidate=600, stale-if-error=86400';
+const CDN_ROOT_STATIC = 'public, s-maxage=2592000, stale-while-revalidate=604800, stale-if-error=604800';
+const CDN_SHORT_PUBLIC = 'public, s-maxage=604800, stale-while-revalidate=86400, stale-if-error=604800';
+// 文档（index.html / SPA 回退）：CDN 短缓存，并允许在回源刷新时短暂使用旧副本
+const CDN_DOCUMENT = 'public, s-maxage=60, stale-while-revalidate=60, stale-if-error=300';
 const CDN_NO_STORE = 'no-store';
 
 // 无需登录即可访问、且对所有访客一致的只读接口，可交由 CDN/浏览器短时缓存
@@ -35,36 +45,72 @@ const PUBLIC_API_CACHE: Record<string, { browser: string; cdn: string }> = {
   '/api/register/config': { browser: 'public, max-age=60, stale-while-revalidate=300', cdn: 'public, s-maxage=300, stale-while-revalidate=900' },
 };
 
-// 带内容哈希的构建产物目录：内容变更即换名，可安全长缓存
+// 只把 Vite 生成、文件名带内容哈希的产物视为不可变资源；普通 /assets/foo.js 不享受一年缓存
 function isHashedAsset(url: string): boolean {
-  return /^\/assets\/.+\.[a-z0-9]+$/i.test(url);
+  return /^\/assets\/[^/]+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$/i.test(url);
 }
 
-// 根目录下内容固定的静态文件（favicon / robots / manifest 等）：可强缓存
-const ROOT_STATIC_EXT = /\.(?:webp|avif|png|jpe?g|gif|svg|ico|bmp|js|mjs|css|wasm|woff2?|ttf|otf|eot|txt|xml|webmanifest|json|map)$/i;
+// 根目录下内容固定的静态文件（favicon / robots / manifest / 字体等）：可较长缓存。
+// 不包含 js/css/json/map，避免把根路径下未带哈希的脚本或动态文件误判为长期缓存。
+const ROOT_STATIC_EXT = /\.(?:webp|avif|png|jpe?g|gif|svg|ico|bmp|wasm|woff2?|ttf|otf|eot|txt|xml|webmanifest)$/i;
+
+function isRootStatic(url: string): boolean {
+  return !url.startsWith('/assets/') && ROOT_STATIC_EXT.test(url);
+}
+
+// Service Worker 及其 workbox 运行时必须走校验，不能沿用普通 .js 的缓存策略
+function isServiceWorker(url: string): boolean {
+  return /^\/(?:sw|service-worker|serviceworker|firebase-messaging-sw|workbox-[^/]+)\.js$/i.test(url);
+}
 
 function isDocument(url: string): boolean {
-  return url === '/' || url.endsWith('.html') || !/\.[a-z0-9]{2,5}$/i.test(url);
+  return url === '/' || /\.html?$/i.test(url) || !/\.[a-z0-9]{2,5}$/i.test(url);
 }
 
 // CDN 缓存优化总开关，排障时可经 DNSMGR_CDN_CACHE=0 回退为「浏览器与 CDN 同值」的旧行为
 const CDN_CACHE_ENABLED = (process.env.DNSMGR_CDN_CACHE || '').trim() !== '0';
 
+function maxAgeSeconds(value: string): number {
+  const m = /\b(?:s-maxage|max-age)=(\d+)/i.exec(value);
+  return m ? Number(m[1]) : 0;
+}
+
+function appendVary(reply: FastifyReply, token: string): void {
+  const raw = reply.getHeader('vary');
+  const value = Array.isArray(raw) ? raw.join(', ') : String(raw || '');
+  if (value.trim() === '*') return;
+  const parts = value.split(',').map((s) => s.trim()).filter(Boolean);
+  if (!parts.some((p) => p.toLowerCase() === token.toLowerCase())) parts.push(token);
+  reply.header('Vary', parts.join(', '));
+}
+
 /**
  * 写入缓存头。浏览器侧用 Cache-Control，CDN 边缘侧用 CDN-Cache-Control；
  * 两者可不同值，便于让 CDN 缓存更久而不拖长浏览器侧的陈旧时间。
- * 同时对可长缓存的响应补 Expires（供不支持 Cache-Control 的边缘/代理识别）。
+ * 同时补 Surrogate-Control（Fastly/Varnish）、Edge-Control（Akamai）、
+ * Expires（HTTP/1.0 代理）与 X-Accel-Expires（Nginx proxy_cache），
+ * 覆盖不读取 CDN-Cache-Control 的缓存层。
  */
 function setCache(reply: FastifyReply, browser: string, cdn?: string) {
   const edge = CDN_CACHE_ENABLED && cdn ? cdn : browser;
   reply.header('Cache-Control', browser);
   reply.header('CDN-Cache-Control', edge);
-  const isNoStore = /no-store|no-cache|must-revalidate/.test(browser);
-  if (!isNoStore) {
-    const m = /(?:s-max-age|max-age)=(\d+)/.exec(browser);
-    const sec = m ? Number(m[1]) : 0;
-    if (sec > 0) reply.header('Expires', new Date(Date.now() + sec * 1000).toUTCString());
+  reply.header('Surrogate-Control', edge.replace(/\bs-maxage=/gi, 'max-age='));
+  const sec = maxAgeSeconds(edge);
+  // Akamai 使用 Edge-Control 控制边缘 TTL；其他 CDN 会忽略该头
+  reply.header('Edge-Control', sec > 0 ? `max-age=${sec}` : 'no-store');
+  if (sec > 0) {
+    reply.header('Expires', new Date(Date.now() + sec * 1000).toUTCString());
+    reply.header('X-Accel-Expires', String(sec));
+  } else {
+    reply.removeHeader('Expires');
+    reply.header('X-Accel-Expires', '0');
   }
+}
+
+function setNoStore(reply: FastifyReply) {
+  setCache(reply, NO_STORE, CDN_NO_STORE);
+  reply.header('Pragma', 'no-cache');
 }
 
 export function applySecurityHeaders(app: FastifyInstance): void {
@@ -78,36 +124,44 @@ export function applySecurityHeaders(app: FastifyInstance): void {
     reply.header('Cross-Origin-Resource-Policy', 'same-origin');
     reply.header('Cross-Origin-Opener-Policy', 'same-origin');
     reply.header('X-Robots-Tag', 'noindex, nofollow');
-    reply.header('Vary', 'Accept-Encoding');
+    // 保留 compress / cors 等插件已写入的 Vary，避免覆盖后把 CORS 变体混进同一份缓存
+    appendVary(reply, 'accept-encoding');
+    const allowOrigin = String(reply.getHeader('access-control-allow-origin') || '');
+    if (allowOrigin && allowOrigin !== '*') appendVary(reply, 'Origin');
     if (hsts) reply.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
 
     const url = String(req.raw.url || '').split('?')[0];
+    const apiUrl = url.toLowerCase();
     const contentType = String(reply.getHeader('content-type') || '');
     const isHtml = contentType.includes('text/html');
+    const cacheableMethod = req.method === 'GET' || req.method === 'HEAD';
 
     // 错误响应一律不可缓存：避免 4xx/5xx（含未命中静态资源回退）被 CDN/浏览器缓存
     if (reply.statusCode >= 400) {
-      reply.header('Cache-Control', NO_STORE);
-      reply.header('Pragma', 'no-cache');
-      reply.header('CDN-Cache-Control', CDN_NO_STORE);
-    } else if (url === '/api' || url.startsWith('/api/')) {
-      const publicCache = req.method === 'GET' ? PUBLIC_API_CACHE[url] : undefined;
+      setNoStore(reply);
+    } else if (apiUrl === '/api' || apiUrl.startsWith('/api/')) {
+      const publicCache = cacheableMethod ? PUBLIC_API_CACHE[apiUrl] : undefined;
       if (publicCache) {
         setCache(reply, publicCache.browser, publicCache.cdn);
       } else {
-        reply.header('Cache-Control', NO_STORE);
-        reply.header('Pragma', 'no-cache');
-        reply.header('CDN-Cache-Control', CDN_NO_STORE);
+        setNoStore(reply);
       }
-    } else if (isHashedAsset(url) || ROOT_STATIC_EXT.test(url)) {
+    } else if (isServiceWorker(url)) {
+      // Service Worker 不参与长缓存，否则发版后旧 worker 可能长期接管页面
+      setCache(reply, SERVICE_WORKER, CDN_NO_STORE);
+      reply.header('Pragma', 'no-cache');
+    } else if (isHashedAsset(url)) {
       // 带哈希的构建产物：内容变更即换名，浏览器与 CDN 均可长缓一年且 immutable
       setCache(reply, IMMUTABLE, CDN_IMMUTABLE);
+    } else if (isRootStatic(url)) {
+      // 根目录公开静态文件：文件名不带哈希，30 天后重新校验，避免 favicon/manifest 永久陈旧
+      setCache(reply, ROOT_STATIC, CDN_ROOT_STATIC);
     } else if (isHtml || isDocument(url)) {
-      // 文档：浏览器强校验保证发版即时生效；CDN 边缘短缓存 + 异步回源，显著提升边缘命中率
-      setCache(reply, REVALIDATE, CDN_DOCUMENT);
+      // 文档：浏览器立即校验；CDN 短缓存，并在 Cache-Control 中带 s-maxage 兼容只认该头的 CDN
+      setCache(reply, CDN_CACHE_ENABLED ? DOCUMENT : REVALIDATE, CDN_DOCUMENT);
     } else {
-      // 其余未知资源：保守地给短公共缓存，CDN 侧可较久
-      setCache(reply, SHORT_PUBLIC, CDN_ROOT_STATIC);
+      // 其余未知资源：浏览器 1 天，CDN 7 天
+      setCache(reply, SHORT_PUBLIC, CDN_SHORT_PUBLIC);
     }
 
     if (isHtml) {

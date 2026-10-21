@@ -6,7 +6,7 @@ import jwt from '@fastify/jwt';
 import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { configGet, getSysKey } from './config.js';
 import { isInstalled, getInstallState } from './installer.js';
 import { initSetupToken } from './lib/setupToken.js';
@@ -152,7 +152,11 @@ const allowedOrigins = (process.env.DNSMGR_ALLOWED_ORIGINS || '')
   .map((s) => s.trim())
   .filter(Boolean);
 if (allowedOrigins.length) {
-  await app.register(cors, { origin: allowedOrigins });
+  await app.register(cors, {
+    origin: allowedOrigins,
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    maxAge: 86400,
+  });
 }
 
 // 登录/注册/安装等敏感接口限流，可经 DNSMGR_RATE_LIMIT=0 关闭
@@ -308,15 +312,50 @@ const webDir = resolveWebDir();
 if (webDir) {
   await app.register(fastifyStatic, { root: webDir, prefix: '/' });
   const indexHtml = fs.readFileSync(path.join(webDir, 'index.html'));
+  const indexStat = fs.statSync(path.join(webDir, 'index.html'));
+  const indexEtag = `"${createHash('sha256').update(indexHtml).digest('base64url')}"`;
+  const indexLastModified = indexStat.mtime.toUTCString();
+  const indexModifiedSec = Math.floor(indexStat.mtimeMs / 1000) * 1000;
+
+  // SPA 回退由进程内 Buffer 返回，需自行提供 ETag/Last-Modified，
+  // 否则浏览器每次导航都会重新下载整份 HTML，CDN 回源校验也无法得到 304。
+  const indexNotModified = (req: any): boolean => {
+    const inm = req.headers['if-none-match'];
+    if (inm) {
+      const raw = Array.isArray(inm) ? inm.join(',') : String(inm);
+      return raw.split(',').some((part) => {
+        const tag = part.trim();
+        return tag === '*' || tag.replace(/^W\//, '') === indexEtag;
+      });
+    }
+    const ims = req.headers['if-modified-since'];
+    if (ims) {
+      const t = Date.parse(String(ims));
+      return Number.isFinite(t) && t >= indexModifiedSec;
+    }
+    return false;
+  };
+
   app.setNotFoundHandler((req: any, reply: any) => {
     const u = String(req.raw.url || '').split('?')[0];
-    if (u === '/api' || u.startsWith('/api/')) {
+    const lower = u.toLowerCase();
+    if (lower === '/api' || lower.startsWith('/api/')) {
       return reply.code(404).send({ code: -1, msg: '接口不存在', path: req.raw.url });
+    }
+    // SPA 回退只接受 GET/HEAD；其他方法对未知路径返回 404，避免把 HTML 当成功响应
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      return reply.code(404).type('text/plain').send('Not Found');
+    }
+    // 保留给静态资源的命名空间不能回退成 SPA HTML，否则 CDN 可能把 HTML 当作脚本/图片缓存
+    if (lower === '/assets' || lower.startsWith('/assets/') || lower === '/static' || lower.startsWith('/static/') || lower === '/.well-known' || lower.startsWith('/.well-known/')) {
+      return reply.code(404).type('text/plain').send('Not Found');
     }
     // 带扩展名的路径视为静态资源：未命中直接 404，避免把 SPA HTML 以 200 返回并被 CDN 长缓存
     if (/\.[a-z0-9]{2,5}$/i.test(u)) {
       return reply.code(404).type('text/plain').send('Not Found');
     }
+    reply.header('ETag', indexEtag).header('Last-Modified', indexLastModified);
+    if (indexNotModified(req)) return reply.code(304).send();
     return reply.type('text/html').send(indexHtml);
   });
 }
