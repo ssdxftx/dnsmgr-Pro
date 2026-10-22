@@ -12,6 +12,9 @@ data/
 backend/data/
 runtime/
 *.log
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 
 # 环境变量（保留示例）
 .env

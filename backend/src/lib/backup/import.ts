@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import { query, table, withTransaction } from '../../db.js';
+import { query, table, withTransaction, listColumns } from '../../db.js';
+import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS, KDF_PARAMS_JSON, unwrapDek, wrapDek } from '../vault/keys.js';
 import { decodeStoredValue, TABLES } from './manifest.js';
@@ -55,8 +56,10 @@ function emptyReport(): TableReport {
 
 /** 目标表实际列，避免归档里版本较新的列导致 INSERT 失败 */
 async function targetColumns(q: Q, name: string): Promise<Set<string>> {
-  const rows = await q(`SHOW COLUMNS FROM ${table(name)}`);
-  return new Set((rows as any[]).map((r) => String(r.Field)));
+  const rows = await listColumns(table(name), q);
+  return new Set(
+    rows.filter((r) => !isGeneratedColumn(r.Extra)).map((r) => String(r.Field)),
+  );
 }
 
 async function insertRow(q: Q, name: string, row: Record<string, any>, cols: Set<string>): Promise<number> {
@@ -121,6 +124,10 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       return report;
     }
 
+    // sys_key 必须在事务外确保已落库：SQLite 的事务回滚会撤销事务内新建的 sys_key，
+    // 但进程内配置缓存可能已记住它，导致后续密文使用未持久化的密钥。
+    const sysKey = await getSysKey();
+
     await withTransaction(async (q) => {
       if (mode === 'replace') {
         for (const name of [...TABLES].reverse()) {
@@ -159,7 +166,6 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       const destMap = new Map<number, number>();
       const userCount = await q(`SELECT COUNT(*) AS c FROM ${table('user')}`);
       const isEmptySite = Number((userCount as any[])[0]?.c || 0) === 0;
-      const sysKey = await getSysKey();
       const ownerUid = Number(header.ownerUid || 0);
       const actorUid = Number(opts.actor?.uid || 0);
       const actorIsAdmin = opts.actorIsAdmin === true;

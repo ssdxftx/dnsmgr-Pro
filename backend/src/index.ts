@@ -43,7 +43,7 @@ import { certTaskRun } from './lib/cert/certTaskService.js';
 import { withDistributedLock } from './lib/scheduler/distLock.js';
 import { refreshAllStatCache, getStatCacheIntervalMs, isStatCacheEnabled } from './lib/cdn/statistics/cacheService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
-import { query, table } from './db.js';
+import { query, table, getDbType, getDriver } from './db.js';
 import { registerAuditHooks } from './lib/audit/hooks.js';
 import { shutdownAudit } from './lib/audit/store.js';
 import auditRoutes from './routes/audit.js';
@@ -372,10 +372,15 @@ async function cleanAuditLog(): Promise<void> {
   if (auditCleanDay === day || now.getHours() < 3) return;
   const days = Math.max(7, Number(await configGet('audit_retain_days', '180')) || 180);
   for (let i = 0; i < 20; i++) {
-    const res: any = await query(
-      `DELETE FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
-      [days],
-    );
+    const res: any = getDbType() === 'sqlite'
+      ? await query(
+        `DELETE FROM ${table('audit_log')} WHERE id IN (SELECT id FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000)`,
+        [days],
+      )
+      : await query(
+        `DELETE FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
+        [days],
+      );
     if (!res?.affectedRows) break;
   }
   auditCleanDay = day;
@@ -451,6 +456,13 @@ try {
 }
 for (const sig of ['SIGTERM', 'SIGINT'] as const) {
   process.once(sig, () => {
-    void app.close().finally(() => process.exit(0));
+    void app
+      .close()
+      .catch(() => undefined)
+      .finally(async () => {
+        // 先关闭审计等 onClose 钩子，再释放数据库连接与 SQLite 单实例锁
+        await getDriver().close().catch(() => undefined);
+        process.exit(0);
+      });
   });
 }

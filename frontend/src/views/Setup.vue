@@ -14,21 +14,40 @@
       </n-alert>
 
       <n-form :model="form" label-placement="top">
-        <n-form-item :label="t('setup.dbHost')">
-          <n-input v-model:value="form.db_host" :placeholder="t('setup.dbHostPlaceholder')" />
+        <n-form-item :label="t('setup.dbType')">
+          <n-radio-group v-model:value="form.db_type" @update:value="onDbTypeChange">
+            <n-radio-button value="sqlite" :disabled="!sqliteAvailable">{{ t('setup.dbTypeSqlite') }}</n-radio-button>
+            <n-radio-button value="mysql">{{ t('setup.dbTypeMysql') }}</n-radio-button>
+          </n-radio-group>
         </n-form-item>
-        <n-form-item :label="t('setup.dbPort')">
-          <n-input-number v-model:value="form.db_port" :min="1" :max="65535" style="width: 100%" />
+        <p class="text-dim db-type-hint">{{ dbTypeHint }}</p>
+
+        <n-alert v-if="form.db_type === 'sqlite'" type="warning" class="mb-4">
+          {{ t('setup.sqliteWarning') }}
+        </n-alert>
+
+        <n-form-item v-if="form.db_type === 'sqlite'" :label="t('setup.sqliteFile')">
+          <n-input :value="sqlitePath" readonly />
         </n-form-item>
-        <n-form-item :label="t('setup.dbUser')">
-          <n-input v-model:value="form.db_user" :placeholder="t('setup.dbUserPlaceholder')" />
-        </n-form-item>
-        <n-form-item :label="t('setup.dbPassword')">
-          <n-input v-model:value="form.db_password" type="password" show-password-on="click" :placeholder="t('setup.dbPasswordPlaceholder')" />
-        </n-form-item>
-        <n-form-item :label="t('setup.dbName')">
-          <n-input v-model:value="form.db_name" :placeholder="t('setup.dbNamePlaceholder')" />
-        </n-form-item>
+
+        <template v-if="form.db_type === 'mysql'">
+          <n-form-item :label="t('setup.dbHost')">
+            <n-input v-model:value="form.db_host" :placeholder="t('setup.dbHostPlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('setup.dbPort')">
+            <n-input-number v-model:value="form.db_port" :min="1" :max="65535" style="width: 100%" />
+          </n-form-item>
+          <n-form-item :label="t('setup.dbUser')">
+            <n-input v-model:value="form.db_user" :placeholder="t('setup.dbUserPlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('setup.dbPassword')">
+            <n-input v-model:value="form.db_password" type="password" show-password-on="click" :placeholder="t('setup.dbPasswordPlaceholder')" />
+          </n-form-item>
+          <n-form-item :label="t('setup.dbName')">
+            <n-input v-model:value="form.db_name" :placeholder="t('setup.dbNamePlaceholder')" />
+          </n-form-item>
+        </template>
+
         <n-form-item :label="t('setup.dbPrefix')">
           <n-input v-model:value="form.db_prefix" :placeholder="t('setup.dbPrefixPlaceholder')" />
         </n-form-item>
@@ -70,7 +89,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
@@ -91,27 +110,49 @@ const importKey = ref('');
 const fileEl = ref<HTMLInputElement | null>(null);
 const checked = ref(false);
 const detected = ref(false);
+const sqliteAvailable = ref(false);
+const sqlitePath = ref('');
+const dataDir = ref('');
+const sqliteReason = ref('');
 const form = reactive({
+  db_type: 'mysql' as 'mysql' | 'sqlite',
   db_host: '127.0.0.1',
   db_port: 3306,
   db_user: '',
   db_password: '',
   db_name: 'dnsmgr',
   db_prefix: 'dnsmgr_',
+  db_file: '',
   setup_token: '',
   admin_username: 'admin',
   admin_password: '',
 });
+
+const dbTypeHint = computed(() => {
+  if (sqliteAvailable.value) return t('setup.sqliteAvailableHint', { dir: dataDir.value });
+  return t('setup.sqliteUnavailableHint', { reason: sqliteReason.value || t('setup.sqliteChecking') });
+});
+
+function onDbTypeChange(): void {
+  checked.value = false;
+  detected.value = false;
+}
+
+function validateConnection(): boolean {
+  if (form.db_type === 'sqlite') return true;
+  if (!form.db_host || !form.db_user || !form.db_name) {
+    message.warning(t('setup.dbInfoRequired'));
+    return false;
+  }
+  return true;
+}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
 async function onCheck() {
-  if (!form.db_host || !form.db_user || !form.db_name) {
-    message.warning(t('setup.dbInfoRequired'));
-    return;
-  }
+  if (!validateConnection()) return;
   checkBusy.value = true;
   try {
     const res = await api<any>('POST', '/setup/check', form);
@@ -132,7 +173,7 @@ async function onCheck() {
 }
 
 async function onInstall() {
-  if (!form.db_host || !form.db_user || !form.db_name) {
+  if (!validateConnection()) {
     message.warning(t('setup.dbConnRequired'));
     return;
   }
@@ -227,9 +268,16 @@ onMounted(async () => {
     const res = await api<any>('GET', '/setup/status');
     if (res.code === 0 && res.data?.installed) {
       router.replace('/login');
+      return;
     }
+    const data = res.data || {};
+    sqliteAvailable.value = !!data.sqlite_available;
+    sqlitePath.value = String(data.sqlite_path || '');
+    dataDir.value = String(data.data_dir || '');
+    sqliteReason.value = String(data.sqlite_reason || '');
+    form.db_type = data.default_db_type === 'sqlite' && sqliteAvailable.value ? 'sqlite' : 'mysql';
   } catch {
-    /* ignore */
+    sqliteReason.value = t('setup.networkError');
   }
 });
 </script>
@@ -237,5 +285,10 @@ onMounted(async () => {
 .text-dim {
   color: var(--app-text-3);
   font-size: 12px;
+}
+
+.db-type-hint {
+  margin: -8px 0 16px;
+  line-height: 1.5;
 }
 </style>

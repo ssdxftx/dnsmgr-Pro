@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { query, table } from '../../db.js';
+import { query, table, listColumns } from '../../db.js';
+import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { APP_VERSION } from '../version.js';
 import { fmtDateTime } from '../util.js';
@@ -157,9 +158,12 @@ async function tableChunk(
   transform?: (row: any) => void,
   extraColumns: string[] = [],
 ): Promise<ArchiveTableChunk> {
-  const cols = (await read(`SHOW COLUMNS FROM ${table(name)}`)) as any[];
+  const cols = await listColumns(table(name), read);
   const excluded = EXCLUDE_COLUMNS[name] || [];
-  const columns = cols.map((c) => String(c.Field)).filter((c) => !excluded.includes(c));
+  const columns = cols
+    .filter((c) => !isGeneratedColumn(c.Extra))
+    .map((c) => String(c.Field))
+    .filter((c) => !excluded.includes(c));
   for (const col of extraColumns) if (!columns.includes(col)) columns.push(col);
   const pk = cols.find((c) => String(c.Key || '').toUpperCase() === 'PRI')?.Field as string | undefined;
   const pageSize = 500;

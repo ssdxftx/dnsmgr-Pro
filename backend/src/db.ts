@@ -1,39 +1,26 @@
-import mysql from 'mysql2/promise';
 import { loadDbConfig, type DbConfig } from './config-loader.js';
+import type { DbDriver, QueryFn } from './db/types.js';
+import { createMysqlDriver } from './db/mysql.js';
 
 let currentPrefix = 'dnsmgr_';
-let pool: mysql.Pool;
+let driver: DbDriver;
 
-function buildPool(cfg: DbConfig): mysql.Pool {
-  currentPrefix = cfg.db_prefix || 'dnsmgr_';
-  const pool = mysql.createPool({
-    host: cfg.db_host,
-    port: Number(cfg.db_port || 3306),
-    user: cfg.db_user,
-    password: cfg.db_password,
-    database: cfg.db_name,
-    waitForConnections: true,
-    // 批量解析记录操作按并发 8 打云端，同时还有多个并发请求读库，10 条连接易被打满；
-    // 适当放大到 20，兼顾并发与数据库压力
-    connectionLimit: 20,
-    maxIdle: 20,
-    idleTimeout: 60000,
-    // DB 不可达时快速失败，避免请求长时间挂起
-    connectTimeout: 10000,
-    enableKeepAlive: true,
-    keepAliveInitialDelay: 10000,
-    charset: 'utf8mb4',
-    dateStrings: true,
-  });
-  // GROUP_CONCAT 默认上限 1024 字节，站点聚合（域名列表）会被截断；每条新连接统一放大
-  pool.on('connection', (conn: any) => {
-    conn.query('SET SESSION group_concat_max_len = 1048576');
-  });
-  return pool;
+async function buildDriver(cfg: DbConfig): Promise<DbDriver> {
+  if (cfg.db_type !== 'sqlite') return createMysqlDriver(cfg);
+  try {
+    // 动态加载，避免仅使用 MySQL 的部署在旧 Node 22 上因缺少 node:sqlite 而无法启动
+    const { createSqliteDriver } = await import('./db/sqlite.js');
+    return createSqliteDriver(cfg);
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    throw new Error(msg.startsWith('SQLite') ? msg : `SQLite 驱动加载失败：${msg}（需要 Node.js 22.13+）`);
+  }
 }
 
-// 启动时用当前配置初始化连接池
-pool = buildPool(loadDbConfig());
+// 启动时用当前配置初始化驱动
+const initialConfig = loadDbConfig();
+driver = await buildDriver(initialConfig);
+currentPrefix = initialConfig.db_prefix || 'dnsmgr_';
 
 export function table(name: string): string {
   return currentPrefix + name;
@@ -43,51 +30,71 @@ export function currentPrefixValue(): string {
   return currentPrefix;
 }
 
-// 安装向导保存配置后调用，用新数据库参数重建连接池（无需重启进程）
-export function reinitPool(cfg: DbConfig): void {
-  const old = pool;
-  pool = buildPool(cfg);
-  if (old) old.end().catch(() => undefined);
+export function getDbType(): 'mysql' | 'sqlite' {
+  return driver.type;
+}
+
+export function getDriver(): DbDriver {
+  return driver;
+}
+
+// 安装向导保存配置后调用，用新数据库参数重建驱动（无需重启进程）
+export async function reinitPool(cfg: DbConfig): Promise<void> {
+  const old = driver;
+  const next = await buildDriver(cfg);
+  currentPrefix = cfg.db_prefix || 'dnsmgr_';
+  driver = next;
+  if (old) await old.close();
 }
 
 export function getDbConfig(): DbConfig {
   return loadDbConfig();
 }
 
-// 供分布式锁等需要独占连接的场景使用
-export function getPool(): mysql.Pool {
-  return pool;
-}
-
 export async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
-  const [rows] = await pool.query(sql, params);
-  return rows as T[];
+  return driver.query<T>(sql, params);
 }
 
 export async function queryOne<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
-  const rows = await query<T>(sql, params);
-  return rows[0];
+  return driver.queryOne<T>(sql, params);
 }
 
 // 事务执行：将「先删后插」等需要原子性的多步操作包在同一连接的事务里，
 // 中途失败整体回滚，避免数据半更新（权限/域名/规则部分丢失）。
-export async function withTransaction<T>(
-  fn: (q: <R = any>(sql: string, params?: any[]) => Promise<R[]>) => Promise<T>,
+export async function withTransaction<T>(fn: (q: QueryFn) => Promise<T>): Promise<T> {
+  return driver.withTransaction(fn);
+}
+
+export async function readSnapshot<T>(
+  fn: (read: (sql: string, params?: any[]) => Promise<any[]>) => Promise<T>,
 ): Promise<T> {
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-    const q = async <R = any>(sql: string, params: any[] = []): Promise<R[]> => {
-      const [rows] = await conn.query(sql, params);
-      return rows as R[];
-    };
-    const result = await fn(q);
-    await conn.commit();
-    return result;
-  } catch (e) {
-    await conn.rollback().catch(() => undefined);
-    throw e;
-  } finally {
-    conn.release();
-  }
+  return driver.readSnapshot(fn);
+}
+
+export async function withDistributedLockResult<T>(
+  name: string,
+  fn: () => Promise<T>,
+  waitSeconds = 0,
+): Promise<{ locked: boolean; result?: T }> {
+  return driver.withLock(name, fn, waitSeconds);
+}
+
+export async function listColumns(tableName: string, q?: QueryFn) {
+  return driver.listColumns(tableName, q);
+}
+
+export async function tableExists(tableName: string): Promise<boolean> {
+  return driver.tableExists(tableName);
+}
+
+export async function columnExists(tableName: string, column: string): Promise<boolean> {
+  return driver.columnExists(tableName, column);
+}
+
+export async function indexExists(tableName: string, indexName: string): Promise<boolean> {
+  return driver.indexExists(tableName, indexName);
+}
+
+export async function uniqueIndexExists(tableName: string, column: string): Promise<boolean> {
+  return driver.uniqueIndexExists(tableName, column);
 }

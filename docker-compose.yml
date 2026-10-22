@@ -25,8 +25,12 @@ services:
         max-file: "3"
     environment:
       TZ: Asia/Shanghai
+      # 已挂载 /app/data 时安装页默认 SQLite；也可在安装页切换为 MySQL。
       # 数据库连接信息建议通过首次启动的“系统安装”页面填写（写入持久化卷 /app/data/config.json）。
       # 如有需要，也可通过环境变量预置（页面填写会覆盖环境变量）：
+      # DB_TYPE: ${DB_TYPE:-sqlite}
+      # DB_FILE: ${DB_FILE:-dnsmgr.sqlite}
+      # DNSMGR_DATA_PERSISTENT: "1"
       # DB_HOST: ${DB_HOST:-127.0.0.1}
       # DB_PORT: ${DB_PORT:-3306}
       # DB_USER: ${DB_USER:-dnsmgr}

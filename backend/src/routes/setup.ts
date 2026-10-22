@@ -2,6 +2,8 @@ import { unlink } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
 import { beginInstall, consumeInstallToken, endInstall, getInstallState, performInstall, testConnection } from '../installer.js';
 import { getDbConfig, query, queryOne, table } from '../db.js';
+import { dbIdentity, resolveSqliteFile, type DbConfig } from '../config-loader.js';
+import { detectDataPersistence } from '../lib/persistence.js';
 import { loadConfig } from '../config.js';
 import { getSysKey } from '../config.js';
 import { setSecretKey } from '../lib/secret.js';
@@ -11,11 +13,51 @@ import { keyForArchive } from '../lib/backup/key.js';
 import { fieldValue, saveUpload } from '../lib/backup/upload.js';
 import { verifySetupToken } from '../lib/setupToken.js';
 
+function parseDbConfig(body: any): DbConfig {
+  const base = getDbConfig();
+  const rawType = String(body?.db_type || base.db_type || '').trim().toLowerCase();
+  const dbType = rawType === 'sqlite' ? 'sqlite' : 'mysql';
+  const sqliteBase: DbConfig = { ...base, db_type: 'sqlite', db_file: '' };
+  const sqlite = dbType === 'sqlite';
+  return {
+    db_type: dbType,
+    db_host: sqlite ? base.db_host : String(body?.db_host || '').trim(),
+    db_port: Number(body?.db_port || base.db_port || 3306),
+    db_user: sqlite ? base.db_user : String(body?.db_user || '').trim(),
+    db_password: String(body?.db_password ?? (sqlite ? base.db_password : '')),
+    db_name: sqlite ? base.db_name : String(body?.db_name || '').trim(),
+    db_prefix: String(body?.db_prefix || base.db_prefix || 'dnsmgr_').trim(),
+    db_file: String(body?.db_file || '').trim() || (sqlite ? resolveSqliteFile(sqliteBase) : base.db_file),
+  };
+}
+
+function validateDbConfig(cfg: DbConfig): string {
+  if (cfg.db_type === 'sqlite') return '';
+  if (!cfg.db_host || !cfg.db_user || !cfg.db_name) return '请完整填写数据库主机、用户名和数据库名';
+  return '';
+}
+
 export default async function setupRoutes(app: FastifyInstance) {
   // 安装状态（前端据此决定展示安装页还是登录页）
   app.get('/api/setup/status', async () => {
     const state = await getInstallState();
-    return { code: 0, data: { installed: state === 'installed' } };
+    const cfg = getDbConfig();
+    const persistence = detectDataPersistence();
+    const sqliteCfg: DbConfig = { ...cfg, db_type: 'sqlite', db_file: '' };
+    const sqlitePathCfg = cfg.db_type === 'sqlite' && cfg.db_file ? cfg : sqliteCfg;
+    return {
+      code: 0,
+      data: {
+        installed: state === 'installed',
+        db_type: cfg.db_type,
+        data_persistent: persistence.persistent,
+        data_dir: persistence.dataDir,
+        sqlite_available: persistence.persistent,
+        sqlite_path: resolveSqliteFile(sqlitePathCfg),
+        sqlite_reason: persistence.reason,
+        default_db_type: state === 'installed' ? cfg.db_type : persistence.persistent ? 'sqlite' : 'mysql',
+      },
+    };
   });
 
   // 测试数据库连接，并返回是否已初始化（已存在彩虹 DNS 数据表）；仅未安装时可用，避免已部署实例被用作连接探测
@@ -28,20 +70,16 @@ export default async function setupRoutes(app: FastifyInstance) {
     if (!verifySetupToken(b.setup_token ?? req.headers['x-setup-token'])) {
       return { code: -1, msg: '安装令牌不正确，请查看服务端启动日志或配置 DNSMGR_SETUP_TOKEN' };
     }
-    const cfg = {
-      db_host: String(b.db_host || '').trim(),
-      db_port: Number(b.db_port || 3306),
-      db_user: String(b.db_user || '').trim(),
-      db_password: String(b.db_password ?? ''),
-      db_name: String(b.db_name || '').trim(),
-      db_prefix: String(b.db_prefix || 'dnsmgr_').trim(),
-    };
-    if (!cfg.db_host || !cfg.db_user || !cfg.db_name) {
-      return { code: -1, msg: '请完整填写数据库主机、用户名和数据库名' };
-    }
+    const cfg = parseDbConfig(b);
+    const cfgErr = validateDbConfig(cfg);
+    if (cfgErr) return { code: -1, msg: cfgErr };
     const result = await testConnection(cfg);
     if (!result.ok) return { code: -1, msg: result.message };
-    return { code: 0, data: { initialized: result.initialized }, msg: result.initialized ? '连接成功，检测到已有数据' : '连接成功' };
+    return {
+      code: 0,
+      data: { initialized: result.initialized, db_type: cfg.db_type },
+      msg: result.initialized ? '连接成功，检测到已有数据' : cfg.db_type === 'sqlite' ? 'SQLite 数据库可创建' : '连接成功',
+    };
   });
 
   // 执行安装：全新空库建表+创建管理员；已有表则绑定现有数据
@@ -54,20 +92,12 @@ export default async function setupRoutes(app: FastifyInstance) {
     if (!verifySetupToken(b.setup_token ?? req.headers['x-setup-token'])) {
       return { code: -1, msg: '安装令牌不正确，请查看服务端启动日志或配置 DNSMGR_SETUP_TOKEN' };
     }
-    const cfg = {
-      db_host: String(b.db_host || '').trim(),
-      db_port: Number(b.db_port || 3306),
-      db_user: String(b.db_user || '').trim(),
-      db_password: String(b.db_password ?? ''),
-      db_name: String(b.db_name || '').trim(),
-      db_prefix: String(b.db_prefix || 'dnsmgr_').trim(),
-    };
+    const cfg = parseDbConfig(b);
     const adminUsername = String(b.admin_username || '').trim();
     const adminPassword = String(b.admin_password || '');
 
-    if (!cfg.db_host || !cfg.db_user || !cfg.db_name) {
-      return { code: -1, msg: '请完整填写数据库连接信息' };
-    }
+    const cfgErr = validateDbConfig(cfg);
+    if (cfgErr) return { code: -1, msg: cfgErr };
     // 并发保护：避免多个安装请求同时初始化
     if (!beginInstall()) return { code: -1, msg: '安装正在进行，请稍候' };
     let result;
@@ -99,7 +129,7 @@ export default async function setupRoutes(app: FastifyInstance) {
   app.post('/api/setup/skip', async (req: any) => {
     const cfg = getDbConfig();
     const token = String(req.body?.install_token || '');
-    if (!consumeInstallToken(token, cfg.db_name)) {
+    if (!consumeInstallToken(token, dbIdentity(cfg))) {
       return { code: -1, msg: '安装令牌已失效' };
     }
     setTimeout(() => process.exit(0), 300);
@@ -114,7 +144,7 @@ export default async function setupRoutes(app: FastifyInstance) {
       const up = await saveUpload(req);
       tmp = up.file;
       const token = String(fieldValue(up.fields, 'install_token') || '');
-      if (!consumeInstallToken(token, cfg.db_name)) {
+      if (!consumeInstallToken(token, dbIdentity(cfg))) {
         return { code: -1, msg: '导入令牌无效或已过期，请跳过此步' };
       }
       // 安装后 sys_key 才写入数据库，必须刷新缓存并重置进程内密钥，否则导入时写入的密文重启后无法解密

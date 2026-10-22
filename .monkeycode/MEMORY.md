@@ -107,3 +107,14 @@ Entries discovered by the Agent during task execution should follow this format:
 - Instructions:
   - 未经用户明确同意，不得更新版本号
   - 修复完成后只提交并推送代码，不执行 `scripts/release.mjs`、不打标签
+
+[Project Knowledge Summary]
+- Date: 2026-10-21
+- Context: Discovered by Agent while 为项目增加 SQLite 数据库支持
+- Category: Build Methods / Testing Methods / Environment Configuration
+- Instructions:
+  - 后端数据库层已抽象为 `backend/src/db.ts` 门面 + `db/mysql.ts` + `db/sqlite.ts`；SQLite 使用 Node 内置 `node:sqlite`，要求 Node 22.13+，Dockerfile 已固定 `node:22.22.0-alpine`
+  - SQLite 仅在数据目录位于非根挂载点（容器卷/PVC/bind mount）或显式设置 `DNSMGR_DATA_PERSISTENT=1` 时可用；NFS/CIFS 等网络文件系统默认禁用；默认数据文件为 `DNSMGR_DATA_DIR/dnsmgr.sqlite`
+  - 安装向导 `POST /api/setup/check` 与 `POST /api/setup/install` 需传 `db_type`（`sqlite` 或 `mysql`）；SQLite 配置在 `config.json` 中以相对数据目录的路径保存
+  - 新增自检命令：`cd backend && npm run check:sqlite`；MySQL 冒烟需设置 `DB_HOST`/`DB_USER`/`DB_NAME` 后执行 `npm run check:mysql`；跨库备份（SQLite → MySQL → SQLite）需 MySQL 环境后执行 `npm run check:cross`；前后端类型检查、`npm run check:i18n`、`npm run build` 保持不变
+  - SQLite 单实例由数据库文件旁的 `dnsmgr.sqlite.lock` 强制保证；同主机 PID 已退出的遗留锁会自动清理，其他主机或活跃 PID 会拒绝启动；网络文件系统按 `DB_FILE` 所在目录检测，非持久化目录启动时输出警告

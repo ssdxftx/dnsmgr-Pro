@@ -1,5 +1,5 @@
 # ---- 前端构建阶段 ----
-FROM node:22-alpine AS web
+FROM node:22.22.0-alpine AS web
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
@@ -7,7 +7,8 @@ COPY frontend/ ./
 RUN npm run build
 
 # ---- 应用运行阶段 ----
-FROM node:22-alpine
+# Node 22.22 内置 node:sqlite（无需实验性启动参数）
+FROM node:22.22.0-alpine
 WORKDIR /app
 
 # buildPfx（证书 PFX 下载 / PFX 部署）依赖 openssl CLI；unzip 用于证书包解压。

@@ -104,12 +104,24 @@ docker run -d \
 
 启动后访问 `http://主机:8082`，首次打开会自动进入**系统安装页**：
 
-1. 填写数据库连接信息（主机、端口、账号、密码、库名、表前缀）。
-2. 点击「测试数据库连接」，系统会自动判断是「全新安装」还是「已有数据」。
-3. 全新安装：填写管理员账号密码，点击「立即安装」。
-4. **兼容彩虹 DNS**：若填写的是彩虹 DNS 现有数据库（表结构一致），系统会检测到已有数据并直接绑定使用，不删除、不覆盖原有解析、用户、证书等数据。
+1. 选择数据库类型：挂载了 `/app/data` 持久化卷时默认 **SQLite**，也可以切换为 MySQL；未挂载持久化卷时只允许 MySQL。
+2. MySQL 填写主机、端口、账号、密码、库名、表前缀；SQLite 使用持久化目录内的 `dnsmgr.sqlite`。
+3. 点击「测试数据库连接」，系统会自动判断是「全新安装」还是「已有数据」。
+4. 全新安装：填写管理员账号密码，点击「立即安装」。
+5. **兼容彩虹 DNS**：绑定 MySQL 现有数据库（表结构一致）时，系统会检测到已有数据并直接使用，不删除、不覆盖原有解析、用户、证书等数据。
 
-> 应用与数据库分离，数据库可自建（MySQL 5.7+ / MariaDB）。`-v dnsmgr-pro-data:/app/data` 用于持久化安装配置、备份与审计缓冲文件，请务必保留。
+> `-v dnsmgr-pro-data:/app/data` 用于持久化 SQLite 数据文件、安装配置、备份与审计缓冲文件，请务必保留。未挂载该卷时 SQLite 选项会被禁用，系统回退为 MySQL。
+
+#### SQLite 使用说明
+
+- SQLite 适合单实例、小规模部署；数据文件位于 `DNSMGR_DATA_DIR/dnsmgr.sqlite`，WAL 文件同目录。
+- 启动时会在数据库文件旁创建 `dnsmgr.sqlite.lock`，第二个实例会直接拒绝启动；异常退出后如确认没有实例运行，可删除该锁文件后重试。
+- 多副本、共享网络存储（NFS/CIFS）请使用 MySQL；SQLite 会按数据文件所在目录检测网络文件系统并禁用。
+- 容器根文件系统不视为持久化；需要 SQLite 时请挂载卷，或显式设置 `DNSMGR_DATA_PERSISTENT=1`。SQLite 运行在非持久化目录时启动日志会给出警告。
+- 即使设置 `DB_TYPE=sqlite`，未检测到持久化时也会自动回退 MySQL，避免数据写在临时文件系统。
+- 备份使用系统内置的加密归档，支持在 MySQL 与 SQLite 之间导出/导入，无需手工复制数据库文件。
+- SQLite 使用 Node 内置 `node:sqlite`，启动日志可能出现 `ExperimentalWarning`，不影响功能。
+- 升级说明：已有 `config.json` 没有 `db_type` 字段时按 MySQL 继续运行，不会自动切换数据库，也不会改写现有 MySQL 数据。
 
 镜像标签同时推送至 Docker Hub 与 GHCR，镜像内「关于」页显示的版本与容器标签一致：
 
@@ -136,7 +148,7 @@ docker compose up -d --build
 
 ### 方式三：宿主机运行
 
-前置条件：Node.js 22+、MySQL 5.7+ 或 MariaDB；证书 PFX 导出与部署需要 `openssl`。
+前置条件：Node.js 22.13+（SQLite 使用内置 `node:sqlite`，推荐 22.22+）、MySQL 5.7+ 或 MariaDB；证书 PFX 导出与部署需要 `openssl`。
 
 ```bash
 # 后端
@@ -150,7 +162,7 @@ npm install
 npm run dev
 ```
 
-后端默认监听 `8082`，前端开发服务器把 `/api` 代理到后端。数据库连接也可通过环境变量 `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_PREFIX` 预置，安装页填写会覆盖环境变量。
+后端默认监听 `8082`，前端开发服务器把 `/api` 代理到后端。数据库类型与连接也可通过环境变量 `DB_TYPE` / `DB_FILE` / `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_PREFIX` 预置，安装页填写会覆盖环境变量。
 
 生产构建：
 
@@ -226,7 +238,9 @@ Vue 运行时与 ECharts 拆为独立 chunk，升级业务代码时依赖 chunk 
 | 变量 | 说明 | 默认 |
 | --- | --- | --- |
 | `APP_PORT` | Docker Compose 对外端口 | `8082` |
-| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_PREFIX` | 数据库连接预置；安装页填写会覆盖 | 空 |
+| `DB_TYPE` | 数据库类型：`mysql` 或 `sqlite`；SQLite 需要持久化目录 | 全新安装且有持久化卷时 `sqlite`，否则 `mysql` |
+| `DB_FILE` | SQLite 数据文件路径，默认 `DNSMGR_DATA_DIR/dnsmgr.sqlite` | `dnsmgr.sqlite` |
+| `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_PREFIX` | MySQL 连接预置；安装页填写会覆盖 | 空 |
 | `DNSMGR_TRUST_PROXY` | 位于 Nginx/CDN 之后时设为 `true` 或具体 IP/CIDR，使日志与限流使用真实客户端 IP | 关闭 |
 | `DNSMGR_ALLOWED_ORIGINS` | 允许跨域调用 API 的来源，逗号分隔；不设置则仅同源 | 同源 |
 | `DNSMGR_RATE_LIMIT` | 设为 `0` 关闭敏感接口限流 | 开启 |
@@ -238,7 +252,8 @@ Vue 运行时与 ECharts 拆为独立 chunk，升级业务代码时依赖 chunk 
 | `DNSMGR_UPDATE_TOKEN` | 检查更新用的 GitHub 令牌，私有仓库或需提高 API 限流额度时配置 | 空 |
 | `DNSMGR_CF_API_BASE` | 覆盖 Cloudflare API 基址，仅本地联调或自建代理使用 | 官方地址 |
 | `DNSMGR_WEB_DIR` | 前端构建产物目录 | 自动探测 |
-| `DNSMGR_DATA_DIR` | 安装配置、备份与审计缓冲目录 | `./data` |
+| `DNSMGR_DATA_DIR` | 安装配置、SQLite 数据文件、备份与审计缓冲目录 | `./data` |
+| `DNSMGR_DATA_PERSISTENT` | 设为 `1`/`0` 显式覆盖持久化检测；用于无法读取容器挂载信息的平台 | 自动检测 |
 
 代理层注意：CDN 需保留 `Cache-Control` 与 `X-Forwarded-For` / `X-Forwarded-Proto`，并遵循源站下发的 `/api/*` 不缓存策略。将 `DNSMGR_TRUST_PROXY=true` 仅用于受信代理之后；生产环境建议填写具体代理 IP 或网段，避免客户端伪造来源 IP 绕过限流。
 
@@ -246,9 +261,9 @@ Vue 运行时与 ECharts 拆为独立 chunk，升级业务代码时依赖 chunk 
 
 ## 技术栈与目录结构
 
-- **后端**：Node.js 22、TypeScript、Fastify 5、mysql2、JWT、bcrypt、nodemailer、ssh2、AWS S3 SDK、undici。
+- **后端**：Node.js 22、TypeScript、Fastify 5、mysql2 / node:sqlite、JWT、bcrypt、nodemailer、ssh2、AWS S3 SDK、undici。
 - **前端**：Vue 3、Vue Router、Pinia、Naive UI、ECharts、Vite。
-- **数据库**：MySQL 5.7+ / MariaDB，表前缀默认 `dnsmgr_`。
+- **数据库**：SQLite（单实例，默认在持久化卷上启用）或 MySQL 5.7+ / MariaDB，表前缀默认 `dnsmgr_`。
 - **运行方式**：生产环境由 Fastify 同进程提供 API 与前端静态文件；开发环境由 Vite 代理 `/api` 到后端。
 
 ```text
@@ -257,6 +272,7 @@ dnsmgr-Pro/
 │   ├── src/
 │   │   ├── routes/           # 认证、域名、CDN、证书、部署、备份、审计等接口
 │   │   ├── lib/              # DNS/CDN/证书/部署 Provider、调度器、保险库、备份等
+│   │   ├── db/               # MySQL / SQLite 驱动、方言翻译与元数据查询
 │   │   ├── sql/              # 建表 SQL
 │   │   ├── migrate.ts        # 启动自动迁移
 │   │   ├── installer.ts      # 安装与绑定逻辑
@@ -285,6 +301,10 @@ cd backend
 npx tsc --noEmit
 npm run check:audit
 npm run check:backup
+npm run check:sqlite
+# 可选：MySQL 冒烟测试与 SQLite ↔ MySQL 跨库备份测试（需设置 DB_HOST / DB_USER / DB_NAME 等）
+npm run check:mysql
+npm run check:cross
 
 # 前端类型检查与静态校验
 cd frontend

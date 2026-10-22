@@ -44,7 +44,14 @@ spec:
               value: Asia/Shanghai
             - name: DNSMGR_DATA_DIR
               value: /app/data
+            # 已挂载 PVC 时安装页默认 SQLite；也可在安装页切换为 MySQL。
             # 如需预置数据库连接，可取消注释（首次打开安装页填写更直观）
+            # - name: DB_TYPE
+            #   value: sqlite
+            # - name: DB_FILE
+            #   value: dnsmgr.sqlite
+            # - name: DNSMGR_DATA_PERSISTENT
+            #   value: "1"
             # - name: DB_HOST
             #   value: your-mysql-host
             # - name: DB_PORT

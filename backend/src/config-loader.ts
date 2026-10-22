@@ -1,13 +1,18 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { detectDataPersistence, resolveDataDir } from './lib/persistence.js';
+
+export type DbType = 'mysql' | 'sqlite';
 
 export interface DbConfig {
+  db_type: DbType;
   db_host: string;
   db_port: number;
   db_user: string;
   db_password: string;
   db_name: string;
   db_prefix: string;
+  db_file: string;
 }
 
 function resolveConfPath(): string {
@@ -22,21 +27,64 @@ export function confPath(): string {
   return CONF_PATH;
 }
 
+function envDbType(): DbType | null {
+  const value = String(process.env.DB_TYPE || '').trim().toLowerCase();
+  if (value === 'sqlite') return 'sqlite';
+  if (value === 'mysql') return 'mysql';
+  return null;
+}
+
+function savedDbType(saved: any): DbType | null {
+  const value = String(saved?.db_type || '').trim().toLowerCase();
+  if (value === 'sqlite') return 'sqlite';
+  if (value === 'mysql') return 'mysql';
+  return null;
+}
+
+function defaultSqliteFile(): string {
+  return path.join(resolveDataDir(), 'dnsmgr.sqlite');
+}
+
+function normalizeDbFile(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return defaultSqliteFile();
+  return path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(resolveDataDir(), raw);
+}
+
+export function resolveSqliteFile(cfg: DbConfig): string {
+  return normalizeDbFile(cfg.db_file);
+}
+
+export function isSqliteFileInsideDataDir(cfg: DbConfig): boolean {
+  const file = resolveSqliteFile(cfg);
+  const dir = resolveDataDir();
+  const rel = path.relative(dir, file);
+  return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
+export function dbIdentity(cfg: DbConfig): string {
+  return cfg.db_type === 'sqlite' ? 'sqlite:' + resolveSqliteFile(cfg) : String(cfg.db_name || '');
+}
+
 // 读取数据库配置：持久化配置文件优先，其次环境变量，最后默认值。
 // 安装向导写入的配置会持久化到 CONF_PATH，重启后仍生效，从而实现“绑定彩虹 DNS 现库”无需重复配置。
 // 注意：不再为数据库密码提供内置默认值，未配置时连接会失败并给出明确报错，避免出厂默认弱口令。
 export function loadDbConfig(): DbConfig {
   const cfg: DbConfig = {
+    db_type: 'mysql',
     db_host: process.env.DB_HOST || '127.0.0.1',
     db_port: Number(process.env.DB_PORT || 3306),
     db_user: process.env.DB_USER || 'dnsmgr',
     db_password: process.env.DB_PASSWORD || '',
     db_name: process.env.DB_NAME || 'dnsmgr',
     db_prefix: process.env.DB_PREFIX || 'dnsmgr_',
+    db_file: process.env.DB_FILE || '',
   };
+
+  let saved: any = null;
   try {
     const raw = fs.readFileSync(CONF_PATH, 'utf8');
-    const saved = JSON.parse(raw);
+    saved = JSON.parse(raw);
     if (saved && typeof saved === 'object') {
       if (saved.db_host) cfg.db_host = saved.db_host;
       if (saved.db_port) cfg.db_port = Number(saved.db_port);
@@ -45,17 +93,48 @@ export function loadDbConfig(): DbConfig {
       if (typeof saved.db_password === 'string') cfg.db_password = saved.db_password;
       if (saved.db_name) cfg.db_name = saved.db_name;
       if (saved.db_prefix) cfg.db_prefix = saved.db_prefix;
+      if (typeof saved.db_file === 'string') cfg.db_file = saved.db_file;
     }
   } catch {
     // 无配置文件，使用环境变量/默认值
   }
+
+  const envType = envDbType();
+  const savedType = savedDbType(saved);
+  if (envType) {
+    cfg.db_type = envType;
+  } else if (savedType) {
+    cfg.db_type = savedType;
+  } else if (saved) {
+    // 旧版配置文件没有 db_type，保持 MySQL 行为
+    cfg.db_type = 'mysql';
+  } else if (hasEnvDbConfig()) {
+    cfg.db_type = 'mysql';
+  } else {
+    cfg.db_type = detectDataPersistence().persistent ? 'sqlite' : 'mysql';
+  }
+
+  if (cfg.db_type === 'sqlite') {
+    cfg.db_file = normalizeDbFile(cfg.db_file);
+    // 尚未保存 SQLite 配置且没有持久化时，按要求回退 MySQL；已保存的 SQLite 配置继续使用。
+    if (savedType !== 'sqlite' && !detectDataPersistence().persistent) {
+      cfg.db_type = 'mysql';
+    }
+  }
+
   return cfg;
 }
 
 export function saveDbConfig(cfg: DbConfig): void {
   fs.mkdirSync(path.dirname(CONF_PATH), { recursive: true });
+  const saved: DbConfig = { ...cfg };
+  if (saved.db_type === 'sqlite') {
+    saved.db_file = resolveSqliteFile(saved);
+    const rel = path.relative(resolveDataDir(), saved.db_file);
+    if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) saved.db_file = rel;
+  }
   // 含数据库密码，显式以 0600 权限写入，避免同机其他用户读取
-  fs.writeFileSync(CONF_PATH, JSON.stringify(cfg, null, 2), { mode: 0o600 });
+  fs.writeFileSync(CONF_PATH, JSON.stringify(saved, null, 2), { mode: 0o600 });
   try {
     fs.chmodSync(CONF_PATH, 0o600);
   } catch {
@@ -73,5 +152,11 @@ export function hasDbConfigFile(): boolean {
 
 // 是否通过环境变量显式提供了数据库配置（用于区分「首次部署 bootstrap」与「已配置实例」）
 export function hasEnvDbConfig(): boolean {
-  return !!(process.env.DB_HOST || process.env.DB_USER || process.env.DB_NAME);
+  return !!(
+    process.env.DB_HOST ||
+    process.env.DB_USER ||
+    process.env.DB_NAME ||
+    process.env.DB_TYPE ||
+    process.env.DB_FILE
+  );
 }

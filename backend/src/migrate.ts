@@ -1,4 +1,5 @@
-import { query, table } from './db.js';
+import { query, table, getDbType, columnExists, indexExists, uniqueIndexExists } from './db.js';
+import { sqliteIndexName } from './db/sqlite-dialect.js';
 import { setCdnDomainIdColumnAvailable } from './lib/cert/cdnDomainIdColumn.js';
 
 // 启动时幂等迁移：为多用户注册系统补齐表结构与字段，已存在则跳过。
@@ -181,7 +182,11 @@ export async function migrate(): Promise<void> {
     await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = 1000 AND level >= 2`);
     const after = await query<{ id: number }>(`SELECT id FROM ${table('user')} WHERE is_super = 1 LIMIT 1`);
     if (after.length === 0) {
-      await query(`UPDATE ${table('user')} SET is_super = 1 WHERE level >= 2 ORDER BY id ASC LIMIT 1`);
+      if (getDbType() === 'sqlite') {
+        await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = (SELECT id FROM (SELECT id FROM ${table('user')} WHERE level >= 2 ORDER BY id ASC LIMIT 1) t)`);
+      } else {
+        await query(`UPDATE ${table('user')} SET is_super = 1 WHERE level >= 2 ORDER BY id ASC LIMIT 1`);
+      }
     }
   }
 
@@ -257,12 +262,8 @@ export async function migrate(): Promise<void> {
 // cert_order.link 的 cdnDomainId 生成列 + 索引：MySQL 5.7+ 生成列；
 // 失败（旧版本或 link 存在非法 JSON）时记录并继续，不影响启动
 async function ensureCertOrderCdnDomainId(): Promise<void> {
-  const cols = await query<any>(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = 'cdn_domain_id' LIMIT 1`,
-    [table('cert_order')]
-  );
-  if (cols.length === 0) {
-    // 生成列基于 JSON_EXTRACT：历史 link 若含非法 JSON，整个 ALTER 会失败。
+  if (!(await columnExists(table('cert_order'), 'cdn_domain_id'))) {
+    // 生成列基于 JSON 提取：历史 link 若含非法 JSON，整个 ALTER 会失败。
     // 先清洗非法 JSON（这些行本就无法被应用解析使用），再尝试建列。
     try {
       await query(
@@ -272,9 +273,15 @@ async function ensureCertOrderCdnDomainId(): Promise<void> {
       console.log(`[migrate] 清洗 cert_order.link 非法 JSON 失败（跳过）：${e?.message || e}`);
     }
     try {
-      await query(
-        `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INT UNSIGNED GENERATED ALWAYS AS (CAST(JSON_UNQUOTE(JSON_EXTRACT(link, '$.cdnDomainId')) AS UNSIGNED)) VIRTUAL`
-      );
+      if (getDbType() === 'sqlite') {
+        await query(
+          `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INTEGER GENERATED ALWAYS AS (CAST(json_extract(link, '$.cdnDomainId') AS INTEGER)) VIRTUAL`
+        );
+      } else {
+        await query(
+          `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INT UNSIGNED GENERATED ALWAYS AS (CAST(JSON_UNQUOTE(JSON_EXTRACT(link, '$.cdnDomainId')) AS UNSIGNED)) VIRTUAL`
+        );
+      }
     } catch (e: any) {
       // 建列失败时标记该列不可用，查询方回退到 link LIKE + 解析，保证功能可用而非整块 500
       setCdnDomainIdColumnAvailable(false);
@@ -288,12 +295,14 @@ async function ensureCertOrderCdnDomainId(): Promise<void> {
 
 async function ensureIndex(tableName: string, indexName: string, columns: string): Promise<void> {
   try {
-    const rows = await query<any>(
-      `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND INDEX_NAME = ? LIMIT 1`,
-      [table(tableName), indexName]
-    );
-    if (rows.length === 0) {
-      await query(`ALTER TABLE ${table(tableName)} ADD INDEX ${indexName} ${columns}`);
+    const sqlite = getDbType() === 'sqlite';
+    const actualName = sqlite ? sqliteIndexName(table(tableName), indexName) : indexName;
+    if (!(await indexExists(table(tableName), actualName))) {
+      if (sqlite) {
+        await query(`CREATE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} ${columns}`);
+      } else {
+        await query(`ALTER TABLE ${table(tableName)} ADD INDEX ${indexName} ${columns}`);
+      }
     }
   } catch (e: any) {
     // 单个索引创建失败（表不存在、列缺失、权限不足等）不应中断后续索引的创建
@@ -303,24 +312,21 @@ async function ensureIndex(tableName: string, indexName: string, columns: string
 
 // 为单列补唯一索引：已存在唯一索引则跳过；存在重复数据导致失败时记录并继续，避免启动中断
 async function ensureUniqueIndex(tableName: string, column: string, indexName: string): Promise<void> {
-  const rows = await query<any>(
-    `SELECT INDEX_NAME FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ? AND NON_UNIQUE = 0 LIMIT 1`,
-    [table(tableName), column]
-  );
-  if (rows.length > 0) return;
+  if (await uniqueIndexExists(table(tableName), column)) return;
   try {
-    await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${column})`);
+    if (getDbType() === 'sqlite') {
+      const actualName = sqliteIndexName(table(tableName), indexName);
+      await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} (${column})`);
+    } else {
+      await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${column})`);
+    }
   } catch (e: any) {
     console.log(`[migrate] 为 ${tableName}.${column} 添加唯一索引失败（可能存在重复数据）：${e?.message || e}`);
   }
 }
 
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {
-  const rows = await query<any>(
-    `SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?`,
-    [table(tableName), column]
-  );
-  if (rows.length === 0) {
+  if (!(await columnExists(table(tableName), column))) {
     await query(`ALTER TABLE ${table(tableName)} ADD COLUMN ${column} ${definition}`);
   }
 }
