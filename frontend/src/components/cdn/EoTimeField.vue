@@ -11,21 +11,17 @@
       :placeholder="placeholder"
       @update:value="onInput"
     />
-    <n-select
-      class="eo-time__unit"
-      :value="unit"
-      :options="unitOptions"
-      size="small"
-      :title="t('cdnRules.timeUnitHint')"
-      @update:value="onUnit"
-    />
+    <div class="eo-time__unit" :title="t('cdnRules.timeUnitHint')">
+      <EsaCardSelect :model-value="unit" :options="unitOptions" dense @update:model-value="onUnit" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NInputNumber, NSelect } from 'naive-ui';
+import { NInputNumber } from 'naive-ui';
+import EsaCardSelect from './EsaCardSelect.vue';
 import type { EoLocale } from '../../lib/eoRuleMeta';
 import { TIME_UNITS, timeFactor, toDisplayValue, type TimeUnit } from '../../lib/eoTime';
 

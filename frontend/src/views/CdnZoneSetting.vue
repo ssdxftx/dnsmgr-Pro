@@ -1,20 +1,40 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="zoneTitle" :subtitle="t('cdnZoneSetting.subtitle')" back="/cdn-zones">
-      <template #actions>
-        <n-space :size="8" align="center">
-          <n-tag size="small" :bordered="false">{{ isEsa ? t('cdnRules.vendEsa') : t('cdnRules.vendEo') }}</n-tag>
-          <n-button size="small" :loading="loadBusy" @click="reloadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
-        </n-space>
+    <PageHeader class="zone-header" :title="zoneTitle" :subtitle="t('cdnZoneSetting.subtitle')" back="/cdn-zones">
+      <template #title-suffix>
+        <n-tag v-if="vendorReady" class="zone-vendor-tag" size="small" :bordered="false">{{ isEsa ? t('cdnRules.vendEsa') : t('cdnRules.vendEo') }}</n-tag>
       </template>
     </PageHeader>
 
+    <div v-if="vendorReady" class="zone-toolbar">
+      <n-button size="small" :loading="loadBusy" @click="reloadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
+      <ZoneModuleMenu
+        :value="activeModule"
+        :sub-value="activeSub"
+        :items="activeModuleItems"
+        :aria-label="t('esaZone.switchPage')"
+        @select="onModuleSelect"
+      />
+    </div>
+
     <n-alert v-if="!aid || !zoneId" type="warning" :show-icon="false">{{ t('cdnZoneSetting.accountMissing') }}</n-alert>
 
+    <!-- ESA：按官方控制台站点级菜单组织 -->
+    <EsaZoneConsole
+      v-else-if="isEsa"
+      v-model:tab="esaTab"
+      :subs="esaSub"
+      :aid="aid"
+      :zone-id="zoneId"
+      :zone-info="zoneInfo"
+      :domains="domains"
+      :ns-list="nsList"
+      @refresh="reloadAll"
+    />
+
     <n-card v-else :bordered="false" class="zone-card">
-      <n-tabs v-model:value="tab" type="line" animated>
-        <!-- ============ 概览 ============ -->
-        <n-tab-pane name="overview" :tab="t('cdnZoneSetting.tabOverview')">
+      <!-- ============ 概览 ============ -->
+        <template v-if="tab === 'overview'">
           <div class="zone-status-strip">
             <n-tag size="medium" :type="zoneInfo.paused ? 'warning' : 'success'" :bordered="false">{{ statusLabel }}</n-tag>
             <div class="zone-status-strip__id">
@@ -56,6 +76,45 @@
             </n-descriptions>
           </div>
 
+          <div v-if="isEsa" class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnZoneSetting.ovProperties') }}</h3>
+              <div class="app-panel__extra">
+                <n-button size="small" type="primary" :loading="propsBusy" :disabled="propsBusy" @click="saveSiteProperties">
+                  {{ t('cdnZoneSetting.ovSaveProps') }}
+                </n-button>
+              </div>
+            </div>
+            <n-form label-placement="left" label-width="130" size="small">
+              <n-form-item :label="t('cdnZoneSetting.ovAccessType')">
+                <EsaCardSelect v-model="propsForm.accessType" :options="accessTypeOptions" compact />
+              </n-form-item>
+              <n-form-item :label="t('cdnZoneSetting.ovCoverage')">
+                <EsaCardSelect v-model="propsForm.coverage" :options="coverageOptions" compact />
+              </n-form-item>
+              <n-form-item :label="t('cdnZoneSetting.ovNameExclusive')">
+                <n-switch v-model:value="propsForm.nameExclusive" size="small" />
+              </n-form-item>
+              <n-form-item :label="t('cdnZoneSetting.ovVersionManagement')">
+                <n-tag size="small" :type="versionManagement ? 'success' : 'default'" :bordered="false">
+                  {{ versionManagement ? t('cdnZoneSetting.ovEnabled') : t('cdnZoneSetting.ovDisabled') }}
+                </n-tag>
+              </n-form-item>
+              <n-form-item :label="t('cdnZoneSetting.ovVanityNs')">
+                <n-input v-model:value="propsForm.vanityNs" :placeholder="t('cdnZoneSetting.ovVanityNsHint')" />
+              </n-form-item>
+            </n-form>
+            <div class="zone-props-meta">
+              <span>{{ t('cdnZoneSetting.ovPlan') }}: {{ siteProps.PlanName || '-' }}</span>
+              <span>{{ t('cdnZoneSetting.ovInstance') }}: {{ siteProps.InstanceId || '-' }}</span>
+              <span v-if="siteProps.CnameZone">{{ t('cdnZoneSetting.ovCnameZone') }}: {{ siteProps.CnameZone }}</span>
+              <span v-if="siteProps.VerifyCode">{{ t('cdnZoneSetting.ovVerifyCode') }}: <span class="app-mono">{{ siteProps.VerifyCode }}</span></span>
+              <span v-if="siteProps.CreateTime">{{ t('cdnZoneSetting.ovCreateTime') }}: {{ formatDateTime(siteProps.CreateTime) }}</span>
+              <span v-if="siteProps.UpdateTime">{{ t('cdnZoneSetting.ovUpdateTime') }}: {{ formatDateTime(siteProps.UpdateTime) }}</span>
+              <span v-if="siteProps.OfflineReason">{{ t('cdnZoneSetting.ovOfflineReason') }}: {{ siteProps.OfflineReason }}</span>
+            </div>
+          </div>
+
           <div class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnZoneSetting.ovNs') }}</h3>
@@ -65,10 +124,10 @@
             </n-space>
             <span v-else class="hint-text">{{ t('cdnZoneSetting.ovNsEmpty') }}</span>
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 域名 ============ -->
-        <n-tab-pane name="domains" :tab="t('cdnZoneSetting.tabDomains')">
+        <template v-else-if="tab === 'domains'">
           <div class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnZoneSetting.domTitle') }}</h3>
@@ -84,10 +143,10 @@
               :empty-text="t('cdnZoneSetting.domEmpty')"
             />
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 源站与负载均衡 ============ -->
-        <n-tab-pane name="origin" :tab="t('cdnZoneSetting.tabOrigin')">
+        <template v-else-if="tab === 'origin'">
           <div class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnOrigin.originGroups') }}</h3>
@@ -114,30 +173,87 @@
             </div>
             <div class="zone-form-strip">
               <n-input v-model:value="lbForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
-              <n-select v-model:value="lbForm.type" :options="lbTypeOptions" style="width: 160px" size="small" />
+              <EsaCardSelect v-model="lbForm.type" :options="lbTypeOptions" dense style="width: 160px; flex: 0 0 160px" />
               <n-button size="small" type="primary" :loading="lbSaveBusy" @click="createLoadBalancer">{{ t('cdnZoneSetting.create') }}</n-button>
-              <n-select v-model:value="lbForm.originGroups" multiple :options="ogOptions" :placeholder="t('cdnOrigin.originGroupsPick')" size="small" class="zone-form-strip__wide" />
+              <EsaCardSelect
+                v-model="lbForm.originGroups"
+                :options="ogOptions"
+                :placeholder="t('cdnOrigin.originGroupsPick')"
+                multiple
+                searchable
+                clearable
+                dense
+                class="zone-form-strip__wide"
+              />
               <n-input v-if="isEsa" v-model:value="lbForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
             <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loadBusy" />
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 规则引擎 ============ -->
-        <n-tab-pane name="rules" :tab="t('cdnZoneSetting.tabRules')">
-          <div class="app-panel">
+        <template v-else-if="tab === 'rules'">
+          <!-- ESA：按官方控制台分类组织规则类型，点击卡片切换当前规则集 -->
+          <div v-if="isEsa" class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnRules.manage') }}</h3>
-              <n-tag v-if="isEsa" size="tiny" :bordered="false">{{ kindLabel(ruleKind) }}</n-tag>
               <div class="app-panel__extra">
-                <n-select
-                  v-if="isEsa"
-                  v-model:value="ruleKind"
-                  :options="ruleKindOptions"
-                  size="small"
-                  style="width: 240px"
-                  @update:value="loadRules"
-                />
+                <n-button size="small" @click="loadRules">{{ t('cdnZoneSetting.refresh') }}</n-button>
+                <n-button size="small" type="primary" @click="showKindPicker = true">
+                  {{ t('cdnRules.createRule') }}
+                </n-button>
+              </div>
+            </div>
+
+            <div class="esa-rules__cats">
+              <button
+                v-for="cat in ESA_RULE_CATEGORIES"
+                :key="cat.key"
+                type="button"
+                class="esa-rules__cat"
+                :class="{ 'esa-rules__cat--active': esaCategory === cat.key }"
+                :title="esaCatDesc(cat)"
+                @click="selectEsaCategory(cat.key)"
+              >
+                <span class="esa-rules__cat-title">{{ esaCatLabel(cat) }}</span>
+                <span class="esa-rules__cat-desc">{{ esaCatDesc(cat) }}</span>
+              </button>
+            </div>
+
+            <div class="esa-rules__kinds">
+              <button
+                v-for="k in esaKindsOfCategory(esaCategory)"
+                :key="k.kind"
+                type="button"
+                class="esa-rules__kind"
+                :class="{ 'esa-rules__kind--active': ruleKind === k.kind }"
+                @click="selectEsaKind(k.kind)"
+              >
+                <span class="esa-rules__kind-title">{{ esaKindLabel(k) }}</span>
+                <span class="esa-rules__kind-desc">{{ esaKindDesc(k) }}</span>
+                <code class="esa-rules__kind-code">{{ k.kind }}</code>
+              </button>
+            </div>
+
+            <div class="esa-rules__current">
+              <span>{{ t('cdnRules.colKind') }}：</span>
+              <n-tag size="small" :bordered="false" type="info">{{ kindLabel(ruleKind) }}</n-tag>
+            </div>
+
+            <ResponsiveDataTable
+              :columns="ruleColumns"
+              :data="ruleList"
+              size="small"
+              :loading="ruleLoadBusy"
+              :empty-text="t('cdnRules.empty')"
+            />
+          </div>
+
+          <!-- EO：保持原有单列表 + 类型下拉 -->
+          <div v-else class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnRules.manage') }}</h3>
+              <div class="app-panel__extra">
                 <n-button size="small" @click="loadRules">{{ t('cdnZoneSetting.refresh') }}</n-button>
                 <n-button size="small" type="primary" @click="createRuleClick">
                   {{ t('cdnRules.createRule') }}
@@ -152,10 +268,10 @@
               :empty-text="t('cdnRules.empty')"
             />
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 安全 ============ -->
-        <n-tab-pane name="security" :tab="t('cdnZoneSetting.tabSecurity')">
+        <template v-else-if="tab === 'security'">
           <div v-if="caps.securityIpGroup" class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnSecurity.ipGroups') }}</h3>
@@ -188,10 +304,10 @@
               spellcheck="false"
             />
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 四层代理 ============ -->
-        <n-tab-pane v-if="caps.l4" name="l4" :tab="t('cdnZoneSetting.tabL4')">
+        <template v-else-if="caps.l4 && tab === 'l4'">
           <div class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnZoneSetting.tabL4') }}</h3>
@@ -207,10 +323,10 @@
             </div>
             <ResponsiveDataTable :columns="l4Columns" :data="l4Proxies" size="small" :loading="loadBusy" />
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 任务与统计 ============ -->
-        <n-tab-pane v-if="caps.tasks" name="tasks" :tab="t('cdnZoneSetting.tabTasks')">
+        <template v-else-if="caps.tasks && tab === 'tasks'">
           <div class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnAdvanced.purge') }}</h3>
@@ -249,39 +365,45 @@
             <pre v-if="analysisText" class="code-view">{{ analysisText }}</pre>
             <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
           </div>
-        </n-tab-pane>
+        </template>
 
         <!-- ============ 全局配置 ============ -->
-        <n-tab-pane name="global" :tab="t('cdnZoneSetting.tabGlobal')">
+        <template v-else-if="tab === 'global'">
           <CdnZoneGlobalSetting :aid="aid" :zone-id="zoneId" @go-rules="tab = 'rules'" />
-        </n-tab-pane>
-      </n-tabs>
+        </template>
     </n-card>
 
-    <!-- 新建规则：先选方式（官方预制 / 本项目预制 / 空白），再选具体预制规则 -->
-    <RuleCreatePicker v-model:show="showCreatePicker" @select="selectCreateSource" />
-    <RuleTemplatePicker v-model:show="showTemplatePicker" :source="pickerSource" @select="selectTemplate" />
-
-    <!-- 规则编辑器 -->
-    <n-modal
-      v-model:show="showRuleEditor"
-      preset="card"
-      :title="ruleEditingId ? t('cdnRules.editRule') : t('cdnRules.createRule')"
-      style="width: min(960px, calc(100vw - 24px))"
-      :mask-closable="false"
-    >
-      <RuleEditor
-        v-if="showRuleEditor"
-        :vendor="isEsa ? 'esa' : 'eo'"
-        :schema="ruleSchema"
-        :initial="ruleInitial"
-        :editing="!!ruleEditingId"
-        :saving="ruleSaveBusy"
-        :domains="siteDomains"
-        @save="saveRule"
-        @cancel="showRuleEditor = false"
+    <!-- EO 规则：新建方式（官方预制 / 本项目预制 / 空白）与编辑器；ESA 规则由 EsaZoneConsole 内部管理 -->
+    <template v-if="!isEsa">
+      <RuleCreatePicker v-model:show="showCreatePicker" @select="selectCreateSource" />
+      <RuleTemplatePicker v-model:show="showTemplatePicker" :source="pickerSource" @select="selectTemplate" />
+      <EsaRuleKindPicker
+        v-model:show="showKindPicker"
+        :locale="String(locale || '').toLowerCase().startsWith('zh') ? 'zh' : 'en'"
+        @select="onPickEsaKind"
       />
-    </n-modal>
+
+      <n-modal
+        v-model:show="showRuleEditor"
+        preset="card"
+        :title="ruleEditingId ? t('cdnRules.editRule') : t('cdnRules.createRule')"
+        class="modal-lg"
+        :mask-closable="false"
+      >
+        <RuleEditor
+          v-if="showRuleEditor"
+          vendor="eo"
+          :kind="ruleKind"
+          :schema="ruleSchema"
+          :initial="ruleInitial"
+          :editing="!!ruleEditingId"
+          :saving="ruleSaveBusy"
+          :domains="siteDomains"
+          @save="saveRule"
+          @cancel="showRuleEditor = false"
+        />
+      </n-modal>
+    </template>
   </div>
 </template>
 
@@ -297,11 +419,18 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import RuleEditor from '../components/cdn/RuleEditor.vue';
 import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
 import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
+import EsaRuleKindPicker from '../components/cdn/EsaRuleKindPicker.vue';
+import ZoneModuleMenu, { type ZoneModuleMenuItem } from '../components/cdn/ZoneModuleMenu.vue';
+import EsaZoneConsole from '../components/cdn/EsaZoneConsole.vue';
 import CdnZoneGlobalSetting from '../components/cdn/CdnZoneGlobalSetting.vue';
+import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 import { useAction } from '../composables/useAction';
+import { formatDateTime } from '../lib/datetime';
 import { ruleEnabled } from '../lib/cdnSwitch';
 import { EO_RULE_TEMPLATES } from '../lib/eoRuleTemplates';
 import { EO_PRESET_RULES } from '../lib/eoPresetRules';
+import { ESA_RULE_CATEGORIES, esaKindsOfCategory, esaKindMeta, type EsaRuleCategory, type EsaRuleKindMeta } from '../lib/esaRuleMeta';
+import { EO_ZONE_TABS, ESA_ZONE_TABS } from '../lib/zoneTabs';
 
 const { t, locale } = useI18n();
 const message = useMessage();
@@ -313,15 +442,56 @@ const router = useRouter();
 const aid = Number(route.params.aid || 0);
 const zoneId = String(route.params.zoneId || '');
 const tab = ref('overview');
+const esaTab = ref('overview');
+const esaSub = reactive<Record<string, string>>({});
+for (const tabDef of ESA_ZONE_TABS) {
+  if (tabDef.children?.length) esaSub[tabDef.key] = tabDef.defaultChild || tabDef.children[0].key;
+}
 const loadBusy = ref(false);
 
 const providers = ref<Record<string, any>>({});
+const accountType = ref('');
 const zoneInfo = ref<Record<string, any>>({});
 const domains = ref<any[]>([]);
 const nsList = ref<string[]>([]);
 
-const isEsa = computed(() => providers.value[zoneInfo.value.route]?.vendor === 'esa' || String(zoneInfo.value.route || '') === 'aliyun_esa');
-const caps = computed<Record<string, boolean>>(() => providers.value[zoneInfo.value.route]?.capabilities || {});
+const isEsa = computed(() => accountType.value === 'aliyun_esa' || String(zoneInfo.value.route || '') === 'aliyun_esa');
+const providerMeta = computed(() => providers.value[String(zoneInfo.value.route || accountType.value || '')] || {});
+const caps = computed<Record<string, boolean>>(() => providerMeta.value.capabilities || {});
+
+// 供应商无关的功能页导航：ESA 与 EO 共用同一个下拉菜单组件，仅数据源不同
+const vendorReady = computed(() => !!(accountType.value || zoneInfo.value.route));
+const esaTabItems = computed<ZoneModuleMenuItem[]>(() =>
+  ESA_ZONE_TABS.map((item) => ({
+    key: item.key,
+    label: t(item.labelKey),
+    defaultChild: item.defaultChild,
+    children: item.children?.map((child) => ({
+      key: child.key,
+      label: child.labelKey ? t(child.labelKey) : child.label || child.key,
+      gate: child.gate,
+    })),
+  })),
+);
+const eoTabItems = computed<ZoneModuleMenuItem[]>(() =>
+  EO_ZONE_TABS.filter((item) => (item.key !== 'l4' || caps.value.l4) && (item.key !== 'tasks' || caps.value.tasks)).map((item) => ({
+    key: item.key,
+    label: t(item.labelKey),
+  })),
+);
+const activeModule = computed(() => (isEsa.value ? esaTab.value : tab.value));
+const activeSub = computed(() => (isEsa.value ? esaSub[esaTab.value] || '' : ''));
+const activeModuleItems = computed<ZoneModuleMenuItem[]>(() => (isEsa.value ? esaTabItems.value : eoTabItems.value));
+
+function onModuleSelect(key: string, sub?: string) {
+  if (isEsa.value) {
+    if (sub) esaSub[key] = sub;
+    esaTab.value = key;
+  } else {
+    tab.value = key;
+  }
+}
+
 /** 当前站点域名（用于规则 HOST 匹配直接选择） */
 const siteDomains = computed<string[]>(() => {
   const set = new Set<string>();
@@ -347,12 +517,29 @@ const statusLabel = computed(() => {
   };
   return map[String(zoneInfo.value.status || '').toLowerCase()] || zoneInfo.value.status || '-';
 });
-const accessTypeLabel = computed(() => (isEsa.value ? '-' : zoneInfo.value.type || '-'));
+const siteProps = ref<Record<string, any>>({});
+const propsBusy = ref(false);
+const propsForm = reactive<any>({ accessType: 'NS', coverage: 'domestic', nameExclusive: false, vanityNs: '' });
+const versionManagement = computed(() => siteProps.value.versionManagement === true || siteProps.value.versionManagement === 'true' || siteProps.value.VersionManagement === true);
+const accessTypeOptions = computed(() => [
+  { label: t('cdnSite.accessNS'), value: 'NS' },
+  { label: t('cdnSite.accessCNAME'), value: 'CNAME' },
+]);
+const coverageOptions = computed(() => [
+  { label: t('cdnSite.coverageDomestic'), value: 'domestic' },
+  { label: t('cdnSite.coverageGlobal'), value: 'global' },
+  { label: t('cdnSite.coverageOverseas'), value: 'overseas' },
+]);
+const accessTypeLabel = computed(() => (isEsa.value ? siteProps.value.accessType || siteProps.value.AccessType || zoneInfo.value.accessType || '-' : zoneInfo.value.type || '-'));
 
 // ===================== 数据加载 =====================
 async function loadProviders() {
-  const res = await api<any>('GET', '/cdn/providers');
-  if (res.code === 0) providers.value = res.data || {};
+  const [p, a] = await Promise.all([
+    api<any>('GET', '/cdn/providers'),
+    api<any>('GET', '/cdn/accounts'),
+  ]);
+  if (p.code === 0) providers.value = p.data || {};
+  if (a.code === 0) accountType.value = String((a.data || []).find((x: any) => Number(x.id) === aid)?.type || '');
 }
 
 async function loadZoneInfo() {
@@ -373,6 +560,46 @@ async function loadNs() {
   if (!zoneId) return;
   const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/ns`);
   nsList.value = res.code === 0 && Array.isArray(res.data) ? res.data : [];
+}
+
+async function loadSiteProperties(): Promise<boolean> {
+  if (!isEsa.value || !zoneId) return true;
+  const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/properties`);
+  if (res.code !== 0) return false;
+  const d = res.data || {};
+  siteProps.value = {
+    ...d,
+    PlanName: d.PlanName ?? d.planName ?? '',
+    InstanceId: d.InstanceId ?? d.instanceId ?? '',
+    CnameZone: d.CnameZone ?? d.cnameZone ?? '',
+    VerifyCode: d.VerifyCode ?? d.verifyCode ?? '',
+    CreateTime: d.CreateTime ?? d.createTime ?? '',
+    UpdateTime: d.UpdateTime ?? d.updateTime ?? '',
+    OfflineReason: d.OfflineReason ?? d.offlineReason ?? '',
+  };
+  propsForm.accessType = siteProps.value.accessType || siteProps.value.AccessType || 'NS';
+  propsForm.coverage = siteProps.value.area || siteProps.value.Coverage || 'domestic';
+  propsForm.nameExclusive = siteProps.value.nameExclusive === true;
+  propsForm.vanityNs = Array.isArray(siteProps.value.vanityNs) ? siteProps.value.vanityNs.join(',') : '';
+  return true;
+}
+
+async function saveSiteProperties() {
+  propsBusy.value = true;
+  try {
+    const res = await api<any>('PUT', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}`, {
+      accessType: propsForm.accessType,
+      coverage: propsForm.coverage,
+      nameExclusive: propsForm.nameExclusive,
+      vanityNs: propsForm.vanityNs,
+    });
+    if (res.code === 0) {
+      message.success(t('cdnZoneSetting.ovPropsSaved'));
+      await Promise.all([loadSiteProperties(), loadZoneInfo(), loadNs()]);
+    } else message.error(res.msg);
+  } finally {
+    propsBusy.value = false;
+  }
 }
 
 // ===================== 概览操作 =====================
@@ -567,6 +794,44 @@ const pickerSource = ref<'official' | 'project'>('official');
 const ruleEditingId = ref('');
 const ruleInitial = ref<any>(null);
 const ruleKindOptions = ref<any[]>([]);
+/** ESA：官方 Rules 分类与规则类型选择 */
+const esaCategory = ref('https');
+const showKindPicker = ref(false);
+const isZhLocale = computed(() => String(locale.value || '').toLowerCase().startsWith('zh'));
+
+function esaCatLabel(cat: EsaRuleCategory) {
+  return isZhLocale.value ? cat.label.zh : cat.label.en;
+}
+function esaCatDesc(cat: EsaRuleCategory) {
+  return isZhLocale.value ? cat.desc.zh : cat.desc.en;
+}
+function esaKindLabel(k: EsaRuleKindMeta) {
+  return isZhLocale.value ? k.label.zh : k.label.en;
+}
+function esaKindDesc(k: EsaRuleKindMeta) {
+  return isZhLocale.value ? k.desc.zh : k.desc.en;
+}
+/** 切换官方分类时，默认选中该分类下第一个规则类型 */
+function selectEsaCategory(key: string) {
+  esaCategory.value = key;
+  const first = esaKindsOfCategory(key)[0];
+  if (first) selectEsaKind(first.kind);
+}
+function selectEsaKind(kind: string) {
+  ruleKind.value = kind;
+  loadRules();
+}
+/** 从「新建规则」卡片选择类型：先同步分类，再切换并打开编辑器 */
+function onPickEsaKind(kind: string) {
+  const meta = esaKindMeta(kind);
+  if (meta) esaCategory.value = meta.category;
+  ruleKind.value = kind;
+  showKindPicker.value = false;
+  loadRuleSchemaForKind().then(() => {
+    loadRules();
+    openRuleEditor(null);
+  });
+}
 
 async function loadRuleSchema() {
   const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-schema`);
@@ -929,7 +1194,7 @@ const analysisText = ref('');
 const taskColumns = computed(() => [
   { title: 'ID', key: 'taskId', minWidth: 120 },
   { title: t('cdnRules.colStatus'), key: 'status', width: 120 },
-  { title: t('cdnAccount.addTime'), key: 'createTime', minWidth: 160 },
+  { title: t('cdnAccount.addTime'), key: 'createTime', minWidth: 160, render: (row: any) => formatDateTime(row.createTime) },
 ]);
 async function loadTasks(): Promise<boolean> {
   if (!caps.value.tasks) return true;
@@ -980,7 +1245,7 @@ async function loadByTab(name: string, force = false) {
 async function reloadAll() {
   loadedTabs.clear();
   loadBusy.value = true;
-  await Promise.all([loadZoneInfo(), loadDomains(), loadNs()]);
+  await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadSiteProperties()]);
   loadBusy.value = false;
   await loadByTab(tab.value, true);
 }
@@ -989,16 +1254,186 @@ watch(tab, (v) => loadByTab(v));
 onMounted(async () => {
   if (!aid || !zoneId) return;
   loadBusy.value = true;
-  // 账户能力、站点信息、域名、NS、规则 schema 互不依赖，全部并行加载
-  await Promise.all([loadProviders(), loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema()]);
+  // 先确定账户类型（ESA 属性接口只在 ESA 站点上调用），其余请求再并行
+  await loadProviders();
+  await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema(), loadSiteProperties()]);
   loadBusy.value = false;
 });
 </script>
 
 <style scoped>
+.zone-header :deep(.page-header__left) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.zone-header :deep(.page-header__text) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.zone-header :deep(.page-header__title) {
+  width: 100%;
+}
+
+.zone-vendor-tag {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+@media (max-width: 767px) {
+  :deep(.page-header__actions) {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  .zone-header :deep(.page-header__left) {
+    width: 100%;
+  }
+
+  .zone-header :deep(.page-header__title) {
+    font-size: 17px;
+    gap: 8px;
+  }
+
+  .zone-vendor-tag {
+    font-size: 11px;
+    height: 20px;
+    padding: 0 5px;
+  }
+}
+
 .ov-verified {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.zone-props-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 18px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--app-divider);
+  color: var(--app-text-3);
+  font-size: 12px;
+}
+
+/* ESA 规则：官方分类 + 规则类型卡片墙 */
+.esa-rules__cats {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+  margin-bottom: 12px;
+}
+.esa-rules__cat {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 8px 12px;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-md);
+  background: var(--app-surface);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.18s var(--app-ease), background 0.18s var(--app-ease);
+}
+.esa-rules__cat:hover {
+  border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
+}
+.esa-rules__cat--active {
+  border-color: color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
+  background: color-mix(in srgb, var(--app-primary) 8%, var(--app-surface));
+}
+.esa-rules__cat-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--app-text-1);
+  white-space: nowrap;
+}
+.esa-rules__cat-desc {
+  max-width: 220px;
+  font-size: 11px;
+  color: var(--app-text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.esa-rules__kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.esa-rules__kind {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+  text-align: left;
+  padding: 12px 13px 10px 16px;
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius-lg);
+  background: var(--app-surface);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  transition: transform 0.18s var(--app-ease), border-color 0.18s var(--app-ease), box-shadow 0.18s var(--app-ease);
+}
+.esa-rules__kind::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 11px;
+  bottom: 11px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--app-primary);
+  opacity: 0;
+  transition: opacity 0.18s var(--app-ease);
+}
+.esa-rules__kind:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
+  box-shadow: var(--app-shadow);
+}
+.esa-rules__kind:hover::before,
+.esa-rules__kind--active::before {
+  opacity: 1;
+}
+.esa-rules__kind--active {
+  border-color: color-mix(in srgb, var(--app-primary) 55%, var(--app-border));
+  background: color-mix(in srgb, var(--app-primary) 6%, var(--app-surface));
+}
+.esa-rules__kind-title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--app-text-1);
+}
+.esa-rules__kind-desc {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--app-text-2);
+}
+.esa-rules__kind-code {
+  font-family: var(--app-font-mono);
+  font-size: 10.5px;
+  color: var(--app-text-3);
+}
+.esa-rules__current {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  color: var(--app-text-3);
 }
 </style>

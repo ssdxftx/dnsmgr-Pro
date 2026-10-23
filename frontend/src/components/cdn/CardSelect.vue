@@ -21,8 +21,9 @@
       v-model:show="show"
       preset="card"
       :title="labels.title"
-      style="width: min(880px, calc(100vw - 24px))"
+      class="modal-lg"
       :mask-closable="true"
+      :auto-focus="false"
     >
       <div class="re-pick__hint">{{ labels.hint }}</div>
 

@@ -1,11 +1,12 @@
 <template>
-  <CardSelect
+  <EsaCardSelect
     :model-value="modelValue"
     :options="options"
     :groups="groups"
-    :labels="labels"
+    dense
+    :placeholder="labels.placeholder"
     :unlisted-label="t('cdnRules.actionUnlisted')"
-    @select="(v: string) => emit('select', v)"
+    @update:model-value="(v: any) => emit('select', String(v))"
   />
 </template>
 
@@ -14,7 +15,7 @@
 // （官方中文名 / 作用说明 / 所属分组），展示层复用通用卡片选择器 CardSelect。
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import CardSelect, { type CardSelectOption } from './CardSelect.vue';
+import EsaCardSelect, { type EsaCardOption } from './EsaCardSelect.vue';
 import { EO_ACTION_GROUPS, eoActionInfo, type EoLocale } from '../../lib/eoRuleMeta';
 import { EO_ACTION_SCHEMAS } from '../../lib/eoRuleSchema';
 
@@ -27,7 +28,7 @@ const emit = defineEmits<{ (e: 'select', name: string): void }>();
 
 const { t } = useI18n();
 
-const options = computed<CardSelectOption[]>(() =>
+const options = computed<EsaCardOption[]>(() =>
   EO_ACTION_SCHEMAS.map((s) => {
     const info = eoActionInfo(s.name, props.locale);
     return {

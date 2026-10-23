@@ -5,14 +5,14 @@
       <n-space :size="6" align="center" style="width: 100%">
         <span class="rule-array__index">{{ idx + 1 }}</span>
         <template v-for="f in fields" :key="f.name">
-          <n-select
+          <EsaCardSelect
             v-if="f.type === 'enum'"
-            :value="row[f.name] ?? null"
+            :model-value="row[f.name] ?? null"
             :options="optionsOf(f)"
             :placeholder="f.label || f.name"
-            size="small"
+            dense
             class="rule-array__cell rule-array__cell--enum"
-            @update:value="(v: any) => setCell(idx, f.name, v)"
+            @update:model-value="(v: any) => setCell(idx, f.name, v)"
           />
           <n-switch
             v-else-if="f.type === 'switch'"
@@ -41,7 +41,8 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NInput, NSelect, NSpace, NSwitch } from 'naive-ui';
+import { NButton, NInput, NSpace, NSwitch } from 'naive-ui';
+import EsaCardSelect from './EsaCardSelect.vue';
 import { toEnabled } from '../../lib/cdnSwitch';
 
 const props = defineProps<{ fields: any[]; value?: any[] }>();

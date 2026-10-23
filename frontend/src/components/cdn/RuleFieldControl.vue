@@ -21,13 +21,13 @@
     size="small"
     @update:value="toggle"
   />
-  <n-select
+  <EsaCardSelect
     v-else-if="field.type === 'enum'"
-    :value="textValue"
+    :model-value="textValue"
     :options="enumOptions"
+    compact
     clearable
-    filterable
-    @update:value="(v: string) => emit('update:modelValue', v)"
+    @update:model-value="(v: any) => emit('update:modelValue', v)"
   />
   <n-input
     v-else-if="field.type === 'expression'"
@@ -54,7 +54,8 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import { NInput, NInputNumber, NSwitch, NSelect } from 'naive-ui';
+import { NInput, NInputNumber, NSwitch } from 'naive-ui';
+import EsaCardSelect from './EsaCardSelect.vue';
 import RuleArrayEditor from './RuleArrayEditor.vue';
 import { toEnabled } from '../../lib/cdnSwitch';
 

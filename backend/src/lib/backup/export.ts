@@ -43,6 +43,7 @@ interface UserContext {
 
 const USER_SKIP_TABLES = new Set<string>([
   'config',
+  'announcement',
   'domain_category',
   'optimizeip',
   'sctask',

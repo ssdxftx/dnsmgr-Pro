@@ -65,6 +65,24 @@ export async function migrate(): Promise<void> {
   // 验证码校验失败次数：超过上限即作废，防止在线爆破
   await ensureColumn('reg_verify', 'attempts', "int(11) NOT NULL DEFAULT '0'");
 
+  // 管理员公告：登录/注册页与仪表盘弹窗展示，关闭状态由前端本地记录
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('announcement')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      title varchar(120) NOT NULL,
+      content text NOT NULL,
+      type varchar(16) NOT NULL DEFAULT 'info',
+      active tinyint(1) NOT NULL DEFAULT '1',
+      sort_order int(11) NOT NULL DEFAULT '0',
+      starttime datetime DEFAULT NULL,
+      endtime datetime DEFAULT NULL,
+      addtime datetime NOT NULL,
+      updatetime datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      KEY idx_active_sort (active, sort_order)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('cdn_cache_task')} (
       id int(11) unsigned NOT NULL AUTO_INCREMENT,

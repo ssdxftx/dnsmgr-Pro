@@ -4,6 +4,7 @@ import { query, queryOne, table } from '../db.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, sameDomain, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
+import { detectCloudflareProxy } from '../lib/dns/cloudflare.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig } from '../lib/secret.js';
 import { findAnyVaultDekForUser } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
@@ -590,7 +591,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     return { code: 0, data: res };
   });
 
-  // 本地解析检测（单条记录），返回 active/not_found/mismatch
+  // 本地解析检测（单条记录），返回 active/cloudflare/not_found/mismatch
   app.post('/api/domains/:id/records/check', auth, async (req: any) => {
     const { id } = req.params as any;
     const info = await getDomainWithAccount(id);
@@ -617,12 +618,16 @@ export default async function domainRoutes(app: FastifyInstance) {
       detail: { name, type, value: rawValue },
     });
     const actual = await localResolve(fullDomain, type);
+    const expected = String(rawValue);
+    if (actual.length && recordValueMatches(expected, actual)) {
+      return { code: 0, data: { status: 'active', actual } };
+    }
+    const cf = await detectCloudflareProxy(fullDomain, type, actual);
+    if (cf.proxied) {
+      return { code: 0, data: { status: 'cloudflare', actual: cf.actual } };
+    }
     if (!actual.length) {
       return { code: 0, data: { status: 'not_found', message: '未查询到该解析记录', actual: [] } };
-    }
-    const expected = String(rawValue);
-    if (recordValueMatches(expected, actual)) {
-      return { code: 0, data: { status: 'active', actual } };
     }
     return { code: 0, data: { status: 'mismatch', expected: String(rawValue).trim().toLowerCase().replace(/\.+$/, ''), actual } };
   });

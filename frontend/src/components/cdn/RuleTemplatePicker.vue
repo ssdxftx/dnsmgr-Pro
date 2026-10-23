@@ -3,7 +3,7 @@
     :show="show"
     preset="card"
     :title="title"
-    style="width: min(900px, calc(100vw - 24px))"
+    class="modal-lg"
     :mask-closable="true"
     @update:show="(v: boolean) => emit('update:show', v)"
   >

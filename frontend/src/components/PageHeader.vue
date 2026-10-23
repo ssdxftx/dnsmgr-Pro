@@ -6,7 +6,7 @@
       </n-button>
       <div class="page-header__text">
         <h1 class="page-header__title">
-          {{ title }}
+          <span class="page-header__title-text">{{ title }}</span>
           <slot name="title-suffix" />
         </h1>
         <p v-if="subtitle" class="page-header__subtitle">{{ subtitle }}</p>
@@ -70,6 +70,9 @@ function goBack() {
   align-items: center;
   gap: 10px;
 }
+.page-header__title-text {
+  min-width: 0;
+}
 .page-header__title::before {
   content: "";
   flex: 0 0 auto;
@@ -102,6 +105,11 @@ function goBack() {
   .page-header__back {
     margin-left: 0;
     margin-top: -5px;
+  }
+  .page-header__title-text {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
   .page-header__actions {
     width: 100%;

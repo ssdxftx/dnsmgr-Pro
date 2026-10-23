@@ -10,12 +10,11 @@
       <!-- 互斥分支（行为选择） -->
       <n-form-item v-if="f.type === 'oneof'" :label="labelOf(f)" :label-props="descProps(f)">
         <div class="eo-params__oneof">
-          <n-select
-            :value="activeKey(f)"
+          <EsaCardSelect
+            :model-value="activeKey(f)"
             :options="variantOptions(f)"
-            size="small"
-            style="width: 100%"
-            @update:value="(v: string) => setVariant(f, v)"
+            compact
+            @update:model-value="(v: any) => setVariant(f, String(v))"
           />
           <div v-if="activeVariant(f)" class="eo-params__group eo-params__group--variant">
             <EoParamFields :fields="activeVariant(f)?.fields || []" :model="ensureObj(activeKey(f))" :locale="locale" :stacked="stacked" />
@@ -54,14 +53,13 @@
           size="small"
           @update:value="(v: boolean) => (model[f.name] = v ? onValue(f) : offValue(f))"
         />
-        <n-select
+        <EsaCardSelect
           v-else-if="f.type === 'select'"
-          :value="model[f.name] === undefined || model[f.name] === null ? null : String(model[f.name])"
+          :model-value="model[f.name] === undefined || model[f.name] === null ? null : String(model[f.name])"
           :options="optionsOf(f)"
-          size="small"
+          compact
           clearable
-          style="width: 100%"
-          @update:value="(v: any) => setVal(f.name, v)"
+          @update:model-value="(v: any) => setVal(f.name, v)"
         />
         <EoTimeField
           v-else-if="f.type === 'number' && f.time"
@@ -99,10 +97,11 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NDynamicTags, NButton, NForm, NFormItem, NInput, NInputNumber, NSelect, NSwitch } from 'naive-ui';
+import { NDynamicTags, NButton, NForm, NFormItem, NInput, NInputNumber, NSwitch } from 'naive-ui';
 import type { EoField } from '../../lib/eoRuleSchema';
 import type { EoLocale } from '../../lib/eoRuleMeta';
 import { pickTimeUnit, type TimeUnit } from '../../lib/eoTime';
+import EsaCardSelect from './EsaCardSelect.vue';
 import EoTimeField from './EoTimeField.vue';
 
 const props = defineProps<{

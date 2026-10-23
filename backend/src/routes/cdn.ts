@@ -40,6 +40,7 @@ import { findAnyVaultDekForUser } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
+import { cleanEsaApiParams, getEsaApi, getEsaCatalog, missingEsaApiParams } from '../lib/cdn/esaApiCatalog.js';
 import { EO_CONDITION_SCHEMA } from '../lib/cdn/ruleCondition.js';
 
 // CDN 路由默认只要求登录；账户/域名入口再按归属收口。
@@ -779,7 +780,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, data: ns };
   });
 
-  // 更新站点属性（接入类型 / 覆盖范围 / 站点名独占）
+  // 站点完整属性（ESA GetSite / GetSiteNameExclusive / 自定义 NS）
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/properties', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getSiteProperties !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点属性查询' };
+    const data = await provider.getSiteProperties(zoneId);
+    if (data === false) return { code: -1, msg: '获取站点属性失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  // 更新站点属性（接入类型 / 覆盖范围 / 站点名独占 / 自定义 NS）
   app.put('/api/cdn/accounts/:aid/sites/:zoneId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneId = String((req.params as any).zoneId || '').trim();
@@ -798,6 +811,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (b.nameExclusive !== undefined && typeof provider.updateSiteNameExclusive === 'function') {
       const enable = b.nameExclusive === true || b.nameExclusive === 'true' || b.nameExclusive === 1 || b.nameExclusive === 'on';
       if (!(await provider.updateSiteNameExclusive(zoneId, enable))) return { code: -1, msg: '站点名独占更新失败，' + provider.getError() };
+      changed = true;
+    }
+    if (b.vanityNs !== undefined && typeof provider.updateSiteVanityNS === 'function') {
+      const list = Array.isArray(b.vanityNs)
+        ? b.vanityNs.map((x: any) => String(x).trim()).filter(Boolean)
+        : String(b.vanityNs || '').split(',').map((x) => x.trim()).filter(Boolean);
+      if (!(await provider.updateSiteVanityNS(zoneId, list))) return { code: -1, msg: '自定义 NS 更新失败，' + provider.getError() };
       changed = true;
     }
     if (!changed) return { code: -1, msg: '无可更新项或该 CDN 类型不支持' };
@@ -1096,6 +1116,55 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
 
     return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+  });
+
+  // ===== 阿里云 ESA 全量 OpenAPI 控制台 =====
+  // 官方 478 个接口的目录与参数元数据，供前端按分类生成可视化表单
+  app.get('/api/cdn/accounts/:aid/esa/catalog', authAid, async (req: any) => {
+    const acct = req.account;
+    if (!acct || acct.type !== 'aliyun_esa') return { code: -1, msg: '该账户不是阿里云 ESA' };
+    return { code: 0, data: getEsaCatalog() };
+  });
+
+  // 通用 Action 执行：Action 必须命中官方目录；站点页传入 zoneId 时强制注入 SiteId
+  app.post('/api/cdn/accounts/:aid/esa/actions', adminAuth, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const action = String(b.action || '').trim();
+    const meta = getEsaApi(action);
+    if (!meta) return { code: -1, msg: `不支持的 ESA API：${action || '(空)'}` };
+    const zoneId = String(b.zoneId || '').trim();
+    let params: Record<string, any> = {};
+    if (b.params && typeof b.params === 'object' && !Array.isArray(b.params)) {
+      params = cleanEsaApiParams(b.params);
+    } else if (typeof b.params === 'string' && b.params.trim()) {
+      try {
+        const parsed = JSON.parse(b.params);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) params = cleanEsaApiParams(parsed);
+        else return { code: -1, msg: 'params 必须是 JSON 对象' };
+      } catch {
+        return { code: -1, msg: 'params 不是合法 JSON' };
+      }
+    }
+    const hasSiteId = meta.params.some((p) => p.name === 'SiteId');
+    if (hasSiteId && zoneId) params.SiteId = zoneId;
+    if (hasSiteId && !zoneId && !params.SiteId) return { code: -1, msg: '该接口需要 SiteId，请从站点页进入或手动填写 SiteId' };
+    const missing = missingEsaApiParams(meta, params, hasSiteId && zoneId ? ['SiteId'] : []);
+    if (missing.length) return { code: -1, msg: `缺少必填参数：${missing.join('、')}` };
+    const provider: any = await cdnForZone(aid, zoneId || null);
+    if (!provider || typeof provider.runEsaApi !== 'function') return { code: -1, msg: '该 CDN 类型不支持 ESA API 控制台' };
+    const result = await provider.runEsaApi(action, params);
+    if (result === false) return { code: -1, msg: '调用失败，' + provider.getError() };
+    if (meta.op !== 'read') {
+      audit(req, {
+        targetType: 'cdn_zone',
+        targetId: zoneId || String(params.SiteId || aid),
+        targetName: String(params.SiteId || zoneId || aid),
+        summary: `ESA API ${action}（${meta.title}）`,
+        detail: { aid, action, zoneId: zoneId || null, paramKeys: Object.keys(params) },
+      });
+    }
+    return { code: 0, msg: '调用成功', data: result };
   });
 
   // ===== 安全：IP 组 =====

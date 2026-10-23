@@ -23,6 +23,7 @@ import dmonitorRoutes from './routes/dmonitor.js';
 import optimizeRoutes from './routes/optimizeip.js';
 import scheduleRoutes from './routes/schedule.js';
 import systemRoutes from './routes/system.js';
+import announcementRoutes from './routes/announcement.js';
 import userRoutes from './routes/user.js';
 import cloudflareRoutes from './routes/cloudflare.js';
 import cfRulesRoutes from './routes/cfrules.js';
@@ -298,6 +299,7 @@ if (installed) {
   await app.register(optimizeRoutes);
   await app.register(scheduleRoutes);
   await app.register(systemRoutes);
+  await app.register(announcementRoutes);
   await app.register(userRoutes);
   await app.register(cloudflareRoutes);
   await app.register(cfRulesRoutes);

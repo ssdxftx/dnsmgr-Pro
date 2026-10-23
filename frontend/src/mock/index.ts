@@ -6,6 +6,8 @@
  * 因此绝不会污染生产环境。
  */
 
+import esaCatalogJson from '../../../backend/src/lib/cdn/esaApiCatalog.json';
+
 const MOCK_USER = {
   id: 1,
   username: 'admin',
@@ -89,11 +91,277 @@ const DM_TASKS = [
 
 // CDN 账户（CdnAccount）
 const CDN_ACCOUNTS = [
-  { id: 1, type: 'tencent', name: '腾讯云 CDN' },
-  { id: 2, type: 'aliyun', name: '阿里云 CDN' },
-  { id: 3, type: 'cloudflare', name: 'Cloudflare' },
-  { id: 4, type: 'baidu', name: '百度云加速' },
+  { id: 1, type: 'tencent', typename: '腾讯云 CDN', name: '腾讯云 CDN' },
+  { id: 2, type: 'aliyun', typename: '阿里云 CDN', name: '阿里云 CDN' },
+  { id: 3, type: 'cloudflare', typename: 'Cloudflare', name: 'Cloudflare' },
+  { id: 4, type: 'baidu', typename: '百度云加速', name: '百度云加速' },
+  { id: 5, type: 'aliyun_esa', typename: '阿里云 ESA', name: '阿里云 ESA 演示账户', remark: '静态预览用假数据' },
+  { id: 6, type: 'tencent_edgeone', typename: '腾讯云 EdgeOne', name: '腾讯云 EdgeOne 演示账户', remark: '静态预览用假数据' },
 ];
+
+const CDN_PROVIDERS = {
+  tencent_edgeone: {
+    name: '腾讯云 EdgeOne',
+    note: '静态预览演示账户，数据均为假数据',
+    vendor: 'eo',
+    config: {
+      SecretId: { name: 'SecretId', type: 'input', required: true },
+      SecretKey: { name: 'SecretKey', type: 'input', required: true },
+    },
+    capabilities: {
+      zoneManage: true,
+      originGroup: true,
+      loadBalancer: true,
+      rules: true,
+      security: true,
+      securityIpGroup: true,
+      l4: true,
+      tasks: true,
+      analysis: true,
+    },
+    addFlow: {
+      zone: { needed: true, label: '站点' },
+      serviceArea: { needed: false },
+      origin: { protocol: true, ports: true, host: true, hostModes: ['accelerate', 'origin', 'custom'] },
+      cert: ['freecert', 'certlink'],
+      scene: { needed: true },
+    },
+  },
+  aliyun_esa: {
+    name: '阿里云 ESA',
+    note: '静态预览演示账户，数据均为假数据',
+    vendor: 'esa',
+    config: {
+      AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
+      AccessKeySecret: { name: 'AccessKeySecret', type: 'input', required: true },
+      region: { name: 'Region', type: 'select', options: [{ value: 'cn-hangzhou', label: '中国内地 (cn-hangzhou)' }, { value: 'ap-southeast-1', label: '非中国内地 (ap-southeast-1)' }] },
+    },
+    capabilities: {
+      zoneManage: true,
+      originGroup: true,
+      loadBalancer: true,
+      rules: true,
+      security: true,
+      securityIpGroup: true,
+      waf: true,
+      originProtection: true,
+      ddos: true,
+      l4: true,
+      tasks: true,
+      analysis: true,
+    },
+    addFlow: {
+      zone: { needed: true, label: '站点' },
+      serviceArea: { needed: false },
+      origin: { protocol: false, ports: true, host: true, hostModes: ['accelerate', 'origin', 'custom'] },
+      cert: ['certapply'],
+      scene: { needed: false },
+    },
+  },
+};
+
+const ESA_SITE = {
+  zone_id: '1000000001',
+  zone_name: 'demo-esa.com',
+  status: 'active',
+  area: 'domestic',
+  accessType: 'NS',
+  paused: false,
+  domain_count: 2,
+  route: 'aliyun_esa',
+  cloud: true,
+  nameServers: ['ns1.demo-esa.com', 'ns2.demo-esa.com'],
+  verifyCode: 'verify_demo_123456',
+  versionManagement: true,
+  planName: 'ESA 专业版',
+  instanceId: 'esa-demo-001',
+  createTime: '2026-10-01T10:00:00Z',
+  updateTime: '2026-10-22T08:00:00Z',
+};
+
+const EO_SITE = {
+  zone_id: 'zone-eo-demo',
+  zone_name: 'demo-eo.com',
+  name: 'demo-eo.com',
+  status: 'active',
+  type: 'partial',
+  area: 'global',
+  accessType: 'CNAME',
+  paused: false,
+  domain_count: 2,
+  route: 'tencent_edgeone',
+  cloud: true,
+  nameServers: ['ns1.demo-eo.com', 'ns2.demo-eo.com'],
+  createTime: '2026-09-12T10:00:00Z',
+  updateTime: '2026-10-20T08:00:00Z',
+};
+
+const EO_DOMAINS = [
+  { id: 9101, name: 'www.demo-eo.com', origin: '203.0.113.20', origin_type: 'ipaddr', zone_id: EO_SITE.zone_id, status: 'online', cname: 'www.demo-eo.com.eo.dnsv1.com' },
+  { id: 9102, name: 'api.demo-eo.com', origin: 'origin.demo-eo.com', origin_type: 'domain', zone_id: EO_SITE.zone_id, status: 'online', cname: 'api.demo-eo.com.eo.dnsv1.com' },
+];
+
+const EO_ORIGIN_GROUPS = {
+  total: 2,
+  list: [
+    { groupId: 'og-primary', name: '主源站', type: 'HTTP', records: ['203.0.113.20'] },
+    { groupId: 'og-backup', name: '备用源站', type: 'HTTP', records: ['203.0.113.21'] },
+  ],
+};
+
+const EO_LOAD_BALANCERS = {
+  total: 1,
+  list: [{ instanceId: 'lb-demo', name: '默认负载均衡', type: 'HTTP', originGroups: ['og-primary', 'og-backup'], status: 'online' }],
+};
+
+const EO_ZONE_SETTING = {
+  zoneSetting: {
+    ForceRedirectHTTPS: { Switch: 'on', RedirectStatusCode: 301 },
+    HTTP2: { Switch: 'on' },
+    OCSPStapling: { Switch: 'off' },
+    HSTS: { Switch: 'on', IncludeSubDomains: 'on', Preload: 'off', Timeout: 31536000 },
+    TLSConfig: { Version: ['TLSv1.2', 'TLSv1.3'], CipherSuite: 'general-v2023' },
+    QUIC: { Switch: 'on' },
+    UpstreamHTTP2: { Switch: 'off' },
+    Grpc: { Switch: 'off' },
+    WebSocket: { Switch: 'on', Timeout: 30 },
+    Cache: { FollowOrigin: { Switch: 'on' }, CustomTime: { Switch: 'off', CacheTime: 0 }, NoCache: { Switch: 'off' } },
+    CachePrefresh: { Switch: 'off', CacheTimePercent: 90 },
+    SmartRouting: { Switch: 'on' },
+    Compression: { Switch: 'on', Algorithms: ['gzip', 'brotli'] },
+    OfflineCache: { Switch: 'off' },
+    ClientIPHeader: { Switch: 'off', HeaderName: '' },
+    ClientIPCountry: { Switch: 'off' },
+    PostMaxSize: { Switch: 'on', MaxSize: 838860800 },
+    IPv6: { Switch: 'on' },
+    AccelerateMainland: { Switch: 'off' },
+  },
+};
+
+const ESA_DOMAINS = [
+  { id: 9001, name: 'www.demo-esa.com', origin: '203.0.113.10', origin_type: 'ipaddr', zone_id: ESA_SITE.zone_id, status: 'online', cname: 'www.demo-esa.com.demo-esa.com.cname.com' },
+  { id: 9002, name: 'api.demo-esa.com', origin: 'origin.demo-esa.com', origin_type: 'domain', zone_id: ESA_SITE.zone_id, status: 'online', cname: 'api.demo-esa.com.demo-esa.com.cname.com' },
+];
+
+const ESA_SITE_PROPS = {
+  ...ESA_SITE,
+  SiteId: ESA_SITE.zone_id,
+  SiteName: ESA_SITE.zone_name,
+  Coverage: ESA_SITE.area,
+  AccessType: ESA_SITE.accessType,
+  NameServerList: ESA_SITE.nameServers.join(','),
+  nsList: ESA_SITE.nameServers,
+  vanityNs: ['ns1.custom-demo.com'],
+  nameExclusive: true,
+  VersionManagement: true,
+  versionManagement: true,
+  PlanName: ESA_SITE.planName,
+  InstanceId: ESA_SITE.instanceId,
+  CnameZone: 'demo-esa.com.cname.com',
+  VerifyCode: ESA_SITE.verifyCode,
+  CreateTime: ESA_SITE.createTime,
+  UpdateTime: ESA_SITE.updateTime,
+};
+
+const ESA_PLAN_INSTANCES = [
+  { InstanceId: 'esa-demo-001', PlanName: 'ESA 专业版', ExpireTime: '2027-10-01T00:00:00Z', SiteQuota: '10', Status: 'online', Coverages: 'domestic,overseas,global' },
+];
+
+const ESA_RULE_COMMON_FIELDS = [
+  { name: 'RuleName', type: 'string', label: '规则名称', group: 'common' },
+  { name: 'RuleEnable', type: 'switch', label: '规则开关', group: 'common', choices: ['on', 'off'] },
+  { name: 'Rule', type: 'expression', label: '规则内容', group: 'common' },
+  { name: 'Sequence', type: 'number', label: '规则执行顺序', group: 'common' },
+];
+const ESA_RULE_SCHEMA = [
+  {
+    kind: 'RedirectRule',
+    fields: [
+      ...ESA_RULE_COMMON_FIELDS,
+      { name: 'Type', type: 'enum', label: '重定向类型', choices: ['static', 'dynamic'] },
+      { name: 'TargetUrl', type: 'string', label: '目标 URL', required: true },
+      { name: 'StatusCode', type: 'enum', label: '状态码', choices: ['301', '302', '303', '307', '308'], required: true },
+      { name: 'ReserveQueryString', type: 'switch', label: '保留查询字符串', choices: ['on', 'off'], required: true },
+    ],
+  },
+  {
+    kind: 'CacheRule',
+    fields: [
+      ...ESA_RULE_COMMON_FIELDS,
+      { name: 'BypassCache', type: 'enum', label: '缓存资格', choices: ['cache_all', 'bypass_all'] },
+      { name: 'BrowserCacheMode', type: 'enum', label: '浏览器缓存模式', choices: ['no_cache', 'follow_origin', 'override_origin'] },
+      { name: 'BrowserCacheTtl', type: 'string', label: '浏览器缓存过期时间' },
+      { name: 'EdgeCacheMode', type: 'enum', label: '节点缓存模式', choices: ['follow_origin', 'no_cache', 'override_origin', 'follow_origin_bypass', 'follow_origin_override'] },
+      { name: 'EdgeCacheTtl', type: 'string', label: '节点缓存过期时间' },
+      { name: 'EdgeStatusCodeCacheTtl', type: 'string', label: '状态码缓存过期时间' },
+      { name: 'SortQueryStringForCache', type: 'switch', label: '查询字符串排序', choices: ['on', 'off'] },
+      { name: 'QueryStringMode', type: 'enum', label: '查询字符串处理', choices: ['ignore_all', 'exclude_query_string', 'reserve_all', 'include_query_string'] },
+      { name: 'QueryString', type: 'string', label: '查询字符串' },
+      { name: 'IncludeHeader', type: 'string', label: '包含请求头' },
+      { name: 'IncludeCookie', type: 'string', label: '包含 Cookie' },
+      { name: 'CheckPresenceHeader', type: 'string', label: '检查请求头存在' },
+      { name: 'CheckPresenceCookie', type: 'string', label: '检查 Cookie 存在' },
+      { name: 'UserDeviceType', type: 'switch', label: '用户设备类型', choices: ['on', 'off'] },
+      { name: 'UserGeo', type: 'switch', label: '用户地理位置', choices: ['on', 'off'] },
+      { name: 'UserLanguage', type: 'switch', label: '用户语言', choices: ['on', 'off'] },
+      { name: 'ServeStale', type: 'switch', label: '响应过期缓存', choices: ['on', 'off'] },
+      { name: 'CacheReserveEligibility', type: 'enum', label: 'Cache Reserve 资格', choices: ['bypass_cache_reserve', 'eligible_for_cache_reserve'] },
+      { name: 'PostCache', type: 'switch', label: 'Post 缓存', choices: ['on', 'off'] },
+      { name: 'PostBodySizeLimit', type: 'string', label: 'Post Body 大小限制' },
+      { name: 'PostBodyCacheKey', type: 'enum', label: 'Post CacheKey 处理', choices: ['md5', 'ignore'] },
+      { name: 'AdditionalCacheablePorts', type: 'string', label: '额外缓存端口' },
+      { name: 'CacheDeceptionArmor', type: 'switch', label: '缓存欺骗防御', choices: ['on', 'off'] },
+    ],
+  },
+  {
+    kind: 'HttpsBasicConfiguration',
+    fields: [
+      ...ESA_RULE_COMMON_FIELDS,
+      { name: 'Https', type: 'enum', label: 'SSL/TLS 加密', choices: ['on', 'off'] },
+      { name: 'CiphersuiteGroup', type: 'enum', label: '密码套件组', choices: ['all', 'strict'] },
+      { name: 'Ciphersuite', type: 'string', label: '密码套件' },
+      { name: 'OcspStapling', type: 'switch', label: 'OCSP Stapling', choices: ['on', 'off'] },
+    ],
+  },
+  {
+    kind: 'HttpsApplicationConfiguration',
+    fields: [
+      ...ESA_RULE_COMMON_FIELDS,
+      { name: 'HttpsForce', type: 'switch', label: '强制 HTTPS', choices: ['on', 'off'] },
+      { name: 'HttpsForceCode', type: 'enum', label: '强制 HTTPS 状态码', choices: ['301', '302', '307', '308'] },
+      { name: 'AltSvc', type: 'switch', label: '机会性加密', choices: ['on', 'off'] },
+      { name: 'AltSvcClear', type: 'switch', label: 'Alt-Svc Clear', choices: ['on', 'off'] },
+      { name: 'AltSvcPersist', type: 'switch', label: 'Alt-Svc Persist', choices: ['on', 'off'] },
+      { name: 'AltSvcMa', type: 'string', label: 'Alt-Svc 有效时间' },
+      { name: 'Hsts', type: 'switch', label: 'HSTS', choices: ['on', 'off'] },
+      { name: 'HstsMaxAge', type: 'string', label: 'HSTS 过期时间' },
+      { name: 'HstsIncludeSubdomains', type: 'switch', label: '包含子域名', choices: ['on', 'off'] },
+      { name: 'HstsPreload', type: 'switch', label: 'Preload', choices: ['on', 'off'] },
+      { name: 'HttpsSniVerify', type: 'switch', label: 'SNI 校验', choices: ['on', 'off'] },
+      { name: 'HttpsNoSniDeny', type: 'switch', label: '无 SNI 拒绝', choices: ['on', 'off'] },
+      { name: 'HttpsSniWhitelist', type: 'string', label: 'SNI 白名单' },
+    ],
+  },
+  {
+    kind: 'OriginRule',
+    fields: [
+      ...ESA_RULE_COMMON_FIELDS,
+      { name: 'OriginHost', type: 'string', label: '回源 Host' },
+      { name: 'OriginScheme', type: 'enum', label: '回源协议', choices: ['follow_client', 'http', 'https'] },
+      { name: 'OriginHttpPort', type: 'string', label: 'HTTP 端口' },
+      { name: 'OriginHttpsPort', type: 'string', label: 'HTTPS 端口' },
+      { name: 'OriginSni', type: 'string', label: '回源 SNI' },
+      { name: 'DnsRecord', type: 'string', label: 'DNS 记录覆盖' },
+      { name: 'Range', type: 'enum', label: 'Range 模式', choices: ['on', 'off'] },
+      { name: 'RangeChunkSize', type: 'string', label: '分片大小' },
+      { name: 'OriginMtls', type: 'switch', label: '回源 mTLS', choices: ['on', 'off'] },
+      { name: 'OriginVerify', type: 'switch', label: '校验源站证书', choices: ['on', 'off'] },
+      { name: 'OriginReadTimeout', type: 'string', label: '回源读超时' },
+    ],
+  },
+];
+
+const ESA_CATALOG = esaCatalogJson;
 
 // 部署任务（DeployTask）：status 1=已完成，其余=待处理；active=是否启用
 const DEPLOY_TASKS = [
@@ -278,6 +546,870 @@ function buildStatDetail(route: string, groups: string, top: string) {
   };
 }
 
+let mockWafSeq = 300;
+let mockRulesetSeq = 9000;
+const mockWafRulesets = new Map<string, number>();
+const mockManagedCounts: Record<number, number> = {
+  11: 24, 12: 18, 13: 9, 14: 6, 15: 8, 16: 7, 17: 5, 18: 4, 22: 6, 26: 4, 27: 10, 28: 5, 31: 12, 99: 3,
+};
+const mockWafStore: any[] = [];
+
+function ensureMockRuleset(phase: string): number {
+  if (!mockWafRulesets.has(phase)) mockWafRulesets.set(phase, ++mockRulesetSeq);
+  return mockWafRulesets.get(phase)!;
+}
+
+function mockWafAdd(phase: string, config: any, rulesetId?: number) {
+  const row = {
+    Id: ++mockWafSeq,
+    Name: config?.Name || `${phase}-${mockWafSeq}`,
+    Status: config?.Status || 'on',
+    Phase: phase,
+    RulesetId: rulesetId || ensureMockRuleset(phase),
+    Config: config || {},
+  };
+  mockWafStore.push(row);
+  return row;
+}
+
+function seedMockWaf() {
+  if (mockWafStore.length) return;
+  ensureMockRuleset('http_custom');
+  ensureMockRuleset('http_ratelimit');
+  ensureMockRuleset('http_whitelist');
+  ensureMockRuleset('ip_access_rule');
+  ensureMockRuleset('http_managed');
+  ensureMockRuleset('http_anti_scan');
+  ensureMockRuleset('http_security_level_rule');
+
+  mockWafAdd('http_custom', {
+    Name: 'block-curl-scanner',
+    Status: 'on',
+    Type: 'http_custom',
+    Expression: '(http.user_agent contains "curl")',
+    Action: 'deny',
+    Notes: '拦截脚本扫描器',
+  });
+  mockWafAdd('http_custom', {
+    Name: 'protect-admin-path',
+    Status: 'on',
+    Type: 'http_custom',
+    Expression: '(http.request.uri.path starts_with "/admin")',
+    Action: 'js',
+  });
+  mockWafAdd('http_ratelimit', {
+    Name: 'api-rate-limit',
+    Status: 'on',
+    Type: 'http_ratelimit',
+    Expression: '(http.request.uri.path starts_with "/api")',
+    Action: 'deny',
+    RateLimit: {
+      Characteristics: { Logic: 'or', Criteria: [{ MatchType: 'ip.src' }] },
+      Interval: 60,
+      TTL: 60,
+      Threshold: { Request: 120 },
+      OnHit: false,
+    },
+  });
+  mockWafAdd('http_whitelist', {
+    Name: 'office-allowlist',
+    Status: 'on',
+    Type: 'http_whitelist',
+    Expression: '(ip.src in {"203.0.113.0/24"})',
+    Actions: { Bypass: { Skip: 'all' } },
+  });
+  mockWafAdd('ip_access_rule', {
+    Name: 'block-datacenter',
+    Status: 'on',
+    Type: 'ip',
+    Value: '198.51.100.0/24',
+    Action: 'deny',
+    Notes: '机房 IP 段',
+  });
+  mockWafAdd('ip_access_rule', {
+    Name: 'monitor-partner',
+    Status: 'on',
+    Type: 'ip',
+    Value: '192.0.2.10',
+    Action: 'monitor',
+  });
+  for (const [type, level, action] of [
+    [11, 2, 'deny'],
+    [12, 2, 'deny'],
+    [27, 1, 'monitor'],
+  ] as Array<[number, number, string]>) {
+    mockWafAdd('http_managed', {
+      Name: `managed-${type}`,
+      Status: 'on',
+      Type: 'http_managed',
+      Expression: 'true',
+      ManagedRulesets: [{ AttackType: type, ProtectionLevel: level, Action: action }],
+    });
+  }
+  mockWafAdd('http_security_level_rule', {
+    Name: 'security-level',
+    Status: 'on',
+    Type: 'http_security_level_rule',
+    SecurityLevel: { Value: 'medium' },
+  });
+  mockWafAdd('http_anti_scan', {
+    Name: 'scan-tools',
+    Status: 'on',
+    Type: 'http_scan_tools',
+    ManagedList: 'intelligence_scan_tools',
+    Expression: 'true',
+    Action: 'deny',
+  });
+}
+seedMockWaf();
+
+let mockPoolSeq = 500;
+let mockLbSeq = 600;
+let mockWaitingSeq = 700;
+let mockWaitingEventSeq = 7100;
+let mockWaitingRuleSeq = 7200;
+let mockL4Seq = 800;
+
+const mockOriginPools: any[] = [
+  {
+    Id: 101,
+    Name: 'primary',
+    Enabled: true,
+    Origins: [
+      { Name: 'origin-a', Address: '1.2.3.4', Weight: 100, Enabled: true, Type: 'ip_domain', IpVersionPolicy: 'round_robin' },
+      { Name: 'origin-b', Address: 'origin.example.com', Weight: 50, Enabled: true, Type: 'ip_domain', IpVersionPolicy: 'round_robin' },
+    ],
+  },
+  {
+    Id: 102,
+    Name: 'backup',
+    Enabled: true,
+    Origins: [{ Name: 'origin-c', Address: '5.6.7.8', Weight: 100, Enabled: true, Type: 'ip_domain', IpVersionPolicy: 'ipv4_first' }],
+  },
+];
+
+const mockLoadBalancers: any[] = [
+  {
+    Id: 601,
+    Name: 'lb.example.com',
+    Enabled: true,
+    Description: '主站负载均衡',
+    DefaultPools: [101],
+    FallbackPool: 102,
+    SteeringPolicy: 'order',
+    SessionAffinity: 'ip',
+    Ttl: 30,
+    AdaptiveRouting: { FailoverAcrossPools: true, OriginLevelRetry: false },
+    Monitor: {
+      Type: 'HTTP',
+      Method: 'GET',
+      Path: '/',
+      Port: 80,
+      Interval: 60,
+      Timeout: 5,
+      ExpectedCodes: '200',
+      FollowRedirects: false,
+      ConsecutiveUp: 3,
+      ConsecutiveDown: 5,
+      MonitoringRegion: 'Global',
+    },
+  },
+];
+
+const mockWaitingRooms: any[] = [
+  {
+    WaitingRoomId: 701,
+    Name: 'checkout-queue',
+    Enable: 'on',
+    QueueAllEnable: 'off',
+    HostNameAndPath: [{ Subdomain: '', Domain: 'shop.example.com', Path: '/checkout' }],
+    CookieName: '__esa_waiting_room',
+    TotalActiveUsers: '200',
+    NewUsersPerMinute: '20',
+    SessionDuration: '10',
+    DisableSessionRenewalEnable: 'off',
+    QueuingMethod: 'fifo',
+    QueuingStatusCode: '429',
+    JsonResponseEnable: 'on',
+    WaitingRoomType: 'default',
+    Language: 'zhcn',
+    Description: '大促结算排队',
+  },
+];
+
+const mockWaitingEvents: any[] = [
+  {
+    WaitingRoomEventId: 7101,
+    WaitingRoomId: 701,
+    Name: 'double-11',
+    Enable: 'on',
+    TotalActiveUsers: '500',
+    NewUsersPerMinute: '50',
+    SessionDuration: '15',
+    StartTime: '2026-11-10T20:00:00Z',
+    EndTime: '2026-11-11T02:00:00Z',
+    QueuingMethod: 'fifo',
+    QueuingStatusCode: '429',
+    WaitingRoomType: 'default',
+  },
+];
+
+const mockWaitingRules: any[] = [
+  {
+    WaitingRoomRuleId: 7201,
+    WaitingRoomId: 701,
+    RuleName: 'checkout-path',
+    RuleEnable: 'on',
+    Rule: '(http.request.uri.path starts_with "/checkout")',
+  },
+];
+
+const mockL4Apps: any[] = [
+  {
+    ApplicationId: 801,
+    RecordName: 'l4.example.com',
+    RulesCount: 2,
+    Status: 'online',
+    Cname: 'l4.example.com.esa-cn.com',
+    Rules: [
+      { Protocol: 'TCP', EdgePort: '3306', SourceType: 'ip', Source: '10.0.0.8', SourcePort: '3306', ClientIPPassThroughMode: 'PPv2', Comment: 'MySQL' },
+      { Protocol: 'UDP', EdgePort: '53', SourceType: 'domain', Source: 'dns.example.com', SourcePort: '53', ClientIPPassThroughMode: 'SPP', Comment: 'DNS' },
+    ],
+    IpAccessRule: 'on',
+    Ipv6: 'off',
+    CrossBorderOptimization: 'on',
+    StaticIp: 'off',
+    KeepAliveProtection: 'on',
+  },
+];
+
+let mockRoutineRouteSeq = 100;
+const mockRoutineRoutes: any[] = [
+  {
+    ConfigId: 1,
+    RoutineName: 'demo-fn',
+    RouteName: 'demo-route',
+    RouteEnable: 'on',
+    Rule: '(http.host eq "example.com")',
+    Bypass: 'off',
+    Sequence: 0,
+    Fallback: 'on',
+    Timeout: '30',
+  },
+];
+
+let mockRoutineSeq = 1;
+const mockUserRoutines: any[] = [
+  { Name: 'demo-fn', Description: '演示边缘函数', HasAssets: false, ModifiedTime: '2026-10-20T08:00:00Z' },
+];
+
+const mockKvNamespaces: any[] = [
+  { Namespace: 'demo-kv', Description: '演示命名空间', CreatedTime: '2026-10-01T10:00:00Z' },
+];
+const mockKvStore: Record<string, any[]> = {
+  'demo-kv': [
+    { Key: 'greeting', Value: 'hello esa', Expiration: '', ExpirationTtl: 3600 },
+    { Key: 'feature-flag', Value: 'on', Expiration: '', ExpirationTtl: 0 },
+  ],
+};
+
+let mockSliderSeq = 1;
+const mockSliderPages: any[] = [
+  { Id: 1, Name: 'default-slider', ForceLanguage: 'auto', SiteIds: ['1000000001'], Configs: {}, CustomContent: '' },
+];
+
+let mockListSeq = 1;
+const mockGlobalLists: any[] = [
+  {
+    Id: 1,
+    Name: 'trusted-ips',
+    Kind: 'ip',
+    Description: '可信来源 IP',
+    Items: [
+      { Value: '203.0.113.10', Description: '办公出口' },
+      { Value: '198.51.100.20', Description: '监控节点' },
+    ],
+  },
+];
+
+let mockSceneSeq = 1;
+const mockScenePolicies: any[] = [
+  {
+    PolicyId: 1,
+    Name: 'double-11',
+    Template: 'major_event',
+    StartTime: '2026-11-10T20:00:00Z',
+    EndTime: '2026-11-11T02:00:00Z',
+    SiteIds: '1000000001',
+    Status: 'enabled',
+  },
+];
+
+let mockPageSeq = 1;
+const mockCustomPages: any[] = [
+  { Id: 1, Name: 'block-page', Description: '默认拦截页', ContentType: 'text/html', Content: '<html><body>Blocked</body></html>', SiteIds: ['1000000001'] },
+];
+
+let mockGlobalWafSeq = 1;
+const mockGlobalWafRulesets: any[] = [
+  {
+    Id: 1,
+    Name: 'global-baseline',
+    Phase: 'http_custom',
+    Status: 'on',
+    Expression: '(http.host eq "demo-esa.com")',
+    Description: '账户级基础防护',
+    Shared: 'on',
+    Rules: [{ Name: 'block-bad-bot', Action: 'deny', Expression: '(http.user_agent contains "badbot")' }],
+  },
+];
+
+let mockDeliverySeq = 1;
+const mockUserDeliveryTasks: any[] = [
+  { TaskName: 'access-to-sls', BusinessType: 'dcdn_log_access_l1', DeliveryType: 'sls', FieldName: 'requests,bytes', Status: 'online', DiscardRate: 0, Details: {} },
+];
+
+const mockResourcePackages: any[] = [
+  { PackageId: 'pkg-demo-1', PackageName: 'ESA 流量包', Total: '1000', Used: '120', Unit: 'GB', ExpireTime: '2027-10-01T00:00:00Z' },
+];
+
+let mockCacheTag = { TagName: 'edge-tag', CaseInsensitive: 'off' };
+let mockDevMode = 'off';
+let mockPerfCollection = 'off';
+
+function mockEsaAction(action: string, params: Record<string, any>): any {
+  const now = '2026-10-22 10:00:00';
+  const records = [
+    { RecordId: 1, RecordName: 'www', Type: 'CNAME', Data: { Value: 'origin.example.com' }, Ttl: 1, Proxied: true, Comment: '主站' },
+    { RecordId: 2, RecordName: '@', Type: 'A', Data: { Value: '1.2.3.4' }, Ttl: 600, Proxied: true, Comment: '' },
+  ];
+  const wafRows = (phase: string) => mockWafStore.filter((r) => r.Phase === phase);
+  switch (action) {
+    case 'GetSite':
+      return { SiteModel: { SiteName: '06162636.xyz', PlanName: 'Entrance', Status: 'active' } };
+    case 'ListRecords':
+      return { Records: records, TotalCount: records.length, PageNumber: 1, PageSize: 100 };
+    case 'ListCertificates':
+      return {
+        Result: [{ Id: 'cert-1', Name: '06162636.xyz', Type: 'free', Status: 'active', NotAfter: '2027-01-01' }],
+        TotalCount: 1,
+      };
+    case 'ListClientCertificates':
+    case 'ListSiteOriginClientCertificates':
+      return { Result: [], TotalCount: 0 };
+    case 'GetCertificateQuota':
+      return { Quota: 10, QuotaUsage: 1, Type: params.Type || 'free' };
+    case 'ApplyCertificate':
+      return { Result: [{ Domain: String(params.Domains || '').split(',')[0], Status: 'pending' }], TotalCount: 1 };
+    case 'GetCnameFlattening':
+      return { FlattenMode: 'flatten_at_root' };
+    case 'GetTieredCache':
+      return { CacheArchitectureMode: 'edge' };
+    case 'GetCacheReserve':
+      return { Enable: 'off', CacheReserveInstanceId: '' };
+    case 'GetPurgeQuota':
+      return { Quota: '1000', Usage: '12', Quota30Day: '30000', Usage30Day: '120' };
+    case 'DescribePurgeTasks':
+    case 'DescribePreloadTasks':
+      return {
+        Tasks: [{ TaskId: 'task-demo', Type: 'file', Status: 'Complete', Progress: 100, CreateTime: now }],
+        TotalCount: 1,
+      };
+    case 'ListOriginPools':
+      return { OriginPools: mockOriginPools, TotalCount: mockOriginPools.length, PageNumber: 1, PageSize: 100 };
+    case 'GetOriginPool': {
+      const row = mockOriginPools.find((p) => Number(p.Id) === Number(params.Id));
+      return row ? { ...row, RequestId: 'mock-get-origin-pool' } : { RequestId: 'mock-get-origin-pool' };
+    }
+    case 'CreateOriginPool': {
+      const row = {
+        Id: ++mockPoolSeq,
+        Name: params.Name,
+        Enabled: params.Enabled !== false,
+        Origins: Array.isArray(params.Origins) ? params.Origins : [],
+      };
+      mockOriginPools.push(row);
+      return { Id: row.Id, RequestId: 'mock-create-origin-pool' };
+    }
+    case 'UpdateOriginPool': {
+      const row = mockOriginPools.find((p) => Number(p.Id) === Number(params.Id));
+      if (row) {
+        if (params.Enabled !== undefined) row.Enabled = params.Enabled;
+        if (Array.isArray(params.Origins)) row.Origins = params.Origins;
+      }
+      return { RequestId: 'mock-update-origin-pool' };
+    }
+    case 'DeleteOriginPool': {
+      const i = mockOriginPools.findIndex((p) => Number(p.Id) === Number(params.Id));
+      if (i >= 0) mockOriginPools.splice(i, 1);
+      return { RequestId: 'mock-delete-origin-pool' };
+    }
+    case 'ListLoadBalancers':
+      return { LoadBalancers: mockLoadBalancers, TotalCount: mockLoadBalancers.length, PageNumber: 1, PageSize: 100 };
+    case 'GetLoadBalancer': {
+      const row = mockLoadBalancers.find((l) => Number(l.Id) === Number(params.Id));
+      return row ? { ...row, RequestId: 'mock-get-load-balancer' } : { RequestId: 'mock-get-load-balancer' };
+    }
+    case 'CreateLoadBalancer': {
+      const row = { ...params, Id: ++mockLbSeq };
+      mockLoadBalancers.push(row);
+      return { Id: row.Id, RequestId: 'mock-create-load-balancer' };
+    }
+    case 'UpdateLoadBalancer': {
+      const row = mockLoadBalancers.find((l) => Number(l.Id) === Number(params.Id));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-load-balancer' };
+    }
+    case 'DeleteLoadBalancer': {
+      const i = mockLoadBalancers.findIndex((l) => Number(l.Id) === Number(params.Id));
+      if (i >= 0) mockLoadBalancers.splice(i, 1);
+      return { RequestId: 'mock-delete-load-balancer' };
+    }
+    case 'ListWafRules': {
+      const phase = String(params.Phase || '');
+      let rows = wafRows(phase);
+      const like = params.QueryArgs?.NameLike || params.QueryArgs?.IdNameLike;
+      if (like) rows = rows.filter((r) => String(r.Name || '').toLowerCase().includes(String(like).toLowerCase()));
+      return {
+        Rules: rows,
+        TotalCount: rows.length,
+        SiteUsage: rows.length,
+        InstanceUsage: rows.length,
+        PageNumber: Number(params.PageNumber || 1),
+        PageSize: Number(params.PageSize || 20),
+      };
+    }
+    case 'GetWafRule': {
+      const row = mockWafStore.find((r) => Number(r.Id) === Number(params.Id));
+      return row ? { ...row, RequestId: 'mock-get-waf-rule' } : { RequestId: 'mock-get-waf-rule' };
+    }
+    case 'CreateWafRule': {
+      const phase = String(params.Phase || '');
+      const row = mockWafAdd(phase, params.Config || {}, params.RulesetId);
+      return { RequestId: 'mock-create-waf-rule', Id: row.Id, RulesetId: row.RulesetId };
+    }
+    case 'UpdateWafRule': {
+      const row = mockWafStore.find((r) => Number(r.Id) === Number(params.Id));
+      if (row) {
+        if (params.Config && typeof params.Config === 'object') {
+          row.Config = { ...(row.Config || {}), ...params.Config };
+          if (params.Config.Name) row.Name = params.Config.Name;
+        }
+        if (params.Status) {
+          row.Status = params.Status;
+          row.Config = { ...(row.Config || {}), Status: params.Status };
+        }
+      }
+      return { RequestId: 'mock-update-waf-rule' };
+    }
+    case 'DeleteWafRule': {
+      const i = mockWafStore.findIndex((r) => Number(r.Id) === Number(params.Id));
+      if (i >= 0) mockWafStore.splice(i, 1);
+      return { RequestId: 'mock-delete-waf-rule' };
+    }
+    case 'ListWafRulesets': {
+      const phase = String(params.Phase || 'http_custom');
+      const id = ensureMockRuleset(phase);
+      return { Rulesets: [{ Id: id, Name: `${phase}-ruleset`, Phase: phase }], TotalCount: 1, RequestId: 'mock-list-waf-rulesets' };
+    }
+    case 'CreateWafRuleset': {
+      const phase = String(params.Phase || 'http_custom');
+      const id = ensureMockRuleset(phase);
+      return { Id: id, RulesetId: id, RequestId: 'mock-create-waf-ruleset' };
+    }
+    case 'ListWafManagedRules': {
+      const type = Number(params.AttackType || 0);
+      const total = mockManagedCounts[type] ?? 0;
+      const rows = Array.from({ length: total }).map((_, i) => ({
+        Id: 20000000 + type * 100 + i,
+        Name: `managed-${type}-${i + 1}`,
+        AttackType: type,
+        Status: 'on',
+        Action: 'deny',
+      }));
+      return { Rules: rows, TotalCount: total, PageNumber: 1, PageSize: Number(params.PageSize || 20) };
+    }
+    case 'BatchCreateWafRules': {
+      const phase = String(params.Phase || 'http_anti_scan');
+      const shared = params.Shared && typeof params.Shared === 'object' ? params.Shared : {};
+      const configs = Array.isArray(params.Configs) ? params.Configs : [];
+      const ids = configs.map((c: any) => mockWafAdd(phase, { ...shared, ...c }, params.RulesetId).Id);
+      return { RequestId: 'mock-batch-create-waf-rules', Ids: ids };
+    }
+    case 'BatchUpdateWafRules': {
+      return { RequestId: 'mock-batch-update-waf-rules' };
+    }
+    case 'ListWafTemplateRules':
+      return {
+        Rules: [
+          { Id: 1, Name: '目录遍历扫描防护', Type: 'http_directory_traversal', Phase: 'http_anti_scan' },
+          { Id: 2, Name: '常见扫描工具防护', Type: 'http_scan_tools', Phase: 'http_anti_scan' },
+        ],
+        RequestId: 'mock-list-waf-template-rules',
+      };
+    case 'ListWafPhases':
+      return {
+        Phases: ['http_custom', 'http_ratelimit', 'http_managed', 'http_anti_scan', 'http_whitelist', 'ip_access_rule', 'http_security_level_rule'].map(
+          (p) => ({ Phase: p, RulesetId: ensureMockRuleset(p) }),
+        ),
+        RequestId: 'mock-list-waf-phases',
+      };
+    case 'GetWafQuota':
+      return { Quota: { CustomRules: 50, RateLimitRules: 3, WhitelistRules: 3, IpAccessRules: 300, ManagedRules: 100 }, RequestId: 'mock-waf-quota' };
+    case 'GetSiteWafSettings':
+      return { Settings: { SecurityLevel: 'medium', BotProtection: true, ClientIpHeader: '' } };
+    case 'GetWafBotAppKey':
+      return { AppKey: 'demo-bot-appkey' };
+    case 'ListBotInstances':
+      return { Instances: [], TotalCount: 0 };
+    case 'ListDDoSInstances':
+      return { Instances: [], TotalCount: 0 };
+    case 'DescribeHttpDDoSAttackProtection':
+      return { Mode: 'normal', Level: 'default' };
+    case 'ListCustomHostnames':
+      return {
+        Hostnames: [{ Id: 1, Hostname: 'saas.example.com', Status: 'active', RecordId: 1, SslFlag: 'on', CertType: 'free' }],
+        TotalCount: 1,
+      };
+    case 'ListSiteDeliveryTasks':
+      return { Tasks: [], TotalCount: 0 };
+    case 'ListVersions':
+      return { SiteVersionList: [{ Version: 0, Description: '生产版本', CreateTime: now }] };
+    case 'ListUserRatePlanInstances':
+      return { Instances: ESA_PLAN_INSTANCES, TotalCount: ESA_PLAN_INSTANCES.length, RequestId: 'mock-rate-plans' };
+    case 'ListUserRoutines':
+      return { Routines: mockUserRoutines, TotalCount: mockUserRoutines.length, RequestId: 'mock-list-routines' };
+    case 'CreateRoutine': {
+      const row = { Name: params.Name, Description: params.Description || '', HasAssets: params.HasAssets === true, ModifiedTime: now };
+      mockUserRoutines.push(row);
+      return { RequestId: 'mock-create-routine' };
+    }
+    case 'UpdateRoutineConfigDescription': {
+      const row = mockUserRoutines.find((r) => r.Name === params.Name);
+      if (row) row.Description = params.Description || '';
+      return { RequestId: 'mock-update-routine' };
+    }
+    case 'DeleteRoutine': {
+      const i = mockUserRoutines.findIndex((r) => r.Name === params.Name);
+      if (i >= 0) mockUserRoutines.splice(i, 1);
+      return { RequestId: 'mock-delete-routine' };
+    }
+    case 'GetKvAccount':
+    case 'DescribeKvAccountStatus':
+      return { Namespaces: mockKvNamespaces, Enabled: true, RequestId: 'mock-kv-account' };
+    case 'CreateKvNamespace': {
+      mockKvNamespaces.push({ Namespace: params.Namespace, Description: params.Description || '', CreatedTime: now });
+      mockKvStore[params.Namespace] = mockKvStore[params.Namespace] || [];
+      return { RequestId: 'mock-create-kv-namespace' };
+    }
+    case 'DeleteKvNamespace': {
+      const i = mockKvNamespaces.findIndex((n) => n.Namespace === params.Namespace);
+      if (i >= 0) mockKvNamespaces.splice(i, 1);
+      delete mockKvStore[params.Namespace];
+      return { RequestId: 'mock-delete-kv-namespace' };
+    }
+    case 'ListKvs':
+      return { Kvs: mockKvStore[params.Namespace] || [], TotalCount: (mockKvStore[params.Namespace] || []).length, RequestId: 'mock-list-kvs' };
+    case 'PutKv': {
+      const list = (mockKvStore[params.Namespace] = mockKvStore[params.Namespace] || []);
+      const row = list.find((k) => k.Key === params.Key);
+      const value = { Key: params.Key, Value: params.Value, ExpirationTtl: params.ExpirationTtl || 0 };
+      if (row) Object.assign(row, value);
+      else list.push(value);
+      return { RequestId: 'mock-put-kv' };
+    }
+    case 'DeleteKv': {
+      const list = mockKvStore[params.Namespace] || [];
+      const i = list.findIndex((k) => k.Key === params.Key);
+      if (i >= 0) list.splice(i, 1);
+      return { RequestId: 'mock-delete-kv' };
+    }
+    case 'ListSliderCaptchaPages':
+      return { Pages: mockSliderPages, TotalCount: mockSliderPages.length, RequestId: 'mock-list-slider-pages' };
+    case 'CreateSliderCaptchaPage': {
+      const row = { ...params, Id: ++mockSliderSeq };
+      mockSliderPages.push(row);
+      return { Id: row.Id, RequestId: 'mock-create-slider-page' };
+    }
+    case 'UpdateSliderCaptchaPage': {
+      const row = mockSliderPages.find((p) => Number(p.Id) === Number(params.Id));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-slider-page' };
+    }
+    case 'DeleteSliderCaptchaPage': {
+      const i = mockSliderPages.findIndex((p) => Number(p.Id) === Number(params.Id));
+      if (i >= 0) mockSliderPages.splice(i, 1);
+      return { RequestId: 'mock-delete-slider-page' };
+    }
+    case 'ListLists':
+      return { Lists: mockGlobalLists, TotalCount: mockGlobalLists.length, RequestId: 'mock-list-lists' };
+    case 'CreateList': {
+      const row = { ...params, Id: ++mockListSeq };
+      mockGlobalLists.push(row);
+      return { Id: row.Id, RequestId: 'mock-create-list' };
+    }
+    case 'UpdateList': {
+      const row = mockGlobalLists.find((l) => Number(l.Id) === Number(params.Id));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-list' };
+    }
+    case 'DeleteList': {
+      const i = mockGlobalLists.findIndex((l) => Number(l.Id) === Number(params.Id));
+      if (i >= 0) mockGlobalLists.splice(i, 1);
+      return { RequestId: 'mock-delete-list' };
+    }
+    case 'ListUserWafRulesets':
+      return { Rulesets: mockGlobalWafRulesets, TotalCount: mockGlobalWafRulesets.length, RequestId: 'mock-list-global-waf' };
+    case 'CreateUserWafRuleset': {
+      const row = { ...params, Id: ++mockGlobalWafSeq };
+      mockGlobalWafRulesets.push(row);
+      return { Id: row.Id, RequestId: 'mock-create-global-waf' };
+    }
+    case 'UpdateUserWafRuleset': {
+      const row = mockGlobalWafRulesets.find((r) => Number(r.Id) === Number(params.Id));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-global-waf' };
+    }
+    case 'DeleteUserWafRuleset': {
+      const i = mockGlobalWafRulesets.findIndex((r) => Number(r.Id) === Number(params.Id));
+      if (i >= 0) mockGlobalWafRulesets.splice(i, 1);
+      return { RequestId: 'mock-delete-global-waf' };
+    }
+    case 'DescribeCustomScenePolicies':
+      return { Policies: mockScenePolicies, TotalCount: mockScenePolicies.length, RequestId: 'mock-list-scene-policies' };
+    case 'CreateCustomScenePolicy': {
+      const row = { ...params, PolicyId: ++mockSceneSeq, Status: 'enabled' };
+      mockScenePolicies.push(row);
+      return { PolicyId: row.PolicyId, RequestId: 'mock-create-scene-policy' };
+    }
+    case 'UpdateCustomScenePolicy': {
+      const row = mockScenePolicies.find((p) => Number(p.PolicyId) === Number(params.PolicyId));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-scene-policy' };
+    }
+    case 'DeleteCustomScenePolicy': {
+      const i = mockScenePolicies.findIndex((p) => Number(p.PolicyId) === Number(params.PolicyId));
+      if (i >= 0) mockScenePolicies.splice(i, 1);
+      return { RequestId: 'mock-delete-scene-policy' };
+    }
+    case 'EnableCustomScenePolicy':
+    case 'DisableCustomScenePolicy': {
+      const row = mockScenePolicies.find((p) => Number(p.PolicyId) === Number(params.PolicyId));
+      if (row) row.Status = action === 'EnableCustomScenePolicy' ? 'enabled' : 'disabled';
+      return { RequestId: 'mock-toggle-scene-policy' };
+    }
+    case 'ListPages':
+      return { Pages: mockCustomPages, TotalCount: mockCustomPages.length, RequestId: 'mock-list-pages' };
+    case 'CreatePage': {
+      const row = { ...params, Id: ++mockPageSeq };
+      mockCustomPages.push(row);
+      return { Id: row.Id, RequestId: 'mock-create-page' };
+    }
+    case 'UpdatePage': {
+      const row = mockCustomPages.find((p) => Number(p.Id) === Number(params.Id));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-page' };
+    }
+    case 'DeletePage': {
+      const i = mockCustomPages.findIndex((p) => Number(p.Id) === Number(params.Id));
+      if (i >= 0) mockCustomPages.splice(i, 1);
+      return { RequestId: 'mock-delete-page' };
+    }
+    case 'ListUserDeliveryTasks':
+      return { Tasks: mockUserDeliveryTasks, TotalCount: mockUserDeliveryTasks.length, RequestId: 'mock-list-user-delivery' };
+    case 'CreateUserDeliveryTask': {
+      const row = { ...params, Status: 'online' };
+      mockUserDeliveryTasks.push(row);
+      return { RequestId: 'mock-create-user-delivery' };
+    }
+    case 'UpdateUserDeliveryTask': {
+      const row = mockUserDeliveryTasks.find((t) => t.TaskName === params.TaskName);
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-user-delivery' };
+    }
+    case 'DeleteUserDeliveryTask': {
+      const i = mockUserDeliveryTasks.findIndex((t) => t.TaskName === params.TaskName);
+      if (i >= 0) mockUserDeliveryTasks.splice(i, 1);
+      return { RequestId: 'mock-delete-user-delivery' };
+    }
+    case 'UpdateUserDeliveryTaskStatus': {
+      const row = mockUserDeliveryTasks.find((t) => t.TaskName === params.TaskName);
+      if (row) row.Status = params.Method === 'off' ? 'offline' : 'online';
+      return { RequestId: 'mock-update-user-delivery-status' };
+    }
+    case 'DescribeUserResourcePackage':
+      return { Packages: mockResourcePackages, TotalCount: mockResourcePackages.length, RequestId: 'mock-resource-packages' };
+    case 'ListESAIPInfo':
+      return { IPInfo: [{ IP: String(params.VipInfo || '').split(',')[0], IsEsa: true }], RequestId: 'mock-esa-ip-info' };
+    case 'ListRoutineRoutes':
+      return {
+        Configs: mockRoutineRoutes.filter((r) => !params.RoutineName || r.RoutineName === params.RoutineName),
+        TotalCount: mockRoutineRoutes.length,
+      };
+    case 'CreateRoutineRoute': {
+      const row = { ...params, ConfigId: ++mockRoutineRouteSeq };
+      mockRoutineRoutes.push(row);
+      return { ConfigId: row.ConfigId, RequestId: 'mock-create-routine-route' };
+    }
+    case 'UpdateRoutineRoute': {
+      const row = mockRoutineRoutes.find((r) => Number(r.ConfigId) === Number(params.ConfigId));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-routine-route' };
+    }
+    case 'DeleteRoutineRoute': {
+      const i = mockRoutineRoutes.findIndex((r) => Number(r.ConfigId) === Number(params.ConfigId));
+      if (i >= 0) mockRoutineRoutes.splice(i, 1);
+      return { RequestId: 'mock-delete-routine-route' };
+    }
+    case 'ListCompressionRules':
+      return {
+        Configs: [{ ConfigId: 1, RuleName: 'default-compress', Gzip: 'on', Brotli: 'on', Zstd: 'off', RuleEnable: 'on', Sequence: 0 }],
+        TotalCount: 1,
+      };
+    case 'ListNetworkOptimizations':
+      return {
+        Configs: [
+          {
+            ConfigId: 1,
+            RuleName: 'default-network',
+            SmartRouting: 'off',
+            Http2Origin: 'on',
+            Websocket: 'on',
+            Grpc: 'off',
+            UploadMaxFilesize: '100',
+            RuleEnable: 'on',
+          },
+        ],
+        TotalCount: 1,
+      };
+    case 'ListWaitingRooms':
+      return { WaitingRooms: mockWaitingRooms, TotalCount: mockWaitingRooms.length };
+    case 'CreateWaitingRoom': {
+      const row = { ...params, WaitingRoomId: ++mockWaitingSeq };
+      mockWaitingRooms.push(row);
+      return { WaitingRoomId: row.WaitingRoomId, RequestId: 'mock-create-waiting-room' };
+    }
+    case 'UpdateWaitingRoom': {
+      const row = mockWaitingRooms.find((r) => Number(r.WaitingRoomId) === Number(params.WaitingRoomId));
+      if (row) Object.assign(row, params);
+      return { RequestId: 'mock-update-waiting-room' };
+    }
+    case 'DeleteWaitingRoom': {
+      const i = mockWaitingRooms.findIndex((r) => Number(r.WaitingRoomId) === Number(params.WaitingRoomId));
+      if (i >= 0) mockWaitingRooms.splice(i, 1);
+      return { RequestId: 'mock-delete-waiting-room' };
+    }
+    case 'ListWaitingRoomEvents':
+      return {
+        WaitingRoomEvents: mockWaitingEvents.filter((r) => Number(r.WaitingRoomId) === Number(params.WaitingRoomId)),
+        TotalCount: mockWaitingEvents.length,
+      };
+    case 'CreateWaitingRoomEvent': {
+      const row = { ...params, WaitingRoomEventId: ++mockWaitingEventSeq };
+      mockWaitingEvents.push(row);
+      return { WaitingRoomEventId: row.WaitingRoomEventId, RequestId: 'mock-create-waiting-room-event' };
+    }
+    case 'DeleteWaitingRoomEvent': {
+      const i = mockWaitingEvents.findIndex((r) => Number(r.WaitingRoomEventId) === Number(params.WaitingRoomEventId));
+      if (i >= 0) mockWaitingEvents.splice(i, 1);
+      return { RequestId: 'mock-delete-waiting-room-event' };
+    }
+    case 'ListWaitingRoomRules':
+      return {
+        WaitingRoomRules: mockWaitingRules.filter((r) => Number(r.WaitingRoomId) === Number(params.WaitingRoomId)),
+        TotalCount: mockWaitingRules.length,
+      };
+    case 'CreateWaitingRoomRule': {
+      const row = { ...params, WaitingRoomRuleId: ++mockWaitingRuleSeq };
+      mockWaitingRules.push(row);
+      return { WaitingRoomRuleId: row.WaitingRoomRuleId, RequestId: 'mock-create-waiting-room-rule' };
+    }
+    case 'DeleteWaitingRoomRule': {
+      const i = mockWaitingRules.findIndex((r) => Number(r.WaitingRoomRuleId) === Number(params.WaitingRoomRuleId));
+      if (i >= 0) mockWaitingRules.splice(i, 1);
+      return { RequestId: 'mock-delete-waiting-room-rule' };
+    }
+    case 'ListTransportLayerApplications':
+      return { Applications: mockL4Apps, TotalCount: mockL4Apps.length, PageNumber: 1, PageSize: 100 };
+    case 'GetTransportLayerApplication': {
+      const row = mockL4Apps.find((a) => Number(a.ApplicationId) === Number(params.ApplicationId));
+      return row ? { ...row, Rules: (row.Rules || []).map((r: any) => ({ ...r })), RequestId: 'mock-get-l4-app' } : { RequestId: 'mock-get-l4-app' };
+    }
+    case 'CreateTransportLayerApplication': {
+      const row = {
+        ...params,
+        ApplicationId: ++mockL4Seq,
+        RulesCount: Array.isArray(params.Rules) ? params.Rules.length : 0,
+        Status: 'online',
+        Cname: `${params.RecordName || 'l4'}.esa-cn.com`,
+      };
+      mockL4Apps.push(row);
+      return { ApplicationId: row.ApplicationId, RequestId: 'mock-create-l4-app' };
+    }
+    case 'UpdateTransportLayerApplication': {
+      const row = mockL4Apps.find((a) => Number(a.ApplicationId) === Number(params.ApplicationId));
+      if (row) {
+        Object.assign(row, params);
+        row.RulesCount = Array.isArray(row.Rules) ? row.Rules.length : 0;
+      }
+      return { RequestId: 'mock-update-l4-app' };
+    }
+    case 'DeleteTransportLayerApplication': {
+      const i = mockL4Apps.findIndex((a) => Number(a.ApplicationId) === Number(params.ApplicationId));
+      if (i >= 0) mockL4Apps.splice(i, 1);
+      return { RequestId: 'mock-delete-l4-app' };
+    }
+    case 'GetCacheTag':
+      return { ...mockCacheTag, SiteVersion: 0, RequestId: 'mock-get-cache-tag' };
+    case 'UpdateCacheTag':
+      mockCacheTag = { TagName: params.TagName || '', CaseInsensitive: params.CaseInsensitive || 'off' };
+      return { RequestId: 'mock-update-cache-tag' };
+    case 'GetDevelopmentMode':
+      return { Enable: mockDevMode, RequestId: 'mock-get-dev-mode' };
+    case 'UpdateDevelopmentMode':
+      mockDevMode = params.Enable || 'off';
+      return { RequestId: 'mock-update-dev-mode' };
+    case 'GetPerformanceDataCollection':
+      return { Enable: mockPerfCollection, RequestId: 'mock-get-perf' };
+    case 'UpdatePerformanceDataCollection':
+      mockPerfCollection = params.Enable || 'off';
+      return { RequestId: 'mock-update-perf' };
+    case 'ListInstanceQuotasWithUsage': {
+      const quotas = [
+        { QuotaName: 'customHttpCert', QuotaValue: '10', Usage: '2' },
+        { QuotaName: 'waiting_room', QuotaValue: '2', Usage: '1' },
+        { QuotaName: 'https|rule_quota', QuotaValue: '50', Usage: '8' },
+        { QuotaName: 'cache_rules|rule_quota', QuotaValue: '100', Usage: '24' },
+        { QuotaName: 'configuration_rules|rule_quota', QuotaValue: '200', Usage: '36' },
+        { QuotaName: 'redirect_rules|rule_quota', QuotaValue: '50', Usage: '4' },
+        { QuotaName: 'compression_rules|rule_quota', QuotaValue: '20', Usage: '2' },
+        { QuotaName: 'origin_rules|rule_quota', QuotaValue: '50', Usage: '6' },
+        { QuotaName: 'transition_rule', QuotaValue: '20', Usage: '0' },
+      ];
+      return { Quotas: quotas, Status: 'online', RequestId: 'mock-quota-usage' };
+    }
+    case 'DescribeSiteTimeSeriesData':
+    case 'DescribeSiteWafTimeSeriesData':
+      return {
+        Data: [],
+        SummarizedData: [{ Field: 'requests', Value: 12345 }],
+        StartTime: params.StartTime,
+        EndTime: params.EndTime,
+        Interval: Number(params.Interval || 3600),
+      };
+    case 'DescribeSiteTopData':
+    case 'DescribeSiteWafTopData':
+      return { Data: [{ Name: 'example.com', Value: 1000 }], StartTime: params.StartTime, EndTime: params.EndTime };
+    case 'TraceSite':
+      return { RequestId: 'trace-demo', Url: params.Url, MatchedRules: [{ RuleName: 'demo-route' }], CacheStatus: 'HIT' };
+    case 'PurgeCaches':
+    case 'PreloadCaches':
+      return { TaskId: 'task-demo' };
+    default:
+      return { RequestId: 'demo-request', Result: 'ok' };
+  }
+}
+
 export function installMock() {
   if (import.meta.env.VITE_MOCK !== 'true') return;
 
@@ -288,6 +1420,8 @@ export function installMock() {
 
     const method = String(init?.method || (typeof input !== 'string' ? input?.method : 'GET') || 'GET').toUpperCase();
     const path = url.slice(url.indexOf('/api')).split('?')[0];
+    const q = new URLSearchParams(url.split('?')[1] || '');
+    const aid = Number(q.get('aid') || 0);
     const json = (data: any, code = 0, msg = 'ok') =>
       new Response(JSON.stringify({ code, data, msg }), {
         status: 200,
@@ -319,6 +1453,57 @@ export function installMock() {
       }
       if (path === '/api/domains') return json(DOMAINS);
       if (path === '/api/dns/accounts') return json(DNS_ACCOUNTS);
+
+      // ---- 阿里云 ESA 演示站点（静态预览专用假数据）----
+      if (path === '/api/cdn/providers') return json(CDN_PROVIDERS);
+      if (path === '/api/cdn/zones') {
+        if (!aid || aid === 5) {
+          return json([{ ...ESA_SITE, aid: 5, typename: '阿里云 ESA', accountName: '阿里云 ESA 演示账户' }]);
+        }
+        if (aid === 6) {
+          return json([{ ...EO_SITE, aid: 6, typename: '腾讯云 EdgeOne', accountName: '腾讯云 EdgeOne 演示账户' }]);
+        }
+        return json([]);
+      }
+      if (path === '/api/cdn/zones/setting') {
+        if (aid === 6) return json(EO_ZONE_SETTING);
+        return new Response(JSON.stringify({ code: -1, msg: 'ESA 全局配置请使用规则引擎' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (path === '/api/cdn/accounts/6/zones') {
+        return json([{ zoneId: EO_SITE.zone_id, zoneName: EO_SITE.zone_name, status: EO_SITE.status, type: EO_SITE.type }]);
+      }
+      if (path === '/api/cdn/accounts/6/rule-schema') return json({ vendor: 'eo' });
+      if (path === '/api/cdn/accounts/6/rules') return json([]);
+      if (path === '/api/cdn/accounts/6/origin-groups') return json(EO_ORIGIN_GROUPS);
+      if (path === '/api/cdn/accounts/6/load-balancers') return json(EO_LOAD_BALANCERS);
+      if (path === '/api/cdn/accounts/5/plan-instances') return json(ESA_PLAN_INSTANCES);
+      {
+        const propsMatch = path.match(/^\/api\/cdn\/accounts\/5\/sites\/([^/]+)\/properties$/);
+        if (propsMatch) return json({ ...ESA_SITE_PROPS, zoneId: propsMatch[1], SiteId: propsMatch[1] });
+        const nsMatch = path.match(/^\/api\/cdn\/accounts\/5\/sites\/([^/]+)\/ns$/);
+        if (nsMatch) return json(ESA_SITE.nameServers);
+      }
+      if (path === '/api/cdn/accounts/5/esa/catalog') return json(ESA_CATALOG);
+      if (path === '/api/cdn/accounts/5/rule-schema') {
+        const kind = String(q.get('kind') || '');
+        if (!kind) return json({ vendor: 'esa', kinds: ESA_RULE_SCHEMA });
+        return json({ vendor: 'esa', kind, fields: ESA_RULE_SCHEMA.find((k) => k.kind === kind)?.fields || [] });
+      }
+      if (path === '/api/cdn/accounts/5/rule-configs') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/origin-groups') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/load-balancers') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/security/ip-groups') return json([]);
+      if (path === '/api/cdn/accounts/5/security/ddos') return json({ Protection: true, Level: 'normal' });
+      if (path === '/api/cdn/accounts/5/security/waf') return json({ phases: [] });
+      if (path === '/api/cdn/accounts/5/security/origin-protection') return json({ Enabled: true });
+      if (path === '/api/cdn/accounts/5/l4-proxies') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/tasks/purge') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/tasks/prefetch') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/quota/purge') return json({ Quota: 1000, Used: 12 });
+      if (path === '/api/cdn/accounts/5/analysis/top') return json([]);
       const cdnDomMatch = path.match(/^\/api\/cdn\/domains\/(\d+)$/);
       if (cdnDomMatch) {
         const d = CDN_DOMAINS.find((x) => x.id === Number(cdnDomMatch[1])) || CDN_DOMAINS[0];
@@ -340,7 +1525,11 @@ export function installMock() {
       if (path.match(/^\/api\/cdn\/domains\/(\d+)\/access$/)) {
         return json({ referer_mode: 'off', referer_list: [], ip_mode: 'off', ip_list: [], ua_list: [] });
       }
-      if (path === '/api/cdn/domains') return json(CDN_DOMAINS);
+      if (path === '/api/cdn/domains') {
+        if (aid === 5) return json(ESA_DOMAINS);
+        if (aid === 6) return json(EO_DOMAINS);
+        return json(CDN_DOMAINS);
+      }
       if (path === '/api/domains/categories') return json(CATEGORIES);
       if (path === '/api/records/search') return json(RECORDS);
       if (path === '/api/users') return json({ list: USERS, total: USERS.length });
@@ -377,6 +1566,18 @@ export function installMock() {
       // 其余 GET 统一返回空集合，保证未做专项 Mock 的页面不报错
       return json([]);
     }
+    if (path === '/api/cdn/accounts/5/sites/check') return json({ passed: true });
+    if (path === '/api/cdn/accounts/5/sites') return json({ zoneId: '1000000002', zoneName: 'new-demo-esa.com' });
+    if (path === '/api/cdn/accounts/5/esa/actions') {
+      let body: any = {};
+      try {
+        body = init?.body ? JSON.parse(String(init.body)) : {};
+      } catch {
+        body = {};
+      }
+      return json(mockEsaAction(String(body.action || ''), body.params || {}));
+    }
+
     // 写操作统一返回成功空对象（预览不可真正修改）
     return json({});
   };

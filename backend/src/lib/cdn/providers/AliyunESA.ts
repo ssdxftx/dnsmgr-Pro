@@ -4,6 +4,7 @@ import { catalogPath, fileExtensions, normalizeValue, parsePathRule, wildcardToR
 import type { PathRuleType } from '../pathRule.js';
 import { toEnabled, fromEnabled } from '../vendorSwitch.js';
 import { mapPool } from '../../util.js';
+import { getEsaApi } from '../esaApiCatalog.js';
 
 // params 透传时禁止覆盖的服务端控制键（由 provider 依业务语义设定）
 const ESA_RESERVED_PARAM_KEYS = new Set(['Action', 'SiteId', 'Id', 'ApplicationId', 'ConfigId', 'SiteVersion']);
@@ -34,9 +35,11 @@ export class AliyunESA implements CdnProvider {
     this.siteId = siteId;
   }
 
-  private async call(param: Record<string, any>): Promise<any> {
+  private async call(param: Record<string, any>, method?: 'GET' | 'POST'): Promise<any> {
     try {
-      const resp = await this.client.request(param);
+      const meta = getEsaApi(String(param.Action || ''));
+      const httpMethod = method || (meta?.methods?.includes('post') || !meta?.methods?.length ? 'POST' : 'GET');
+      const resp = await this.client.request(param, httpMethod);
       if (resp.Code && resp.Code !== 'Success') throw new Error(resp.Message || resp.Code);
       return resp;
     } catch (e: any) {
@@ -53,13 +56,35 @@ export class AliyunESA implements CdnProvider {
       const data = await this.call({ Action: 'ListSites', PageNumber: page, PageSize: size });
       if (!data) break;
       for (const s of data.Sites || []) {
-        list.push({ zoneId: String(s.SiteId || ''), zoneName: s.SiteName || '', status: s.Status || '', area: s.Coverage || '' });
+        list.push({
+          zoneId: String(s.SiteId || ''),
+          zoneName: s.SiteName || '',
+          status: s.Status || '',
+          area: s.Coverage || '',
+          accessType: s.AccessType || '',
+          nameServers: this.splitNs(s.NameServerList),
+          verifyCode: s.VerifyCode || '',
+          versionManagement: s.VersionManagement === true,
+          planName: s.PlanName || '',
+          instanceId: s.InstanceId || '',
+          createTime: s.CreateTime || '',
+          updateTime: s.UpdateTime || '',
+          offlineReason: s.OfflineReason || '',
+        });
       }
       const total = Number(data.TotalCount || 0);
       if ((data.Sites || []).length < size || list.length >= total) break;
       page++;
     }
     return list;
+  }
+
+  private splitNs(value: any): string[] {
+    if (Array.isArray(value)) return value.map((x) => String(x)).filter(Boolean);
+    return String(value || '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
   }
 
   async check() {
@@ -590,6 +615,29 @@ export class AliyunESA implements CdnProvider {
     return d.NSList || [];
   }
 
+  async getSiteProperties(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.call({ Action: 'GetSite', SiteId: Number(zoneId) });
+    if (!d) return false;
+    const model = d.SiteModel || {};
+    const exclusive = await this.call({ Action: 'GetSiteNameExclusive', SiteId: Number(zoneId) });
+    return {
+      ...model,
+      zoneId: String(model.SiteId || zoneId),
+      zoneName: model.SiteName || '',
+      area: model.Coverage || '',
+      accessType: model.AccessType || '',
+      nsList: this.splitNs(model.NameServerList),
+      vanityNs: Object.keys(model.VanityNSList || {}),
+      nameExclusive: exclusive ? exclusive.Enable === 'on' : false,
+      versionManagement: model.VersionManagement === true,
+    };
+  }
+
+  async updateSiteVanityNS(zoneId: string, nsList: string[] | string): Promise<boolean> {
+    const value = Array.isArray(nsList) ? nsList.join(',') : String(nsList || '');
+    return (await this.call({ Action: 'UpdateSiteVanityNS', SiteId: Number(zoneId), VanityNSList: value })) !== false;
+  }
+
   async deleteZone(zoneId: string): Promise<boolean> {
     return (await this.call({ Action: 'DeleteSite', SiteId: Number(zoneId) })) !== false;
   }
@@ -948,5 +996,17 @@ export class AliyunESA implements CdnProvider {
 
   async updateTieredCache(zoneId: string, mode: string): Promise<boolean> {
     return (await this.call({ Action: 'UpdateTieredCache', SiteId: Number(zoneId), CacheArchitectureMode: mode })) !== false;
+  }
+
+  /** 通用 ESA API 执行器：Action 必须存在于官方元数据目录，参数按官方字段直接透传 */
+  async runEsaApi(action: string, params: Record<string, any> = {}): Promise<Record<string, any> | false> {
+    const meta = getEsaApi(action);
+    if (!meta) {
+      this.error = `不支持的 ESA API：${action}`;
+      return false;
+    }
+    const body: Record<string, any> = { ...params };
+    delete body.Action;
+    return (await this.call(this.withJson({ Action: action, ...body }))) || false;
   }
 }

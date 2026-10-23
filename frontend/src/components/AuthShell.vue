@@ -63,6 +63,8 @@
         <span v-for="(p, i) in platforms" :key="'b' + i" class="auth-ticker__item"><i class="dot" />{{ p }}</span>
       </div>
     </div>
+
+    <AnnouncementModal v-if="announcements" />
   </div>
 </template>
 
@@ -72,8 +74,12 @@ import { NIcon } from 'naive-ui';
 import { GlobeOutline } from '@vicons/ionicons5';
 import { useI18n } from 'vue-i18n';
 import { useLocale } from '../composables/useLocale';
+import AnnouncementModal from './AnnouncementModal.vue';
 
-withDefaults(defineProps<{ maxWidth?: string }>(), { maxWidth: '440px' });
+withDefaults(defineProps<{ maxWidth?: string; announcements?: boolean }>(), {
+  maxWidth: '440px',
+  announcements: true,
+});
 
 const { t } = useI18n();
 const { locale, setLocale } = useLocale();

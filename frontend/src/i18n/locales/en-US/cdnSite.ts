@@ -30,6 +30,7 @@ export default {
     verifiedOk: 'Verification done',
     nameOk: 'Site name is available',
     nameBad: 'Site name is not available',
+    needInstance: 'Select a plan instance',
     needName: 'Please enter a site name',
     confirmDelete: 'Delete site "{name}"? This cannot be undone.',
     coverageDomestic: 'Chinese Mainland',

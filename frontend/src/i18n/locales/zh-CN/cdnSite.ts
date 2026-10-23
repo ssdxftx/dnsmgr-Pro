@@ -30,6 +30,7 @@ export default {
     verifiedOk: '验证完成',
     nameOk: '站点名可用',
     nameBad: '站点名不可用',
+    needInstance: '请选择套餐实例',
     needName: '请输入站点名称',
     confirmDelete: '确定删除站点「{name}」？该操作不可恢复。',
     coverageDomestic: '中国内地',

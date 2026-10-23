@@ -19,6 +19,15 @@
   margin-left: auto;
 }
 
+/* ---- 页面级工具条：左侧刷新、右侧功能页下拉，无卡片底色 ---- */
+.zone-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+
 /* ---- 分区面板：由 .zone-panel 提升为全站可复用的语义分区 ---- */
 .app-panel {
   background: var(--app-surface-2);
@@ -73,14 +82,16 @@
   white-space: nowrap;
 }
 
-/* ---- 弹窗宽度三档：sm=480 / md=640 / lg=800（替代 10+ 种内联 max-width） ---- */
+/* ---- 弹窗宽度四档：sm=480 / md=640 / lg=800 / xl=1080（替代零散内联 max-width） ---- */
 .modal-sm { max-width: 480px; }
 .modal-md { max-width: 640px; }
 .modal-lg { max-width: 800px; }
+.modal-xl { max-width: 1080px; }
 @media (max-width: 767px) {
   .modal-sm,
   .modal-md,
-  .modal-lg {
+  .modal-lg,
+  .modal-xl {
     max-width: calc(100vw - 32px);
   }
 }

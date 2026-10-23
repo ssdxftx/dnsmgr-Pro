@@ -17,10 +17,11 @@
         <n-divider class="section" title-placement="left">HTTPS / TLS</n-divider>
         <n-form-item :label="t('cdnZone.forceHttpsLabel')">
           <n-switch v-model:value="zone.forceSwitch" />
-          <n-select
-            v-model:value="zone.forceCode"
+          <EsaCardSelect
+            v-model="zone.forceCode"
             :options="[{ label: '302', value: 302 }, { label: '301', value: 301 }]"
-            style="width: 90px; margin-left: 8px"
+            dense
+            style="width: 120px; margin-left: 8px"
           />
         </n-form-item>
         <n-form-item label="HTTP/2"><n-switch v-model:value="zone.http2" /></n-form-item>
@@ -106,8 +107,9 @@ import { reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   NAlert, NButton, NCheckbox, NDivider, NForm, NFormItem, NInput,
-  NInputNumber, NRadio, NRadioGroup, NSelect, NSpace, NSpin, NSwitch, useMessage,
+  NInputNumber, NRadio, NRadioGroup, NSpace, NSpin, NSwitch, useMessage,
 } from 'naive-ui';
+import EsaCardSelect from './EsaCardSelect.vue';
 import { api } from '../../api';
 
 const props = defineProps<{ aid: number; zoneId: string }>();

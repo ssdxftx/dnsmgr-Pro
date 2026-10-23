@@ -85,6 +85,10 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/system/webhooktest': { module: 'system', action: 'system.test.webhook' },
   'POST /api/system/customwebhooktest': { module: 'system', action: 'system.test.customWebhook' },
   'POST /api/system/proxytest': { module: 'system', action: 'system.test.proxy' },
+  'POST /api/system/announcements': { module: 'system', action: 'system.announcement.create', targetType: 'announcement' },
+  'PUT /api/system/announcements/:id': { module: 'system', action: 'system.announcement.update', targetType: 'announcement' },
+  'POST /api/system/announcements/:id/status': { module: 'system', action: 'system.announcement.status', targetType: 'announcement' },
+  'DELETE /api/system/announcements/:id': { module: 'system', action: 'system.announcement.delete', targetType: 'announcement' },
   'POST /api/about/check-update': { module: 'system', action: 'system.checkUpdate' },
 
   // 用户
@@ -144,6 +148,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/cdn/accounts/:aid/l4-proxies': { module: 'cdn', action: 'cdn.l4Proxy.create' },
   'PUT /api/cdn/accounts/:aid/l4-proxies/:proxyId': { module: 'cdn', action: 'cdn.l4Proxy.update' },
   'DELETE /api/cdn/accounts/:aid/l4-proxies/:proxyId': { module: 'cdn', action: 'cdn.l4Proxy.delete' },
+  'POST /api/cdn/accounts/:aid/esa/actions': { module: 'cdn', action: 'cdn.esa.api', targetType: 'cdn_zone' },
   'POST /api/cdn/accounts/:aid/l4-proxies/:proxyId/rules': { module: 'cdn', action: 'cdn.l4Rule.create' },
   'DELETE /api/cdn/accounts/:aid/l4-proxies/:proxyId/rules': { module: 'cdn', action: 'cdn.l4Rule.delete' },
 

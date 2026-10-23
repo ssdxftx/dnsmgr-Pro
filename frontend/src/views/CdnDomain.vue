@@ -58,13 +58,25 @@
     <n-modal :show="showAdd && stepKey === 'account'" preset="card" :title="t('cdnDomain.addTitle1')" class="modal-md" :mask-closable="false" @update:show="(v: boolean) => (showAdd = v)">
       <n-form label-placement="left" label-width="110" class="add-form">
         <n-form-item :label="t('cdnDomain.account')">
-          <n-select v-model:value="form.aid" :options="accountOptions" @update:value="onAccountChange" />
+          <EsaCardSelect
+            :model-value="form.aid"
+            :options="accountOptions"
+            compact
+            @update:model-value="(v: any) => { form.aid = v; onAccountChange(v); }"
+          />
         </n-form-item>
         <n-form-item v-if="addFlow.zone.needed" :label="addFlow.zone.label">
-          <n-select v-model:value="form.zone_id" :options="zoneOptions" :placeholder="t('cdnDomain.selectZone', { label: addFlow.zone.label })" @update:value="onZoneChange" />
+          <EsaCardSelect
+            :model-value="form.zone_id"
+            :options="zoneOptions"
+            compact
+            searchable
+            :placeholder="t('cdnDomain.selectZone', { label: addFlow.zone.label })"
+            @update:model-value="(v: any) => { form.zone_id = v; onZoneChange(v); }"
+          />
         </n-form-item>
         <n-form-item v-if="addFlow.serviceArea.needed" :label="t('cdnDomain.serviceArea')">
-          <n-select v-model:value="form.service_area" :options="serviceAreaOptions" />
+          <EsaCardSelect v-model="form.service_area" :options="serviceAreaOptions" compact />
         </n-form-item>
       </n-form>
       <template #footer>
@@ -233,10 +245,10 @@
     <n-modal v-model:show="showSync" preset="card" :title="t('cdnDomain.syncTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cdnDomain.account')">
-          <n-select v-model:value="syncAid" :options="accountOptions" />
+          <EsaCardSelect v-model="syncAid" :options="accountOptions" compact />
         </n-form-item>
         <n-form-item :label="t('cdnDomain.linkedDomain')">
-          <n-select v-model:value="syncDid" :options="[{ label: t('common.all'), value: 0 }, ...dnsDomainOptions]" />
+          <EsaCardSelect v-model="syncDid" :options="[{ label: t('common.all'), value: 0 }, ...dnsDomainOptions]" compact searchable />
         </n-form-item>
       </n-form>
       <template #footer>
@@ -515,6 +527,7 @@ import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 import EmptyState from '../components/EmptyState.vue';
 import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
 import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';

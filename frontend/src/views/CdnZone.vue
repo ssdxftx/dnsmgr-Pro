@@ -2,6 +2,7 @@
   <div class="app-stack">
     <PageHeader :title="t('cdnZone.title')" :subtitle="t('cdnZone.subtitle')" back="/cdn-domains">
       <template #actions>
+        <n-button v-if="createAccounts.length" size="small" type="primary" @click="openCreate">{{ t('cdnSite.create') }}</n-button>
         <n-button size="small" :loading="loadBusy" @click="loadAll">{{ t('cdnZoneSetting.refresh') }}</n-button>
       </template>
     </PageHeader>
@@ -79,11 +80,65 @@
         </div>
       </div>
     </n-card>
+
+    <n-modal v-model:show="showCreate" preset="card" :title="t('cdnSite.create')" class="modal-md" :mask-closable="false">
+      <n-form label-placement="left" label-width="110">
+        <n-form-item :label="t('cdnAccount.provider')">
+          <EsaCardSelect
+            :model-value="createForm.aid"
+            :options="createAccountOptions"
+            compact
+            @update:model-value="(v: any) => { createForm.aid = v; onCreateAid(v); }"
+          />
+        </n-form-item>
+        <n-form-item :label="t('cdnSite.siteName')">
+          <div class="create-name-row">
+            <n-input v-model:value="createForm.name" :placeholder="t('cdnSite.siteNamePlaceholder')" />
+            <n-button size="small" :loading="checkBusy" :disabled="!createForm.aid || !createForm.name" @click="checkName">{{ t('cdnSite.checkName') }}</n-button>
+          </div>
+        </n-form-item>
+        <n-alert v-if="checkResult" :type="checkResult.passed ? 'success' : 'warning'" :show-icon="false" class="mb-3">
+          {{ checkResult.message }}
+        </n-alert>
+
+        <template v-if="createIsEsa">
+          <n-form-item :label="t('cdnSite.coverage')">
+            <EsaCardSelect v-model="createForm.coverage" :options="coverageOptions" compact />
+          </n-form-item>
+          <n-form-item :label="t('cdnSite.accessType')">
+            <EsaCardSelect v-model="createForm.accessType" :options="accessTypeOptions" compact />
+          </n-form-item>
+          <n-form-item :label="t('cdnSite.instance')">
+            <EsaCardSelect
+              v-model="createForm.instanceId"
+              :options="planOptions"
+              compact
+              searchable
+              :placeholder="t('cdnSite.instance')"
+            />
+          </n-form-item>
+        </template>
+        <template v-else>
+          <n-form-item :label="t('cdnSite.type')">
+            <EsaCardSelect v-model="createForm.type" :options="eoTypeOptions" compact />
+          </n-form-item>
+          <n-form-item :label="t('cdnSite.area')">
+            <EsaCardSelect v-model="createForm.area" :options="eoAreaOptions" compact />
+          </n-form-item>
+        </template>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showCreate = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="createBusy" @click="createSite">{{ t('cdnSite.create') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NCard, NSpin, NTag, useMessage } from 'naive-ui';
@@ -91,6 +146,7 @@ import { FolderOpenOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
+import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 
 const { t } = useI18n();
 const message = useMessage();
@@ -101,7 +157,38 @@ const loadBusy = ref(false);
 const zoneList = ref<any[]>([]);
 const accounts = ref<any[]>([]);
 const cfAccounts = ref<any[]>([]);
+const providers = ref<Record<string, any>>({});
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+
+const showCreate = ref(false);
+const createBusy = ref(false);
+const checkBusy = ref(false);
+const planBusy = ref(false);
+const planOptions = ref<any[]>([]);
+const checkResult = ref<{ passed: boolean; message: string } | null>(null);
+const createForm = reactive<any>({ aid: null, name: '', coverage: 'domestic', accessType: 'NS', instanceId: '', type: 'partial', area: 'global' });
+const coverageOptions = computed(() => [
+  { label: t('cdnSite.coverageDomestic'), value: 'domestic' },
+  { label: t('cdnSite.coverageGlobal'), value: 'global' },
+  { label: t('cdnSite.coverageOverseas'), value: 'overseas' },
+]);
+const accessTypeOptions = computed(() => [
+  { label: t('cdnSite.accessNS'), value: 'NS' },
+  { label: t('cdnSite.accessCNAME'), value: 'CNAME' },
+]);
+const eoTypeOptions = computed(() => [
+  { label: t('cdnSite.typePartial'), value: 'partial' },
+  { label: t('cdnSite.typeFull'), value: 'full' },
+]);
+const eoAreaOptions = computed(() => [
+  { label: t('cdnSite.areaGlobal'), value: 'global' },
+  { label: t('cdnSite.areaMainland'), value: 'mainland' },
+  { label: t('cdnSite.areaOverseas'), value: 'overseas' },
+]);
+const createAccounts = computed(() => accounts.value.filter((a: any) => providers.value[a.type]?.capabilities?.zoneManage));
+const createAccountOptions = computed(() => createAccounts.value.map((a: any) => ({ label: `${a.name} · ${providers.value[a.type]?.name || a.type}`, value: a.id })));
+const createAccount = computed(() => createAccounts.value.find((a: any) => Number(a.id) === Number(createForm.aid)) || null);
+const createIsEsa = computed(() => String(createAccount.value?.type || '') === 'aliyun_esa');
 
 function statusLabel(row: any) {
   if (row.paused) return t('cdnSite.statusPaused');
@@ -134,9 +221,104 @@ function openSetting(row: any) {
   router.push(`/cdn-zones/${row.aid}/${encodeURIComponent(String(row.zone_id))}`);
 }
 
+async function loadProviders() {
+  const res = await api<any>('GET', '/cdn/providers');
+  providers.value = res.code === 0 ? res.data || {} : {};
+}
+
 async function loadAccounts() {
   const res = await api<any>('GET', '/cdn/accounts');
   accounts.value = res.code === 0 ? res.data || [] : [];
+}
+
+function openCreate() {
+  checkResult.value = null;
+  planOptions.value = [];
+  const first = createAccounts.value[0];
+  createForm.aid = first?.id || null;
+  createForm.name = '';
+  createForm.coverage = 'domestic';
+  createForm.accessType = 'NS';
+  createForm.instanceId = '';
+  createForm.type = 'partial';
+  createForm.area = 'global';
+  showCreate.value = true;
+  if (createForm.aid) onCreateAid(createForm.aid);
+}
+
+function onCreateAid(aid: number) {
+  checkResult.value = null;
+  planOptions.value = [];
+  createForm.instanceId = '';
+  if (String(createAccount.value?.type || '') === 'aliyun_esa') loadPlans();
+}
+
+async function loadPlans() {
+  if (!createForm.aid) return;
+  planBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/cdn/accounts/${createForm.aid}/plan-instances`);
+    if (res.code !== 0) {
+      message.error(res.msg);
+      return;
+    }
+    const list = Array.isArray(res.data) ? res.data : [];
+    planOptions.value = list
+      .filter((p: any) => p.InstanceId)
+      .map((p: any) => ({
+        label: `${p.PlanName || p.InstanceId} · ${p.InstanceId}${p.ExpireTime ? ' · ' + String(p.ExpireTime).slice(0, 10) : ''}`,
+        value: String(p.InstanceId),
+      }));
+    if (!createForm.instanceId && planOptions.value.length) createForm.instanceId = planOptions.value[0].value;
+  } finally {
+    planBusy.value = false;
+  }
+}
+
+async function checkName() {
+  if (!createForm.aid || !createForm.name) return;
+  checkBusy.value = true;
+  try {
+    const res = await api<any>('POST', `/cdn/accounts/${createForm.aid}/sites/check`, { siteName: createForm.name.trim() });
+    if (res.code !== 0) {
+      checkResult.value = { passed: false, message: res.msg };
+      return;
+    }
+    const passed = res.data?.passed !== false;
+    checkResult.value = {
+      passed,
+      message: passed ? t('cdnSite.nameOk') : res.data?.reason || res.data?.message || t('cdnSite.nameBad'),
+    };
+  } finally {
+    checkBusy.value = false;
+  }
+}
+
+async function createSite() {
+  if (!createForm.aid) return message.warning(t('cdnAccount.fillWarning'));
+  if (!createForm.name.trim()) return message.warning(t('cdnSite.needName'));
+  if (createIsEsa.value && !createForm.instanceId) return message.warning(t('cdnSite.needInstance'));
+  createBusy.value = true;
+  try {
+    const body: Record<string, any> = { name: createForm.name.trim() };
+    if (createIsEsa.value) {
+      body.coverage = createForm.coverage;
+      body.accessType = createForm.accessType;
+      body.instanceId = createForm.instanceId;
+    } else {
+      body.type = createForm.type;
+      body.area = createForm.area;
+    }
+    const res = await api<any>('POST', `/cdn/accounts/${createForm.aid}/sites`, body);
+    if (res.code !== 0) return message.error(res.msg);
+    message.success(res.msg || t('cdnSite.created'));
+    showCreate.value = false;
+    const zoneId = res.data?.zoneId || res.data?.SiteId;
+    if (zoneId) router.push(`/cdn-zones/${createForm.aid}/${encodeURIComponent(String(zoneId))}`);
+    else loadAll();
+  } finally {
+    createBusy.value = false;
+  }
 }
 
 async function loadAll() {
@@ -194,13 +376,25 @@ function openCfRules(a: any) {
   router.push({ path: '/cf-rules', query: { aid: String(a.aid) } });
 }
 
-onMounted(() => {
+onMounted(async () => {
+  await loadProviders();
   loadAll();
   loadCfAccounts();
 });
 </script>
 
 <style scoped>
+.create-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.create-name-row .n-input {
+  flex: 1;
+}
+
 .zone-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));

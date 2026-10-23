@@ -105,7 +105,7 @@
           <n-descriptions-item :label="t('record.recordValue')">{{ checkResult.value }}</n-descriptions-item>
         </n-descriptions>
         <n-alert
-          :type="checkResult.status === 'active' ? 'success' : checkResult.status === 'mismatch' ? 'error' : 'warning'"
+          :type="checkResult.status === 'active' ? 'success' : checkResult.status === 'cloudflare' ? 'info' : checkResult.status === 'mismatch' ? 'error' : 'warning'"
           :show-icon="false"
           :title="statusText"
         />
@@ -217,6 +217,7 @@ const lineOptions = computed(() =>
 const statusText = computed(() => {
   const s = checkResult.value.status;
   if (s === 'active') return t('record.statusActive');
+  if (s === 'cloudflare') return t('record.statusCloudflare');
   if (s === 'mismatch') return t('record.statusMismatch');
   if (s === 'not_found') return t('record.statusNotFound');
   return '';

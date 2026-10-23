@@ -1,5 +1,6 @@
 <template>
   <div class="app-stack">
+    <AnnouncementModal />
     <PageHeader :title="t('dashboard.title')" :subtitle="t('dashboard.subtitle')" />
 
     <!-- 遥测卡：计数动画 + 曲线描边 -->
@@ -67,6 +68,7 @@ import { useResponsive } from '../composables/useResponsive';
 import PageHeader from '../components/PageHeader.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import EmptyState from '../components/EmptyState.vue';
+import AnnouncementModal from '../components/AnnouncementModal.vue';
 
 const router = useRouter();
 const { t } = useI18n();

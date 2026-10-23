@@ -30,6 +30,8 @@ const routes = [
       { path: 'preheat-tasks', component: () => import('./views/PreheatTask.vue'), meta: { titleKey: 'route.preheatTasks' } },
       { path: 'dns-check', component: () => import('./views/DnsCheckTask.vue'), meta: { titleKey: 'route.dnsCheck' } },
       { path: 'cdn-zones', component: () => import('./views/CdnZone.vue'), meta: { titleKey: 'route.cdnZones' } },
+      { path: 'cdn-accounts/:aid/esa-api', component: () => import('./views/CdnEsaApi.vue'), meta: { titleKey: 'route.cdnEsaApi' } },
+      { path: 'cdn-accounts/:aid/esa-console', component: () => import('./views/CdnEsaConsole.vue'), meta: { titleKey: 'route.cdnEsaConsole' } },
       { path: 'cdn-zones/:aid/:zoneId', component: () => import('./views/CdnZoneSetting.vue'), meta: { titleKey: 'route.cdnZones' } },
       { path: 'cf-rules', component: () => import('./views/CfRules.vue'), meta: { titleKey: 'route.cfRules' } },
       { path: 'cdn-domains/:id/setting', component: () => import('./views/CdnDomainSetting.vue'), meta: { titleKey: 'route.cdnSetting' } },
@@ -93,12 +95,12 @@ router.beforeEach(async (to, from, next) => {
     if (to.path.startsWith('/statistics') && Number(u?.stat_cache) === 1) return next();
     return next('/domains');
   }
-  // CDN 站点设置路由的两个参数都必须为正整数
-  if (to.params.aid !== undefined || to.params.zoneId !== undefined) {
+  // CDN 相关路由：aid 必须为正整数；带 zoneId 的路由同时校验 zoneId
+  if (to.params.aid !== undefined) {
     const aid = Number(to.params.aid);
-    const zoneId = String(to.params.zoneId ?? '');
-    if (!Number.isInteger(aid) || aid <= 0 || !zoneId.trim()) return next('/cdn-zones');
+    if (!Number.isInteger(aid) || aid <= 0) return next('/cdn-zones');
   }
+  if (to.params.zoneId !== undefined && !String(to.params.zoneId).trim()) return next('/cdn-zones');
   // 带参数路由的 id 必须是正整数，避免 Number('abc')=NaN 直接进接口（页面回显 #NaN、报错无意义）
   if (to.params.id !== undefined) {
     const id = Number(to.params.id);

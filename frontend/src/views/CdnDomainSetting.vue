@@ -34,7 +34,7 @@
             <n-input v-model:value="originForm.origin_host" :placeholder="t('cdnSetting.originHostPlaceholder')" />
           </n-form-item>
           <n-form-item :label="t('cdnSetting.originProtocolLabel')">
-            <n-select v-model:value="originForm.origin_protocol" :options="protoOptions" style="width:200px" />
+            <EsaCardSelect v-model="originForm.origin_protocol" :options="protoOptions" compact style="width: 240px" />
           </n-form-item>
           <n-form-item :label="t('cdnSetting.originPortLabel')">
             <n-space align="center" :size="8">
@@ -129,6 +129,7 @@ import { NDynamicInput, NDynamicTags, useMessage } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 
 const { t } = useI18n();
 const route = useRoute();

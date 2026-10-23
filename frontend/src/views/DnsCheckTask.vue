@@ -99,6 +99,20 @@
         size="small"
         style="margin-top: 12px"
       />
+      <n-alert
+        v-if="runningResult.proxied && runningResult.proxied.length"
+        type="info"
+        :show-icon="false"
+        :title="t('dnsCheck.cloudflareProxied', { count: runningResult.proxied.length })"
+        style="margin-top: 12px"
+      />
+      <ResponsiveDataTable
+        v-if="runningResult.proxied && runningResult.proxied.length"
+        :columns="proxyColumns"
+        :data="runningResult.proxied"
+        size="small"
+        style="margin-top: 8px"
+      />
       <template #footer>
         <n-space justify="end">
           <n-button @click="showResult = false">{{ t('common.close') }}</n-button>
@@ -146,7 +160,7 @@ const subOptions = ref<any[]>([]);
 const showEdit = ref(false);
 const editingId = ref<number | null>(null);
 const showResult = ref(false);
-const runningResult = ref<any>({ total: 0, issues: [], error: '' });
+const runningResult = ref<any>({ total: 0, issues: [], proxied: [], error: '' });
 const typeList = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA'];
 
 const form = reactive<any>({ name: '', did: null, sub: null, types: [], cycle: 'daily', runTime: '04:00', intervalMin: 60, noticeEmail: '', active: true });
@@ -291,6 +305,23 @@ const issueColumns = computed(() => [
     key: 'status',
     width: 90,
     render: (row: any) => h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => (row.status === 'not_found' ? t('dnsCheck.notFound') : t('dnsCheck.mismatch')) }),
+  },
+]);
+
+const proxyColumns = computed(() => [
+  { title: t('dnsCheck.hostRecord'), key: 'name', width: 120 },
+  { title: t('common.type'), key: 'type', width: 70 },
+  { title: t('dnsCheck.expectedValue'), key: 'value', width: 150, ellipsis: { tooltip: true } },
+  {
+    title: t('dnsCheck.actualValue'),
+    key: 'actual',
+    render: (row: any) => (row.actual && row.actual.length ? row.actual.join(', ') : '-'),
+  },
+  {
+    title: t('common.status'),
+    key: 'status',
+    width: 150,
+    render: () => h(NTag, { size: 'small', type: 'info', bordered: false }, { default: () => t('dnsCheck.cloudflareProxiedStatus') }),
   },
 ]);
 

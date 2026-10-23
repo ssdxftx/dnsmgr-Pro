@@ -146,6 +146,7 @@ assert((await lock1).locked && !lock2.locked, 'SQLite 命名锁互斥');
 const columns = await db.listColumns('dnsmgr_user');
 assert(columns.some((column) => column.Field === 'email'), 'listColumns 返回表结构');
 assert(await db.columnExists('dnsmgr_cert_order', 'cdn_domain_id'), '生成列检测可用');
+assert(await db.tableExists('dnsmgr_announcement'), '公告表迁移成功');
 const generated: any = await db.query('INSERT INTO dnsmgr_cert_order (aid, status, isauto, link) VALUES (?, ?, ?, ?)', [1, 3, 1, '{"cdnDomainId":123}']);
 assert((await db.query<any>('SELECT cdn_domain_id FROM dnsmgr_cert_order WHERE id = ?', [generated.insertId]))[0].cdn_domain_id === 123, '生成列可查询');
 const migrate = await import('../src/migrate.js');
@@ -180,12 +181,19 @@ const statRow: any = await db.queryOne(
 );
 assert(statRow?.data === 'b', '多行 upsert 与 VALUES(col) 翻译正确');
 
+await db.query(
+  `INSERT INTO dnsmgr_announcement (title, content, type, active, sort_order, starttime, endtime, addtime, updatetime)
+   VALUES (?, ?, 'info', 1, 0, NULL, NULL, NOW(), NOW())`,
+  ['check-announcement', 'backup check'],
+);
+
 const exported = await backupExport.exportBackup({ scope: 'site', includeLogs: true });
 assert(exported.size > 0 && exported.file.endsWith('.dnsmgrbk'), 'SQLite 备份导出成功');
 const key = await backupKey.getBackupKey();
 assert(key, '备份密钥可用');
 const report = await backupImport.importArchive(path.join(backupArchive.backupsDir(), exported.file), { key, mode: 'replace' });
 assert(report.tables.domain?.inserted === 2, 'SQLite 备份恢复域名数据');
+assert(report.tables.announcement?.inserted === 1, 'SQLite 备份恢复公告数据');
 
 const configFile = path.join(dir, 'config.json');
 const saved = JSON.parse(fs.readFileSync(configFile, 'utf8'));

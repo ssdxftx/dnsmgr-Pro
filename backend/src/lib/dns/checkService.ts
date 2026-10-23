@@ -1,6 +1,7 @@
 import { query, queryOne, table } from '../../db.js';
 import { getDnsProvider } from './factory.js';
 import { localResolve, recordValueMatches } from './localResolve.js';
+import { detectCloudflareProxy } from './cloudflare.js';
 import { getUserPermissions, matchPermission, sameDomain } from '../../auth.js';
 import { configGet } from '../../config.js';
 import { sendMail } from '../monitor/msgNotice.js';
@@ -27,6 +28,13 @@ export interface CheckIssue {
   type: string;
   value: string;
   status: 'not_found' | 'mismatch';
+  actual: string[];
+}
+
+export interface CheckProxied {
+  name: string;
+  type: string;
+  value: string;
   actual: string[];
 }
 
@@ -69,13 +77,13 @@ export async function checkDomainRecords(
   types?: string[],
   uid?: number,
   sub?: string | null,
-): Promise<{ total: number; issues: CheckIssue[]; error?: string }> {
+): Promise<{ total: number; issues: CheckIssue[]; proxied: CheckProxied[]; error?: string }> {
   const d: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
-  if (!d) return { total: 0, issues: [], error: '域名不存在' };
+  if (!d) return { total: 0, issues: [], proxied: [], error: '域名不存在' };
   const acct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
-  if (!acct) return { total: 0, issues: [], error: '账户不存在' };
+  if (!acct) return { total: 0, issues: [], proxied: [], error: '账户不存在' };
   const provider: any = getDnsProvider(acct.type, safeJson(acct.config), d.name, d.thirdid);
-  if (!provider) return { total: 0, issues: [], error: '该厂商暂未支持' };
+  if (!provider) return { total: 0, issues: [], proxied: [], error: '该厂商暂未支持' };
 
   // 权限范围：未传 uid 视为管理员（默认全量），否则按用户是否为管理员/是否开启检测整个域名决定
   let scopeAdmin = true;
@@ -112,6 +120,7 @@ export async function checkDomainRecords(
 
   const typeSet = types && types.length ? new Set(types) : null;
   const issues: CheckIssue[] = [];
+  const proxied: CheckProxied[] = [];
   const targetsToCheck: { name: any; type: any; value: any; fullDomain: string }[] = [];
   for (const r of list) {
     if (typeSet && !typeSet.has(r.Type)) continue;
@@ -131,15 +140,21 @@ export async function checkDomainRecords(
     while (cursor < targetsToCheck.length) {
       const c = targetsToCheck[cursor++];
       const actual = await localResolve(c.fullDomain, c.type);
+      if (actual.length && recordValueMatches(String(c.value), actual)) continue;
+      const cf = await detectCloudflareProxy(c.fullDomain, c.type, actual);
+      if (cf.proxied) {
+        proxied.push({ name: c.name, type: c.type, value: String(c.value), actual: cf.actual });
+        continue;
+      }
       if (!actual.length) {
         issues.push({ name: c.name, type: c.type, value: String(c.value), status: 'not_found', actual: [] });
-      } else if (!recordValueMatches(String(c.value), actual)) {
+      } else {
         issues.push({ name: c.name, type: c.type, value: String(c.value), status: 'mismatch', actual });
       }
     }
   };
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, targetsToCheck.length) }, () => worker()));
-  return { total: targetsToCheck.length, issues };
+  return { total: targetsToCheck.length, issues, proxied };
 }
 
 /** 根据任务配置计算下一次执行时间 */

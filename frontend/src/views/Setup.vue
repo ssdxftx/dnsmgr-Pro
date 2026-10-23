@@ -1,5 +1,5 @@
 <template>
-  <AuthShell max-width="560px">
+  <AuthShell max-width="560px" :announcements="false">
     <n-card class="auth-card" :bordered="false">
       <div class="auth-head">
         <h2>{{ t('setup.title') }}</h2>

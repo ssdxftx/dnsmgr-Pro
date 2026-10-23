@@ -28,36 +28,23 @@
             <n-switch v-model:value="form.enabled" size="small" />
           </n-form-item>
 
-          <!-- ESA：条件表达式 + 片段插入 -->
+          <!-- ESA：可视化条件（字段/运算符卡片 + 表达式预览） -->
           <template v-if="isEsa">
             <n-form-item :label="t('cdnRules.condTitle')">
-              <n-radio-group v-model:value="esaCondMode" size="small">
-                <n-radio-button value="all">{{ t('cdnRules.condAll') }}</n-radio-button>
-                <n-radio-button value="custom">{{ t('cdnRules.condCustom') }}</n-radio-button>
-              </n-radio-group>
-            </n-form-item>
-            <n-form-item v-if="esaCondMode === 'all'" :label="' '">
-              <span class="hint-text">{{ t('cdnRules.condAllHint') }}</span>
-            </n-form-item>
-            <template v-else>
-              <n-form-item :label="t('cdnRules.condExpression')">
-                <n-input
-                  v-model:value="form.ruleExpr"
-                  type="textarea"
-                  :rows="2"
-                  :placeholder="t('cdnRules.condExpressionHint')"
-                  class="mono-input"
-                  spellcheck="false"
+              <div class="rule-editor__cond-wrap">
+                <n-radio-group v-model:value="esaCondMode" size="small">
+                  <n-radio-button value="all">{{ t('cdnRules.condAll') }}</n-radio-button>
+                  <n-radio-button value="custom">{{ t('cdnRules.condCustom') }}</n-radio-button>
+                </n-radio-group>
+                <span v-if="esaCondMode === 'all'" class="hint-text">{{ t('cdnRules.condAllHint') }}</span>
+                <EsaConditionBuilder
+                  v-else
+                  v-model="form.ruleExpr"
+                  :domains="domains || []"
+                  :locale="localeKey"
                 />
-              </n-form-item>
-              <n-form-item :label="t('cdnRules.condSnippet')">
-                <n-space :size="6">
-                  <n-button v-for="s in esaSnippets" :key="s.key" size="tiny" @click="insertSnippet(s.tpl)">
-                    {{ t(s.key) }}
-                  </n-button>
-                </n-space>
-              </n-form-item>
-            </template>
+              </div>
+            </n-form-item>
             <n-form-item :label="t('cdnRules.colSeq')">
               <n-input-number v-model:value="form.sequence" :min="0" class="rule-editor__seq" clearable />
             </n-form-item>
@@ -65,23 +52,15 @@
         </n-form>
       </div>
 
-      <!-- ESA：行为字段（由官方字段表驱动） -->
+      <!-- ESA：执行动作卡片（按官方控制台动作分组，卡片上写明作用） -->
       <div v-if="isEsa" class="app-panel rule-editor__card">
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('cdnRules.groupAction') }}</h3>
+          <div class="app-panel__extra">
+            <n-tag size="tiny" :bordered="false">{{ kindLabel }}</n-tag>
+          </div>
         </div>
-        <n-form :label-placement="formLabelPlacement" :label-width="formLabelWidth">
-          <n-form-item
-            v-for="f in esaActionFields"
-            :key="f.name"
-            :label="labelOf(f)"
-            :required="!!f.required"
-            :label-props="f.desc ? { title: f.desc } : undefined"
-          >
-            <RuleFieldControl :field="f" v-model="form.data[f.name]" />
-          </n-form-item>
-          <div v-if="!esaActionFields.length" class="hint-text">{{ t('cdnRules.empty') }}</div>
-        </n-form>
+        <EsaActionConfig :kind="kind || ''" :schema="esaFields" v-model="form.data" :locale="localeKey" />
       </div>
 
       <!-- EO：官方 IF / ELSE IF / ELSE 分支结构（信号阶梯卡片流） -->
@@ -178,16 +157,19 @@
                             size="small"
                             class="rule-editor__cond-name"
                           />
-                          <n-select
+                          <EsaCardSelect
                             v-if="needValues(it) && isHostChoice(it)"
-                            v-model:value="it.values"
+                            :model-value="it.values"
                             :options="hostOptions"
                             multiple
-                            filterable
-                            tag
-                            size="small"
+                            searchable
+                            clearable
+                            creatable
+                            dense
+                            :unlisted-label="t('cdnRules.actionUnlisted')"
                             class="rule-editor__cond-values"
                             :placeholder="t('cdnRules.condHostPick')"
+                            @update:model-value="(v: any) => (it.values = v)"
                           />
                           <n-dynamic-tags
                             v-else-if="needValues(it)"
@@ -283,9 +265,10 @@ import { computed, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   NAlert, NButton, NDynamicTags, NForm, NFormItem, NIcon, NInput, NInputNumber,
-  NPopover, NRadioButton, NRadioGroup, NSelect, NSpace, NSwitch, NTag, useMessage,
+  NPopover, NRadioButton, NRadioGroup, NSpace, NSwitch, NTag, useMessage,
 } from 'naive-ui';
 import { CloseOutline } from '@vicons/ionicons5';
+import EsaCardSelect from './EsaCardSelect.vue';
 import RuleFieldControl from './RuleFieldControl.vue';
 import EoParamFields from './EoParamFields.vue';
 import ActionPicker from './ActionPicker.vue';
@@ -296,11 +279,16 @@ import { EO_OPERATORS, EO_TARGETS, type EoLocale } from '../../lib/eoRuleMeta';
 import { eoActionFields, eoParamKey, type EoField } from '../../lib/eoRuleSchema';
 import { timeTransform, restoreSeconds, pickTimeUnit } from '../../lib/eoTime';
 import { buildCondition, parseCondition, type EoCondItem, type EoOrGroup } from '../../lib/eoRuleExpr';
+import EsaConditionBuilder from './EsaConditionBuilder.vue';
+import EsaActionConfig from './EsaActionConfig.vue';
+import { esaKindMeta } from '../../lib/esaRuleMeta';
 
 const props = defineProps<{
   vendor: 'esa' | 'eo';
   /** ESA：规则字段表；EO：保留占位 */
   schema: any;
+  /** ESA：当前规则类型（官方 API kind），用于动作卡片分组 */
+  kind?: string;
   /** 编辑既有规则时的初始数据 */
   initial?: any;
   editing?: boolean;
@@ -366,20 +354,21 @@ function labelOf(f: any): string {
 }
 
 // ---------- ESA ----------
-const esaFields = computed<any[]>(() => (isEsa.value && Array.isArray(props.schema) ? props.schema : []));
+const esaFields = computed<any[]>(() => {
+  if (!isEsa.value) return [];
+  const s: any = props.schema;
+  if (Array.isArray(s)) return s;
+  if (Array.isArray(s?.fields)) return s.fields;
+  return [];
+});
 const esaActionFields = computed(() => esaFields.value.filter((f) => f.group !== 'common'));
 
-const esaSnippets = [
-  { key: 'cdnRules.condSnippetHost', tpl: '(http.host eq "example.com")' },
-  { key: 'cdnRules.condSnippetPath', tpl: '(starts_with(http.request.uri.path, "/"))' },
-  { key: 'cdnRules.condSnippetExt', tpl: '(http.request.uri.path matches "\\.(jpg|png)$")' },
-  { key: 'cdnRules.condSnippetMethod', tpl: '(http.request.method eq "GET")' },
-];
-function insertSnippet(tpl: string) {
-  const cur = String(form.ruleExpr || '').trim();
-  if (!cur || cur === 'true') form.ruleExpr = tpl;
-  else form.ruleExpr = cur + ' and ' + tpl.replace(/^\(/, '').replace(/\)$/, '');
-}
+/** 当前 ESA 规则类型的官方名称（卡片标题右侧展示） */
+const kindLabel = computed(() => {
+  const meta = esaKindMeta(props.kind || '');
+  if (!meta) return props.kind || '';
+  return isZh.value ? meta.label.zh : meta.label.en;
+});
 
 // ---------- EO 官方元数据 ----------
 /** 匹配类型卡片：官方中文名 + 作用说明（去掉「全部」——全部请求即 ELSE 分支） */
@@ -752,6 +741,12 @@ watch(
 }
 .rule-editor__seq {
   width: 160px;
+}
+.rule-editor__cond-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
 }
 
 /* ---- 分区卡片：编辑器内统一容器，沿用 app-panel 观感 ---- */

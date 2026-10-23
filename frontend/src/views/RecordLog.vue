@@ -18,6 +18,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
 import { useMessage } from 'naive-ui';
 import { api } from '../api';
+import { formatDateTime } from '../lib/datetime';
 import { ListOutline, LayersOutline, DocumentTextOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
@@ -37,7 +38,7 @@ const page = ref(1);
 const pageSize = ref(20);
 
 const columns = computed(() => [
-  { title: t('record.logTime'), key: 'UpdateTime', width: 200 },
+  { title: t('record.logTime'), key: 'UpdateTime', width: 200, render: (row: any) => formatDateTime(row.UpdateTime) },
   { title: t('record.logRecordId'), key: 'RecordId', width: 200 },
   { title: t('record.logName'), key: 'Name' },
 ]);

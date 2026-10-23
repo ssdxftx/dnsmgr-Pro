@@ -1,9 +1,10 @@
 <template>
-  <CardSelect
+  <EsaCardSelect
     :model-value="modelValue"
     :options="options"
-    :labels="labels"
-    @select="(v: string) => emit('select', v)"
+    dense
+    :placeholder="labels.placeholder"
+    @update:model-value="(v: any) => emit('select', String(v))"
   />
 </template>
 
@@ -13,13 +14,13 @@
 // 本组件只负责两类控件各自的标题、提示与搜索文案。
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import CardSelect, { type CardSelectOption } from './CardSelect.vue';
+import EsaCardSelect, { type EsaCardOption } from './EsaCardSelect.vue';
 
 const props = defineProps<{
   /** target：匹配类型；operator：运算符 */
   kind: 'target' | 'operator';
   modelValue: string;
-  options: CardSelectOption[];
+  options: EsaCardOption[];
 }>();
 const emit = defineEmits<{ (e: 'select', value: string): void }>();
 

@@ -169,6 +169,12 @@ export interface CdnProvider {
   checkCnameStatus?(zoneId: string, recordNames: string[]): Promise<any[] | false>;
   // 站点 NS 列表（ESA GetSiteCurrentNS）
   getSiteNs?(zoneId: string): Promise<string[] | false>;
+  // 站点完整属性（ESA GetSite + 名称独占 + 自定义 NS）
+  getSiteProperties?(zoneId: string): Promise<Record<string, any> | false>;
+  // 自定义 NS（ESA UpdateSiteVanityNS）
+  updateSiteVanityNS?(zoneId: string, nsList: string[] | string): Promise<boolean>;
+  // 通用官方 API 执行器（阿里云 ESA 全量 OpenAPI）
+  runEsaApi?(action: string, params: Record<string, any>): Promise<Record<string, any> | false>;
   // 站点名校验（ESA CheckSiteName）
   checkSiteName?(siteName: string): Promise<{ passed: boolean; reason?: string } | false>;
   // 接入类型 / 覆盖范围 / 站点名独占（ESA）

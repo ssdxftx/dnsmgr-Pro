@@ -20,7 +20,12 @@
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('cdnAccount.editTitle') : t('cdnAccount.addTitle')" class="modal-sm" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('cdnAccount.provider')">
-          <n-select v-model:value="form.type" :options="providerOptions" @update:value="onTypeChange" />
+          <EsaCardSelect
+            :model-value="form.type"
+            :options="providerOptions"
+            compact
+            @update:model-value="(v: any) => { form.type = v; onTypeChange(); }"
+          />
         </n-form-item>
         <n-form-item :label="t('cdnAccount.accountName')">
           <n-input v-model:value="form.name" :placeholder="t('cdnAccount.remarkPlaceholder')" />
@@ -30,7 +35,14 @@
         </n-form-item>
         <n-alert v-if="currentProvider?.note" type="info" class="mb-3">{{ currentProvider.note }}</n-alert>
         <n-form-item v-for="(field, key) in currentProvider?.config || {}" :key="key" :label="field.name">
-          <n-select v-if="field.type === 'select'" v-model:value="form.config[key]" :options="field.options || []" :placeholder="field.placeholder || field.name" clearable />
+          <EsaCardSelect
+            v-if="field.type === 'select'"
+            v-model="form.config[key]"
+            :options="field.options || []"
+            compact
+            clearable
+            :placeholder="field.placeholder || field.name"
+          />
           <n-input v-else v-model:value="form.config[key]" :type="isSecretField(key) ? 'password' : 'text'" show-password-on="click" :placeholder="field.placeholder || field.name" />
         </n-form-item>
       </n-form>
@@ -46,7 +58,6 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
-import { useRouter } from 'vue-router';
 import { NButton, NIcon, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 import { AddOutline, CloudOutline, PeopleOutline, GlobeOutline } from '@vicons/ionicons5';
@@ -55,11 +66,11 @@ import { isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
-const router = useRouter();
 const loadBusy = ref(false);
 const accounts = ref<any[]>([]);
 const providerCount = computed(() => new Set(accounts.value.map((a: any) => a.type)).size);
@@ -96,24 +107,15 @@ const columns = computed(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 280,
+    width: 160,
     render(row: any) {
-      const caps = providers.value[row.type]?.capabilities || {};
-      const btns: any[] = [];
-      // 站点级功能（站点/源站/规则引擎/安全/四层/任务）统一在「CDN 站点设置页」中管理
-      if (caps.zoneManage || caps.rules || caps.security || caps.l4 || caps.tasks || caps.originGroup || caps.loadBalancer) {
-        btns.push(h(NButton, { size: 'tiny', onClick: () => goSites(row) }, { default: () => t('cdnSite.goSites') }));
-      }
-      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
-      btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
-      return h('div', { class: 'row-actions' }, btns);
+      return h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openEdit(row) }, { default: () => t('common.edit') }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }),
+      ]);
     },
   },
 ]);
-
-function goSites(row: any) {
-  router.push(`/cdn-zones?aid=${row.id}`);
-}
 
 function safeJson(s: string) {
   try {

@@ -8,6 +8,8 @@
   --app-surface: #ffffff;
   --app-surface-2: #f7fafc;
   --app-text: #0f1b2d;
+  /* 兼容历史样式：部分页面使用 --app-text-1 表示主文本 */
+  --app-text-1: var(--app-text);
   --app-text-2: #4a5872;
   --app-text-3: #8593a8;
   --app-border: #dde5f0;
@@ -33,6 +35,8 @@
   /* ---- 圆角 ---- */
   --app-radius-sm: 8px;
   --app-radius: 12px;
+  /* 兼容历史样式：--app-radius-md 与基础圆角同义 */
+  --app-radius-md: var(--app-radius);
   --app-radius-lg: 16px;
   --app-radius-xl: 20px;
 

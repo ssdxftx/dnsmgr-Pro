@@ -179,6 +179,22 @@
           </n-card>
         </n-tab-pane>
 
+        <!-- 公告管理 -->
+        <n-tab-pane name="announcements" :tab="t('systemSet.tabAnnouncements')">
+          <n-card :title="t('systemSet.announcementManage')" :bordered="false" size="small">
+            <template #header-extra>
+              <n-button type="primary" size="small" @click="openAnnouncementAdd">{{ t('systemSet.announcementAdd') }}</n-button>
+            </template>
+            <ResponsiveDataTable
+              :columns="announcementColumns"
+              :data="announcements"
+              :loading="announcementsLoadBusy"
+              :row-key="(row: any) => row.id"
+              :empty-text="t('systemSet.announcementEmpty')"
+            />
+          </n-card>
+        </n-tab-pane>
+
         <!-- 代理设置 -->
         <n-tab-pane name="proxy" :tab="t('systemSet.tabProxy')">
           <n-card :title="t('systemSet.proxyCardTitle')" :bordered="false" size="small" style="max-width:520px">
@@ -292,6 +308,82 @@
       </template>
     </n-modal>
 
+    <!-- 公告编辑弹窗 -->
+    <n-modal
+      v-model:show="showAnnouncement"
+      preset="card"
+      :title="announcementEditingId ? t('systemSet.announcementEdit') : t('systemSet.announcementAdd')"
+      class="modal-md"
+      :mask-closable="false"
+    >
+      <n-form label-placement="top">
+        <n-form-item :label="t('systemSet.announcementTitle')" required>
+          <n-input
+            v-model:value="announcementForm.title"
+            maxlength="120"
+            show-count
+            :placeholder="t('systemSet.announcementTitlePlaceholder')"
+          />
+        </n-form-item>
+        <n-form-item :label="t('systemSet.announcementContent')" required>
+          <n-input
+            v-model:value="announcementForm.content"
+            type="textarea"
+            :rows="6"
+            maxlength="5000"
+            show-count
+            :placeholder="t('systemSet.announcementContentPlaceholder')"
+          />
+        </n-form-item>
+        <n-grid :cols="isMobile ? 1 : 2" :x-gap="12">
+          <n-grid-item>
+            <n-form-item :label="t('systemSet.announcementType')">
+              <n-select v-model:value="announcementForm.type" :options="announcementTypeOptions" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item :label="t('systemSet.announcementSort')">
+              <n-input-number v-model:value="announcementForm.sort_order" :min="-999999" :max="999999" style="width: 100%" />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item :label="t('systemSet.announcementStart')">
+              <n-date-picker
+                v-model:value="announcementForm.starttime"
+                type="datetime"
+                value-format="yyyy-MM-dd HH:mm:ss"
+                clearable
+                :placeholder="t('systemSet.announcementStartPlaceholder')"
+                style="width: 100%"
+              />
+            </n-form-item>
+          </n-grid-item>
+          <n-grid-item>
+            <n-form-item :label="t('systemSet.announcementEnd')">
+              <n-date-picker
+                v-model:value="announcementForm.endtime"
+                type="datetime"
+                value-format="yyyy-MM-dd HH:mm:ss"
+                clearable
+                :placeholder="t('systemSet.announcementEndPlaceholder')"
+                style="width: 100%"
+              />
+            </n-form-item>
+          </n-grid-item>
+        </n-grid>
+        <n-form-item :label="t('systemSet.announcementActive')">
+          <n-switch v-model:value="announcementForm.active" />
+          <n-text depth="3" style="font-size: 12px; margin-left: 8px">{{ t('systemSet.announcementActiveHint') }}</n-text>
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showAnnouncement = false">{{ t('common.cancel') }}</n-button>
+          <n-button type="primary" :loading="announcementSaveBusy" @click="saveAnnouncement">{{ t('common.save') }}</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <!-- QQ机器人使用说明 -->
     <n-modal v-model:show="showQqbotHelp" preset="card" :title="t('systemSet.qqHelpTitle')" class="modal-md" :mask-closable="false">
       <div class="help-body">
@@ -312,16 +404,18 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useMessage, useDialog, NButton, NTag } from 'naive-ui';
+import { useMessage, useDialog, NButton, NDatePicker, NSwitch, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import PageHeader from '../components/PageHeader.vue';
 import ActionButton from '../components/ActionButton.vue';
 import { useAction } from '../composables/useAction';
+import { useResponsive } from '../composables/useResponsive';
 
 const message = useMessage();
 const dialog = useDialog();
 const { t } = useI18n();
+const { isMobile } = useResponsive();
 const { busy, run } = useAction();
 const saveBusy = ref(false);
 const cfg = reactive<Record<string, string>>({});
@@ -335,10 +429,35 @@ const genForm = reactive({ count: 1, days: 0, maxUse: 0, remark: '' });
 const regCodes = ref<any[]>([]);
 const regCodesLoadBusy = ref(false);
 
+const announcements = ref<any[]>([]);
+const announcementsLoadBusy = ref(false);
+const showAnnouncement = ref(false);
+const announcementEditingId = ref<number | null>(null);
+const announcementSaveBusy = ref(false);
+const announcementForm = reactive<any>({
+  title: '',
+  content: '',
+  type: 'info',
+  active: true,
+  sort_order: 0,
+  starttime: null,
+  endtime: null,
+});
+
 const registerModeOptions = computed(() => [
   { label: t('systemSet.regModeEmail'), value: 'email' },
   { label: t('systemSet.regModeCode'), value: 'code' },
 ]);
+
+const announcementTypeLabels = computed<Record<string, string>>(() => ({
+  info: t('systemSet.announcementTypeInfo'),
+  success: t('systemSet.announcementTypeSuccess'),
+  warning: t('systemSet.announcementTypeWarning'),
+  error: t('systemSet.announcementTypeError'),
+}));
+const announcementTypeOptions = computed(() =>
+  Object.entries(announcementTypeLabels.value).map(([value, label]) => ({ label, value })),
+);
 
 const mailTypeOptions = computed(() => [
   { label: t('systemSet.mailTypeSmtp'), value: '0' },
@@ -507,6 +626,170 @@ const regCodeColumns = computed<any[]>(() => [
   },
 ]);
 
+function announcementTagType(type: string): 'info' | 'success' | 'warning' | 'error' {
+  return ['info', 'success', 'warning', 'error'].includes(type) ? (type as any) : 'info';
+}
+
+function formatAnnouncementTime(value: any): string {
+  return value ? String(value).replace('T', ' ').slice(0, 16) : '-';
+}
+
+function toAnnouncementPicker(value: any): string | null {
+  return value ? String(value).replace('T', ' ').slice(0, 19) : null;
+}
+
+const announcementColumns = computed<any[]>(() => [
+  { title: t('systemSet.announcementTitleCol'), key: 'title', minWidth: 220, ellipsis: { tooltip: true } },
+  {
+    title: t('systemSet.announcementType'),
+    key: 'type',
+    width: 100,
+    render: (row: any) =>
+      h(NTag, { type: announcementTagType(row.type), size: 'small', bordered: false }, {
+        default: () => announcementTypeLabels.value[row.type] || announcementTypeLabels.value.info,
+      }),
+  },
+  {
+    title: t('systemSet.announcementActive'),
+    key: 'active',
+    width: 100,
+    render: (row: any) =>
+      h(NSwitch, {
+        value: Number(row.active) === 1,
+        loading: !!busy[`announcement:${row.id}:status`],
+        disabled: !!busy[`announcement:${row.id}:status`],
+        onUpdateValue: (value: boolean) =>
+          run(`announcement:${row.id}:status`, () => toggleAnnouncement(row, value)),
+      }),
+  },
+  { title: t('systemSet.announcementSort'), key: 'sort_order', width: 90, mobile: 'hide' },
+  {
+    title: t('systemSet.announcementStart'),
+    key: 'starttime',
+    width: 160,
+    mobile: 'hide',
+    render: (row: any) => formatAnnouncementTime(row.starttime),
+  },
+  {
+    title: t('systemSet.announcementEnd'),
+    key: 'endtime',
+    width: 160,
+    mobile: 'hide',
+    render: (row: any) => formatAnnouncementTime(row.endtime),
+  },
+  {
+    title: t('common.updatedAt'),
+    key: 'updatetime',
+    width: 160,
+    mobile: 'hide',
+    render: (row: any) => formatAnnouncementTime(row.updatetime || row.addtime),
+  },
+  {
+    title: t('common.actions'),
+    key: 'actions',
+    width: 140,
+    render: (row: any) =>
+      h('div', { class: 'row-actions' }, [
+        h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => openAnnouncementEdit(row) }, {
+          default: () => t('common.edit'),
+        }),
+        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => deleteAnnouncement(row) }, {
+          default: () => t('common.delete'),
+        }),
+      ]),
+  },
+]);
+
+async function loadAnnouncements() {
+  announcementsLoadBusy.value = true;
+  const res = await api<any>('GET', '/system/announcements');
+  announcementsLoadBusy.value = false;
+  if (res.code === 0) announcements.value = Array.isArray(res.data) ? res.data : [];
+  else message.error(res.msg);
+}
+
+function openAnnouncementAdd() {
+  announcementEditingId.value = null;
+  Object.assign(announcementForm, {
+    title: '',
+    content: '',
+    type: 'info',
+    active: true,
+    sort_order: 0,
+    starttime: null,
+    endtime: null,
+  });
+  showAnnouncement.value = true;
+}
+
+function openAnnouncementEdit(row: any) {
+  announcementEditingId.value = Number(row.id);
+  Object.assign(announcementForm, {
+    title: row.title || '',
+    content: row.content || '',
+    type: row.type || 'info',
+    active: Number(row.active) === 1,
+    sort_order: Number(row.sort_order || 0),
+    starttime: toAnnouncementPicker(row.starttime),
+    endtime: toAnnouncementPicker(row.endtime),
+  });
+  showAnnouncement.value = true;
+}
+
+async function saveAnnouncement() {
+  if (!String(announcementForm.title || '').trim()) return message.warning(t('systemSet.announcementTitleRequired'));
+  if (!String(announcementForm.content || '').trim()) return message.warning(t('systemSet.announcementContentRequired'));
+  const body = {
+    title: String(announcementForm.title).trim(),
+    content: String(announcementForm.content).trim(),
+    type: announcementForm.type || 'info',
+    active: announcementForm.active ? 1 : 0,
+    sort_order: Number(announcementForm.sort_order || 0),
+    starttime: announcementForm.starttime || null,
+    endtime: announcementForm.endtime || null,
+  };
+  announcementSaveBusy.value = true;
+  const res: any = announcementEditingId.value
+    ? await api('PUT', `/system/announcements/${announcementEditingId.value}`, body)
+    : await api('POST', '/system/announcements', body);
+  announcementSaveBusy.value = false;
+  if (res.code === 0) {
+    message.success(res.msg);
+    showAnnouncement.value = false;
+    await loadAnnouncements();
+  } else {
+    message.error(res.msg);
+  }
+}
+
+async function toggleAnnouncement(row: any, value: boolean) {
+  const res: any = await api('POST', `/system/announcements/${row.id}/status`, { active: value ? 1 : 0 });
+  if (res.code === 0) {
+    message.success(res.msg);
+    await loadAnnouncements();
+  } else {
+    message.error(res.msg);
+  }
+}
+
+function deleteAnnouncement(row: any) {
+  dialog.warning({
+    title: t('common.tip'),
+    content: t('systemSet.announcementDeleteConfirm'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      const res: any = await api('DELETE', `/system/announcements/${row.id}`);
+      if (res.code === 0) {
+        message.success(res.msg);
+        await loadAnnouncements();
+      } else {
+        message.error(res.msg);
+      }
+    },
+  });
+}
+
 async function loadRegCodes() {
   regCodesLoadBusy.value = true;
   const res = await api<any>('GET', '/register/codes', { limit: 500, offset: 0 });
@@ -576,6 +859,7 @@ onMounted(() => {
   loadSettings();
   loadCronKey();
   loadRegCodes();
+  loadAnnouncements();
 });
 </script>
 
