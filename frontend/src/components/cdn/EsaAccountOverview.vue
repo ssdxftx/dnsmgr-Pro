@@ -61,7 +61,6 @@ const { t } = useI18n();
 const links = computed(() => [
   { key: 'edge', label: t('esaAccount.navEdge'), desc: t('esaAccount.navEdgeDesc') },
   { key: 'captcha', label: t('esaAccount.navCaptcha'), desc: t('esaAccount.navCaptchaDesc') },
-  { key: 'analytics', label: t('esaAccount.navAnalytics'), desc: t('esaAccount.navAnalyticsDesc') },
   { key: 'global', label: t('esaAccount.navGlobal'), desc: t('esaAccount.navGlobalDesc') },
   { key: 'billing', label: t('esaAccount.navBilling'), desc: t('esaAccount.navBillingDesc') },
 ]);

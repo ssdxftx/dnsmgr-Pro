@@ -18,8 +18,6 @@ export default {
     navEdgeDesc: '边缘函数、KV 存储与边缘容器',
     navCaptcha: 'AI CAPTCHA',
     navCaptchaDesc: '验证页配置与验证分析',
-    navAnalytics: '分析与日志',
-    navAnalyticsDesc: '账户分析、安全分析、实时日志与 Trace',
     navGlobal: '全局设置',
     navGlobalDesc: '全局列表、全局 WAF、场景策略与自定义页面',
     navTools: '工具',

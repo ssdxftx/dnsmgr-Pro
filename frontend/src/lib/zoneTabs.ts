@@ -17,17 +17,6 @@ export const ESA_ZONE_TABS: ZoneTabDef[] = [
   { key: 'settings-list', labelKey: 'esaZone.tabSettingsList' },
   { key: 'versions', labelKey: 'esaZone.tabVersions' },
   {
-    key: 'analytics',
-    labelKey: 'esaZone.tabAnalytics',
-    defaultChild: 'account',
-    children: [
-      { key: 'account', labelKey: 'esaZone.analyticsAccount' },
-      { key: 'security', labelKey: 'esaZone.analyticsSecurity' },
-      { key: 'logs', labelKey: 'esaZone.realtimeLogs' },
-      { key: 'trace', labelKey: 'esaZone.trace' },
-    ],
-  },
-  {
     key: 'dns',
     labelKey: 'esaZone.tabDns',
     defaultChild: 'analytics',
@@ -146,17 +135,6 @@ export const ESA_ACCOUNT_TABS: ZoneTabDef[] = [
     children: [
       { key: 'config', labelKey: 'esaAccount.captchaConfig' },
       { key: 'analytics', labelKey: 'esaAccount.captchaAnalytics' },
-    ],
-  },
-  {
-    key: 'analytics',
-    labelKey: 'esaAccount.navAnalytics',
-    defaultChild: 'account',
-    children: [
-      { key: 'account', labelKey: 'esaAccount.analyticsAccount' },
-      { key: 'security', labelKey: 'esaAccount.analyticsSecurity' },
-      { key: 'logs', labelKey: 'esaAccount.analyticsLogs' },
-      { key: 'trace', labelKey: 'esaAccount.analyticsTrace' },
     ],
   },
   {

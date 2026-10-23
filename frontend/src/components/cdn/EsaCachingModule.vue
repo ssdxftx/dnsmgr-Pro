@@ -34,7 +34,7 @@
           <h3 class="app-panel__title">{{ t('esaZone.cacheAnalytics') }}</h3>
         </div>
         <p class="esa-module__hint">{{ t('esaZone.cacheAnalyticsHint') }}</p>
-        <n-button size="small" type="primary" @click="emit('go', 'analytics', 'account')">{{ t('esaZone.openAnalytics') }}</n-button>
+        <n-button size="small" type="primary" @click="openStats('account')">{{ t('esaZone.openAnalytics') }}</n-button>
       </div>
     </template>
 
@@ -160,6 +160,7 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage, NButton, NForm, NFormItem, NInput, NSwitch, NTag } from 'naive-ui';
@@ -170,8 +171,12 @@ import EsaRulesModule from './EsaRulesModule.vue';
 import EsaCardSelect from './EsaCardSelect.vue';
 
 const props = defineProps<{ aid: number; zoneId: string; domains: string[] }>();
-const emit = defineEmits<{ (e: 'go', target: string, sub?: string): void }>();
 const { t } = useI18n();
+const router = useRouter();
+
+function openStats(target: string) {
+  router.push({ path: '/statistics/aliyun_esa', query: { aid: String(props.aid), zone: props.zoneId, tab: 'analytics', sub: target } });
+}
 const message = useMessage();
 
 const sub = defineModel<string>('sub', { default: 'rules' });

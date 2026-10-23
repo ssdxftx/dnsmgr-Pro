@@ -26,7 +26,7 @@
           <div class="app-panel__extra"><n-tag size="tiny" :bordered="false" type="warning">Enterprise</n-tag></div>
         </div>
         <p class="esa-module__hint">{{ t('esaZone.l4AnalyticsDesc') }}</p>
-        <n-button size="small" type="primary" @click="emit('go', 'analytics', 'account')">{{ t('esaZone.openAnalytics') }}</n-button>
+        <n-button size="small" type="primary" @click="openStats('account')">{{ t('esaZone.openAnalytics') }}</n-button>
       </div>
     </template>
 
@@ -75,6 +75,7 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useDialog, useMessage, NAlert, NButton, NForm, NFormItem, NInput, NModal, NSpace, NSwitch, NTag } from 'naive-ui';
@@ -83,8 +84,12 @@ import ResponsiveDataTable from '../ResponsiveDataTable.vue';
 import EsaRowsEditor, { type EsaRowFieldDef } from './EsaRowsEditor.vue';
 
 const props = defineProps<{ aid: number; zoneId: string }>();
-const emit = defineEmits<{ (e: 'go', target: string, sub?: string): void }>();
 const { t } = useI18n();
+const router = useRouter();
+
+function openStats(target: string) {
+  router.push({ path: '/statistics/aliyun_esa', query: { aid: String(props.aid), zone: props.zoneId, tab: 'analytics', sub: target } });
+}
 const message = useMessage();
 const dialog = useDialog();
 

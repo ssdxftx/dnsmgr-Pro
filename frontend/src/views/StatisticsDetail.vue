@@ -69,6 +69,9 @@
           @update:top-dim="onTopDim"
         />
       </n-tab-pane>
+      <n-tab-pane v-if="routeKey === 'aliyun_esa' && isAdmin" name="analytics" :tab="t('statistics.analyticsTab')">
+        <EsaAnalyticsPanel :aid="selectedAid" :zone-id="String(route.query.zone || '')" />
+      </n-tab-pane>
     </n-tabs>
 
     <p class="data-note">
@@ -150,10 +153,11 @@ const providerView = defineAsyncComponent(
   } as Record<string, () => Promise<any>>)[routeKey] || (() => import('./statistics/DetailEdgeOne.vue')),
 );
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const EsaAnalyticsPanel = defineAsyncComponent(() => import('../components/statistics/EsaAnalyticsPanel.vue'));
 
 const range = ref('24h');
 const customRange = ref<[number, number] | null>(null);
-const selectedAid = ref<number | null>(null);
+const selectedAid = ref<number | null>(Number(route.query.aid || 0) || null);
 const selectedDomains = ref<string[]>([]);
 const accountOptions = ref<Array<{ label: string; value: number }>>([]);
 const domainOptions = ref<Array<{ label: string; value: string }>>([]);
@@ -286,6 +290,7 @@ async function loadGroup(group: string) {
 }
 
 async function reload() {
+  if (tab.value === 'analytics') return;
   seriesByGroup.value = new Map();
   breakdownsByGroup.value = new Map();
   loaded.value = new Set();
@@ -293,6 +298,7 @@ async function reload() {
 }
 
 function onTab(value: string) {
+  if (value === 'analytics') return;
   if (!loaded.value.has(value)) loadGroup(value);
 }
 
@@ -324,12 +330,19 @@ watch(autoRefresh, (on) => {
     clearInterval(timer);
     timer = null;
   }
-  if (on) timer = setInterval(() => loadGroup(tab.value), 60_000);
+  if (on) {
+    timer = setInterval(() => {
+      if (tab.value !== 'analytics') loadGroup(tab.value);
+    }, 60_000);
+  }
 });
 
 onMounted(() => {
   loadOptions();
   loadGroup('overview');
+  if (String(route.query.tab || '') === 'analytics' && routeKey === 'aliyun_esa' && isAdmin.value) {
+    tab.value = 'analytics';
+  }
 });
 onBeforeUnmount(() => {
   if (timer) clearInterval(timer);

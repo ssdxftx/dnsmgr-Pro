@@ -18,8 +18,6 @@ export default {
     navEdgeDesc: 'Edge functions, KV storage and edge containers',
     navCaptcha: 'AI CAPTCHA',
     navCaptchaDesc: 'Verification pages and analytics',
-    navAnalytics: 'Analytics and Logs',
-    navAnalyticsDesc: 'Account analytics, security analytics, real-time logs and Trace',
     navGlobal: 'Global Settings',
     navGlobalDesc: 'Global lists, global WAF, scenario policies and custom pages',
     navTools: 'Tools',

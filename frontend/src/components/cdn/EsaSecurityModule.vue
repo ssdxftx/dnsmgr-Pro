@@ -25,7 +25,7 @@
           <h3 class="app-panel__title">{{ t('esaZone.secEvents') }}</h3>
         </div>
         <p class="esa-module__hint">{{ t('esaZone.secEventsHint') }}</p>
-        <n-button size="small" type="primary" @click="emit('go', 'analytics', 'security')">{{ t('esaZone.openAnalytics') }}</n-button>
+        <n-button size="small" type="primary" @click="openStats('security')">{{ t('esaZone.openAnalytics') }}</n-button>
       </div>
     </template>
 
@@ -104,6 +104,7 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NAlert, NButton, NTag } from 'naive-ui';
@@ -119,8 +120,12 @@ import type { EsaWafPhase } from '../../lib/esaWafMeta';
 const props = withDefaults(defineProps<{ aid: number; zoneId: string; domains?: string[] }>(), {
   domains: () => [],
 });
-const emit = defineEmits<{ (e: 'go', target: string, sub?: string): void }>();
 const { t } = useI18n();
+const router = useRouter();
+
+function openStats(target: string) {
+  router.push({ path: '/statistics/aliyun_esa', query: { aid: String(props.aid), zone: props.zoneId, tab: 'analytics', sub: target } });
+}
 
 const sub = defineModel<string>('sub', { default: 'overview' });
 const wafSub = ref('custom');

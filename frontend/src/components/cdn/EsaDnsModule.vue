@@ -6,7 +6,7 @@
           <h3 class="app-panel__title">{{ t('esaZone.dnsAnalytics') }}</h3>
         </div>
         <p class="esa-module__hint">{{ t('esaZone.dnsAnalyticsHint') }}</p>
-        <n-button size="small" type="primary" @click="emit('go', 'analytics', 'account')">{{ t('esaZone.openAnalytics') }}</n-button>
+        <n-button size="small" type="primary" @click="openStats('account')">{{ t('esaZone.openAnalytics') }}</n-button>
       </div>
     </template>
 
@@ -55,15 +55,20 @@
 </template>
 
 <script setup lang="ts">
+import { useRouter } from 'vue-router';
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NDescriptions, NDescriptionsItem, NTag } from 'naive-ui';
 import EsaActionPanel, { type EsaFieldDef } from './EsaActionPanel.vue';
 import EsaActionTable, { type EsaTableColumn } from './EsaActionTable.vue';
 
-defineProps<{ aid: number; zoneId: string }>();
-const emit = defineEmits<{ (e: 'go', target: string, sub?: string): void }>();
+const props = defineProps<{ aid: number; zoneId: string }>();
 const { t } = useI18n();
+const router = useRouter();
+
+function openStats(target: string) {
+  router.push({ path: '/statistics/aliyun_esa', query: { aid: String(props.aid), zone: props.zoneId, tab: 'analytics', sub: target } });
+}
 
 const sub = defineModel<string>('sub', { default: 'analytics' });
 

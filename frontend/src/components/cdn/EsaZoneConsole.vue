@@ -83,15 +83,7 @@
 
     <EsaVersionsModule v-else-if="tab === 'versions'" :aid="aid" :zone-id="zoneId" />
 
-    <EsaAnalyticsModule
-      v-else-if="tab === 'analytics'"
-      v-model:sub="deepSub.analytics"
-      :aid="aid"
-      :zone-id="zoneId"
-      @go="onGo"
-    />
-
-    <EsaDnsModule v-else-if="tab === 'dns'" v-model:sub="deepSub.dns" :aid="aid" :zone-id="zoneId" @go="onGo" />
+    <EsaDnsModule v-else-if="tab === 'dns'" v-model:sub="deepSub.dns" :aid="aid" :zone-id="zoneId" />
 
     <EsaSslModule v-else-if="tab === 'ssl'" v-model:sub="deepSub.ssl" :aid="aid" :zone-id="zoneId" />
 
@@ -101,7 +93,6 @@
       :aid="aid"
       :zone-id="zoneId"
       :domains="domains"
-      @go="onGo"
     />
 
     <EsaCachingModule
@@ -110,7 +101,6 @@
       :aid="aid"
       :zone-id="zoneId"
       :domains="siteDomains"
-      @go="onGo"
     />
 
     <EsaRulesModule v-else-if="tab === 'rules'" ref="rulesRef" :aid="aid" :zone-id="zoneId" :domains="siteDomains" />
@@ -125,7 +115,7 @@
       @go="onGo"
     />
 
-    <EsaL4Module v-else-if="tab === 'l4'" v-model:sub="deepSub.l4" :aid="aid" :zone-id="zoneId" @go="onGo" />
+    <EsaL4Module v-else-if="tab === 'l4'" v-model:sub="deepSub.l4" :aid="aid" :zone-id="zoneId" />
 
     <EsaErModule v-else-if="tab === 'er'" :aid="aid" :zone-id="zoneId" />
 
@@ -148,7 +138,6 @@ import { formatDateTime } from '../../lib/datetime';
 import EsaCardSelect from './EsaCardSelect.vue';
 import EsaSettingsList from './EsaSettingsList.vue';
 import EsaVersionsModule from './EsaVersionsModule.vue';
-import EsaAnalyticsModule from './EsaAnalyticsModule.vue';
 import EsaDnsModule from './EsaDnsModule.vue';
 import EsaSslModule from './EsaSslModule.vue';
 import EsaSecurityModule from './EsaSecurityModule.vue';

@@ -17,7 +17,6 @@
     />
     <EsaEdgeComputingModule v-else-if="section === 'edge'" v-model:sub="subs.edge" :aid="aid" />
     <EsaCaptchaModule v-else-if="section === 'captcha'" v-model:sub="subs.captcha" :aid="aid" />
-    <EsaAccountAnalyticsModule v-else-if="section === 'analytics'" v-model:sub="subs.analytics" :aid="aid" :sites="sites" />
     <EsaGlobalSettingsModule v-else-if="section === 'global'" v-model:sub="subs.global" :aid="aid" :instance-id="instanceId" />
     <EsaToolsModule v-else-if="section === 'tools'" v-model:sub="subs.tools" :aid="aid" />
     <EsaBillingModule v-else-if="section === 'billing'" v-model:sub="subs.billing" :aid="aid" :instance-id="instanceId" />
@@ -32,7 +31,6 @@ import { api } from '../../api';
 import EsaAccountOverview from './EsaAccountOverview.vue';
 import EsaEdgeComputingModule from './EsaEdgeComputingModule.vue';
 import EsaCaptchaModule from './EsaCaptchaModule.vue';
-import EsaAccountAnalyticsModule from './EsaAccountAnalyticsModule.vue';
 import EsaGlobalSettingsModule from './EsaGlobalSettingsModule.vue';
 import EsaToolsModule from './EsaToolsModule.vue';
 import EsaBillingModule from './EsaBillingModule.vue';

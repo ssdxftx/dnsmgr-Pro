@@ -9,6 +9,9 @@
       </div>
       <p class="esa-module__hint">{{ t('esaZone.cappingQuotaDesc') }}</p>
       <n-alert v-if="error" type="error" :show-icon="false" class="mb-3">{{ error }}</n-alert>
+      <n-alert v-if="unsupported.length" type="warning" :show-icon="false" class="mb-3">
+        {{ t('esaZone.cappingUnsupported', { names: unsupportedLabels }) }}
+      </n-alert>
       <div v-if="quotas.length" class="esa-cap__grid">
         <div v-for="q in quotas" :key="q.key" class="esa-cap__card">
           <div class="esa-cap__head">
@@ -79,8 +82,16 @@ const QUOTAS = [
 ];
 
 const rows = ref<any[]>([]);
+const unsupported = ref<string[]>([]);
 const busy = ref(false);
 const error = ref('');
+
+function quotaLabel(key: string) {
+  const meta = QUOTAS.find((x) => x.key === key);
+  return meta ? t(`esaZone.${meta.labelKey}`) : key;
+}
+
+const unsupportedLabels = computed(() => unsupported.value.map(quotaLabel).join(', '));
 
 const quotas = computed(() =>
   rows.value.map((q) => {
@@ -106,29 +117,64 @@ function pick(row: any, keys: string[]) {
   return undefined;
 }
 
+function quotaRows(data: any): any[] {
+  const list = Array.isArray(data?.Quotas) ? data.Quotas : [];
+  return list.map((row: any) => ({
+    key: pick(row, ['QuotaName', 'Name', 'QuotaCode', 'Key']) || '',
+    used: pick(row, ['Usage', 'Used', 'UsageValue', 'UsedValue']) ?? 0,
+    quota: pick(row, ['QuotaValue', 'Quota', 'Total', 'Limit']) ?? 0,
+  }));
+}
+
+function isUnsupported(message: unknown) {
+  return /unsupported quota/i.test(String(message || ''));
+}
+
+function callQuotas(names: string[]) {
+  return api<any>('POST', `/cdn/accounts/${props.aid}/esa/actions`, {
+    action: 'ListInstanceQuotasWithUsage',
+    zoneId: props.zoneId,
+    params: { QuotaNames: names.join(',') },
+  });
+}
+
 async function load() {
   busy.value = true;
   error.value = '';
+  unsupported.value = [];
+  rows.value = [];
   try {
-    const res = await api<any>('POST', `/cdn/accounts/${props.aid}/esa/actions`, {
-      action: 'ListInstanceQuotasWithUsage',
-      zoneId: props.zoneId,
-      params: { QuotaNames: QUOTAS.map((q) => q.key).join(',') },
-    });
-    if (res.code !== 0) {
-      error.value = res.msg || t('esaZone.loadFailed');
-      rows.value = [];
+    const res = await callQuotas(QUOTAS.map((q) => q.key));
+    if (res.code === 0) {
+      rows.value = quotaRows(res.data);
       return;
     }
-    const list = Array.isArray(res.data?.Quotas) ? res.data.Quotas : [];
-    rows.value = list.map((row: any) => ({
-      key: pick(row, ['QuotaName', 'Name', 'QuotaCode', 'Key']) || '',
-      used: pick(row, ['Usage', 'Used', 'UsageValue', 'UsedValue']) ?? 0,
-      quota: pick(row, ['QuotaValue', 'Quota', 'Total', 'Limit']) ?? 0,
-    }));
+    if (!isUnsupported(res.msg)) {
+      error.value = res.msg || t('esaZone.loadFailed');
+      return;
+    }
+
+    const collected: any[] = [];
+    const skipped: string[] = [];
+    let firstError = '';
+    for (const quota of QUOTAS) {
+      try {
+        const one = await callQuotas([quota.key]);
+        if (one.code === 0) {
+          const list = quotaRows(one.data);
+          const matched = list.filter((row) => row.key === quota.key);
+          collected.push(...(matched.length ? matched : list.length === 1 ? list : []));
+        } else if (isUnsupported(one.msg)) skipped.push(quota.key);
+        else if (!firstError) firstError = one.msg || t('esaZone.loadFailed');
+      } catch (e: any) {
+        if (!firstError) firstError = e?.message || t('esaZone.loadFailed');
+      }
+    }
+    rows.value = Array.from(new Map(collected.map((row) => [row.key, row])).values());
+    unsupported.value = skipped;
+    if (!rows.value.length && firstError) error.value = firstError;
   } catch (e: any) {
     error.value = e?.message || t('esaZone.loadFailed');
-    rows.value = [];
   } finally {
     busy.value = false;
   }
