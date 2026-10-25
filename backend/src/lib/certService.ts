@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { query, queryOne, table } from '../db.js';
 import { getCertProvider, certConfig } from './cert/factory.js';
 import { addDns, delDns, verifyDns } from './certDns.js';
-import { appendLog, fmtDateTime } from './util.js';
+import { appendLog, fmtDateTime, safeProcessId } from './util.js';
 import type { CertProvider } from './cert/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -71,8 +71,9 @@ export class CertOrderService {
   }
 
   private saveLog(txt: string) {
-    if (!this.order.processid) return;
-    appendLog(join(LOG_DIR, this.order.processid + '.log'), txt + '\n');
+    const processid = safeProcessId(this.order.processid);
+    if (!processid) return;
+    appendLog(join(LOG_DIR, processid + '.log'), txt + '\n');
   }
 
   private async saveResult(status: number, error: string | null = null, retrytime: string | null = null) {
@@ -108,7 +109,7 @@ export class CertOrderService {
   }
 
   private async lockOrder() {
-    if (!this.order.processid) this.order.processid = genSid();
+    if (!safeProcessId(this.order.processid)) this.order.processid = genSid();
     // 原子加锁：仅当当前未锁、或锁已超时（1 小时）时才更新成功，避免并发重复处理同一订单
     const res: any = await query(
       `UPDATE ${table('cert_order')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,

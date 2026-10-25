@@ -11,8 +11,24 @@ export async function migrate(): Promise<void> {
   await ensureColumn('user', 'stat_cache', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('user', 'is_super', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('user', 'token_version', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('user', 'login_fail', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('user', 'login_locked_until', 'datetime DEFAULT NULL');
+  await ensureColumn('user', 'totp_fail', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('user', 'totp_locked_until', 'datetime DEFAULT NULL');
+  await ensureColumn('dmtask', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('sctask', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('optimizeip', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('cdn_preheat_task', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'readonly', "tinyint(1) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'expiretime', 'datetime DEFAULT NULL');
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('rate_limit')} (
+      bucket varchar(191) NOT NULL,
+      window_start bigint(20) NOT NULL,
+      hits int(11) NOT NULL DEFAULT '0',
+      PRIMARY KEY (bucket)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
   // 用户名唯一约束：防止并发注册/建号绕过「先查后插」判重产生重复账号
   await ensureUniqueIndex('user', 'username', 'uniq_username');
   // 邮箱唯一：空字符串统一转 NULL，避免旧数据中的空串触发唯一冲突
@@ -97,6 +113,7 @@ export async function migrate(): Promise<void> {
       KEY addtime (addtime)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  await ensureColumn('cdn_cache_task', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('cdn_preheat_task')} (

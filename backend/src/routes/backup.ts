@@ -28,6 +28,7 @@ import {
 } from '../lib/backup/destinations.js';
 import { saveUpload } from '../lib/backup/upload.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
+import { requireLoginPassword } from '../lib/reauth.js';
 
 function isAdmin(user: any): boolean {
   return checkLevel(user, 2);
@@ -169,14 +170,19 @@ export default async function backupRoutes(app: FastifyInstance) {
       }
       const key = await keyForArchive(tmp, fields.passphrase ? String(fields.passphrase) : undefined);
       const header = (await readArchiveHeader(tmp)).header;
-      if (mode === 'replace' && String(header.scope) !== 'site') {
+      const archiveScope = String(header.scope || '').trim();
+      // scope 必须显式且只允许 site/user；缺失或任意字符串都不能退化成整站导入。
+      if (archiveScope !== 'site' && archiveScope !== 'user') {
+        return reply.code(400).send({ code: -1, msg: '备份归档范围不合法' });
+      }
+      if (mode === 'replace' && archiveScope !== 'site') {
         return reply.code(400).send({ code: -1, msg: 'replace 模式仅支持整站备份' });
       }
-      if (String(header.scope) === 'site' && !admin) {
+      if (archiveScope === 'site' && !admin) {
         return reply.code(403).send({ code: -1, msg: '无权限导入整站备份' });
       }
       if (
-        String(header.scope) === 'user' &&
+        archiveScope === 'user' &&
         !admin &&
         Number(header.ownerUid || 0) !== Number(req.user.uid)
       ) {
@@ -191,6 +197,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         dryRun: fields.dry_run === true || fields.dry_run === 'true',
         actor: { uid: Number(req.user.uid), username: String(req.user.username || '') },
         actorIsAdmin: admin,
+        trusted: admin,
         passphrase: fields.passphrase ? String(fields.passphrase) : undefined,
         // overwrite_config 只对管理员开放；multipart 字段是字符串，必须显式兼容 'true'
         overwriteConfig:
@@ -319,6 +326,8 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.post('/api/backup/key', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password);
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const existed = await hasBackupKey();
     await rotateBackupKey();
     audit(req, { module: 'backup', action: 'backup.key.rotate', summary: existed ? '轮换备份密钥' : '生成备份密钥' });
@@ -501,13 +510,16 @@ export default async function backupRoutes(app: FastifyInstance) {
     try {
       await downloadRemote(Number(req.params.destId), name, local);
       const st = await stat(local);
+      const header = (await readArchiveHeader(local)).header;
+      const scope = String(header.scope || '') === 'user' ? 'user' : 'site';
       const r: any = await query(
         `INSERT INTO ${table('backup_job')} (kind, scope, status, file_name, file_size, dest, dest_id, include_logs, created_at, finished_at)
-         VALUES ('manual', 'site', 'success', ?, ?, 'local', 0, 1, NOW(), NOW())`,
-        [path.basename(name), st.size],
+         VALUES ('manual', ?, 'success', ?, ?, 'local', 0, 1, NOW(), NOW())`,
+        [scope, path.basename(name), st.size],
       );
       return { code: 0, msg: '已拉回本地', data: { id: r.insertId, file: path.basename(name), size: st.size } };
     } catch (e: any) {
+      await unlink(local).catch(() => undefined);
       return { code: -1, msg: String(e?.message || e) };
     }
   });

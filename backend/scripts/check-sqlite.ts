@@ -23,6 +23,7 @@ const config = await import('../src/config.js');
 const backupExport = await import('../src/lib/backup/export.js');
 const backupImport = await import('../src/lib/backup/import.js');
 const backupArchive = await import('../src/lib/backup/archive.js');
+const { hitRateLimitDistributed } = await import('../src/lib/rateLimit.js');
 const backupKey = await import('../src/lib/backup/key.js');
 
 assert(isGeneratedColumn('VIRTUAL GENERATED'), '识别 VIRTUAL 生成列');
@@ -191,7 +192,7 @@ const exported = await backupExport.exportBackup({ scope: 'site', includeLogs: t
 assert(exported.size > 0 && exported.file.endsWith('.dnsmgrbk'), 'SQLite 备份导出成功');
 const key = await backupKey.getBackupKey();
 assert(key, '备份密钥可用');
-const report = await backupImport.importArchive(path.join(backupArchive.backupsDir(), exported.file), { key, mode: 'replace' });
+const report = await backupImport.importArchive(path.join(backupArchive.backupsDir(), exported.file), { key, mode: 'replace', trusted: true });
 assert(report.tables.domain?.inserted === 2, 'SQLite 备份恢复域名数据');
 assert(report.tables.announcement?.inserted === 1, 'SQLite 备份恢复公告数据');
 
@@ -218,6 +219,106 @@ const bind = await installer.performInstall(cfg, '', '');
 assert(bind.ok && bind.bound, '已安装的 SQLite 数据库可重复绑定');
 const boundUsers = await db.query<any>('SELECT COUNT(*) AS c FROM dnsmgr_user');
 assert(boundUsers[0].c === 1, '重复绑定不新增管理员');
+
+// 个人备份不能把「有子域名授权的共享域名」下的其他用户任务导出
+const bob: any = await db.query(
+  `INSERT INTO dnsmgr_user (username, password, is_api, apikey, level, regtime, lasttime, status, is_super, email)
+   VALUES ('backup-bob', 'x', 0, '', 1, NOW(), NOW(), 1, 0, 'bob@example.com')`,
+);
+const victimAccount: any = await db.query(
+  `INSERT INTO dnsmgr_account (type, name, config, remark, owner_uid, visibility, addtime)
+   VALUES ('aliyun', 'victim-account', '{}', '', 0, 'shared', NOW())`,
+);
+const victimDomain: any = await db.query(
+  `INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime)
+   VALUES (?, 'victim.example.com', 'v', 0, NOW())`,
+  [victimAccount.insertId],
+);
+await db.query(
+  `INSERT INTO dnsmgr_permission (uid, domain, sub, readonly) VALUES (?, 'victim.example.com', 'www', 0)`,
+  [bob.insertId],
+);
+await db.query(
+  `INSERT INTO dnsmgr_dns_check_task (name, did, uid, sub, types, cycle, interval_min, notice_email, active, addtime)
+   VALUES ('victim-task', ?, 1000, 'www', 'A', 'daily', 0, 'admin@example.com', 1, NOW())`,
+  [victimDomain.insertId],
+);
+const bobExport = await backupExport.exportBackup({ scope: 'user', ownerUid: Number(bob.insertId), includeLogs: true });
+const bobArchive = await backupArchive.openArchive(path.join(backupArchive.backupsDir(), bobExport.file), key!);
+try {
+  const exportedDomains: any[] = [];
+  const domainStream = bobArchive.readTable('domain');
+  if (domainStream) for await (const row of domainStream) exportedDomains.push(row);
+  assert(!exportedDomains.some((row) => row.name === 'victim.example.com'), '个人备份不导出仅授权域名的 domain 行');
+  const exportedTasks: any[] = [];
+  const taskStream = bobArchive.readTable('dns_check_task');
+  if (taskStream) for await (const row of taskStream) exportedTasks.push(row);
+  assert(exportedTasks.length === 0, '个人备份不导出其他用户的 DNS 检测任务');
+} finally {
+  await bobArchive.dispose();
+}
+
+// 整站备份排除某用户时，其私有账户下的域名也不能出现在归档中
+const privateAccount: any = await db.query(
+  `INSERT INTO dnsmgr_account (type, name, config, remark, owner_uid, visibility, addtime)
+   VALUES ('aliyun', 'bob-private', '{}', '', ?, 'private', NOW())`,
+  [bob.insertId],
+);
+await db.query(
+  `INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime)
+   VALUES (?, 'excluded.example.com', 'e', 0, NOW())`,
+  [privateAccount.insertId],
+);
+await db.query(
+  `INSERT INTO dnsmgr_user_vault (uid, mode, exclude_from_site_backup) VALUES (?, 'none', 1)`,
+  [bob.insertId],
+);
+const sharedAccount: any = await db.query(
+  `INSERT INTO dnsmgr_account (type, name, config, remark, owner_uid, visibility, addtime)
+   VALUES ('aliyun', 'shared', '{}', '', 0, 'shared', NOW())`,
+);
+const sharedDomain: any = await db.query(
+  `INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime)
+   VALUES (?, 'shared.example.com', 's', 0, NOW())`,
+  [sharedAccount.insertId],
+);
+await db.query(
+  `INSERT INTO dnsmgr_dmtask (did, rr, recordid, type, main_value, backup_value, checktype, checkurl, frequency, cycle, timeout, owner_uid, addtime, active)
+   VALUES (?, 'www', 'excluded-task', 1, '1.1.1.1', '2.2.2.2', 0, '', 60, 1, 10, ?, NOW(), 1)`,
+  [sharedDomain.insertId, bob.insertId],
+);
+await db.query(
+  `INSERT INTO dnsmgr_cdn_cache_task (url, type, provider, task_id, status, msg, addtime, owner_uid)
+   VALUES ('https://excluded.example.com/a.js', 'url', 'aliyun', NULL, 0, NULL, NOW(), ?)`,
+  [bob.insertId],
+);
+const siteExport = await backupExport.exportBackup({ scope: 'site', includeLogs: true });
+const siteArchive = await backupArchive.openArchive(path.join(backupArchive.backupsDir(), siteExport.file), key!);
+try {
+  const siteDomains: any[] = [];
+  const siteStream = siteArchive.readTable('domain');
+  if (siteStream) for await (const row of siteStream) siteDomains.push(row);
+  assert(!siteDomains.some((row) => row.name === 'excluded.example.com'), '整站备份排除用户时不导出其私有域名');
+  const siteTasks: any[] = [];
+  const taskStream = siteArchive.readTable('dmtask');
+  if (taskStream) for await (const row of taskStream) siteTasks.push(row);
+  assert(!siteTasks.some((row) => row.recordid === 'excluded-task'), '整站备份排除用户时按 owner_uid 排除其容灾任务');
+  const cacheTasks: any[] = [];
+  const cacheStream = siteArchive.readTable('cdn_cache_task');
+  if (cacheStream) for await (const row of cacheStream) cacheTasks.push(row);
+  assert(!cacheTasks.some((row) => String(row.url).includes('excluded.example.com')), '整站备份排除用户时按 owner_uid 排除其缓存任务');
+} finally {
+  await siteArchive.dispose();
+}
+
+assert(await hitRateLimitDistributed('rate-check', 2, 60_000), '分布式限流第一次放行');
+assert(await hitRateLimitDistributed('rate-check', 2, 60_000), '分布式限流第二次放行');
+assert(!(await hitRateLimitDistributed('rate-check', 2, 60_000)), '分布式限流超限拒绝');
+await db.query(`DELETE FROM dnsmgr_rate_limit WHERE bucket = 'rate-check'`);
+assert(await hitRateLimitDistributed('rate-rollover', 1, 50), '分布式限流窗口首次放行');
+await new Promise((resolve) => setTimeout(resolve, 70));
+assert(await hitRateLimitDistributed('rate-rollover', 1, 50), '分布式限流跨窗口后重新计数');
+await db.query(`DELETE FROM dnsmgr_rate_limit WHERE bucket = 'rate-rollover'`);
 
 await db.getDriver().close();
 assert(!fs.existsSync(path.join(dir, 'dnsmgr.sqlite.lock')), '关闭驱动后释放单实例锁');

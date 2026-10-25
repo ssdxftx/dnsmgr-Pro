@@ -11,6 +11,7 @@ import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { getVisibleAccount } from '../lib/accounts/visibility.js';
 import { clampLimit } from '../lib/util.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -206,11 +207,13 @@ function buildAccess(acc: { admin: boolean; perms: SubPermission[] }, domainName
   return { admin: false, readonly: !writable, writable, subs: mine.map((p) => p.sub).filter(Boolean) };
 }
 
-async function getDomainWithAccount(domainId: number) {
+async function getDomainWithAccount(domainId: number, user?: any) {
   const d = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [domainId]);
   if (!d) return null;
   const acct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
   if (!acct) return null;
+  // 私有账户仅所有者可见；管理员和获得子域名授权的用户都不能借域名 ID 使用他人云凭据
+  if (user && acct.visibility === 'private' && Number(acct.owner_uid) !== Number(user.uid)) return null;
   return { domain: d, account: acct };
 }
 
@@ -226,6 +229,7 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   // ============ 域名管理 ============
   app.get('/api/domains', auth, async (req: any) => {
+    if (!(await hitRateLimitDistributed(`cloud:domains:${req.user.uid}`, 60, 60_000))) return { code: -1, msg: '请求过于频繁，请稍后再试' };
     const acc = await getUserPerms(req);
     const kw = String(req.query?.kw || '').trim();
     const select = `SELECT A.*, B.type AS account_type, B.name AS account_name,
@@ -242,13 +246,12 @@ export default async function domainRoutes(app: FastifyInstance) {
         : [];
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
-    let data = rows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
+    const visibleRows = (rows as any[]).filter(
+      (r) => r.account_visibility !== 'private' || Number(r.account_owner) === Number(req.user.uid),
+    );
+    let data = visibleRows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
     if (acc.admin) {
-      // 管理员可见域名，但他人私有账户只显示占位名，避免泄露账户备注等元信息
       data = data.map((r: any) => {
-        if (r.account_visibility === 'private' && Number(r.account_owner) !== Number(req.user.uid)) {
-          r.account_name = '个人账户';
-        }
         delete r.account_visibility;
         delete r.account_owner;
         return r;
@@ -357,6 +360,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // 解析记录搜索：按主机记录（子域名）或备注跨域模糊检索，返回可编辑的解析记录条目
   // 供「域名列表」搜索在本地无命中时原地展示记录卡片
   app.get('/api/records/search', auth, async (req: any) => {
+    if (!(await hitRateLimitDistributed(`cloud:records-search:${req.user.uid}`, 30, 60_000))) return { code: -1, msg: '请求过于频繁，请稍后再试' };
     const acc = await getUserPerms(req);
     const kw = String(req.query?.kw || '').trim().toLowerCase();
     if (!kw) return { code: 0, data: [] };
@@ -372,12 +376,16 @@ export default async function domainRoutes(app: FastifyInstance) {
         : [];
     // 批量取账户，避免逐个域名查 account
     const acctMap = await fetchAccountMap(targets.map((t: any) => Number(t.aid)));
+    const visibleTargets = targets.filter((t: any) => {
+      const a = acctMap.get(Number(t.aid));
+      return !a || a.visibility !== 'private' || Number(a.owner_uid) === Number(req.user.uid);
+    });
     const LIMIT = 200;
     const out: any[] = [];
     let cursor = 0;
     const worker = async () => {
-      while (cursor < targets.length && out.length < LIMIT) {
-        const d = targets[cursor++];
+      while (cursor < visibleTargets.length && out.length < LIMIT) {
+        const d = visibleTargets[cursor++];
         if (out.length >= LIMIT) return;
         try {
           const list = (await fetchAllRecords(d, acctMap.get(Number(d.aid)))).list;
@@ -466,7 +474,9 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.delete('/api/domains/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
-    const row = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [id]);
+    const info = await getDomainWithAccount(Number(id), req.user);
+    if (!info) return { code: -1, msg: '域名不存在' };
+    const row = info.domain;
     // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名
     await clearDomainPermissions([row?.name || '']);
     await query(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
@@ -490,8 +500,9 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.put('/api/domains/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number((req.params as any).id);
-    const row: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [id]);
-    if (!row) return { code: -1, msg: '域名不存在' };
+    const info = await getDomainWithAccount(id, req.user);
+    if (!info) return { code: -1, msg: '域名不存在' };
+    const row: any = info.domain;
     const b = req.body || {};
     const upd: Record<string, any> = {};
     const boolField = (k: string) => (Number(b[k]) ? 1 : 0);
@@ -530,6 +541,13 @@ export default async function domainRoutes(app: FastifyInstance) {
       ? (req.body.ids as any[]).map(Number).filter((n) => Number.isInteger(n) && n > 0)
       : [];
     if (!ids.length) return { code: -1, msg: '请选择域名' };
+    const allowed = await query(
+      `SELECT D.id FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+        WHERE D.id IN (${ids.map(() => '?').join(',')}) AND (A.visibility <> 'private' OR A.owner_uid = ?)`,
+      [...ids, Number(req.user.uid)],
+    );
+    const allowedIds = new Set((allowed as any[]).map((r) => Number(r.id)));
+    if (ids.some((id) => !allowedIds.has(id))) return { code: -1, msg: '无权操作部分私有账户域名' };
     const names = await query(`SELECT name FROM ${table('domain')} WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
     await clearDomainPermissions((names as any[]).map((r) => r.name));
     const ph = ids.map(() => '?').join(',');
@@ -551,10 +569,11 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   // ============ 解析记录 ============
   app.get('/api/domains/:id/records', auth, async (req: any) => {
+    if (!(await hitRateLimitDistributed(`cloud:records:${req.user.uid}`, 120, 60_000))) return { code: -1, msg: '请求过于频繁，请稍后再试' };
     const { id } = req.params as any;
     const q = req.query || {};
     const acc = await getUserPerms(req);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     // 普通用户必须先拥有该域名的任意子域名授权，避免用任意域名 ID 触发云端拉取/解密
     if (!acc.admin && !acc.perms.some((p) => sameDomain(p.domain, info.domain.name))) {
@@ -594,7 +613,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // 本地解析检测（单条记录），返回 active/cloudflare/not_found/mismatch
   app.post('/api/domains/:id/records/check', auth, async (req: any) => {
     const { id } = req.params as any;
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     const b = req.body || {};
@@ -634,7 +653,7 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   app.get('/api/domains/:id/lines', auth, async (req: any) => {
     const { id } = req.params as any;
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin && !acc.perms.some((p) => sameDomain(p.domain, info.domain.name))) {
@@ -650,7 +669,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.post('/api/domains/:id/records', auth, async (req: any) => {
     const { id } = req.params as any;
     const { name, type, value, line, ttl, mx, weight, remark } = req.body || {};
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
@@ -679,7 +698,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.post('/api/domains/:id/records/:recordId/remark', auth, async (req: any) => {
     const { id, recordId } = req.params as any;
     const remark = (req.body || {}).remark ?? null;
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
@@ -723,7 +742,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.put('/api/domains/:id/records/:recordId', auth, async (req: any) => {
     const { id, recordId } = req.params as any;
     const { name, type, value, line, ttl, mx, weight, remark } = req.body || {};
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
@@ -762,7 +781,7 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   app.delete('/api/domains/:id/records/:recordId', auth, async (req: any) => {
     const { id, recordId } = req.params as any;
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
@@ -796,7 +815,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.post('/api/domains/:id/records/:recordId/status', auth, async (req: any) => {
     const { id, recordId } = req.params as any;
     const { status } = req.body || {};
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
@@ -828,8 +847,9 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   // 批量操作解析记录：open/pause/delete/remark/value/line/group
   app.post('/api/domains/:id/records/batch', auth, async (req: any) => {
+    if (!(await hitRateLimitDistributed(`cloud:records-batch:${req.user.uid}`, 20, 60_000))) return { code: -1, msg: '请求过于频繁，请稍后再试' };
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const accountConfig = await accountConfigOf(info.account);
     const provider: any = getDnsProvider(info.account.type, accountConfig, info.domain.name, info.domain.thirdid);
@@ -925,7 +945,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // 批量添加解析记录（每行「主机记录 记录值」，其余属性统一）
   app.post('/api/domains/:id/records/batch-add', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin && !acc.perms.some((p) => sameDomain(p.domain, info.domain.name))) {
@@ -976,7 +996,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // 域名快捷信息：线路列表 + 最小 TTL + 是否支持权重/备注
   app.get('/api/domains/:id/quickinfo', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin) {
@@ -996,7 +1016,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // 解析记录分组列表（阿里云 / DNSPod）
   app.get('/api/domains/:id/groups', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
@@ -1014,7 +1034,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // ============ 权重解析（阿里云）============
   app.get('/api/domains/:id/weight', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
@@ -1027,7 +1047,7 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   app.post('/api/domains/:id/weight', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.setWeightStatus !== 'function') return { code: -1, msg: '该DNS类型不支持权重解析（仅阿里云）' };
@@ -1092,7 +1112,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // ============ 域名别名（DNSPod）============
   app.get('/api/domains/:id/aliases', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
@@ -1108,7 +1128,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = Number((req.params as any).id);
     const alias = String((req.body || {}).alias || '').trim();
     if (!alias) return { code: -1, msg: '参数不能为空' };
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.addDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
@@ -1123,7 +1143,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   app.delete('/api/domains/:id/aliases/:aliasId', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { id, aliasId } = req.params as any;
-    const info = await getDomainWithAccount(Number(id));
+    const info = await getDomainWithAccount(Number(id), req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.deleteDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
@@ -1138,7 +1158,7 @@ export default async function domainRoutes(app: FastifyInstance) {
   // ============ 解析操作日志（阿里云）============
   app.get('/api/domains/:id/recordlog', auth, async (req: any) => {
     const id = Number((req.params as any).id);
-    const info = await getDomainWithAccount(id);
+    const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
     if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };

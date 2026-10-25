@@ -28,6 +28,16 @@ export async function canAccessCertOrder(orderId: number, user: any): Promise<bo
   return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
 }
 
+/** 域名是否可以由该用户操作：私有账户仅所有者，共享账户沿用域名授权 */
+export async function canAccessDomainAccount(domainId: number, user: any): Promise<boolean> {
+  const row: any = await queryOne(
+    `SELECT A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    [Number(domainId)],
+  );
+  if (!row) return false;
+  return row.visibility !== 'private' || Number(row.owner_uid) === Number(user?.uid);
+}
+
 /** 列表：管理员看共享 + 自己的私有；普通用户只看自己的私有 */
 export async function listVisibleAccounts(t: AccountTable, user: any): Promise<any[]> {
   if (checkLevel(user, 2)) {

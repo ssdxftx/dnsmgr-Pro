@@ -211,6 +211,17 @@ const providerMap: Record<string, new (config: Record<string, any>) => CdnProvid
   wangsu_cdn: WangsuCDN,
 };
 
+// 只保留 provider 元数据声明的配置字段，避免客户端注入 Endpoint/base_url 等隐藏字段
+export function pickCdnConfig(type: string, config: any): Record<string, any> {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return (config || {}) as Record<string, any>;
+  const meta = cdnConfig[type];
+  if (!meta) return {};
+  const allowed = new Set(Object.keys(meta.config || {}));
+  const out: Record<string, any> = {};
+  for (const [k, v] of Object.entries(config)) if (allowed.has(k)) out[k] = v;
+  return out;
+}
+
 export function getCdnProvider(type: string, config: Record<string, any>): CdnProvider | false {
   const Ctor = providerMap[type];
   if (!Ctor) return false;

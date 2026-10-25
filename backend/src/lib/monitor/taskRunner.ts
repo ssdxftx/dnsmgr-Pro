@@ -13,6 +13,7 @@ function getDnsType(value: string): string {
 }
 
 import { decryptConfig } from '../secret.js';
+import { loadAccountConfig } from '../accounts/taskConfig.js';
 
 function safeJson(s: string): Record<string, any> {
   return decryptConfig(s) || {};
@@ -86,7 +87,7 @@ async function handle(row: any): Promise<void> {
   let drow: any = null;
   if (action > 0) {
     drow = await queryOne(
-      `SELECT A.*, B.type AS account_type, B.config AS account_config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
+      `SELECT A.*, B.type AS account_type, B.config AS account_config, B.owner_uid AS account_owner FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
       [row.did]
     );
     if (!drow) {
@@ -96,9 +97,11 @@ async function handle(row: any): Promise<void> {
     row.domain = row.rr + '.' + drow.name;
   }
 
+  const accountConfig = drow ? await loadAccountConfig({ config: drow.account_config, owner_uid: drow.account_owner }) : {};
+
   if (action === 1) {
     if (row.type === 2) {
-      const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
+      const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
       if (!dns) throw new Error('该厂商暂未支持');
       const recordinfo = safeJson(row.recordinfo);
       if (drow.account_type === 'cloudflare' && row.cdn === 1) {
@@ -109,7 +112,7 @@ async function handle(row: any): Promise<void> {
         await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '修改解析失败', ?, ?)`, [drow.name, dns.getError(), fmtDateTime()]);
       }
     } else if (row.type === 1 || row.type === 3) {
-      const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
+      const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
       if (!dns) throw new Error('该厂商暂未支持');
       const res = await dns.setDomainRecordStatus(row.recordid, '0');
       if (!res) {
@@ -118,7 +121,7 @@ async function handle(row: any): Promise<void> {
     }
   } else if (action === 2) {
     if (row.type === 2) {
-      const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
+      const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
       if (!dns) throw new Error('该厂商暂未支持');
       const recordinfo = safeJson(row.recordinfo);
       if (drow.account_type === 'cloudflare' && row.cdn === 1) {
@@ -129,7 +132,7 @@ async function handle(row: any): Promise<void> {
         await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '修改解析失败', ?, ?)`, [drow.name, dns.getError(), fmtDateTime()]);
       }
     } else if (row.type === 1 || row.type === 3) {
-      const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
+      const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
       if (!dns) throw new Error('该厂商暂未支持');
       const res = await dns.setDomainRecordStatus(row.recordid, '1');
       if (!res) {

@@ -13,6 +13,9 @@ export class S3storageDeploy implements DeployProvider {
     this.AccessKeyId = config.AccessKeyId || '';
     this.SecretAccessKey = config.SecretAccessKey || '';
     this.endpoint = String(config.endpoint || '').replace(/\/+$/, '');
+    if (/^http:\/\//i.test(this.endpoint) && process.env.DNSMGR_ALLOW_INSECURE_S3 !== '1') {
+      throw new Error('S3 Endpoint 必须使用 HTTPS；如确需 HTTP，请显式设置 DNSMGR_ALLOW_INSECURE_S3=1');
+    }
     this.region = config.region || 'us-east-1';
   }
 

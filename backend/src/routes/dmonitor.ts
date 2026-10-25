@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
+import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 
 // 容灾监控接口仅管理员可用
@@ -99,8 +100,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     }
 
     const totalRow = await queryOne<{ c: number }>(
-      `SELECT COUNT(*) AS c FROM ${table('dmtask')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where}`,
-      params
+      `SELECT COUNT(*) AS c FROM ${table('dmtask')} A JOIN ${table('domain')} B ON A.did = B.id JOIN ${table('account')} C ON B.aid = C.id WHERE 1=1 AND (C.visibility <> 'private' OR C.owner_uid = ?)${where}`,
+      [Number(req.user.uid), ...params]
     );
     const total = totalRow?.c ?? 0;
 
@@ -112,8 +113,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
 
     const list = await query(
-      `SELECT A.*, B.name AS domain FROM ${table('dmtask')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      `SELECT A.*, B.name AS domain FROM ${table('dmtask')} A JOIN ${table('domain')} B ON A.did = B.id JOIN ${table('account')} C ON B.aid = C.id WHERE 1=1 AND (C.visibility <> 'private' OR C.owner_uid = ?)${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      [Number(req.user.uid), ...params, limit, offset]
     );
 
     const rows = list.map((r: any) => ({
@@ -151,6 +152,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.recordid || !task.main_value || !task.frequency || !task.cycle) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.checktype > 0 && task.timeout > task.frequency) {
       return { code: -1, msg: '为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔' };
     }
@@ -161,8 +163,8 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (exists) return { code: -1, msg: '当前容灾切换策略已存在' };
 
     await query(
-      `INSERT INTO ${table('dmtask')} (did, rr, recordid, type, main_value, backup_value, checktype, checkurl, tcpport, frequency, cycle, timeout, proxy, cdn, remark, recordinfo, addtime, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [task.did, task.rr, task.recordid, task.type, task.main_value, task.backup_value, task.checktype, task.checkurl, task.tcpport, task.frequency, task.cycle, task.timeout, task.proxy, task.cdn, task.remark, task.recordinfo, task.addtime, task.active]
+      `INSERT INTO ${table('dmtask')} (did, rr, recordid, type, main_value, backup_value, checktype, checkurl, tcpport, frequency, cycle, timeout, proxy, cdn, remark, recordinfo, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [task.did, task.rr, task.recordid, task.type, task.main_value, task.backup_value, task.checktype, task.checkurl, task.tcpport, task.frequency, task.cycle, task.timeout, task.proxy, task.cdn, task.remark, task.recordinfo, task.addtime, task.active, Number(req.user.uid)]
     );
     return { code: 0, msg: '添加成功' };
   });
@@ -192,6 +194,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.recordid || !task.main_value || !task.frequency || !task.cycle) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.checktype > 0 && task.timeout > task.frequency) {
       return { code: -1, msg: '为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔' };
     }
@@ -210,6 +213,9 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
 
   app.post('/api/dmonitor/tasks/:id/active', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('dmtask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const active = Number((req.body || {}).active) === 1 ? 1 : 0;
     await query(`UPDATE ${table('dmtask')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: '设置成功' };
@@ -217,6 +223,9 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
 
   app.delete('/api/dmonitor/tasks/:id', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('dmtask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     await query(`DELETE FROM ${table('dmtask')} WHERE id = ?`, [id]);
     await query(`DELETE FROM ${table('dmlog')} WHERE taskid = ?`, [id]);
     return { code: 0, msg: '删除成功' };
@@ -229,6 +238,10 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!list.length) return { code: -1, msg: '参数错误' };
     // 批量语句替代逐条 SQL（原实现 2N 条）
     const ph = list.map(() => '?').join(',');
+    const tasks: any[] = await query(`SELECT did FROM ${table('dmtask')} WHERE id IN (${ph})`, list);
+    for (const task of tasks) {
+      if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    }
     let success = 0;
     if (act === 'delete') {
       await query(`DELETE FROM ${table('dmlog')} WHERE taskid IN (${ph})`, list);
@@ -252,6 +265,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
       [id]
     );
     if (!task) return { code: -1, msg: '切换策略不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限查看该域名的私有账户任务' };
     const day = fmtDateTime(new Date(Date.now() - 24 * 3600 * 1000));
     const switchCount = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('dmlog')} WHERE taskid = ? AND date >= ?`, [id, day]);
     const failCount = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('dmlog')} WHERE taskid = ? AND date >= ? AND action = 1`, [id, day]);
@@ -262,6 +276,9 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
 
   app.get('/api/dmonitor/tasks/:id/logs', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('dmtask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '切换策略不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限查看该域名的私有账户任务' };
     const q = req.query || {};
     const action = Number(q.action || 0);
     const offset = clampOffset(q.offset);

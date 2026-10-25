@@ -58,22 +58,22 @@ async function buildUserContext(read: SnapshotRead, uid: number): Promise<UserCo
   const accounts = await read(`SELECT id FROM ${table('account')} WHERE owner_uid = ?`, [uid]);
   const cdnAccounts = await read(`SELECT id FROM ${table('cdn_account')} WHERE owner_uid = ?`, [uid]);
   const certAccounts = await read(`SELECT id FROM ${table('cert_account')} WHERE owner_uid = ?`, [uid]);
-  const perms = await read(`SELECT domain FROM ${table('permission')} WHERE uid = ?`, [uid]);
   const accountIds = new Set<number>(accounts.map((r: any) => Number(r.id)));
   const cdnAccountIds = new Set<number>(cdnAccounts.map((r: any) => Number(r.id)));
   const certAccountIds = new Set<number>(certAccounts.map((r: any) => Number(r.id)));
-  const permNames = new Set<string>(perms.map((r: any) => String(r.domain).toLowerCase()));
 
-  const allDomains = await read(`SELECT id, aid, name FROM ${table('domain')}`);
+  // 个人备份只导出本人私有账户名下的资产。不能把「有子域名授权的共享域名」
+  // 纳入范围，否则会把其他用户的检测任务、告警邮箱、CDN 元数据一起导走。
+  const allDomains = await read(`SELECT id, aid FROM ${table('domain')}`);
   const domainIds = new Set<number>();
   for (const d of allDomains as any[]) {
-    if (accountIds.has(Number(d.aid)) || permNames.has(String(d.name).toLowerCase())) domainIds.add(Number(d.id));
+    if (accountIds.has(Number(d.aid))) domainIds.add(Number(d.id));
   }
 
-  const allCdn = await read(`SELECT id, aid, did FROM ${table('cdn_domain')}`);
+  const allCdn = await read(`SELECT id, aid FROM ${table('cdn_domain')}`);
   const cdnDomainIds = new Set<number>();
   for (const d of allCdn as any[]) {
-    if (cdnAccountIds.has(Number(d.aid)) || domainIds.has(Number(d.did))) cdnDomainIds.add(Number(d.id));
+    if (cdnAccountIds.has(Number(d.aid))) cdnDomainIds.add(Number(d.id));
   }
 
   const allOrders = await read(`SELECT id, aid FROM ${table('cert_order')}`);
@@ -91,16 +91,108 @@ async function buildUserContext(read: SnapshotRead, uid: number): Promise<UserCo
   return { uid, accountIds, cdnAccountIds, certAccountIds, domainIds, cdnDomainIds, certOrderIds, taskIds };
 }
 
-function siteFilter(name: string, excludedUsers: Set<number>) {
+interface SiteExclusions {
+  users: Set<number>;
+  accounts: Set<number>;
+  cdnAccounts: Set<number>;
+  certAccounts: Set<number>;
+  domains: Set<number>;
+  cdnDomains: Set<number>;
+  certOrders: Set<number>;
+  tasks: Set<number>;
+}
+
+const marks = (ids: number[]) => ids.map(() => '?').join(',');
+
+async function buildSiteExclusions(read: SnapshotRead, users: Set<number>): Promise<SiteExclusions> {
+  const ex: SiteExclusions = {
+    users,
+    accounts: new Set(),
+    cdnAccounts: new Set(),
+    certAccounts: new Set(),
+    domains: new Set(),
+    cdnDomains: new Set(),
+    certOrders: new Set(),
+    tasks: new Set(),
+  };
+  if (!users.size) return ex;
+  const uidList = [...users];
+  const collect = (rows: any[], target: Set<number>) => {
+    for (const r of rows) target.add(Number(r.id));
+  };
+  collect(
+    (await read(`SELECT id FROM ${table('account')} WHERE visibility = 'private' AND owner_uid IN (${marks(uidList)})`, uidList)) as any[],
+    ex.accounts,
+  );
+  collect(
+    (await read(`SELECT id FROM ${table('cdn_account')} WHERE visibility = 'private' AND owner_uid IN (${marks(uidList)})`, uidList)) as any[],
+    ex.cdnAccounts,
+  );
+  collect(
+    (await read(`SELECT id FROM ${table('cert_account')} WHERE visibility = 'private' AND owner_uid IN (${marks(uidList)})`, uidList)) as any[],
+    ex.certAccounts,
+  );
+  if (ex.accounts.size) {
+    const accountList = [...ex.accounts];
+    collect(
+      (await read(`SELECT id FROM ${table('domain')} WHERE aid IN (${marks(accountList)})`, accountList)) as any[],
+      ex.domains,
+    );
+  }
+  if (ex.cdnAccounts.size) {
+    const accountList = [...ex.cdnAccounts];
+    collect(
+      (await read(`SELECT id FROM ${table('cdn_domain')} WHERE aid IN (${marks(accountList)})`, accountList)) as any[],
+      ex.cdnDomains,
+    );
+  }
+  if (ex.certAccounts.size) {
+    const accountList = [...ex.certAccounts];
+    collect(
+      (await read(`SELECT id FROM ${table('cert_order')} WHERE aid IN (${marks(accountList)})`, accountList)) as any[],
+      ex.certOrders,
+    );
+  }
+  if (ex.domains.size) {
+    const domainList = [...ex.domains];
+    collect(
+      (await read(`SELECT id FROM ${table('dmtask')} WHERE did IN (${marks(domainList)})`, domainList)) as any[],
+      ex.tasks,
+    );
+  }
+  collect(
+    (await read(`SELECT id FROM ${table('dmtask')} WHERE owner_uid IN (${marks(uidList)})`, uidList)) as any[],
+    ex.tasks,
+  );
+  return ex;
+}
+
+function siteFilter(name: string, ex: SiteExclusions) {
   return (row: any): boolean => {
     // 运行态标志不进归档：否则恢复中的快照被带到别的站点会永久卡在维护模式
     if (name === 'config') return !['maintenance', 'sys_key', 'backup_key'].includes(String(row.key));
-    if (!excludedUsers.size) return true;
-    if (name === 'user') return !excludedUsers.has(Number(row.id));
-    if (name === 'user_vault') return !excludedUsers.has(Number(row.uid));
-    if (name === 'account' || name === 'cdn_account' || name === 'cert_account') {
-      return !(row.visibility === 'private' && excludedUsers.has(Number(row.owner_uid)));
+    if (!ex.users.size) return true;
+    if (name === 'user') return !ex.users.has(Number(row.id));
+    if (name === 'user_vault') return !ex.users.has(Number(row.uid));
+    if (name === 'account') return !ex.accounts.has(Number(row.id));
+    if (name === 'cdn_account') return !ex.cdnAccounts.has(Number(row.id));
+    if (name === 'cert_account') return !ex.certAccounts.has(Number(row.id));
+    if (name === 'permission' || name === 'audit_log') return !ex.users.has(Number(row.uid));
+    if (name === 'dns_check_task') return !ex.users.has(Number(row.uid)) && !ex.domains.has(Number(row.did));
+    if (name === 'domain') return !ex.domains.has(Number(row.id));
+    if (name === 'dmtask') return !ex.users.has(Number(row.owner_uid)) && !ex.domains.has(Number(row.did));
+    if (name === 'sctask') return !ex.users.has(Number(row.owner_uid)) && !ex.domains.has(Number(row.did));
+    if (name === 'optimizeip') return !ex.users.has(Number(row.owner_uid)) && !ex.domains.has(Number(row.did));
+    if (name === 'cdn_preheat_task' || name === 'cdn_cache_task') return !ex.users.has(Number(row.owner_uid));
+    if (name === 'domain_alias' || name === 'cert_cname' || name === 'cert_link_log') {
+      return !ex.domains.has(Number(row.did));
     }
+    if (name === 'dmlog') return !ex.tasks.has(Number(row.taskid));
+    if (name === 'cdn_domain') return !ex.cdnDomains.has(Number(row.id));
+    if (name === 'cdn_cache_rule') return !ex.cdnDomains.has(Number(row.did));
+    if (name === 'cf_rule_credential') return !ex.cdnAccounts.has(Number(row.aid));
+    if (name === 'cert_order') return !ex.certOrders.has(Number(row.id));
+    if (name === 'cert_domain' || name === 'cert_deploy') return !ex.certOrders.has(Number(row.oid));
     return true;
   };
 }
@@ -143,7 +235,7 @@ function userFilter(name: string, ctx: UserContext, includeLogs: boolean) {
       case 'dmlog':
         return ctx.taskIds.has(Number(row.taskid));
       case 'dns_check_task':
-        return ctx.domainIds.has(Number(row.did));
+        return ctx.domainIds.has(Number(row.did)) && Number(row.uid) === ctx.uid;
       case 'audit_log':
         return includeLogs && Number(row.uid) === ctx.uid;
       default:
@@ -291,6 +383,7 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
         for (const r of rows as any[]) excludedUsers.add(Number(r.uid));
       }
       const ctx = scope === 'user' ? await buildUserContext(read, ownerUid) : null;
+      const siteExclusions = scope === 'site' ? await buildSiteExclusions(read, excludedUsers) : null;
       if (scope === 'site') {
         const vaultRows = await read(`SELECT mode FROM ${table('user_vault')}`);
         const convenient = (vaultRows as any[]).filter((r) => String(r.mode) === 'none').length;
@@ -327,7 +420,7 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
             if (name === 'audit_log' && !includeLogs) continue;
             const keep =
               scope === 'site'
-                ? siteFilter(name, excludedUsers)
+                ? siteFilter(name, siteExclusions as SiteExclusions)
                 : userFilter(name, ctx as UserContext, includeLogs);
             const chunk = await tableChunk(
               read,

@@ -54,6 +54,8 @@ function safeTargetPath(p: any): string {
     .map((s) => s.trim())
     .filter(Boolean)
     .map((d) => normalize(d));
+  // 未显式配置时默认只允许写入数据目录，避免证书部署覆盖 /app 下的程序文件
+  if (!allowDirs.length) allowDirs.push(normalize(process.env.DNSMGR_DATA_DIR || '/app/data'));
 
   if (isWinAbs && !isPosixAbs) {
     // 配置了允许目录白名单时，Windows 风格路径无法落在其中，直接拒绝

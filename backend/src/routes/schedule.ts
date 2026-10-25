@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
+import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { updateNexttime } from '../lib/schedule/scheduleService.js';
 
 // 定时切换解析接口仅管理员可用
@@ -64,8 +65,8 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     }
 
     const totalRow = await queryOne<{ c: number }>(
-      `SELECT COUNT(*) AS c FROM ${table('sctask')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where}`,
-      params
+      `SELECT COUNT(*) AS c FROM ${table('sctask')} A JOIN ${table('domain')} B ON A.did = B.id JOIN ${table('account')} C ON B.aid = C.id WHERE 1=1 AND (C.visibility <> 'private' OR C.owner_uid = ?)${where}`,
+      [Number(req.user.uid), ...params]
     );
     const total = totalRow?.c ?? 0;
 
@@ -76,8 +77,8 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
 
     const list = await query(
-      `SELECT A.*, B.name AS domain FROM ${table('sctask')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      `SELECT A.*, B.name AS domain FROM ${table('sctask')} A JOIN ${table('domain')} B ON A.did = B.id JOIN ${table('account')} C ON B.aid = C.id WHERE 1=1 AND (C.visibility <> 'private' OR C.owner_uid = ?)${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      [Number(req.user.uid), ...params, limit, offset]
     );
 
     const rows = list.map((r: any) => ({
@@ -94,6 +95,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const task = await queryOne(`SELECT * FROM ${table('sctask')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '切换策略不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限查看该域名的私有账户任务' };
     return { code: 0, data: task };
   });
 
@@ -101,6 +103,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const b = req.body || {};
     let val = buildTask(b);
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };
+    if (!(await canAccessDomainAccount(val.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const exists = await queryOne(
       `SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ?`,
       [val.recordid, val.switchtype, val.switchtime]
@@ -108,8 +111,8 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     if (exists) return { code: -1, msg: '当前定时切换策略已存在' };
 
     await query(
-      `INSERT INTO ${table('sctask')} (did, rr, recordid, type, cycle, switchtype, switchdate, switchtime, value, line, remark, recordinfo, addtime, active) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [val.did, val.rr, val.recordid, val.type, val.cycle, val.switchtype, val.switchdate, val.switchtime, val.value, val.line, val.remark, val.recordinfo, Math.floor(Date.now() / 1000), 1]
+      `INSERT INTO ${table('sctask')} (did, rr, recordid, type, cycle, switchtype, switchdate, switchtime, value, line, remark, recordinfo, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [val.did, val.rr, val.recordid, val.type, val.cycle, val.switchtype, val.switchdate, val.switchtime, val.value, val.line, val.remark, val.recordinfo, Math.floor(Date.now() / 1000), 1, Number(req.user.uid)]
     );
     const idRow = await queryOne(`SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ? ORDER BY id DESC LIMIT 1`, [val.recordid, val.switchtype, val.switchtime]);
     if (idRow) {
@@ -124,6 +127,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const val = buildTask(b);
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };
+    if (!(await canAccessDomainAccount(val.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const exists = await queryOne(
       `SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ? AND id <> ?`,
       [val.recordid, val.switchtype, val.switchtime, id]
@@ -141,6 +145,9 @@ export default async function scheduleRoutes(app: FastifyInstance) {
 
   app.post('/api/schedule/tasks/:id/active', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('sctask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '切换策略不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const active = Number((req.body || {}).active) === 1 ? 1 : 0;
     await query(`UPDATE ${table('sctask')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: '设置成功' };
@@ -148,6 +155,9 @@ export default async function scheduleRoutes(app: FastifyInstance) {
 
   app.delete('/api/schedule/tasks/:id', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('sctask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '切换策略不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     await query(`DELETE FROM ${table('sctask')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });
@@ -158,6 +168,10 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const list = [...new Set(ids.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0))];
     if (!list.length) return { code: -1, msg: '参数错误' };
     const ph = list.map(() => '?').join(',');
+    const tasks: any[] = await query(`SELECT did FROM ${table('sctask')} WHERE id IN (${ph})`, list);
+    for (const task of tasks) {
+      if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    }
     let success = 0;
     if (act === 'delete') {
       const res: any = await query(`DELETE FROM ${table('sctask')} WHERE id IN (${ph})`, list);

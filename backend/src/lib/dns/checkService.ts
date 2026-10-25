@@ -7,11 +7,7 @@ import { configGet } from '../../config.js';
 import { sendMail } from '../monitor/msgNotice.js';
 import { fmtDateTime } from '../util.js';
 
-import { decryptConfig } from '../secret.js';
-
-function safeJson(s: string): Record<string, any> {
-  return decryptConfig(s) || {};
-}
+import { loadAccountConfig } from '../accounts/taskConfig.js';
 
 // 告警邮件 HTML 转义，避免记录名/值注入标记
 function esc(v: any): string {
@@ -59,7 +55,7 @@ export async function listSubDomains(did: number): Promise<string[]> {
   if (!d) return [];
   const acct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
   if (!acct) return [];
-  const provider: any = getDnsProvider(acct.type, safeJson(acct.config), d.name, d.thirdid);
+  const provider: any = getDnsProvider(acct.type, await loadAccountConfig(acct), d.name, d.thirdid);
   if (!provider) return [];
   const list = await fetchAllRecords(provider);
   const subs = new Set<string>();
@@ -82,7 +78,7 @@ export async function checkDomainRecords(
   if (!d) return { total: 0, issues: [], proxied: [], error: '域名不存在' };
   const acct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
   if (!acct) return { total: 0, issues: [], proxied: [], error: '账户不存在' };
-  const provider: any = getDnsProvider(acct.type, safeJson(acct.config), d.name, d.thirdid);
+  const provider: any = getDnsProvider(acct.type, await loadAccountConfig(acct), d.name, d.thirdid);
   if (!provider) return { total: 0, issues: [], proxied: [], error: '该厂商暂未支持' };
 
   // 权限范围：未传 uid 视为管理员（默认全量），否则按用户是否为管理员/是否开启检测整个域名决定

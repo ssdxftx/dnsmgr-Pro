@@ -45,17 +45,19 @@ export default async function setupRoutes(app: FastifyInstance) {
     const persistence = detectDataPersistence();
     const sqliteCfg: DbConfig = { ...cfg, db_type: 'sqlite', db_file: '' };
     const sqlitePathCfg = cfg.db_type === 'sqlite' && cfg.db_file ? cfg : sqliteCfg;
+    const installed = state === 'installed';
     return {
       code: 0,
       data: {
-        installed: state === 'installed',
+        installed,
         db_type: cfg.db_type,
         data_persistent: persistence.persistent,
-        data_dir: persistence.dataDir,
+        // 已安装站点不再向匿名调用方暴露容器内绝对路径
+        data_dir: installed ? '' : persistence.dataDir,
         sqlite_available: persistence.persistent,
-        sqlite_path: resolveSqliteFile(sqlitePathCfg),
-        sqlite_reason: persistence.reason,
-        default_db_type: state === 'installed' ? cfg.db_type : persistence.persistent ? 'sqlite' : 'mysql',
+        sqlite_path: installed ? '' : resolveSqliteFile(sqlitePathCfg),
+        sqlite_reason: installed ? '' : persistence.reason,
+        default_db_type: installed ? cfg.db_type : persistence.persistent ? 'sqlite' : 'mysql',
       },
     };
   });
@@ -160,7 +162,7 @@ export default async function setupRoutes(app: FastifyInstance) {
         key = await keyForArchive(tmp, pass ? String(pass) : undefined);
       }
       const tempAdmin: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 ORDER BY id LIMIT 1`);
-      const report = await importArchive(tmp, { key, mode: 'install' });
+      const report = await importArchive(tmp, { key, mode: 'install', trusted: true });
       // 旧归档可能带 maintenance=1，安装完成后必须归零
       await setMaintenance(false);
 

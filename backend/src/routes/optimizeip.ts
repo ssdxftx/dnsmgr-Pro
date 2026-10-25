@@ -5,6 +5,7 @@ import { fmtDateTime, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib
 import { getLicense, executeOne } from '../lib/optimize/optimizeService.js';
 import { withDistributedLock } from '../lib/scheduler/distLock.js';
 import { checkLevel } from '../auth.js';
+import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { SECRET_MASK } from '../lib/secret.js';
 
 // 优选IP接口仅管理员可用
@@ -114,8 +115,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     }
 
     const totalRow = await queryOne<{ c: number }>(
-      `SELECT COUNT(*) AS c FROM ${table('optimizeip')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where}`,
-      params
+      `SELECT COUNT(*) AS c FROM ${table('optimizeip')} A JOIN ${table('domain')} B ON A.did = B.id JOIN ${table('account')} C ON B.aid = C.id WHERE 1=1 AND (C.visibility <> 'private' OR C.owner_uid = ?)${where}`,
+      [Number(req.user.uid), ...params]
     );
     const total = totalRow?.c ?? 0;
 
@@ -126,8 +127,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const orderBy = hasOwn(allowedSort, sort) ? `${allowedSort[sort]} ${orderDir}` : 'A.id DESC';
 
     const list = await query(
-      `SELECT A.*, B.name AS domain FROM ${table('optimizeip')} A JOIN ${table('domain')} B ON A.did = B.id WHERE 1=1${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
-      [...params, limit, offset]
+      `SELECT A.*, B.name AS domain FROM ${table('optimizeip')} A JOIN ${table('domain')} B ON A.did = B.id JOIN ${table('account')} C ON B.aid = C.id WHERE 1=1 AND (C.visibility <> 'private' OR C.owner_uid = ?)${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
+      [Number(req.user.uid), ...params, limit, offset]
     );
     return { code: 0, data: { total, list } };
   });
@@ -137,6 +138,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const task = await queryOne(`SELECT * FROM ${table('optimizeip')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限查看该域名的私有账户任务' };
     return { code: 0, data: task };
   });
 
@@ -158,14 +160,15 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.ip_type || !task.recordnum || !task.ttl) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.recordnum < 1) return { code: -1, msg: '解析数量不能少于1个' };
     if (task.recordnum > 50) return { code: -1, msg: '解析数量不能超过50个' };
     const exists = await queryOne(`SELECT id FROM ${table('optimizeip')} WHERE did = ? AND rr = ?`, [task.did, task.rr]);
     if (exists) return { code: -1, msg: '当前域名的优选IP任务已存在' };
 
     await query(
-      `INSERT INTO ${table('optimizeip')} (did, rr, type, ip_type, cdn_type, recordnum, ttl, remark, addtime, active) VALUES (?,?,?,?,?,?,?,?,?,?)`,
-      [task.did, task.rr, task.type, task.ip_type, task.cdn_type, task.recordnum, task.ttl, task.remark, task.addtime, task.active]
+      `INSERT INTO ${table('optimizeip')} (did, rr, type, ip_type, cdn_type, recordnum, ttl, remark, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      [task.did, task.rr, task.type, task.ip_type, task.cdn_type, task.recordnum, task.ttl, task.remark, task.addtime, task.active, Number(req.user.uid)]
     );
     return { code: 0, msg: '添加成功' };
   });
@@ -187,6 +190,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.ip_type || !task.recordnum || !task.ttl) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.recordnum < 1) return { code: -1, msg: '解析数量不能少于1个' };
     if (task.recordnum > 50) return { code: -1, msg: '解析数量不能超过50个' };
     const exists = await queryOne(`SELECT id FROM ${table('optimizeip')} WHERE did = ? AND rr = ? AND id <> ?`, [task.did, task.rr, id]);
@@ -202,6 +206,9 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 启停
   app.post('/api/optimize/tasks/:id/active', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('optimizeip')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const active = Number((req.body || {}).active) === 1 ? 1 : 0;
     await query(`UPDATE ${table('optimizeip')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: '设置成功' };
@@ -210,6 +217,9 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 删除
   app.delete('/api/optimize/tasks/:id', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT did FROM ${table('optimizeip')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     await query(`DELETE FROM ${table('optimizeip')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });
@@ -219,6 +229,7 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const task = await queryOne(`SELECT * FROM ${table('optimizeip')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     // 与周期任务共享同一把分布式锁：多副本下手动执行也不会与调度器并发写同一份记录
     let ok = false;
     let message = '';

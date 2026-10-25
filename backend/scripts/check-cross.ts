@@ -87,7 +87,7 @@ async function mysqlImport(): Promise<void> {
   };
   const install = await installer.performInstall(cfg, 'admin', 'password123');
   assert(install.ok, 'MySQL 跨库测试安装成功');
-  const report = await backupImport.importArchive(archive, { key, mode: 'replace' });
+  const report = await backupImport.importArchive(archive, { key, mode: 'replace', trusted: true });
   assert(report.tables.domain?.inserted === 1, 'SQLite 归档导入 MySQL');
   const user: any = await db.queryOne(`SELECT id, username FROM ${prefix}user LIMIT 1`);
   const domain: any = await db.queryOne(`SELECT name FROM ${prefix}domain LIMIT 1`);
@@ -126,7 +126,7 @@ async function sqliteImport(): Promise<void> {
   };
   const install = await installer.performInstall(cfg, 'admin', 'password123');
   assert(install.ok, 'SQLite 跨库测试安装成功');
-  const report = await backupImport.importArchive(archive, { key, mode: 'replace' });
+  const report = await backupImport.importArchive(archive, { key, mode: 'replace', trusted: true });
   assert(report.tables.domain?.inserted === 1, 'MySQL 归档导入 SQLite');
   const user: any = await db.queryOne('SELECT id, username FROM dnsmgr_user LIMIT 1');
   const domain: any = await db.queryOne('SELECT name FROM dnsmgr_domain LIMIT 1');

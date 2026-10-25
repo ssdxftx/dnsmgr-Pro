@@ -178,6 +178,7 @@ export default {
     destroyHint: '将删除保险库与全部私有凭证，且不可恢复',
     destroyConfirm: '请输入 DESTROY 确认',
     destroyPass: '输入保险库口令以确认销毁',
+    loginPass: '登录密码',
     destroyed: '保险库已销毁',
     excludeBackup: '不参与整站备份',
     excludeHint: '开启后，整站备份不会包含你的保险库与私有账户',

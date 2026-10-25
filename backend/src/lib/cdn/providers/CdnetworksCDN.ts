@@ -17,8 +17,11 @@ export class CdnetworksCDN implements CdnProvider {
   private itemId: string;
   private error = '';
 
-  constructor(config: Record<string, any>) {
-    this.client = new Cdnetworks(config.AccessKey, config.SecretKey, config.Endpoint || 'api.cdnetworks.com');
+  constructor(config: Record<string, any>, providerEndpoint = 'api.cdnetworks.com') {
+    // 固定官方 API 主机。Endpoint 不得由账户配置覆盖，否则普通用户可借助
+    // 自定义 CDN 账户把服务端变成内网 HTTPS 探测/请求代理。
+    const endpoint = String(process.env.DNSMGR_CDNETWORKS_ENDPOINT || providerEndpoint).trim() || providerEndpoint;
+    this.client = new Cdnetworks(config.AccessKey, config.SecretKey, endpoint);
     this.contractId = config.ContractId || '';
     this.itemId = config.ItemId || '10';
   }
@@ -52,7 +55,8 @@ export class CdnetworksCDN implements CdnProvider {
   async check() {
     try {
       const res = await this.client.request('GET', '/cdnw/api/domain/example.com');
-      return res.status !== 401 && res.status !== 403;
+      // 2xx/3xx 表示凭据与接口正常；404 表示凭据有效但测试域名不存在
+      return (res.status >= 200 && res.status < 400) || res.status === 404;
     } catch (e: any) {
       this.error = e.message || String(e);
       return false;
@@ -93,7 +97,7 @@ export class CdnetworksCDN implements CdnProvider {
   }
 
   async getDomainCname(domain: string): Promise<string | false> {
-    const data = await this.call('GET', `/cdnw/api/domain/${domain}`);
+    const data = await this.call('GET', `/cdnw/api/domain/${encodeURIComponent(domain)}`);
     if (!data || data === true) return false;
     return data.cname ? String(data.cname) : false;
   }
@@ -104,21 +108,21 @@ export class CdnetworksCDN implements CdnProvider {
   }
 
   async deleteDomain(domain: string) {
-    return (await this.call('DELETE', `/api/domain/${domain}`)) !== false;
+    return (await this.call('DELETE', `/api/domain/${encodeURIComponent(domain)}`)) !== false;
   }
 
   async setDomainStatus(domain: string, status: string) {
     const action = status === 'offline' ? 'disable' : 'enable';
-    return (await this.call('PUT', `/api/domain/${domain}/${action}`, {})) !== false;
+    return (await this.call('PUT', `/api/domain/${encodeURIComponent(domain)}/${action}`, {})) !== false;
   }
 
   async updateOrigin(domain: string, origin: string, originType: string, originHost: string, originProtocol: string, httpPort: number, httpsPort: number) {
-    const ok = await this.call('PUT', `/api/domain/property/${domain}`, {
+    const ok = await this.call('PUT', `/api/domain/property/${encodeURIComponent(domain)}`, {
       'origin-config': { 'origin-ips': origin, 'origin-host': originHost || '', 'origin-port': String(httpPort || 80) },
     });
     if (ok === false) return false;
     const proto = originProtocol === 'https' ? 'https' : originProtocol === 'follow' ? 'follow' : 'http';
-    return (await this.call('PUT', `/api/config/back2originrewrite/${domain}`, { backToOriginRewriteRule: { protocol: proto, port: String(httpPort || 80) } })) !== false;
+    return (await this.call('PUT', `/api/config/back2originrewrite/${encodeURIComponent(domain)}`, { backToOriginRewriteRule: { protocol: proto, port: String(httpPort || 80) } })) !== false;
   }
 
   async setCacheRules(domain: string, rules: any[]) {
@@ -149,7 +153,7 @@ export class CdnetworksCDN implements CdnProvider {
       })
       .filter(Boolean)
       .reverse();
-    return (await this.call('PUT', `/api/config/cachetime/${domain}`, { 'cache-time-behaviors': behaviors })) !== false;
+    return (await this.call('PUT', `/api/config/cachetime/${encodeURIComponent(domain)}`, { 'cache-time-behaviors': behaviors })) !== false;
   }
 
   async setHttps(domain: string, enabled: boolean, forceRedirect: boolean) {
@@ -165,7 +169,7 @@ export class CdnetworksCDN implements CdnProvider {
         priority: '10',
       });
     }
-    return (await this.call('PUT', `/api/config/InnerRedirect/${domain}`, { 'rewrite-rule-settings': rules })) !== false;
+    return (await this.call('PUT', `/api/config/InnerRedirect/${encodeURIComponent(domain)}`, { 'rewrite-rule-settings': rules })) !== false;
   }
 
   async purge(urls: string[], type: 'url' | 'dir'): Promise<string | false> {
@@ -182,7 +186,7 @@ export class CdnetworksCDN implements CdnProvider {
   }
 
   async getAccess(domain: string): Promise<Record<string, any> | false> {
-    const data = await this.call('GET', `/api/config/visitcontrol/${domain}`);
+    const data = await this.call('GET', `/api/config/visitcontrol/${encodeURIComponent(domain)}`);
     if (!data || data === true) return false;
     const rules = data.visitControlRules || [];
     const out: Record<string, any> = { referer_mode: 'off', referer_list: [], ip_mode: 'off', ip_list: [], ua_list: [] };
@@ -218,7 +222,7 @@ export class CdnetworksCDN implements CdnProvider {
   }
 
   async setAccess(domain: string, config: Record<string, any>): Promise<boolean> {
-    const current = await this.call('GET', `/api/config/visitcontrol/${domain}`);
+    const current = await this.call('GET', `/api/config/visitcontrol/${encodeURIComponent(domain)}`);
     const existing = current && current !== true ? current.visitControlRules || [] : [];
     const rules: any[] = existing
       .filter((r: any) => !r.ipControlRule && !r.uaControlRule && !r.refererControlRule)
@@ -242,6 +246,6 @@ export class CdnetworksCDN implements CdnProvider {
     if (uaList.length) {
       rules.push({ 'custom-pattern': 'all', 'control-action': '403', priority: '10', 'ua-control-rule': { invalidUserAgents: uaList.join(';') } });
     }
-    return (await this.call('PUT', `/api/config/visitcontrol/${domain}`, { 'visit-control-rules': rules })) !== false;
+    return (await this.call('PUT', `/api/config/visitcontrol/${encodeURIComponent(domain)}`, { 'visit-control-rules': rules })) !== false;
   }
 }

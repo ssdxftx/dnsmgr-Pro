@@ -4,6 +4,10 @@ import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS, KDF_PARAMS_JSON, unwrapDek, wrapDek } from '../vault/keys.js';
 import { decodeStoredValue, TABLES } from './manifest.js';
+import { ADMIN_ONLY_DNS_TYPES, dnsProviders } from '../dns/factory.js';
+import { cdnConfig } from '../cdn/factory.js';
+import { certConfig } from '../cert/factory.js';
+import { safeProcessId } from '../util.js';
 import { openArchive } from './archive.js';
 
 export type ImportMode = 'install' | 'merge' | 'replace';
@@ -16,6 +20,10 @@ export interface ImportOptions {
   actorIsAdmin?: boolean;
   passphrase?: string;
   overwriteConfig?: boolean;
+  /** 内部受信任入口（安装向导/在线恢复/自检脚本）才允许导入 site/install 归档 */
+  trusted?: boolean;
+  /** 调用方显式指定的 scope，用于管理员兼容无 scope 的旧归档 */
+  scopeOverride?: string;
 }
 
 export interface TableReport {
@@ -49,6 +57,33 @@ const USER_IMPORT_TABLES = new Set<string>([
   'cdn_account',
   'cert_account',
 ]);
+
+// replace 模式除业务表外还必须清理的运行态数据；否则旧站点的日志、统计、
+// 验证码和 TOTP 防重放记录会残留到新站点。
+const REPLACE_EXTRA_TABLES = ['log', 'cdn_stat_data', 'reg_verify', 'totp_replay'];
+
+function sanitizePlainConfig(raw: any, allowed: Set<string>): any {
+  if (raw && typeof raw === 'object') {
+    if ('__encv1' in raw && typeof raw.__encv1 === 'string') return sanitizePlainConfig(raw.__encv1, allowed);
+    if ('__b64' in raw) return raw;
+    const out: Record<string, any> = {};
+    for (const [k, v] of Object.entries(raw)) if (allowed.has(k)) out[k] = v;
+    return out;
+  }
+  if (typeof raw === 'string' && !raw.startsWith('enc:') && raw.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const out: Record<string, any> = {};
+        for (const [k, v] of Object.entries(parsed)) if (allowed.has(k)) out[k] = v;
+        return JSON.stringify(out);
+      }
+    } catch {
+      // 非 JSON 的旧配置保持原样
+    }
+  }
+  return raw;
+}
 
 function emptyReport(): TableReport {
   return { inserted: 0, reused: 0, skipped: 0, dropped: 0 };
@@ -89,8 +124,30 @@ async function uniqueName(q: Q, base: string): Promise<string> {
 export async function importArchive(file: string, opts: ImportOptions): Promise<ImportReport> {
   const archive = await openArchive(file, opts.key);
   const header = archive.header;
-  const scope = String(header.scope || 'site');
+  const scope = String(opts.scopeOverride ?? header.scope ?? '').trim();
   const mode = opts.mode;
+  const actorUid = Number(opts.actor?.uid || 0);
+  const trusted = opts.trusted === true;
+  const actorIsAdmin = opts.actorIsAdmin === true || trusted;
+  const ownerUid = Number(header.ownerUid || 0);
+
+  // 归档 scope 是安全边界的一部分，必须 fail-closed 校验；不能在未知 scope 时
+  // 退化成 site，否则普通用户可借 scope 缺失/伪造绕过个人备份白名单。
+  const reject = async (msg: string): Promise<never> => {
+    await archive.dispose();
+    throw new Error(msg);
+  };
+  if (!scope) return await reject('备份归档缺少范围标识，已拒绝导入');
+  if (scope !== 'user' && scope !== 'site' && scope !== 'install') {
+    return await reject('备份归档范围不合法，已拒绝导入');
+  }
+  if (scope === 'install' && !trusted) return await reject('安装范围归档仅允许安装向导导入');
+  if (!actorIsAdmin && scope !== 'user') return await reject('无权限导入整站备份');
+  if (scope === 'user') {
+    if (!actorUid) return await reject('个人备份导入缺少用户标识');
+    if (!actorIsAdmin && ownerUid !== actorUid) return await reject('只能导入自己的备份');
+  }
+
   const report: ImportReport = {
     scope,
     mode,
@@ -100,13 +157,12 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
     warnings: [],
   };
 
-  const actorUid = Number(opts.actor?.uid || 0);
   const userSafe = scope === 'user' && actorUid > 0;
-  const selfImport = scope === 'user' && opts.actorIsAdmin !== true && actorUid > 0;
+  const selfImport = scope === 'user' && !actorIsAdmin && actorUid > 0;
   const names = TABLES.filter((t) => archive.tableNames.includes(t)).filter(
-    (t) => !userSafe || USER_IMPORT_TABLES.has(t),
+    (t) => scope !== 'user' || USER_IMPORT_TABLES.has(t),
   );
-  if (userSafe) {
+  if (scope === 'user') {
     const ignored = archive.tableNames.filter((t) => (TABLES as readonly string[]).includes(t) && !USER_IMPORT_TABLES.has(t));
     if (ignored.length) {
       report.warnings.push(`个人备份中的全局数据已忽略：${ignored.join('、')}`);
@@ -132,6 +188,9 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       if (mode === 'replace') {
         for (const name of [...TABLES].reverse()) {
           if (DELETE_SKIP.has(name)) continue;
+          await q(`DELETE FROM ${table(name)}`);
+        }
+        for (const name of REPLACE_EXTRA_TABLES) {
           await q(`DELETE FROM ${table(name)}`);
         }
       }
@@ -166,9 +225,6 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       const destMap = new Map<number, number>();
       const userCount = await q(`SELECT COUNT(*) AS c FROM ${table('user')}`);
       const isEmptySite = Number((userCount as any[])[0]?.c || 0) === 0;
-      const ownerUid = Number(header.ownerUid || 0);
-      const actorUid = Number(opts.actor?.uid || 0);
-      const actorIsAdmin = opts.actorIsAdmin === true;
       const selfMerge = scope === 'user' && actorUid > 0 && !actorIsAdmin;
       let privateBlocked = false;
       let warnedPrivate = false;
@@ -318,6 +374,47 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'account':
             case 'cdn_account':
             case 'cert_account': {
+              const accountType = String(row.type || '');
+              if (name === 'account') {
+                const meta = dnsProviders[accountType];
+                if (!meta) {
+                  if (!actorIsAdmin) {
+                    rep.dropped++;
+                    report.warnings.push(`未知 DNS 账户类型「${accountType}」，已跳过`);
+                    continue;
+                  }
+                } else {
+                  if (!actorIsAdmin && ADMIN_ONLY_DNS_TYPES.has(accountType)) {
+                    rep.dropped++;
+                    report.warnings.push(`个人备份中的内网 DNS 账户类型「${accountType}」已跳过`);
+                    continue;
+                  }
+                  if (!actorIsAdmin) row.config = sanitizePlainConfig(row.config, new Set(Object.keys(meta.config || {})));
+                }
+              } else if (name === 'cdn_account') {
+                const meta = cdnConfig[accountType];
+                if (!meta) {
+                  if (!actorIsAdmin) {
+                    rep.dropped++;
+                    report.warnings.push(`未知 CDN 账户类型「${accountType}」，已跳过`);
+                    continue;
+                  }
+                } else {
+                  if (!actorIsAdmin) row.config = sanitizePlainConfig(row.config, new Set(Object.keys(meta.config || {})));
+                }
+              } else if (name === 'cert_account') {
+                const meta = certConfig[accountType];
+                if (!meta && !actorIsAdmin) {
+                  rep.dropped++;
+                  report.warnings.push(`未知证书账户类型「${accountType}」，已跳过`);
+                  continue;
+                }
+                if (!actorIsAdmin) row.config = sanitizePlainConfig(row.config, new Set(Object.keys(meta?.inputs || {})));
+              }
+              if (!actorIsAdmin && name === 'cert_account') {
+                // 个人备份只允许保留账户记录；证书/部署任务不在白名单内，无法驱动调度器。
+                row.deploy = 0;
+              }
               const origAid = Number(row.id);
               if (selfImport) {
                 row.visibility = 'private';
@@ -387,13 +484,34 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'cert_cname':
             case 'cert_link_log':
             case 'dns_check_task':
-            case 'dmtask': {
+            case 'dmtask':
+            case 'sctask':
+            case 'optimizeip': {
               const did = didMap.get(Number(row.did));
               if (!did) {
                 rep.skipped++;
                 continue;
               }
               row.did = did;
+              if (name === 'dns_check_task') {
+                const mappedUid = uidMap.get(Number(row.uid));
+                if (!mappedUid) {
+                  rep.skipped++;
+                  continue;
+                }
+                row.uid = mappedUid;
+              }
+              if ((name === 'dmtask' || name === 'sctask' || name === 'optimizeip') && 'owner_uid' in row) {
+                row.owner_uid = uidMap.get(Number(row.owner_uid)) ?? 0;
+              }
+              if (name === 'cert_link_log' && Number(row.oid)) {
+                const mappedOid = oidMap.get(Number(row.oid));
+                if (!mappedOid) {
+                  rep.skipped++;
+                  continue;
+                }
+                row.oid = mappedOid;
+              }
               const orig = Number(row.id);
               delete row.id;
               const id = await insertRow(q, name, row, columns);
@@ -419,6 +537,22 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'cert_order': {
               const orig = Number(row.id);
               row.aid = xaidMap.get(Number(row.aid)) ?? 0;
+              // link 中的 cdnDomainId 是旧站点的 CDN 域名 ID，必须重映射；找不到时删除该字段，
+              // 避免恢复后把证书联动到同 ID 的另一个站点。
+              if (row.link) {
+                try {
+                  const link = typeof row.link === 'string' ? JSON.parse(row.link) : row.link;
+                  if (link && typeof link === 'object' && !Array.isArray(link) && link.cdnDomainId !== undefined) {
+                    const mapped = cdidMap.get(Number(link.cdnDomainId));
+                    if (mapped) link.cdnDomainId = mapped;
+                    else delete link.cdnDomainId;
+                    row.link = typeof row.link === 'string' ? JSON.stringify(link) : link;
+                  }
+                } catch {
+                  // 非 JSON 的旧 link 保持原样
+                }
+              }
+              if ('processid' in row) row.processid = safeProcessId(row.processid);
               delete row.id;
               const id = await insertRow(q, name, row, columns);
               oidMap.set(orig, id);
@@ -434,6 +568,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               row.oid = oid;
               if ('aid' in row) row.aid = xaidMap.get(Number(row.aid)) ?? 0;
+              if (name === 'cert_deploy' && 'processid' in row) row.processid = safeProcessId(row.processid);
               delete row.id;
               await insertRow(q, name, row, columns);
               rep.inserted++;
@@ -497,8 +632,18 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               rep.inserted++;
               continue;
             }
+            case 'cdn_preheat_task':
+            case 'cdn_cache_task': {
+              delete row.id;
+              if ('owner_uid' in row) row.owner_uid = uidMap.get(Number(row.owner_uid)) ?? 0;
+              await insertRow(q, name, row, columns);
+              rep.inserted++;
+              continue;
+            }
             case 'backup_schedule': {
               delete row.id;
+              // 站点计划目前只支持整站导出；归一化 scope，避免旧归档带 user 值后被当作整站计划执行
+              if ('scope' in row) row.scope = 'site';
               row.dest_id = destMap.get(Number(row.dest_id)) ?? 0;
               await insertRow(q, name, row, columns);
               rep.inserted++;
@@ -548,6 +693,11 @@ async function mapUser(
   }
   let level = Number(row.level || 1);
   let isSuper = Number(row.is_super || 0);
+  // 非管理员导入的账号永远只能是普通用户，即使归档中的 scope/level 被伪造。
+  if (!ctx.actorIsAdmin) {
+    level = 1;
+    isSuper = 0;
+  }
   // 只有「安装向导 + 空站 + 个人备份」才允许所有者成为管理员；
   // 已运行站点导入个人备份必须保持普通用户，避免自助提权
   if (isOwner && ctx.mode === 'install' && ctx.isEmptySite) {

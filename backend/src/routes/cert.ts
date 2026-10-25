@@ -18,9 +18,10 @@ import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
 import { configGet, configSet } from '../config.js';
-import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime } from '../lib/util.js';
+import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime, safeProcessId } from '../lib/util.js';
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 import { localResolve } from '../lib/dns/localResolve.js';
+import { requireLoginPassword } from '../lib/reauth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
@@ -640,6 +641,8 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessCertOrder(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.headers['x-confirm-password']);
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
@@ -677,8 +680,9 @@ export default async function certRoutes(app: FastifyInstance) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
     const row = await queryOne(`SELECT processid FROM ${table('cert_order')} WHERE id = ?`, [id]);
-    if (!row?.processid) return { code: -1, msg: '无日志' };
-    const file = join(LOG_DIR, row.processid + '.log');
+    const processid = safeProcessId(row?.processid);
+    if (!processid) return { code: -1, msg: '无日志' };
+    const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: -1, msg: '日志文件不存在' };
     return { code: 0, data: readFileSync(file, 'utf8') };
   });

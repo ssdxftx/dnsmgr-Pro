@@ -95,7 +95,8 @@ export async function checkCurl(url: string, timeout: number, ip: string | null 
       status = false;
       errmsg = 'http_code=' + httpcode;
     }
-    await res.arrayBuffer().catch(() => undefined);
+    // 只关心状态码，主动丢弃响应体，避免恶意/超大页面把内存打满
+    await res.body?.cancel().catch(() => undefined);
   } catch (e: any) {
     status = false;
     errmsg = e && e.name === 'TimeoutError' ? 'timeout' : (e.cause?.code || e.message || '请求失败');

@@ -11,6 +11,7 @@ function getDnsType(value: string): string {
 }
 
 import { decryptConfig } from '../secret.js';
+import { loadAccountConfig } from '../accounts/taskConfig.js';
 
 function safeJson(s: string): Record<string, any> {
   return decryptConfig(s) || {};
@@ -57,7 +58,7 @@ export async function executeAll(): Promise<boolean> {
 
 export async function executeOne(row: any): Promise<void> {
   const drow = await queryOne(
-    `SELECT A.*, B.type AS account_type, B.config AS account_config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
+    `SELECT A.*, B.type AS account_type, B.config AS account_config, B.owner_uid AS account_owner FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
     [row.did]
   );
   if (!drow) throw new Error('域名不存在');
@@ -65,7 +66,8 @@ export async function executeOne(row: any): Promise<void> {
   await query(`UPDATE ${table('sctask')} SET updatetime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
 
   const domain = row.rr + '.' + drow.name;
-  const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
+  const accountConfig = await loadAccountConfig({ config: drow.account_config, owner_uid: drow.account_owner });
+  const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
   if (!dns) throw new Error('DNS模块不存在');
 
   let opOk = true;

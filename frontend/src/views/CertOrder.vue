@@ -108,7 +108,7 @@
 import { h, onMounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
-import { NButton, NDropdown, NDynamicInput, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
+import { NButton, NDropdown, NDynamicInput, NInput, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ShieldCheckmarkOutline, CheckmarkCircleOutline, TimeOutline, WarningOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -387,12 +387,46 @@ async function toggleAuto(row: any) {
   }
 }
 
+function askPassword(title: string, placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let value = '';
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    dialog.warning({
+      title,
+      content: () =>
+        h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          placeholder,
+          onUpdateValue: (v: string) => {
+            value = v;
+          },
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => finish(value),
+      onNegativeClick: () => finish(null),
+      onClose: () => finish(null),
+      onMaskClick: () => finish(null),
+    });
+  });
+}
+
 async function viewInfo(row: any) {
+  const password = await askPassword(t('certOrder.infoTitle'), t('vault.loginPass'));
+  if (password === null) return;
   info.value = null;
   showInfo.value = true; // 先开弹窗，立即给出视觉响应
   infoBusy.value = true;
   try {
-    const res = await api<any>('GET', `/cert/orders/${row.id}/info`);
+    const res = await api<any>('GET', `/cert/orders/${row.id}/info`, undefined, {
+      headers: { 'X-Confirm-Password': password },
+    });
     if (res.code === 0) info.value = res.data;
     else {
       showInfo.value = false;

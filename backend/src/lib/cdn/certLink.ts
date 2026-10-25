@@ -11,10 +11,7 @@ type QueryFn = (sql: string, params?: any[]) => Promise<any>;
 import { decryptConfig, encryptConfig } from '../secret.js';
 import { CertOrderService } from '../certService.js';
 import { canAccessCertOrder } from '../accounts/visibility.js';
-
-function safeJson(s: any): Record<string, any> {
-  return decryptConfig(s) || {};
-}
+import { loadAccountConfig } from '../accounts/taskConfig.js';
 
 // 证书联动阶段：order=证书订单、issue=签发、account=部署账户、task=部署任务、deploy=部署到 CDN
 export type LinkNode = 'order' | 'issue' | 'account' | 'task' | 'deploy';
@@ -62,13 +59,17 @@ export function providerReady(type: string, config: Record<string, any>): boolea
   return true;
 }
 
-export const DEFAULT_LE_EMAIL = 'ssdxftx@gmail.com';
+export const DEFAULT_LE_EMAIL = (process.env.DNSMGR_LE_EMAIL || 'admin@example.com').trim();
 
 // 查找或创建默认 Let's Encrypt 账户（固定邮箱）
 export async function ensureDefaultLetsEncrypt(q: QueryFn = query): Promise<number> {
   const rows: any = await q(`SELECT id, config FROM ${table('cert_account')} WHERE type = 'letsencrypt' AND deploy = 0`);
   for (const r of rows as any[]) {
-    if (safeJson(r.config).email === DEFAULT_LE_EMAIL) return Number(r.id);
+    try {
+      if ((await loadAccountConfig(r)).email === DEFAULT_LE_EMAIL) return Number(r.id);
+    } catch {
+      // 私有证书账户在后台无会话时跳过，继续查找或创建默认账户
+    }
   }
   const res: any = await q(
     `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES ('letsencrypt', ?, ?, ?, 0, NOW())`,
@@ -88,10 +89,16 @@ export async function resolveCertAccount(
     const rows: any = await q(`SELECT * FROM ${table('cert_account')} WHERE id = ? AND deploy = 0 LIMIT 1`, [id]);
     return rows[0] || null;
   };
-  const usable = (a: any): boolean =>
-    !!a && providerReady(a.type, safeJson(a.config)) && (!opts.requireWildcard || !!certConfig[a.type]?.wildcard);
+  const usable = async (a: any): Promise<boolean> => {
+    if (!a) return false;
+    try {
+      return providerReady(a.type, await loadAccountConfig(a)) && (!opts.requireWildcard || !!certConfig[a.type]?.wildcard);
+    } catch {
+      return false;
+    }
+  };
   const configured = await pick(configuredAid);
-  if (usable(configured)) return { aid: Number(configured.id), account: configured, usingDefault: false };
+  if (await usable(configured)) return { aid: Number(configured.id), account: configured, usingDefault: false };
   const aid = await ensureDefaultLetsEncrypt(q);
   return { aid, account: await pick(aid), usingDefault: true };
 }
@@ -275,7 +282,7 @@ export async function ensureCertDeployForDomain(cdnDomainId: number, orderId: nu
     await linkLog(did, orderId, 'account', 'fail', 'CDN 账户不存在，无法创建部署任务');
     return false;
   }
-  const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+  const provider: any = getCdnProvider(acct.type, await loadAccountConfig(acct));
   if (!provider || typeof provider.getCertScope !== 'function') {
     await linkLog(did, orderId, 'account', 'fail', '该 CDN 类型不支持证书联动部署');
     return false;

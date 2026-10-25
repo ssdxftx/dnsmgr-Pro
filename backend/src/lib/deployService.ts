@@ -4,7 +4,7 @@ import { query, queryOne, table } from '../db.js';
 import { getDeployProvider } from './deploy/factory.js';
 import type { DeployProvider } from './deploy/types.js';
 import { genSid } from './certService.js';
-import { appendLog } from './util.js';
+import { appendLog, safeProcessId } from './util.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
@@ -41,8 +41,9 @@ export class CertDeployService {
   }
 
   private saveLog(txt: string) {
-    if (!this.task.processid) return;
-    appendLog(join(LOG_DIR, this.task.processid + '.log'), txt + '\n');
+    const processid = safeProcessId(this.task.processid);
+    if (!processid) return;
+    appendLog(join(LOG_DIR, processid + '.log'), txt + '\n');
   }
 
   private async saveResult(status: number, error: string | null = null, retrytime: string | null = null) {
@@ -68,7 +69,7 @@ export class CertDeployService {
   }
 
   private async lockTask() {
-    if (!this.task.processid) this.task.processid = genSid();
+    if (!safeProcessId(this.task.processid)) this.task.processid = genSid();
     // 原子加锁：仅当未锁或锁已超时（1 小时）时才成功，避免并发重复部署
     const res: any = await query(
       `UPDATE ${table('cert_deploy')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,

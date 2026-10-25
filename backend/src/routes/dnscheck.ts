@@ -9,6 +9,8 @@ import { withDistributedLock } from '../lib/scheduler/distLock.js';
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,}$/;
+const MIN_INTERVAL_MIN = 5;
+const MAX_TASKS_PER_USER = 50;
 
 /** 校验告警邮箱：普通用户只能填写自己的邮箱，避免借系统邮件服务向任意地址发信 */
 function noticeEmailErr(user: any, raw: any): string | null {
@@ -40,17 +42,22 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
   app.get('/api/dns-check/domains', auth, async (req: any) => {
     const kw = String(req.query?.kw ?? '').trim();
     if (checkLevel(req.user, 2)) {
-      const where = kw ? " WHERE name LIKE ? ESCAPE '!'" : '';
+      const where = kw ? " AND D.name LIKE ? ESCAPE '!'" : '';
       const params = kw ? ['%' + escapeLike(kw) + '%'] : [];
-      const rows = await query(`SELECT id, name FROM ${table('domain')}${where} ORDER BY id DESC LIMIT 2000`, params);
+      const rows = await query(
+        `SELECT D.id, D.name FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+          WHERE (A.visibility <> 'private' OR A.owner_uid = ?)${where} ORDER BY D.id DESC LIMIT 2000`,
+        [Number(req.user.uid), ...params],
+      );
       return { code: 0, data: rows };
     }
     const perms = await getUserPermissions(req.user.uid);
     const names = [...new Set(perms.map((p: any) => p.domain))];
     if (!names.length) return { code: 0, data: [] };
     const rows: any[] = await query(
-      `SELECT id, name FROM ${table('domain')} WHERE name IN (${names.map(() => '?').join(',')}) ORDER BY id DESC`,
-      names,
+      `SELECT D.id, D.name FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+        WHERE D.name IN (${names.map(() => '?').join(',')}) AND (A.visibility <> 'private' OR A.owner_uid = ?) ORDER BY D.id DESC`,
+      [...names, Number(req.user.uid)],
     );
     return { code: 0, data: rows };
   });
@@ -59,12 +66,15 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
   app.get('/api/dns-check/domains/:id/subs', auth, async (req: any) => {
     const did = Number(req.params.id);
     if (!did) return { code: -1, msg: '参数错误' };
+    const d: any = await queryOne(
+      `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+      [did],
+    );
+    if (!d || (d.visibility === 'private' && Number(d.owner_uid) !== Number(req.user.uid))) return { code: 0, data: [] };
     if (checkLevel(req.user, 2)) {
       const subs = await listSubDomains(did);
       return { code: 0, data: subs };
     }
-    const d: any = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [did]);
-    if (!d) return { code: 0, data: [] };
     const perms = await getUserPermissions(req.user.uid);
     const subs = perms
       .filter((p: any) => sameDomain(p.domain, d.name) && p.sub)
@@ -82,9 +92,12 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const noticeErr = noticeEmailErr(req.user, b.notice_email);
     if (noticeErr) return { code: -1, msg: noticeErr };
     const cycle = b.cycle === 'interval' ? 'interval' : 'daily';
-    const intervalMin = b.cycle === 'interval' ? Number(b.interval_min) || 0 : 0;
+    const intervalMin = b.cycle === 'interval' ? Math.max(MIN_INTERVAL_MIN, Number(b.interval_min) || 0) : 0;
     const runTime = cycle === 'daily' ? String(b.run_time || '00:00') : null;
-    if (cycle === 'interval' && intervalMin <= 0) return { code: -1, msg: '请填写检测间隔的分钟数' };
+    if (!checkLevel(req.user, 2)) {
+      const count = Number((await queryOne(`SELECT COUNT(*) AS c FROM ${table('dns_check_task')} WHERE uid = ?`, [req.user.uid]))?.c || 0);
+      if (count >= MAX_TASKS_PER_USER) return { code: -1, msg: `最多创建 ${MAX_TASKS_PER_USER} 个检测任务` };
+    }
     const nextRun = fmtDateTime(calcNextRun(cycle, intervalMin, runTime));
     const id: number = await query(
       `INSERT INTO ${table('dns_check_task')} (name, did, uid, sub, types, cycle, interval_min, run_time, notice_email, active, next_run, addtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
@@ -107,9 +120,8 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const noticeErr = noticeEmailErr(req.user, b.notice_email);
     if (noticeErr) return { code: -1, msg: noticeErr };
     const cycle = b.cycle === 'interval' ? 'interval' : 'daily';
-    const intervalMin = b.cycle === 'interval' ? Number(b.interval_min) || 0 : 0;
+    const intervalMin = b.cycle === 'interval' ? Math.max(MIN_INTERVAL_MIN, Number(b.interval_min) || 0) : 0;
     const runTime = cycle === 'daily' ? String(b.run_time || '00:00') : null;
-    if (cycle === 'interval' && intervalMin <= 0) return { code: -1, msg: '请填写检测间隔的分钟数' };
     await query(
       `UPDATE ${table('dns_check_task')} SET name = ?, did = ?, sub = ?, types = ?, cycle = ?, interval_min = ?, run_time = ?, notice_email = ?, active = ? WHERE id = ?`,
       [String(b.name || ''), did, sub, String(b.types || ''), cycle, intervalMin, runTime, String(b.notice_email || ''), b.active == 0 ? 0 : 1, id],
@@ -161,9 +173,13 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
 }
 
 async function canAccessDomain(user: any, did: number): Promise<boolean> {
-  if (checkLevel(user, 2)) return true;
-  const d: any = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [did]);
+  const d: any = await queryOne(
+    `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    [did],
+  );
   if (!d) return false;
+  if (d.visibility === 'private' && Number(d.owner_uid) !== Number(user.uid)) return false;
+  if (checkLevel(user, 2)) return true;
   const perms = await getUserPermissions(user.uid);
   // 只读授权不能创建/修改检测任务（会周期发起外部解析并发送邮件）
   return perms.some((p: any) => sameDomain(p.domain, d.name) && Number(p.readonly) !== 1);
@@ -171,9 +187,13 @@ async function canAccessDomain(user: any, did: number): Promise<boolean> {
 
 /** 校验普通用户选择的子域名是否落在其接入域名范围内 */
 async function canAccessSub(user: any, did: number, sub: string): Promise<boolean> {
-  if (checkLevel(user, 2)) return true;
-  const d: any = await queryOne(`SELECT name FROM ${table('domain')} WHERE id = ?`, [did]);
+  const d: any = await queryOne(
+    `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    [did],
+  );
   if (!d) return false;
+  if (d.visibility === 'private' && Number(d.owner_uid) !== Number(user.uid)) return false;
+  if (checkLevel(user, 2)) return true;
   const perms = await getUserPermissions(user.uid);
   return matchPermission(perms, d.name, sub.trim().replace(/\.+$/, '')) === 0;
 }

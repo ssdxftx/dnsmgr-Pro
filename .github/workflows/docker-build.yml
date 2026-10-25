@@ -43,7 +43,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # 需要完整历史与标签，用于比对「版本号是否发生变化」
           fetch-depth: 0
@@ -58,6 +58,10 @@ jobs:
             echo "::error::前后端版本号不一致（backend=${PKG_VERSION}, frontend=${FE_VERSION}），请使用 scripts/release.mjs 统一发布"
             exit 1
           fi
+          if [[ ! "${PKG_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::版本号必须为 x.y.z 纯数字格式（当前：${PKG_VERSION}）"
+            exit 1
+          fi
           echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
           echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "项目版本号：${PKG_VERSION}"
@@ -67,8 +71,13 @@ jobs:
       # 因此 release.mjs 同时推送分支与标签时，两条流水线的判定结果稳定一致。
       - name: Decide whether to build
         id: gate
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::版本号不合法，拒绝构建"
+            exit 1
+          fi
 
           # 标签推送：直接构建，并校验标签与版本号一致
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
@@ -119,22 +128,22 @@ jobs:
 
       - name: Set up QEMU
         if: steps.gate.outputs.build == 'true' && contains(steps.platforms.outputs.platforms, 'arm64')
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
         if: steps.gate.outputs.build == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Log in to Docker Hub
         if: steps.gate.outputs.build == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GitHub Container Registry
         if: steps.gate.outputs.build == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -144,7 +153,7 @@ jobs:
       - name: Docker metadata
         id: meta
         if: steps.gate.outputs.build == 'true'
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: |
             ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
@@ -163,7 +172,7 @@ jobs:
 
       - name: Build and push to Docker Hub & GHCR
         if: steps.gate.outputs.build == 'true'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ./Dockerfile

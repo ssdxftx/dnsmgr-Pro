@@ -14,6 +14,7 @@ import { checkLevel } from '../auth.js';
 import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
 import { refreshGlobalProxyDispatcher } from '../lib/proxy.js';
+import { requireLoginPassword } from '../lib/reauth.js';
 
 // 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
 function safeEqual(a: string, b: string): boolean {
@@ -21,6 +22,8 @@ function safeEqual(a: string, b: string): boolean {
   const hb = createHash('sha256').update(String(b)).digest();
   return timingSafeEqual(ha, hb);
 }
+const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_)/;
+
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
     await (app as any).authenticate(req, reply);
@@ -59,6 +62,11 @@ export default async function systemRoutes(app: FastifyInstance) {
   // 保存系统配置（忽略掩码值，避免未修改的密钥被写坏；禁止通过该接口修改签名密钥）
   app.post('/api/system/settings', auth, async (req: any) => {
     const b = req.body || {};
+    if (Object.keys(b).some((key) => SENSITIVE_SETTING_RE.test(key))) {
+      const passwordErr = await requireLoginPassword(Number(req.user.uid), b.password);
+      if (passwordErr) return { code: -1, msg: passwordErr };
+    }
+    delete b.password;
     const before = await loadConfig();
     const changed: string[] = [];
     if (b.mail_type !== undefined && b.mail_name2 !== undefined && Number(b.mail_type) > 0) {

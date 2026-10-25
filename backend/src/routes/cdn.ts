@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { domainToASCII } from 'node:url';
 import { query, queryOne, table, withTransaction } from '../db.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { configGet, configSet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
@@ -389,6 +390,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     preHandler: async (req: any, reply: any) => {
       await (app as any).authenticate(req, reply);
       if (!req.user) return;
+      if (!(await hitRateLimitDistributed(`cloud:cdn-account:${req.user.uid}`, 180, 60_000))) return reply.code(429).send({ code: -1, msg: '请求过于频繁，请稍后再试' });
       const acct = await getVisibleAccount('cdn_account', Number(req.params.aid), req.user);
       if (!acct) return reply.code(404).send({ code: -1, msg: '账户不存在' });
       req.account = acct;
@@ -400,6 +402,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     preHandler: async (req: any, reply: any) => {
       await (app as any).authenticate(req, reply);
       if (!req.user) return;
+      if (!(await hitRateLimitDistributed(`cloud:cdn-domain:${req.user.uid}`, 180, 60_000))) return reply.code(429).send({ code: -1, msg: '请求过于频繁，请稍后再试' });
       const row: any = await queryOne(`SELECT id, aid FROM ${table('cdn_domain')} WHERE id = ?`, [Number(req.params.id)]);
       if (!row) return reply.code(404).send({ code: -1, msg: '加速域名不存在' });
       const acct = await getVisibleAccount('cdn_account', Number(row.aid), req.user);
@@ -2709,13 +2712,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
           status,
           errMsg,
           addtime,
+          Number(user?.uid || 0),
         ]);
       }
     }
     // 批量写入任务历史，最多 100 行，减少逐条 INSERT 的数据库往返
     if (taskRows.length) {
       await query(
-        `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime) VALUES ?`,
+        `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime, owner_uid) VALUES ?`,
         [taskRows],
       );
     }

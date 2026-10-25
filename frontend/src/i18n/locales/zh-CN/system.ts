@@ -9,6 +9,8 @@ export default {
     tabProxy: '代理设置',
     tabCron: '计划任务',
     tabStatCache: '统计缓存',
+    confirmPasswordTitle: '安全确认',
+    confirmPasswordHint: '请输入登录密码以保存安全设置',
     saveSuccess: '设置保存成功',
     copiedClipboard: '已复制到剪贴板',
     copyFailed: '复制失败，请手动复制',

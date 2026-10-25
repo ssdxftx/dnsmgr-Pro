@@ -118,7 +118,7 @@ const exported = await backupExport.exportBackup({ scope: 'site', includeLogs: t
 assert(exported.size > 0 && exported.file.endsWith('.dnsmgrbk'), 'MySQL 备份导出成功');
 const key = await backupKey.getBackupKey();
 assert(key, '备份密钥可用');
-const report = await backupImport.importArchive(path.join(backupArchive.backupsDir(), exported.file), { key, mode: 'replace' });
+const report = await backupImport.importArchive(path.join(backupArchive.backupsDir(), exported.file), { key, mode: 'replace', trusted: true });
 assert(report.tables.domain?.inserted === 2, 'MySQL 备份恢复域名数据');
 
 await db.getDriver().close();

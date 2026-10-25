@@ -170,10 +170,18 @@
         <n-input :value="recoveryCode" readonly select-all />
         <n-checkbox v-model:checked="recoveryAck" class="mt-3">{{ t('vault.recoverySavedAck') }}</n-checkbox>
       </template>
+      <n-input
+        v-else
+        v-model:value="recoveryPass"
+        type="password"
+        show-password-on="click"
+        class="mt-3"
+        :placeholder="t('vault.loginPass')"
+      />
       <template #footer>
         <n-space justify="end">
           <n-button v-if="!recoveryCode" @click="recoveryOpen = false">{{ t('backup.cancel') }}</n-button>
-          <n-button v-if="!recoveryCode" type="warning" :loading="busy" @click="generateRecovery">{{ t('vault.setRecovery') }}</n-button>
+          <n-button v-if="!recoveryCode" type="warning" :loading="busy" :disabled="!recoveryPass" @click="generateRecovery">{{ t('vault.setRecovery') }}</n-button>
           <n-button v-else type="primary" :disabled="!recoveryAck" @click="recoveryOpen = false">{{ t('vault.saved') }}</n-button>
         </n-space>
       </template>
@@ -182,6 +190,13 @@
     <n-modal v-model:show="destroyOpen" preset="card" :title="t('vault.destroy')" class="modal-md" :mask-closable="false">
       <n-alert type="error" class="mb-3">{{ t('vault.destroyHint') }}</n-alert>
       <n-input v-model:value="destroyConfirm" :placeholder="t('vault.destroyConfirm')" />
+      <n-input
+        v-model:value="destroyLoginPass"
+        type="password"
+        show-password-on="click"
+        class="mt-3"
+        :placeholder="t('vault.loginPass')"
+      />
       <n-input
         v-if="status.mode === 'passphrase'"
         v-model:value="destroyPass"
@@ -196,7 +211,7 @@
           <n-button
             type="error"
             :loading="busy"
-            :disabled="destroyConfirm !== 'DESTROY' || (status.mode === 'passphrase' && !destroyPass)"
+            :disabled="destroyConfirm !== 'DESTROY' || !destroyLoginPass || (status.mode === 'passphrase' && !destroyPass)"
             @click="destroy"
           >{{ t('vault.destroy') }}</n-button>
         </n-space>
@@ -242,7 +257,9 @@ const upgradePass = ref('');
 const recoveryOpen = ref(false);
 const recoveryCode = ref('');
 const recoveryAck = ref(false);
+const recoveryPass = ref('');
 const destroyConfirm = ref('');
+const destroyLoginPass = ref('');
 const destroyPass = ref('');
 const initForm = reactive({ passphrase: '', confirm: '' });
 const passForm = reactive({ old: '', next: '' });
@@ -252,6 +269,8 @@ const ready = computed(() => status.value.unlocked || status.value.mode === 'non
 // 各弹窗关闭时清空口令，避免在解锁/降级/升级之间残留明文
 watch(unlockOpen, (v) => { if (!v) unlockPass.value = ''; });
 watch(downgradeOpen, (v) => { if (!v) downgradePass.value = ''; });
+watch(recoveryOpen, (v) => { if (!v) recoveryPass.value = ''; });
+watch(destroyOpen, (v) => { if (!v) { destroyConfirm.value = ''; destroyLoginPass.value = ''; destroyPass.value = ''; } });
 watch(upgradeOpen, (v) => { if (!v) upgradePass.value = ''; });
 watch(passOpen, (v) => { if (!v) { passForm.old = ''; passForm.next = ''; } });
 watch(initOpen, (v) => { if (!v) { initForm.passphrase = ''; initForm.confirm = ''; } });
@@ -377,7 +396,7 @@ function setRecovery() {
 async function generateRecovery() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/recovery', { recovery: 'random' });
+    const res = await api<any>('POST', '/vault/recovery', { recovery: 'random', password: recoveryPass.value });
     if (res.code !== 0) return message.error(res.msg);
     const code = String(res?.data?.recoveryCode || '');
     if (!code) return message.error(t('vault.saved'));
@@ -411,11 +430,13 @@ async function destroy() {
   try {
     const res = await api<any>('POST', '/vault/destroy', {
       confirm: destroyConfirm.value,
+      password: destroyLoginPass.value,
       passphrase: destroyPass.value,
     });
     if (res.code !== 0) return message.error(res.msg);
     destroyOpen.value = false;
     destroyConfirm.value = '';
+    destroyLoginPass.value = '';
     destroyPass.value = '';
     message.success(t('vault.destroyed'));
     await load();

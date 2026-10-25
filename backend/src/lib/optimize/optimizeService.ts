@@ -29,6 +29,7 @@ const LINE_NAME: Record<string, Record<string, string>> = {
 };
 
 import { decryptConfig } from '../secret.js';
+import { loadAccountConfig } from '../accounts/taskConfig.js';
 
 function safeJson(s: string): Record<string, any> {
   return decryptConfig(s) || {};
@@ -187,7 +188,7 @@ export async function executeOne(row: any): Promise<string> {
 
   const ipTypes = String(row.ip_type || '').split(',');
   const drow = await queryOne(
-    `SELECT A.*, B.type AS account_type, B.config AS account_config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
+    `SELECT A.*, B.type AS account_type, B.config AS account_config, B.owner_uid AS account_owner FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
     [row.did]
   );
   if (!drow) throw new Error('域名不存在（ID：' + row.did + '）');
@@ -198,7 +199,7 @@ export async function executeOne(row: any): Promise<string> {
 
     const info = await getIpAddress2(row.cdn_type, ipType);
 
-    const dns = getDnsProvider(drow.account_type, safeJson(drow.account_config), drow.name, drow.thirdid);
+    const dns = getDnsProvider(drow.account_type, await loadAccountConfig({ config: drow.account_config, owner_uid: drow.account_owner }), drow.name, drow.thirdid);
     if (!dns) throw new Error('DNS模块不存在');
     // 优先精确子域名查询（DescribeSubDomainRecords），退化为通用模糊查询
     const domainRecords = typeof (dns as any).getSubDomainRecords === 'function'

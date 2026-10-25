@@ -33,6 +33,14 @@ export function clampOffset(v: any): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+// 证书/部署任务日志 ID 白名单：该值会拼入文件路径，必须拒绝路径分隔符与 .. 等字符
+export const SAFE_PROCESS_ID_RE = /^[A-Za-z0-9_-]{1,32}$/;
+
+export function safeProcessId(value: any): string | null {
+  const id = String(value ?? '').trim();
+  return SAFE_PROCESS_ID_RE.test(id) ? id : null;
+}
+
 // 面向客户端返回的错误信息：去除换行/制表等控制符并限制长度，避免泄露多行堆栈等内部细节
 export function clientMessage(e: any, fallback = '操作失败'): string {
   const raw = typeof e === 'string' ? e : e && e.message ? String(e.message) : '';

@@ -8,6 +8,51 @@ import { audit } from '../lib/audit/context.js';
 import { autoUnlockConvenient } from '../lib/vault/service.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
+const MAX_AUTH_FAILURES = 5;
+const AUTH_LOCK_MS = 15 * 60_000;
+const GENERIC_LOGIN_FAILED = '用户名或密码错误';
+
+function lockedUntil(value: any): number {
+  if (!value) return 0;
+  const ms = value instanceof Date ? value.getTime() : new Date(String(value).replace(' ', 'T')).getTime();
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function authLocked(value: any): boolean {
+  return lockedUntil(value) > Date.now();
+}
+
+async function recordLoginFailure(user: any): Promise<void> {
+  const fails = Number(user.login_fail || 0) + 1;
+  if (fails >= MAX_AUTH_FAILURES) {
+    await query(`UPDATE ${table('user')} SET login_fail = 0, login_locked_until = ? WHERE id = ?`, [
+      new Date(Date.now() + AUTH_LOCK_MS),
+      user.id,
+    ]);
+  } else {
+    await query(`UPDATE ${table('user')} SET login_fail = ? WHERE id = ?`, [fails, user.id]);
+  }
+}
+
+async function clearLoginFailure(uid: number): Promise<void> {
+  await query(`UPDATE ${table('user')} SET login_fail = 0, login_locked_until = NULL WHERE id = ?`, [uid]);
+}
+
+async function recordTotpFailure(user: any): Promise<void> {
+  const fails = Number(user.totp_fail || 0) + 1;
+  if (fails >= MAX_AUTH_FAILURES) {
+    await query(`UPDATE ${table('user')} SET totp_fail = 0, totp_locked_until = ? WHERE id = ?`, [
+      new Date(Date.now() + AUTH_LOCK_MS),
+      user.id,
+    ]);
+  } else {
+    await query(`UPDATE ${table('user')} SET totp_fail = ? WHERE id = ?`, [fails, user.id]);
+  }
+}
+
+async function clearTotpFailure(uid: number): Promise<void> {
+  await query(`UPDATE ${table('user')} SET totp_fail = 0, totp_locked_until = NULL WHERE id = ?`, [uid]);
+}
 
 // TOTP 防重放：记录每个用户在有效窗口内已使用过的动态口令，拒绝重复提交。
 // 使用数据库唯一键而不是进程内 Map，保证多副本部署时同一口令也只能成功一次。
@@ -59,8 +104,10 @@ export default async function authRoutes(app: FastifyInstance) {
       });
       return { code: -1, msg: '用户名或密码错误' };
     }
+    const locked = authLocked(user.login_locked_until);
     const ok = await verifyPassword(user.password, password);
     if (!ok) {
+      if (!locked) await recordLoginFailure(user);
       audit(req, {
         module: 'auth',
         action: 'auth.login',
@@ -68,9 +115,21 @@ export default async function authRoutes(app: FastifyInstance) {
         targetId: user.id,
         targetName: String(user.username),
         summary: `登录失败：${username}（密码错误）`,
-        detail: { reason: 'bad_password' },
+        detail: { reason: locked ? 'login_locked' : 'bad_password' },
       });
-      return { code: -1, msg: '用户名或密码错误' };
+      return { code: -1, msg: GENERIC_LOGIN_FAILED };
+    }
+    if (locked) {
+      audit(req, {
+        module: 'auth',
+        action: 'auth.login',
+        targetType: 'user',
+        targetId: user.id,
+        targetName: String(user.username),
+        summary: `登录失败：${username}（账号临时锁定）`,
+        detail: { reason: 'login_locked' },
+      });
+      return { code: -1, msg: GENERIC_LOGIN_FAILED };
     }
     // 密码正确后再提示封禁，避免未认证的用户名枚举
     if (user.status == 0) {
@@ -85,6 +144,7 @@ export default async function authRoutes(app: FastifyInstance) {
       });
       return { code: -1, msg: '此用户已被封禁' };
     }
+    await clearLoginFailure(user.id);
     if (user.totp_open == 1 && user.totp_secret) {
       const preToken = (app as any).jwt.sign({ uid: user.id, type: 'totp_pre' }, { expiresIn: '5m' });
       audit(req, {
@@ -98,6 +158,7 @@ export default async function authRoutes(app: FastifyInstance) {
       });
       return { code: -1, msg: '需要验证动态口令', vcode: 2, data: { pre_token: preToken } };
     }
+    if (user.totp_open != 1) await clearTotpFailure(user.id);
     const jti = randomUUID();
     const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session', jti };
     const token = (app as any).jwt.sign(payload);
@@ -151,10 +212,16 @@ export default async function authRoutes(app: FastifyInstance) {
     const user = await findUserById(decoded.uid);
     if (!user) return totpFail('user_missing', '用户不存在');
     if (Number(user.status) === 0) return totpFail('user_disabled', '账号已被禁用', user);
+    if (authLocked(user.totp_locked_until)) return totpFail('totp_locked', '动态口令错误', user);
     if (user.totp_open != 1 || !user.totp_secret) return totpFail('totp_not_enabled', '未开启TOTP二次验证', user);
     const totpSecret = decryptText(user.totp_secret) || '';
-    if (!verifyTOTP(totpSecret, code)) return totpFail('bad_code', '动态口令错误', user);
+    if (!verifyTOTP(totpSecret, code)) {
+      await recordTotpFailure(user);
+      return totpFail('bad_code', '动态口令错误', user);
+    }
     if (!(await markTotpUsed(user.id, String(code).trim()))) return totpFail('code_reused', '动态口令已被使用，请稍后再试', user);
+    await clearLoginFailure(user.id);
+    await clearTotpFailure(user.id);
 
     const jti = randomUUID();
     const payload = { uid: user.id, username: user.username, level: user.level, totp_open: user.totp_open, token_version: Number(user.token_version || 0), type: 'session', jti };

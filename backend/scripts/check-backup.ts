@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { openArchive, readArchiveHeader, writeArchive } from '../src/lib/backup/archive.js';
+import { importArchive } from '../src/lib/backup/import.js';
 import { decodeStoredValue, encodeRow } from '../src/lib/backup/manifest.js';
 import { decryptWithDek, deriveKek, encryptWithDek, newDek, unwrapDek, wrapDek } from '../src/lib/vault/keys.js';
 
@@ -68,6 +69,56 @@ try {
   wrongKeyMsg = String(e?.message || '');
 }
 assert(wrongKeyMsg === '备份密钥错误', '错误密钥返回「备份密钥错误」');
+
+async function writeMetaArchive(file: string, header: Record<string, any>): Promise<void> {
+  await writeArchive(
+    {
+      header,
+      tables: async function* () {
+        yield { name: 'user', columns: ['id', 'username'], rows: [] };
+      },
+    },
+    key,
+    file,
+  );
+}
+
+async function expectImportRejected(file: string, opts: any, label: string): Promise<void> {
+  let message = '';
+  try {
+    await importArchive(file, opts);
+  } catch (e: any) {
+    message = String(e?.message || '');
+  }
+  assert(!!message, label);
+}
+
+const installArchive = path.join(dir, 'install-test.dnsmgrbk');
+await writeMetaArchive(installArchive, { scope: 'install' });
+await expectImportRejected(
+  installArchive,
+  { key, mode: 'merge', actor: { uid: 2, username: 'bob' } },
+  '非管理员导入 install scope 被拒绝',
+);
+await expectImportRejected(
+  out,
+  { key, mode: 'merge', actor: { uid: 2, username: 'bob' } },
+  '非管理员导入 site scope 被拒绝',
+);
+const noScopeArchive = path.join(dir, 'noscope-test.dnsmgrbk');
+await writeMetaArchive(noScopeArchive, {});
+await expectImportRejected(
+  noScopeArchive,
+  { key, mode: 'merge', actor: { uid: 2, username: 'bob' } },
+  '缺少 scope 的归档被拒绝',
+);
+const userArchive = path.join(dir, 'user-test.dnsmgrbk');
+await writeMetaArchive(userArchive, { scope: 'user', ownerUid: 1 });
+await expectImportRejected(
+  userArchive,
+  { key, mode: 'merge', actor: { uid: 2, username: 'bob' } },
+  '非管理员导入他人个人备份被拒绝',
+);
 
 const dek = newDek();
 const kek = await deriveKek('correct horse battery staple', randomBytes(16));

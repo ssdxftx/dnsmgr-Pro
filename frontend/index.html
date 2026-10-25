@@ -9,18 +9,9 @@
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="description" content="多厂商 DNS、CDN 与 SSL 证书一体化管理平台" />
     <title>聚合 DNS 管理系统</title>
-    <!-- 防主题闪烁：渲染前确定亮/暗主题（与 useThemeMode 逻辑一致） -->
-    <script>
-      (function () {
-        try {
-          var saved = localStorage.getItem('dnsmgr_theme');
-          // 默认暗色（控制塔氛围），尊重用户已保存的偏好
-          var theme = saved === 'dark' || saved === 'light' ? saved : 'dark';
-          document.documentElement.dataset.theme = theme;
-          document.documentElement.style.colorScheme = theme;
-        } catch (e) {}
-      })();
-    </script>
+    <!-- 防主题闪烁：渲染前确定亮/暗主题（与 useThemeMode 逻辑一致）。
+         必须使用同源外部脚本，内联脚本会被 CSP script-src 'self' 阻止。 -->
+    <script src="/theme-init.js"></script>
     <!-- 字体：展示字 Chakra Petch / 等宽数字 IBM Plex Mono / 中文 Noto Sans SC
          不引入第三方字体外链（源站 CSP 为 style-src/font-src 'self'，外链会被拦截且拖慢首屏）；
          字体在 tokens.css 中以系统字体栈就近回退，全部静态资源同源、可被 CDN 长缓存。 -->

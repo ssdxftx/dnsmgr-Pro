@@ -60,6 +60,8 @@ process.on('unhandledRejection', (reason: any) => {
 });
 process.on('uncaughtException', (err: any) => {
   console.error('[backend] 未捕获异常:', err?.message || err);
+  // 未捕获异常后进程状态不可信，交给编排层重启，避免带病继续对外服务。
+  setTimeout(() => process.exit(1), 100).unref?.();
 });
 
 function resolveWebDir(): string {
@@ -96,6 +98,9 @@ const app = Fastify({
   // Fastify 5 类型不再声明数值形式，但运行时仍支持按跳数信任代理，故此处保留原语义
   trustProxy: resolveTrustProxy() as any,
   bodyLimit: Number(process.env.DNSMGR_BODY_LIMIT || 2 * 1024 * 1024),
+  connectionTimeout: Number(process.env.DNSMGR_CONNECTION_TIMEOUT_MS || 120_000),
+  requestTimeout: Number(process.env.DNSMGR_REQUEST_TIMEOUT_MS || 300_000),
+  keepAliveTimeout: Number(process.env.DNSMGR_KEEPALIVE_TIMEOUT_MS || 72_000),
 });
 
 applySecurityHeaders(app);

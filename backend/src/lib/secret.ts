@@ -89,7 +89,7 @@ export function isSecretKey(key: string): boolean {
   if (SECRET_KEY_RE.test(k)) return true;
   // 收尾为 key / pass 的字段名（如 access_key、pfx_pass）同样是敏感字段
   if (/(^|_)(key|pass)$/i.test(k)) return true;
-  return ['SecretId', 'AccessKeyId', 'api_password', 'skey', 'passphrase', 'kubeconfig', 'kube_config', 'pfx_pass', 'qqbot_bind_code'].includes(k);
+  return ['SecretId', 'AccessKeyId', 'access_key_id', 'api_password', 'skey', 'passphrase', 'kubeconfig', 'kube_config', 'pfx_pass', 'qqbot_bind_code', 'custom_webhook_headers'].includes(k);
 }
 
 // 返回给前端的配置：敏感字段以掩码替换，避免明文回显（递归处理嵌套对象/数组）

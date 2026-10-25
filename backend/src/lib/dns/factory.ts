@@ -371,6 +371,10 @@ const providerMap: Record<string, new (config: Record<string, any>) => DnsProvid
   aws: AwsDns,
 };
 
+// 这些 provider 的目标地址完全由账户配置决定，且底层允许访问内网；非管理员禁止创建。
+export const ADMIN_ONLY_DNS_TYPES = new Set(['dnsmgr', 'goedge', 'powerdns', 'technitium']);
+
+
 export function getDnsProvider(
   type: string,
   config: Record<string, any>,

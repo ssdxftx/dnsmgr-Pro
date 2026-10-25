@@ -30,8 +30,8 @@ export default async function preheatRoutes(app: FastifyInstance) {
     if (cycle === 'interval' && intervalMin <= 0) return { code: -1, msg: '请填写预热间隔的分钟数' };
     const nextRun = fmtDateTime(calcNextRun(cycle, intervalMin, runTime));
     const id: number = await query(
-      `INSERT INTO ${table('cdn_preheat_task')} (name, urls, op, cycle, interval_min, run_time, active, next_run, addtime) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [String(b.name || ''), urls, op, cycle, intervalMin, runTime, b.active == 0 ? 0 : 1, nextRun],
+      `INSERT INTO ${table('cdn_preheat_task')} (name, urls, op, cycle, interval_min, run_time, active, next_run, addtime, owner_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
+      [String(b.name || ''), urls, op, cycle, intervalMin, runTime, b.active == 0 ? 0 : 1, nextRun, Number(req.user.uid)],
     ).then((r: any) => r.insertId || 0);
     return { code: 0, msg: '创建成功', data: id };
   });
@@ -75,7 +75,7 @@ export default async function preheatRoutes(app: FastifyInstance) {
     let result: { success: number; failed: number } | null = null;
     const locked = await withDistributedLock('dnsmgr:preheat', async () => {
       const urls = loadUrls(row.urls);
-      result = row.op === 'purge' ? await purgeUrls(urls) : await preheatUrls(urls);
+      result = row.op === 'purge' ? await purgeUrls(urls, Number(row.owner_uid) || 0) : await preheatUrls(urls, Number(row.owner_uid) || 0);
       const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
       await query(`UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ?`, [next, id]);
     });

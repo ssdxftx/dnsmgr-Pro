@@ -9,6 +9,8 @@ export default {
     tabProxy: 'Proxy',
     tabCron: 'Scheduled Tasks',
     tabStatCache: 'Statistics Cache',
+    confirmPasswordTitle: 'Security confirmation',
+    confirmPasswordHint: 'Enter your login password to save security settings',
     saveSuccess: 'Settings saved successfully',
     copiedClipboard: 'Copied to clipboard',
     copyFailed: 'Copy failed, please copy manually',

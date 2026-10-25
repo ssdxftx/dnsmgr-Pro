@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
-import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
-import { getCdnProvider, cdnConfig, getCdnConfigList } from '../lib/cdn/factory.js';
+import { getDnsProvider, dnsProviders, ADMIN_ONLY_DNS_TYPES } from '../lib/dns/factory.js';
+import { getCdnProvider, cdnConfig, getCdnConfigList, pickCdnConfig } from '../lib/cdn/factory.js';
 import { ConfigDecryptError, decryptConfig, encryptAccountConfig, encryptConfig, isEncryptedConfig, isSecretKey, maskConfig, mergeMaskedConfig, readAccountConfig, SECRET_MASK } from '../lib/secret.js';
 import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { getDekForWrite } from '../lib/vault/service.js';
@@ -15,10 +15,6 @@ const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authe
 function isAdmin(user: any): boolean {
   return checkLevel(user, 2);
 }
-
-// 这些 provider 的目标地址完全由账户配置决定，且底层使用允许内网的部署级 fetch。
-// 为避免普通用户把服务器当内网探测/代理节点，仅允许管理员创建（共享账户）。
-const ADMIN_ONLY_DNS_TYPES = new Set(['dnsmgr', 'goedge', 'powerdns', 'technitium']);
 
 function privateDnsTypeBlocked(user: any, type: string): string | null {
   if (isAdmin(user)) return null;
@@ -186,7 +182,8 @@ export default async function accountRoutes(app: FastifyInstance) {
       [type, name, isPrivate ? 'private' : 'shared', isPrivate ? req.user.uid : 0],
     );
     if (exists) return { code: -1, msg: 'CDN账户已存在' };
-    const provider = getCdnProvider(type, config);
+    const safeConfig = pickCdnConfig(type, config);
+    const provider = getCdnProvider(type, safeConfig);
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证CDN账户失败，' + provider.getError() };
@@ -223,7 +220,7 @@ export default async function accountRoutes(app: FastifyInstance) {
     const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
     const base = readAccountConfig(row.config, dek);
     if (base.state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });
-    const merged = mergeMaskedConfig(config, base.config);
+    const merged = pickCdnConfig(type, mergeMaskedConfig(config, base.config));
     const provider = getCdnProvider(type, merged);
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const ok = await provider.check();

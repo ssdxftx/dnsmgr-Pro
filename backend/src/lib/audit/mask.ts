@@ -3,7 +3,7 @@ import type { AuditChange } from './types.js';
 
 // 字段名命中即整值替换为掩码；isSecretKey 覆盖 password/token/apikey/appsecret 等，
 // 这里再补验证码与一次性令牌这类短字段。
-const EXTRA_SECRET = /^(code|vcode|pre_token)$/i;
+const EXTRA_SECRET = /^(code|vcode|pre_token|custom_webhook_headers|authorization)$/i;
 
 const MAX_STR = 500;
 const MAX_ITEMS = 20;

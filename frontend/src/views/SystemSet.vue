@@ -404,7 +404,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useMessage, useDialog, NButton, NDatePicker, NSwitch, NTag } from 'naive-ui';
+import { useMessage, useDialog, NButton, NDatePicker, NInput, NSwitch, NTag } from 'naive-ui';
 import { api } from '../api';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import PageHeader from '../components/PageHeader.vue';
@@ -503,9 +503,46 @@ async function loadSettings() {
   if (res.code === 0) Object.assign(cfg, res.data);
 }
 
+const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_)/;
+
+function askPassword(): Promise<string | null> {
+  return new Promise((resolve) => {
+    let value = '';
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    dialog.warning({
+      title: t('systemSet.confirmPasswordTitle'),
+      content: () =>
+        h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          placeholder: t('systemSet.confirmPasswordHint'),
+          onUpdateValue: (v: string) => {
+            value = v;
+          },
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => finish(value),
+      onNegativeClick: () => finish(null),
+      onClose: () => finish(null),
+      onMaskClick: () => finish(null),
+    });
+  });
+}
+
 async function saveFields(fields: string[]): Promise<boolean> {
   const body: Record<string, string> = {};
   for (const f of fields) body[f] = cfg[f] ?? '';
+  if (fields.some((key) => SENSITIVE_SETTING_RE.test(key))) {
+    const password = await askPassword();
+    if (password === null) return false;
+    body.password = password;
+  }
   saveBusy.value = true;
   const res = await api('POST', '/system/settings', body);
   saveBusy.value = false;

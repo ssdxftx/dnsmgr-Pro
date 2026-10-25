@@ -2,7 +2,7 @@
 FROM node:22.22.0-alpine AS web
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
 RUN npm run build
 
@@ -23,7 +23,7 @@ ENV NODE_ENV=production \
 
 # 后端依赖（含 tsx，用于运行 TypeScript 源码）
 COPY backend/package.json backend/package-lock.json ./
-RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY backend/ ./
 
 # 前端构建产物

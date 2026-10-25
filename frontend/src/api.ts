@@ -37,6 +37,8 @@ export interface ApiOptions {
   cache?: boolean | number;
   /** 跳过缓存读取，强制重新请求 */
   force?: boolean;
+  /** 额外请求头（如二次确认密码） */
+  headers?: Record<string, string>;
 }
 
 // 默认 GET 缓存 15s：写操作会整体失效，跨页读取全量列表时减少重复请求
@@ -68,7 +70,7 @@ export function invalidateApiCache(prefix?: string): void {
 export async function api<T = any>(method: string, url: string, body?: any, opts: ApiOptions = {}): Promise<T> {
   const upper = String(method || 'GET').toUpperCase();
   const isGet = upper === 'GET';
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...(opts.headers || {}) };
   const token = getToken();
   if (token) headers.Authorization = 'Bearer ' + token;
 

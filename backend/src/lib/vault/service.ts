@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { query, queryOne, table } from '../../db.js';
+import { query, queryOne, table, withTransaction } from '../../db.js';
 import { getSysKey } from '../../config.js';
 import {
   deriveKek,
@@ -11,6 +11,7 @@ import {
   unwrapDek,
   wrapDek,
 } from './keys.js';
+import { purgePrivateAssets, removeBackupFiles } from '../users/purge.js';
 import {
   clearVaultSession,
   findVaultDekByUid,
@@ -285,10 +286,8 @@ export async function destroyVault(uid: number, confirm: string, passphrase?: st
     );
     if (!dek) return await bumpFail(uid, Number(row.fail_count || 0));
   }
-  await query(`DELETE FROM ${table('account')} WHERE owner_uid = ? AND visibility = 'private'`, [uid]);
-  await query(`DELETE FROM ${table('cdn_account')} WHERE owner_uid = ? AND visibility = 'private'`, [uid]);
-  await query(`DELETE FROM ${table('cert_account')} WHERE owner_uid = ? AND visibility = 'private'`, [uid]);
-  await query(`DELETE FROM ${table('user_vault')} WHERE uid = ?`, [uid]);
+  const backupFiles = await withTransaction(async (q) => await purgePrivateAssets(q, uid));
+  await removeBackupFiles(backupFiles);
   clearVaultSession(uid);
 }
 

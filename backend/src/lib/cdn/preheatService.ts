@@ -2,11 +2,7 @@ import { query, queryOne, table } from '../../db.js';
 import { getCdnProvider } from './factory.js';
 import { fmtDateTime } from '../util.js';
 
-import { decryptConfig } from '../secret.js';
-
-function safeJson(s: string): Record<string, any> {
-  return decryptConfig(s) || {};
-}
+import { loadAccountConfig } from '../accounts/taskConfig.js';
 
 function domainFromUrl(url: string): string {
   try {
@@ -29,22 +25,22 @@ export function loadUrls(text: string): string[] {
 async function cdnForZone(aid: number, zoneId: string | null) {
   const acct: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
   if (!acct) return false;
-  const provider: any = getCdnProvider(acct.type, safeJson(acct.config));
+  const provider: any = getCdnProvider(acct.type, await loadAccountConfig(acct));
   if (!provider) return false;
   if (zoneId && typeof provider.setZoneId === 'function') provider.setZoneId(zoneId);
   if (zoneId && typeof provider.setSiteId === 'function') provider.setSiteId(zoneId);
   return provider;
 }
 
-async function insertTask(url: string, route: string, op: string, status: number, msg: string | null, taskId?: string | null) {
+async function insertTask(url: string, route: string, op: string, status: number, msg: string | null, taskId?: string | null, ownerUid = 0) {
   await query(
-    `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-    [url, op, route, taskId ?? null, status, msg],
+    `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime, owner_uid) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
+    [url, op, route, taskId ?? null, status, msg, ownerUid],
   );
 }
 
 /** 按加速域名分组分发缓存操作（预热 / 清除缓存） */
-async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: string[]): Promise<{ success: number; failed: number }> {
+async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: string[], ownerUid = 0): Promise<{ success: number; failed: number }> {
   const list = dedupe(urls);
   const grouped: Record<string, { route: string; provider: any; urls: string[] }> = {};
   const providers: Record<string, any> = {};
@@ -81,7 +77,7 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
     if (typeof fn !== 'function') {
       for (const u of g.urls) {
         failed.push({ url: u, msg: unsupported });
-        await insertTask(u, g.route, taskType, 1, unsupported);
+        await insertTask(u, g.route, taskType, 1, unsupported, null, ownerUid);
       }
       continue;
     }
@@ -90,10 +86,10 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
     for (const u of g.urls) {
       if (taskId === false) {
         failed.push({ url: u, msg: errMsg || '提交失败' });
-        await insertTask(u, g.route, taskType, 1, errMsg);
+        await insertTask(u, g.route, taskType, 1, errMsg, null, ownerUid);
       } else {
         success++;
-        await insertTask(u, g.route, taskType, 0, null, typeof taskId === 'string' ? taskId : null);
+        await insertTask(u, g.route, taskType, 0, null, typeof taskId === 'string' ? taskId : null, ownerUid);
       }
     }
   }
@@ -101,13 +97,13 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
 }
 
 /** 对一批 URL 执行预热 */
-export async function preheatUrls(urls: string[]): Promise<{ success: number; failed: number }> {
-  return dispatchCacheOp('preheat', 'preheat', urls);
+export async function preheatUrls(urls: string[], ownerUid = 0): Promise<{ success: number; failed: number }> {
+  return dispatchCacheOp('preheat', 'preheat', urls, ownerUid);
 }
 
 /** 对一批 URL 执行清除缓存（URL 刷新） */
-export async function purgeUrls(urls: string[]): Promise<{ success: number; failed: number }> {
-  return dispatchCacheOp('purge', 'url', urls);
+export async function purgeUrls(urls: string[], ownerUid = 0): Promise<{ success: number; failed: number }> {
+  return dispatchCacheOp('purge', 'url', urls, ownerUid);
 }
 
 /** 根据任务配置计算下一次执行时间 */
@@ -139,8 +135,8 @@ export async function executePreheatTasks(): Promise<number> {
     const urls = loadUrls(t.urls);
     if (urls.length) {
       try {
-        if (t.op === 'purge') await purgeUrls(urls);
-        else await preheatUrls(urls);
+        if (t.op === 'purge') await purgeUrls(urls, Number(t.owner_uid) || 0);
+        else await preheatUrls(urls, Number(t.owner_uid) || 0);
       } catch (e: any) {
         console.error('[preheat] 自动任务执行异常:', e?.message);
       }

@@ -207,7 +207,7 @@
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
-import { NButton, NSpace, useDialog, useMessage } from 'naive-ui';
+import { NButton, NInput, NSpace, useDialog, useMessage } from 'naive-ui';
 import { ArchiveOutline, CloudDownloadOutline, FolderOpenOutline, KeyOutline, TimeOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import { isAdminUser } from '../lib/admin';
@@ -377,19 +377,43 @@ async function startExport() {
   }
 }
 
-function rotateKey() {
-  dialog.warning({
-    title: t('backup.keyTitle'),
-    content: t('backup.rotateConfirm'),
-    positiveText: t('backup.rotateKey'),
-    negativeText: t('backup.cancel'),
-    onPositiveClick: async () => {
-      const res = await api<any>('POST', '/backup/key', {});
-      if (res.code !== 0) return message.error(res.msg);
-      message.success(res.msg);
-      keyReady.value = true;
-    },
+function askPassword(title: string, placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let value = '';
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    dialog.warning({
+      title,
+      content: () =>
+        h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          placeholder,
+          onUpdateValue: (v: string) => {
+            value = v;
+          },
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => finish(value),
+      onNegativeClick: () => finish(null),
+      onClose: () => finish(null),
+      onMaskClick: () => finish(null),
+    });
   });
+}
+
+async function rotateKey() {
+  const password = await askPassword(t('backup.keyTitle'), t('vault.loginPass'));
+  if (password === null) return;
+  const res = await api<any>('POST', '/backup/key', { password });
+  if (res.code !== 0) return message.error(res.msg);
+  message.success(res.msg);
+  keyReady.value = true;
 }
 
 async function download(row: any) {
