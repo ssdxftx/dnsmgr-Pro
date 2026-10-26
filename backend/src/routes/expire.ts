@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel, getUserPermissions, matchPermission } from '../auth.js';
+import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { configGet, configSet } from '../config.js';
 import { updateDomainDate } from '../lib/expire/expireNoticeService.js';
 import { audit } from '../lib/audit/context.js';
@@ -32,6 +33,8 @@ export default async function expireRoutes(app: FastifyInstance) {
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT id, name FROM ${table('domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '域名不存在' };
+    // 私有账户域名仅所有者可操作（管理员也不能借域名 ID 触发他人域名的外部查询）
+    if (!(await canAccessDomainAccount(id, req.user))) return { code: -1, msg: '域名不存在或无权限' };
     // 普通用户仅能更新其有权限访问、且可写的域名到期时间（只读/受限子域名均拒绝）
     if (!checkLevel(req.user, 2)) {
       const perms = await getUserPermissions(req.user.uid);
@@ -58,11 +61,19 @@ export default async function expireRoutes(app: FastifyInstance) {
     const ids: number[] = Array.isArray(b.ids) ? b.ids.map(Number).filter((n: number) => n > 0) : [];
     const isNotice = b.is_notice == 1 ? 1 : 0;
     if (!ids.length) return { code: -1, msg: '请选择域名' };
-    await query(`UPDATE ${table('domain')} SET is_notice = ? WHERE id IN (${ids.map(() => '?').join(',')})`, [isNotice, ...ids]);
+    const allowed = await query(
+      `SELECT D.id FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+        WHERE D.id IN (${ids.map(() => '?').join(',')})
+          AND (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`,
+      [...ids, Number(req.user.uid)],
+    );
+    const allowedIds = (allowed as any[]).map((r) => Number(r.id));
+    if (!allowedIds.length) return { code: -1, msg: '无权操作所选域名' };
+    await query(`UPDATE ${table('domain')} SET is_notice = ? WHERE id IN (${allowedIds.map(() => '?').join(',')})`, [isNotice, ...allowedIds]);
     audit(req, {
       targetType: 'domain',
-      summary: `批量${isNotice ? '开启' : '关闭'}到期提醒（${ids.length} 个域名）`,
-      detail: { ids: ids.slice(0, 50), is_notice: isNotice },
+      summary: `批量${isNotice ? '开启' : '关闭'}到期提醒（${allowedIds.length} 个域名）`,
+      detail: { ids: allowedIds.slice(0, 50), requested: ids.length, is_notice: isNotice },
     });
     return { code: 0, msg: isNotice ? '已开启到期提醒' : '已关闭到期提醒' };
   });

@@ -155,6 +155,10 @@ export default async function backupRoutes(app: FastifyInstance) {
   let importRunning = false;
   app.post('/api/backup/import', auth, async (req: any, reply: any) => {
     if (importRunning) return reply.code(409).send({ code: -1, msg: '已有导入任务正在执行，请稍后再试' });
+    // 限流必须在落盘前执行，否则攻击者可反复上传 200MB 文件占满数据卷
+    if (!hitRateLimit(`backup:import:${req.user.uid}`, 3, 10 * 60_000)) {
+      return reply.code(429).send({ code: -1, msg: '备份导入过于频繁，请稍后再试' });
+    }
     importRunning = true;
     let tmp = '';
     try {
@@ -165,9 +169,6 @@ export default async function backupRoutes(app: FastifyInstance) {
       const admin = isAdmin(req.user);
       const mode = fields.mode === 'replace' ? 'replace' : 'merge';
       if (mode === 'replace' && !admin) return reply.code(403).send({ code: -1, msg: '无权限' });
-      if (!hitRateLimit(`backup:import:${req.user.uid}`, 3, 10 * 60_000)) {
-        return reply.code(429).send({ code: -1, msg: '备份导入过于频繁，请稍后再试' });
-      }
       const key = await keyForArchive(tmp, fields.passphrase ? String(fields.passphrase) : undefined);
       const header = (await readArchiveHeader(tmp)).header;
       const archiveScope = String(header.scope || '').trim();
@@ -503,8 +504,10 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.post('/api/backup/remote/:destId/pull', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
-    const name = String(req.body?.name || '');
-    if (!name.endsWith('.dnsmgrbk')) return { code: -1, msg: '文件名不合法' };
+    const rawName = String(req.body?.name || '');
+    const name = path.basename(rawName);
+    // 远端对象只允许纯文件名，避免把 ../ 等路径片段传给 WebDAV/S3 客户端
+    if (name !== rawName || !name.endsWith('.dnsmgrbk')) return { code: -1, msg: '文件名不合法' };
     await ensureDataDirs();
     const local = path.join(backupsDir(), path.basename(name));
     try {

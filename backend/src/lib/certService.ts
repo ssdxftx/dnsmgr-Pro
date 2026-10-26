@@ -432,7 +432,7 @@ export class CertOrderService {
       `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
       [this.oid],
     );
-    const pid = this.order.processid;
+    const pid = safeProcessId(this.order.processid);
     if (pid) {
       const f = join(LOG_DIR, pid + '.log');
       if (existsSync(f)) unlinkSync(f);

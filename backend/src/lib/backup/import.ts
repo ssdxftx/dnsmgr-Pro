@@ -468,8 +468,14 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 continue;
               }
               row.cid = cidMap.get(Number(row.cid)) ?? 0;
-              const hit = await q(`SELECT id FROM ${table('domain')} WHERE name = ? LIMIT 1`, [row.name]);
+              const hit = await q(`SELECT id, aid FROM ${table('domain')} WHERE name = ? LIMIT 1`, [row.name]);
               if (hit.length) {
+                // 同名域名可能属于另一个云账户；只有账户映射一致时才复用，避免把任务/别名挂到他人域名
+                if (Number((hit as any[])[0].aid) !== Number(row.aid)) {
+                  rep.skipped++;
+                  report.warnings.push(`域名「${row.name}」已存在于其他云账户，已跳过`);
+                  continue;
+                }
                 didMap.set(orig, Number((hit as any[])[0].id));
                 rep.reused++;
                 continue;
@@ -523,8 +529,14 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               const orig = Number(row.id);
               row.aid = caidMap.get(Number(row.aid)) ?? 0;
               row.did = didMap.get(Number(row.did)) ?? 0;
-              const hit = await q(`SELECT id FROM ${table('cdn_domain')} WHERE name = ? LIMIT 1`, [row.name]);
+              const hit = await q(`SELECT id, aid FROM ${table('cdn_domain')} WHERE name = ? LIMIT 1`, [row.name]);
               if (hit.length) {
+                // 同名加速域名只有归属同一 CDN 账户时才复用，避免挂接他人云端站点
+                if (Number((hit as any[])[0].aid) !== Number(row.aid)) {
+                  rep.skipped++;
+                  report.warnings.push(`加速域名「${row.name}」已存在于其他 CDN 账户，已跳过`);
+                  continue;
+                }
                 cdidMap.set(orig, Number((hit as any[])[0].id));
                 rep.reused++;
                 continue;

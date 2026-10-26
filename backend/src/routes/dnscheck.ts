@@ -30,10 +30,21 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
   // 任务列表：管理员看全部，普通用户只看自己的
   app.get('/api/dns-check/tasks', auth, async (req: any) => {
     const isAdmin = checkLevel(req.user, 2);
-    // JOIN 域名表取名称，替代「另查前 2000 条域名做映射」（后者在域名超 2000 时任务行domain_name 为空）
-    const rows = isAdmin
-      ? await query(`SELECT T.*, D.name AS domain_name FROM ${table('dns_check_task')} T LEFT JOIN ${table('domain')} D ON T.did = D.id ORDER BY T.id DESC`)
-      : await query(`SELECT T.*, D.name AS domain_name FROM ${table('dns_check_task')} T LEFT JOIN ${table('domain')} D ON T.did = D.id WHERE T.uid = ? ORDER BY T.id DESC`, [req.user.uid]);
+    // JOIN 域名表取名称，替代「另查前 2000 条域名做映射」（后者在域名超 2000 时任务行domain_name 为空）。
+    // 私有 DNS 账户的任务只对所有者可见，管理员也不能通过任务列表读取他人私有域名信息。
+    const scope = isAdmin
+      ? `(A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`
+      : `T.uid = ? AND (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`;
+    const params = isAdmin ? [Number(req.user.uid)] : [Number(req.user.uid), Number(req.user.uid)];
+    const rows = await query(
+      `SELECT T.*, D.name AS domain_name
+         FROM ${table('dns_check_task')} T
+         LEFT JOIN ${table('domain')} D ON T.did = D.id
+         LEFT JOIN ${table('account')} A ON D.aid = A.id
+        WHERE ${scope}
+        ORDER BY T.id DESC`,
+      params,
+    );
     const data = rows.map((r: any) => ({ ...r }));
     return { code: 0, data };
   });
@@ -131,9 +142,10 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
 
   app.post('/api/dns-check/tasks/:id/toggle', auth, async (req: any) => {
     const id = Number(req.params.id);
-    const row: any = await queryOne(`SELECT uid FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT uid, did FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
     if (!checkLevel(req.user, 2) && Number(row.uid) !== req.user.uid) return { code: -1, msg: '无权限' };
+    if (!(await canAccessDomain(req.user, Number(row.did)))) return { code: -1, msg: '无权限操作该域名的私有账户任务' };
     const active = (req.body || {}).active == 1 ? 1 : 0;
     await query(`UPDATE ${table('dns_check_task')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: active ? '已启用' : '已停用' };
@@ -144,6 +156,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const row: any = await queryOne(`SELECT * FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
     if (!checkLevel(req.user, 2) && Number(row.uid) !== req.user.uid) return { code: -1, msg: '无权限' };
+    if (!(await canAccessDomain(req.user, Number(row.did)))) return { code: -1, msg: '无权限检测该域名' };
     if (!hitRateLimit(`dnscheck:${req.user.uid}`, 6, 10 * 60_000)) {
       return { code: -1, msg: '检测执行过于频繁，请稍后再试' };
     }
@@ -164,9 +177,10 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
 
   app.delete('/api/dns-check/tasks/:id', auth, async (req: any) => {
     const id = Number(req.params.id);
-    const row: any = await queryOne(`SELECT uid FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT uid, did FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
     if (!checkLevel(req.user, 2) && Number(row.uid) !== req.user.uid) return { code: -1, msg: '无权限' };
+    if (!(await canAccessDomain(req.user, Number(row.did)))) return { code: -1, msg: '无权限操作该域名的私有账户任务' };
     await query(`DELETE FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });

@@ -75,6 +75,13 @@ const allRecordsCache = new Map<string, { at: number; list: any[] }>();
 const RECORDS_TTL = 60_000;
 const RECORDS_CACHE_MAX = 300;
 
+/** 域名名称不是唯一键（不同账户可接入同名域名），缓存必须按域名 ID 隔离，避免跨租户命中他人记录。 */
+function domainCacheKey(d: any): string {
+  const id = Number(d?.id || 0);
+  if (Number.isFinite(id) && id > 0) return 'id:' + id;
+  return 'name:' + Number(d?.aid || 0) + ':' + String(d?.thirdid || '') + ':' + String(d?.name || '');
+}
+
 /** 批量取账户（含 AES 解密配置），避免每条授权各查一次 account */
 async function fetchAccountMap(aids: number[]): Promise<Map<number, any>> {
   const map = new Map<number, any>();
@@ -88,7 +95,8 @@ async function fetchAccountMap(aids: number[]): Promise<Map<number, any>> {
 /** 拉取某域名全部解析记录（带 60s 内存缓存），用于统计子域名记录数；acct 可由调用方批量预取后传入。
  *  返回 ok 以区分「记录为空」与「云端拉取失败」：失败时不写缓存，由调用方在行上标记，避免把失败伪装成 0 条。 */
 async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: boolean }> {
-  const cached = allRecordsCache.get(d.name);
+  const cacheKey = domainCacheKey(d);
+  const cached = allRecordsCache.get(cacheKey);
   if (cached && Date.now() - cached.at < RECORDS_TTL) return { list: cached.list, ok: true };
   let list: any[] = [];
   let ok = false;
@@ -115,7 +123,7 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
   }
   if (ok) {
     evictOldest(allRecordsCache, RECORDS_CACHE_MAX);
-    allRecordsCache.set(d.name, { at: Date.now(), list });
+    allRecordsCache.set(cacheKey, { at: Date.now(), list });
   }
   return { list, ok };
 }
@@ -141,7 +149,8 @@ const RECORD_TOTAL_CACHE_MAX = 500;
 
 /** 仅取某域名的记录总数（不带子域名过滤时使用）：只请求 1 条 + 读取分页 total，避免全量拉取；acct 可由调用方批量预取后传入 */
 async function fetchRecordTotal(d: any, acct?: any): Promise<number> {
-  const cached = recordTotalCache.get(d.name);
+  const cacheKey = domainCacheKey(d);
+  const cached = recordTotalCache.get(cacheKey);
   if (cached && Date.now() - cached.at < RECORDS_TTL) return cached.total;
   let total = Number(d.recordcount || 0);
   const acctRow = acct !== undefined ? acct : await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
@@ -153,7 +162,7 @@ async function fetchRecordTotal(d: any, acct?: any): Promise<number> {
     }
   }
   if (recordTotalCache.size >= RECORD_TOTAL_CACHE_MAX) evictOldest(recordTotalCache, RECORD_TOTAL_CACHE_MAX);
-  recordTotalCache.set(d.name, { at: Date.now(), total });
+  recordTotalCache.set(cacheKey, { at: Date.now(), total });
   return total;
 }
 

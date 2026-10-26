@@ -405,6 +405,8 @@ try {
     const distributed = (name: string, fn: () => Promise<unknown>, label: string) => {
       let running = false;
       return () => {
+        // 恢复/导入期间数据库处于替换窗口，暂停所有后台写入型调度，避免与恢复事务并发
+        if (isMaintenance()) return;
         if (running) return;
         running = true;
         withDistributedLock('dnsmgr:' + name, fn)

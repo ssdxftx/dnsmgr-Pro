@@ -55,10 +55,12 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
 
   app.get('/api/dmonitor/domains', auth, async (req: any) => {
     const kw = String(req.query?.kw ?? '').trim();
-    const where = kw ? " WHERE A.name LIKE ? ESCAPE '!'" : '';
-    const params = kw ? ['%' + escapeLike(kw) + '%'] : [];
+    const where = kw ? " AND A.name LIKE ? ESCAPE '!'" : '';
+    const params: any[] = [Number(req.user.uid)];
+    if (kw) params.push('%' + escapeLike(kw) + '%');
     const rows = await query(
-      `SELECT A.id, A.name, B.type FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id${where} ORDER BY A.id DESC LIMIT 2000`,
+      `SELECT A.id, A.name, B.type FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id
+        WHERE (B.visibility <> 'private' OR B.owner_uid = ?)${where} ORDER BY A.id DESC LIMIT 2000`,
       params,
     );
     return { code: 0, data: rows };

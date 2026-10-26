@@ -42,7 +42,7 @@ export default {
     emailRequired: 'Please enter your email address first',
     networkError: 'Network error',
     usernameMin: 'Username must be at least 3 characters',
-    passwordMin: 'Password must be at least 6 characters',
+    passwordMin: 'Password must be at least 8 characters',
     passwordMismatch: 'The two passwords do not match',
     emailCodeRequired: 'Please enter the email verification code',
     regCodeRequired: 'Please enter the registration code',

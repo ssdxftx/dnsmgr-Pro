@@ -36,7 +36,7 @@ import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/c
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel, getUserPermissions, isRecordInScope, matchPermission } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
-import { canAccessCertOrder, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
+import { canAccessCertOrder, canAccessDomainAccount, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findAnyVaultDekForUser } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
@@ -110,8 +110,15 @@ async function accountConfigOf(acct: any): Promise<Record<string, any>> {
 /** 校验用户能否把加速域名接入到该 DNS 域名：管理员放行；普通用户需有非只读授权且记录名在授权范围内 */
 async function assertDnsDomainUsable(user: any, did: number, accelName: string): Promise<any | null> {
   if (!Number.isFinite(did) || did <= 0) return null;
-  const d: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
+  const d: any = await queryOne(
+    `SELECT D.*, A.visibility AS account_visibility, A.owner_uid AS account_owner
+       FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+      WHERE D.id = ?`,
+    [did],
+  );
   if (!d) return null;
+  // 私有 DNS 账户只允许所有者使用，即使调用方是管理员也不能借域名 ID 使用他人云凭据
+  if (d.account_visibility === 'private' && Number(d.account_owner) !== Number(user?.uid)) return null;
   if (checkLevel(user, 2)) return d;
   const name = String(accelName || '').toLowerCase();
   const base = String(d.name || '').toLowerCase();
@@ -1132,6 +1139,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // 通用 Action 执行：Action 必须命中官方目录；站点页传入 zoneId 时强制注入 SiteId
   app.post('/api/cdn/accounts/:aid/esa/actions', adminAuth, async (req: any) => {
     const aid = Number((req.params as any).aid);
+    // adminAuth 只校验管理员等级；私有账户仍须按所有者可见性收口，避免管理员借 aid 使用他人凭据
+    if (!(await getVisibleAccount('cdn_account', aid, req.user))) {
+      return { code: -1, msg: '账户不存在' };
+    }
     const b = req.body || {};
     const action = String(b.action || '').trim();
     const meta = getEsaApi(action);
@@ -1744,9 +1755,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
   });
 
   // 免费证书 DNS 委派验证：联动域名在本系统内时尝试自动添加验证记录
-  async function addVerifyRecord(row: any, rec: any): Promise<string> {
-    const dnsDomain = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [row.did]);
+  async function addVerifyRecord(row: any, rec: any, user: any): Promise<string> {
+    const dnsDomain: any = await queryOne(
+      `SELECT D.*, A.visibility AS account_visibility, A.owner_uid AS account_owner
+         FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+        WHERE D.id = ?`,
+      [row.did],
+    );
     if (!dnsDomain) return '未找到联动域名，请手动添加验证记录';
+    if (dnsDomain.account_visibility === 'private' && Number(dnsDomain.account_owner) !== Number(user?.uid)) {
+      return '无权限操作该域名的私有 DNS 账户，请手动添加验证记录';
+    }
     const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
     if (!dnsAcct) return 'DNS账户不存在，请手动添加验证记录';
     const dns = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
@@ -1789,7 +1808,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         message = checkOnly ? '免费证书已部署' : '免费证书已申请并部署';
       } else if (r?.status === 'pending' && Array.isArray(r.records) && r.records.length) {
         const notes: string[] = [];
-        for (const rec of r.records) notes.push(await addVerifyRecord(row, rec));
+        for (const rec of r.records) notes.push(await addVerifyRecord(row, rec, user));
         message = (message || '需完成域名验证') + '；' + notes.join('；');
       }
       results.push({ id, name, status: r?.status || 'failed', message, records: r?.records || [] });
@@ -1846,9 +1865,18 @@ export default async function cdnRoutes(app: FastifyInstance) {
         results.push({ id, name: row.name, status: 'failed', message: '无法准备证书账户（默认 Let\'s Encrypt 创建失败）' });
         continue;
       }
-      const rootRow = await queryOne(`SELECT id FROM ${table('domain')} WHERE name = ?`, [scope.siteName]);
+      const rootRow: any = await queryOne(
+        `SELECT D.id, D.aid, A.visibility AS account_visibility, A.owner_uid AS account_owner
+           FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+          WHERE D.name = ?`,
+        [scope.siteName],
+      );
       if (!rootRow) {
         results.push({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 未在本系统添加，无法自动完成 DNS 验证` });
+        continue;
+      }
+      if (rootRow.account_visibility === 'private' && Number(rootRow.account_owner) !== Number(user?.uid)) {
+        results.push({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 使用他人私有 DNS 账户，无法自动完成验证` });
         continue;
       }
       const order = await ensureWildcardOrder(aid, scope.domains);
@@ -1919,6 +1947,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
   async function applyCertLink(domainId: number, provider: any, opts: { certOrderId?: any; certAid?: any; useDefault?: boolean }, user: any): Promise<any> {
     const row = await loadCdnDomain(domainId);
     if (!row) return { status: 'failed', message: '加速域名不存在' };
+    // 证书验证会写入联动 DNS 域名：私有 DNS 账户仅所有者可用，避免管理员借 CDN 域名操作他人私有域
+    if (row.did && !(await canAccessDomainAccount(Number(row.did), user))) {
+      return { status: 'failed', message: '无权限操作该加速域名关联的私有 DNS 账户' };
+    }
     if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.getCertDeployPlan !== 'function') {
       await linkLog(domainId, 0, 'order', 'fail', '该厂商不支持与项目联动');
       return { status: 'failed', message: '该厂商不支持与项目联动' };
@@ -2900,6 +2932,15 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
         belongDomain = d;
         recordName = name.slice(0, name.length - suffix.length);
         break;
+      }
+    }
+
+    // 私有 DNS 账户只允许所有者写入；管理员同步也不能把 CNAME 写进他人私有域名
+    if (belongDomain) {
+      const belongAcct = acctById.get(Number(belongDomain.aid));
+      if (belongAcct?.visibility === 'private' && Number(belongAcct.owner_uid) !== Number(user?.uid)) {
+        skipped++;
+        continue;
       }
     }
 

@@ -15,7 +15,12 @@ export default async function dashboardRoutes(app: FastifyInstance) {
   app.get('/api/dashboard/summary', auth, async (req: any) => {
     if (checkLevel(req.user, 2)) {
       const [d, a, c] = await Promise.all([
-        queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('domain')}`),
+        queryOne<{ c: number }>(
+          `SELECT COUNT(*) AS c FROM ${table('domain')} D
+            LEFT JOIN ${table('account')} A ON D.aid = A.id
+            WHERE (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`,
+          [req.user.uid],
+        ),
         queryOne<{ c: number }>(
           `SELECT COUNT(*) AS c FROM ${table('account')} WHERE visibility = 'shared' OR (visibility = 'private' AND owner_uid = ?)`,
           [req.user.uid],
@@ -44,9 +49,11 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     for (let i = 0; i < names.length; i += 500) {
       const chunk = names.slice(i, i + 500);
       const row = await queryOne<{ c: number }>(
-        `SELECT COUNT(*) AS c FROM ${table('domain')}
-         WHERE LOWER(TRIM(TRAILING '.' FROM name)) IN (${chunk.map(() => '?').join(',')})`,
-        chunk,
+        `SELECT COUNT(*) AS c FROM ${table('domain')} D
+          LEFT JOIN ${table('account')} A ON D.aid = A.id
+         WHERE LOWER(TRIM(TRAILING '.' FROM D.name)) IN (${chunk.map(() => '?').join(',')})
+           AND (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`,
+        [...chunk, Number(req.user.uid)],
       );
       domains += Number(row?.c || 0);
     }

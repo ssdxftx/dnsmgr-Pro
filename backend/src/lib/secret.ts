@@ -36,6 +36,7 @@ export function encryptText(plain: string): string {
 
 export function decryptText(raw: string | null | undefined): string | null {
   if (raw === null || raw === undefined || raw === '') return null;
+  if (typeof raw !== 'string') return null;
   // 个人凭证保险库密文：绝不能拿 sys_key 去试，否则会被误判为「配置损坏」
   if (raw.startsWith(U1_PREFIX)) return null;
   if (!raw.startsWith(ENC_PREFIX)) return raw;

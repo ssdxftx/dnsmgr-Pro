@@ -27,8 +27,8 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 域名列表（排除 cloudflare，用于添加任务）
   app.get('/api/optimize/domains', auth, async (req: any) => {
     const kw = String(req.query?.kw ?? '').trim();
-    const conds = ["B.type <> 'cloudflare'"];
-    const params: any[] = [];
+    const conds = ["B.type <> 'cloudflare'", "(B.visibility <> 'private' OR B.owner_uid = ?)"];
+    const params: any[] = [Number(req.user.uid)];
     if (kw) {
       conds.push("A.name LIKE ? ESCAPE '!'");
       params.push('%' + escapeLike(kw) + '%');

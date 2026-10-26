@@ -64,28 +64,43 @@ async function buildUserContext(read: SnapshotRead, uid: number): Promise<UserCo
 
   // 个人备份只导出本人私有账户名下的资产。不能把「有子域名授权的共享域名」
   // 纳入范围，否则会把其他用户的检测任务、告警邮箱、CDN 元数据一起导走。
-  const allDomains = await read(`SELECT id, aid FROM ${table('domain')}`);
+  // 查询按本人账户 ID 下推，避免为了筛选而把全站域名/CDN/证书/任务读入内存。
+  const ids = (set: Set<number>) => [...set];
+  const inClause = (list: number[]) => list.map(() => '?').join(',');
   const domainIds = new Set<number>();
-  for (const d of allDomains as any[]) {
-    if (accountIds.has(Number(d.aid))) domainIds.add(Number(d.id));
+  if (accountIds.size) {
+    const rows = await read(
+      `SELECT id, aid FROM ${table('domain')} WHERE aid IN (${inClause(ids(accountIds))})`,
+      ids(accountIds),
+    );
+    for (const d of rows as any[]) domainIds.add(Number(d.id));
   }
 
-  const allCdn = await read(`SELECT id, aid FROM ${table('cdn_domain')}`);
   const cdnDomainIds = new Set<number>();
-  for (const d of allCdn as any[]) {
-    if (cdnAccountIds.has(Number(d.aid))) cdnDomainIds.add(Number(d.id));
+  if (cdnAccountIds.size) {
+    const rows = await read(
+      `SELECT id, aid FROM ${table('cdn_domain')} WHERE aid IN (${inClause(ids(cdnAccountIds))})`,
+      ids(cdnAccountIds),
+    );
+    for (const d of rows as any[]) cdnDomainIds.add(Number(d.id));
   }
 
-  const allOrders = await read(`SELECT id, aid FROM ${table('cert_order')}`);
   const certOrderIds = new Set<number>();
-  for (const o of allOrders as any[]) {
-    if (certAccountIds.has(Number(o.aid))) certOrderIds.add(Number(o.id));
+  if (certAccountIds.size) {
+    const rows = await read(
+      `SELECT id, aid FROM ${table('cert_order')} WHERE aid IN (${inClause(ids(certAccountIds))})`,
+      ids(certAccountIds),
+    );
+    for (const o of rows as any[]) certOrderIds.add(Number(o.id));
   }
 
-  const tasks = await read(`SELECT id, did FROM ${table('dmtask')}`);
   const taskIds = new Set<number>();
-  for (const t of tasks as any[]) {
-    if (domainIds.has(Number(t.did))) taskIds.add(Number(t.id));
+  if (domainIds.size) {
+    const rows = await read(
+      `SELECT id, did FROM ${table('dmtask')} WHERE did IN (${inClause(ids(domainIds))})`,
+      ids(domainIds),
+    );
+    for (const t of rows as any[]) taskIds.add(Number(t.id));
   }
 
   return { uid, accountIds, cdnAccountIds, certAccountIds, domainIds, cdnDomainIds, certOrderIds, taskIds };

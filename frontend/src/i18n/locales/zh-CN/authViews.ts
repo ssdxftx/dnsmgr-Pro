@@ -42,7 +42,7 @@ export default {
     emailRequired: '请先填写邮箱地址',
     networkError: '网络错误',
     usernameMin: '用户名至少 3 个字符',
-    passwordMin: '密码至少 6 位',
+    passwordMin: '密码至少 8 位',
     passwordMismatch: '两次输入的密码不一致',
     emailCodeRequired: '请输入邮箱验证码',
     regCodeRequired: '请输入注册码',

@@ -15,6 +15,7 @@ import { SECRET_MASK, isSecretKey } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
 import { refreshGlobalProxyDispatcher } from '../lib/proxy.js';
 import { requireLoginPassword } from '../lib/reauth.js';
+import { isMaintenance } from '../lib/backup/maintenance.js';
 
 // 系统设置接口仅管理员可用（/api/system/cron 走独立密钥校验，不经过此 auth）
 function safeEqual(a: string, b: string): boolean {
@@ -216,6 +217,8 @@ export default async function systemRoutes(app: FastifyInstance) {
 
   // 计划任务触发（兼容 PHP cron URL，key 校验）
   app.get('/api/system/cron', async (req: any) => {
+    // 维护/恢复期间禁止外部 cron 触发解析写入，避免与恢复事务并发
+    if (isMaintenance()) return { code: -1, msg: '系统正在恢复数据，请稍后再试' };
     const key = (req.query?.key || '').toString();
     const cronType = await configGet('cron_type', '0');
     const cronKey = await configGet('cron_key');

@@ -6,6 +6,7 @@ import { generateSecret, provisioningUri, verifyTOTP } from '../lib/totp.js';
 import { decryptText, encryptText } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
 import { autoUnlockConvenient } from '../lib/vault/service.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 const MAX_AUTH_FAILURES = 5;
@@ -145,8 +146,21 @@ export default async function authRoutes(app: FastifyInstance) {
       return { code: -1, msg: '此用户已被封禁' };
     }
     await clearLoginFailure(user.id);
-    if (user.totp_open == 1 && user.totp_secret) {
-      const preToken = (app as any).jwt.sign({ uid: user.id, type: 'totp_pre' }, { expiresIn: '5m' });
+    if (Number(user.totp_open) !== 0) {
+      // 已开启二次验证但密钥缺失/损坏时必须 fail-closed，绝不能降级为仅密码登录
+      if (!user.totp_secret) {
+        audit(req, {
+          module: 'auth',
+          action: 'auth.login',
+          targetType: 'user',
+          targetId: user.id,
+          targetName: String(user.username),
+          summary: `登录失败：${username}（二次验证配置异常）`,
+          detail: { reason: 'totp_secret_missing' },
+        });
+        return { code: -1, msg: '二次验证配置异常，请联系管理员重置' };
+      }
+      const preToken = (app as any).jwt.sign({ uid: user.id, type: 'totp_pre', token_version: Number(user.token_version || 0) }, { expiresIn: '5m' });
       audit(req, {
         module: 'auth',
         action: 'auth.login',
@@ -212,6 +226,10 @@ export default async function authRoutes(app: FastifyInstance) {
     const user = await findUserById(decoded.uid);
     if (!user) return totpFail('user_missing', '用户不存在');
     if (Number(user.status) === 0) return totpFail('user_disabled', '账号已被禁用', user);
+    // 密码/2FA 变更会自增 token_version，旧的预令牌不得继续完成登录
+    if (Number(decoded.token_version || 0) !== Number(user.token_version || 0)) {
+      return totpFail('token_version_changed', '登录状态已失效，请重新登录', user);
+    }
     if (authLocked(user.totp_locked_until)) return totpFail('totp_locked', '动态口令错误', user);
     if (user.totp_open != 1 || !user.totp_secret) return totpFail('totp_not_enabled', '未开启TOTP二次验证', user);
     const totpSecret = decryptText(user.totp_secret) || '';
@@ -265,6 +283,10 @@ export default async function authRoutes(app: FastifyInstance) {
     const user = await findUserById(req.user.uid);
     if (!user) return { code: -1, msg: '用户不存在' };
     if (!password) return { code: -1, msg: '请输入登录密码以确认操作' };
+    // 二次验证状态变更同样允许重输密码，与其他敏感操作共用跨实例尝试限制，避免会话被盗后爆破密码
+    if (!(await hitRateLimitDistributed(`reauth:${req.user.uid}`, 10, 15 * 60_000))) {
+      return { code: -1, msg: '密码确认过于频繁，请稍后再试' };
+    }
     if (!(await verifyPassword(user.password, String(password)))) return { code: -1, msg: '登录密码错误' };
     if (action === 'bind') {
       if (!secret) return { code: -1, msg: '密钥不能为空' };

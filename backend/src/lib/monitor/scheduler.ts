@@ -3,6 +3,7 @@ import { configSet } from '../../config.js';
 import { fmtDateTime } from '../util.js';
 import { runMonitorTask } from './taskRunner.js';
 import { withDistributedLock } from '../scheduler/distLock.js';
+import { isMaintenance } from '../backup/maintenance.js';
 
 let running = false;
 let day = '';
@@ -14,6 +15,7 @@ export function startMonitorScheduler(): void {
   day = formatDay(new Date());
 
   setInterval(() => {
+    if (isMaintenance()) return;
     if (running) return;
     running = true;
     withDistributedLock('dnsmgr:monitor', tick)

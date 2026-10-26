@@ -118,7 +118,7 @@ async function onSendCode() {
 
 async function onRegister() {
   if (form.username.length < 3) return message.warning(t('register.usernameMin'));
-  if (form.password.length < 6) return message.warning(t('register.passwordMin'));
+  if (form.password.length < 8) return message.warning(t('register.passwordMin'));
   if (form.password !== form.password2) return message.warning(t('register.passwordMismatch'));
   if (config.mode === 'email' && !form.code) return message.warning(t('register.emailCodeRequired'));
   if (config.mode === 'code' && !form.reg_code) return message.warning(t('register.regCodeRequired'));
