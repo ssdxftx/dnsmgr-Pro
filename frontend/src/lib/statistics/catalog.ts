@@ -8,6 +8,8 @@ export interface ProviderMeta {
   filters: string[];
   siteScoped: boolean;
   topDims: string[];
+  /** 详情页顶部 KPI 与卡片基础项；不填用全局五项 */
+  basicKeys?: string[];
 }
 
 export interface ChartConfig {
@@ -56,11 +58,14 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
     name: '阿里云 ESA',
     tone: 'warning',
     icon: 'aliyun',
-    groups: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin'],
+    // ESA 时序接口只提供 Traffic / Requests / RequestTraffic / PageView 四项，
+    // 带宽、命中率、回源属于维度或其它接口，不在时序里
+    groups: ['overview', 'traffic', 'request'],
     delayMinutes: 5,
     filters: ['domain'],
     siteScoped: true,
     topDims: [],
+    basicKeys: ['flux', 'req', 'req_flux', 'pv'],
   },
 };
 
@@ -68,7 +73,8 @@ export const PROVIDER_LIST = Object.values(PROVIDERS);
 
 export const GROUP_CHARTS: Record<string, Record<string, ChartConfig[]>> = {
   tencent_edgeone: {
-    overview: [{ keys: ['flux_out', 'bw'], dual: true }],
+    // flux_out 非基础项，overview 组不会返回它；用 flux（访问流量）保证概览图有两条线
+    overview: [{ keys: ['flux', 'bw'], dual: true }],
     traffic: [{ keys: ['flux_out', 'flux_in', 'flux'] }],
     bandwidth: [{ keys: ['bw', 'bw_out', 'bw_in'] }],
     request: [{ keys: ['req', 'req_rate'], dual: true }],
@@ -105,12 +111,9 @@ export const GROUP_CHARTS: Record<string, Record<string, ChartConfig[]>> = {
     top: [],
   },
   aliyun_esa: {
-    overview: [{ keys: ['flux', 'bw'], dual: true }],
-    traffic: [{ keys: ['flux'] }],
-    bandwidth: [{ keys: ['bw'] }],
-    request: [{ keys: ['req', 'qps'], dual: true }],
-    cache: [{ keys: ['hit_flux'], chart: 'bar' }, { keys: ['hit_rate'] }],
-    origin: [{ keys: ['bs_flux'] }, { keys: ['origin_bw'] }],
+    overview: [{ keys: ['flux', 'req'], dual: true }],
+    traffic: [{ keys: ['flux', 'req_flux'] }],
+    request: [{ keys: ['req', 'pv'] }],
   },
 };
 

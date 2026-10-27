@@ -63,4 +63,9 @@ export interface ProviderCatalog {
   breakdowns: BreakdownDef[];
   delayMinutes: number;
   siteScoped: boolean;
+  /**
+   * 卡片上的基础指标顺序。不填时用全局 BASIC_KEYS（flux/bw/bs_flux/req/hit_rate）；
+   * 上游只提供部分指标时（如 ESA 只有流量与请求数），用它避免卡片出现一串「—」。
+   */
+  basicKeys?: string[];
 }

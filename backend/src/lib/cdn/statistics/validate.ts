@@ -59,8 +59,8 @@ export function parseTop(value: any, allowed: string[]): string[] {
 export const BASIC_KEYS = ['flux', 'bw', 'bs_flux', 'req', 'hit_rate'] as const;
 
 export function basicUnit(key: string): MetricUnit {
-  if (key === 'flux' || key === 'bs_flux') return 'byte';
+  if (key === 'flux' || key === 'bs_flux' || key === 'req_flux') return 'byte';
   if (key === 'bw') return 'bps';
-  if (key === 'req') return 'count';
+  if (key === 'req' || key === 'pv') return 'count';
   return 'percent';
 }

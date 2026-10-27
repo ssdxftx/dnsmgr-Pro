@@ -49,13 +49,10 @@ export async function queryAliyunEsaStatistics(
   // 按域名逐个查询会重复累加同一站点数据，因此先去重站点，再逐站点查询
   const siteIds = Array.from(new Set(domains.map((d) => d.zoneId).filter((z): z is string => !!z)));
   for (const siteId of siteIds) {
-    const fields: any[] = [
-      { FieldName: 'Traffic', Dimension: ['ALL'] },
-      { FieldName: 'Bandwidth', Dimension: ['ALL'] },
-    ];
+    // 只请求 ESA 时序接口真实支持的指标（Bandwidth / HitRate 不在其列，请求会失败）
+    const fields: any[] = [{ FieldName: 'Traffic', Dimension: ['ALL'] }];
     if (type === 'Visits' || type === 'All') {
       fields.push({ FieldName: 'Requests', Dimension: ['ALL'] });
-      fields.push({ FieldName: 'HitRate', Dimension: ['ALL'] });
     }
     let data: any[] = [];
     reqTotal++;
@@ -77,19 +74,11 @@ export async function queryAliyunEsaStatistics(
 
     if (type === 'Resource' || type === 'All') {
       const fluxSeries = alignSeries(pickSeries(data, 'Traffic'), len);
-      const bwSeries = alignSeries(pickSeries(data, 'Bandwidth'), len);
+      // 带宽由流量按时间粒度换算（ESA 不单独提供带宽指标）
+      const sec = Number(intervalSec) || 3600;
       for (let i = 0; i < len; i++) {
         flux[i] += fluxSeries[i] || 0;
-        bw[i] += bwSeries[i] || 0;
-      }
-      if (type === 'All') {
-        const rateSeries = alignSeries(pickSeries(data, 'HitRate'), len);
-        // HitRate 可能为百分比（0-100）或比例（0-1），按最大值自适应
-        const asPercent = Math.max(...rateSeries, 0) > 1.5;
-        for (let i = 0; i < len; i++) {
-          const rate = asPercent ? (rateSeries[i] || 0) / 100 : rateSeries[i] || 0;
-          hitFlux[i] += Math.round((fluxSeries[i] || 0) * rate);
-        }
+        bw[i] += Math.round((fluxSeries[i] || 0) / sec);
       }
     }
     if (type === 'Visits' || type === 'All') {

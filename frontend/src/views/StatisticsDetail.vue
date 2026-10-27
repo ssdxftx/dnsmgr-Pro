@@ -107,6 +107,7 @@ import {
   BarChartOutline,
   CloudDownloadOutline,
   CloudOutline,
+  EyeOutline,
   FlashOutline,
   RefreshOutline,
   SpeedometerOutline,
@@ -206,17 +207,23 @@ const kpiItems = computed<KpiItem[]>(() => {
     flux: CloudOutline,
     bw: SpeedometerOutline,
     bs_flux: CloudDownloadOutline,
+    req_flux: CloudDownloadOutline,
     req: BarChartOutline,
+    pv: EyeOutline,
     hit_rate: FlashOutline,
   };
   const tones: Record<string, KpiItem['tone']> = {
     flux: 'primary',
     bw: 'info',
     bs_flux: 'success',
+    req_flux: 'success',
     req: 'warning',
+    pv: 'info',
     hit_rate: 'primary',
   };
-  return ['flux', 'bw', 'bs_flux', 'req', 'hit_rate'].map((key) => {
+  // 服务商只支持部分指标时（如 ESA），按 catalog 的配置渲染，避免一排「—」
+  const keys = meta.basicKeys?.length ? meta.basicKeys : ['flux', 'bw', 'bs_flux', 'req', 'hit_rate'];
+  return keys.map((key) => {
     const s = seriesMap.value.get(key) || (key === 'hit_rate' ? seriesMap.value.get('hit_rate_flux') : undefined);
     return {
       key,
@@ -285,7 +292,12 @@ async function loadGroup(group: string) {
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     const data = res.data as DetailData;
     detail.value = { ...data, series: [...(detail.value?.series || [])], breakdowns: [...(detail.value?.breakdowns || [])] };
-    const overviewKeys = new Set(['flux', 'bw', 'bs_flux', 'req', 'hit_rate', 'hit_rate_flux']);
+    // overview 组保留「该服务商卡片上的基础项」；早前写死五项，
+    // 导致 ESA 的 RequestTraffic / PageView 被过滤掉，KPI 只能显示「—」
+    const overviewKeys = new Set([
+      ...(meta.basicKeys?.length ? meta.basicKeys : ['flux', 'bw', 'bs_flux', 'req', 'hit_rate']),
+      'hit_rate_flux',
+    ]);
     const nextSeries = new Map(seriesByGroup.value);
     for (const g of groups) {
       nextSeries.set(

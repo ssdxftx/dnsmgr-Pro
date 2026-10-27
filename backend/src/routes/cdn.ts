@@ -2360,8 +2360,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
         return { code: 0, data: { dataUntil, providers } };
       }
 
-      const acctWhere: string[] = ["visibility = 'shared'"];
-      const acctParams: any[] = [];
+      // 按当前用户可见账户取数：普通用户含共享 + 自己的私有账户；
+      // 之前写死 visibility = 'shared'，私有账户（自建的 ESA/EO 账户）在统计页永远不出现
+      if (!visibleAids.length) return { code: 0, data: { dataUntil, providers: [] } };
+      const acctWhere: string[] = [`id IN (${visibleAids.map(() => '?').join(',')})`];
+      const acctParams: any[] = [...visibleAids];
       if (aid) {
         acctWhere.push('id = ?');
         acctParams.push(aid);
@@ -2371,11 +2374,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
         acctParams.push(routeFilter);
       }
       const acctRows: any[] = await query(
-        `SELECT * FROM ${table('cdn_account')}` + (acctWhere.length ? ` WHERE ${acctWhere.join(' AND ')}` : ''),
+        `SELECT * FROM ${table('cdn_account')} WHERE ${acctWhere.join(' AND ')}`,
         acctParams,
       );
-      const domWhere: string[] = [];
-      const domParams: any[] = [];
+
+      const domWhere: string[] = [`aid IN (${visibleAids.map(() => '?').join(',')})`];
+      const domParams: any[] = [...visibleAids];
       if (aid) {
         domWhere.push('aid = ?');
         domParams.push(aid);
@@ -2385,27 +2389,63 @@ export default async function cdnRoutes(app: FastifyInstance) {
         domParams.push(routeFilter);
       }
       const domRows: any[] = await query(
-        `SELECT * FROM ${table('cdn_domain')}` + (domWhere.length ? ` WHERE ${domWhere.join(' AND ')}` : ''),
+        `SELECT * FROM ${table('cdn_domain')} WHERE ${domWhere.join(' AND ')}`,
         domParams,
       );
 
+      // 站点级服务商（ESA / EdgeOne）的统计以「站点」为单位，不依赖本项目是否接入过域名。
+      // 本地没有域名记录时回退到云端站点列表，否则只建了站点、未接域名的账户在统计页会整块消失。
+      const cloudSites = new Map<number, StatisticsDomain[]>();
+      for (const catalog of listCatalogs()) {
+        if (!catalog.siteScoped) continue;
+        for (const a of acctRows.filter((x) => x.type === catalog.route)) {
+          const localCount = domRows.filter((d) => Number(d.aid) === Number(a.id)).length;
+          if (localCount) continue;
+          try {
+            const provider: any = getCdnProvider(a.type, await accountConfigOf(a));
+            if (!provider || typeof provider.getZones !== 'function') continue;
+            const zones = await provider.getZones();
+            if (!Array.isArray(zones)) continue;
+            const list = zones
+              .map((z: any) => ({
+                name: String(z?.zoneName || z?.name || ''),
+                route: String(a.type),
+                zoneId: String(z?.zoneId || ''),
+                serviceArea: z?.area,
+              }))
+              .filter((d: any) => d.zoneId);
+            if (list.length) cloudSites.set(Number(a.id), list);
+          } catch {
+            // 云端不可达时保持「未接入」，不影响其他服务商
+          }
+        }
+      }
+
       const inputs = listCatalogs()
-        .filter((catalog) => isConnected(catalog.route))
+        .filter(
+          (catalog) =>
+            isConnected(catalog.route) ||
+            acctRows.some((a) => a.type === catalog.route && cloudSites.has(Number(a.id))),
+        )
         .map((catalog) => {
         const accounts: OverviewAccount[] = acctRows
           .filter((a) => a.type === catalog.route)
-          .map((a) => ({
-            id: Number(a.id),
-            ...readConfigSafe(a.config),
-            domains: domRows
+          .map((a) => {
+            const localDomains: StatisticsDomain[] = domRows
               .filter((d) => Number(d.aid) === Number(a.id) && d.route === catalog.route)
               .map((d) => ({
                 name: d.name,
                 route: d.route,
                 zoneId: d.zone_id,
                 serviceArea: d.service_area,
-              })),
-          }))
+              }));
+            const domains = localDomains.length ? localDomains : cloudSites.get(Number(a.id)) || [];
+            return {
+              id: Number(a.id),
+              ...readConfigSafe(a.config),
+              domains,
+            };
+          })
           .filter((a) => a.domains.length);
         return {
           route: catalog.route,

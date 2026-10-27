@@ -519,6 +519,7 @@ const STAT_METRIC_UNITS: Record<string, string> = {
   hit_flux: 'byte', cache_flux_hit: 'byte', cache_flux_miss: 'byte', cache_flux_dynamic: 'byte',
   bw: 'bps', bw_out: 'bps', bw_in: 'bps', origin_bw: 'bps', origin_bw_in: 'bps', origin_bw_out: 'bps',
   req: 'count', req_rate: 'qps', qps: 'qps', hit_req: 'count', cache_req_hit: 'count', cache_req_miss: 'count', origin_req: 'count',
+  req_flux: 'byte', pv: 'count',
   hit_rate: 'percent', hit_rate_flux: 'percent', hit_rate_req: 'percent',
   resp_time: 'ms', ttfb: 'ms',
   sc_2xx: 'count', sc_3xx: 'count', sc_4xx: 'count', sc_5xx: 'count',
@@ -529,20 +530,20 @@ const STAT_KEYS: Record<string, string[]> = {
   tencent_edgeone: ['flux', 'flux_out', 'flux_in', 'bw', 'bw_out', 'bw_in', 'req', 'req_rate', 'hit_rate', 'hit_rate_flux', 'hit_rate_req', 'cache_flux_hit', 'cache_flux_miss', 'cache_flux_dynamic', 'cache_req_hit', 'cache_req_miss', 'bs_flux', 'origin_flux_out', 'origin_bw_in', 'origin_bw_out', 'origin_req', 'sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx', 'origin_sc_2xx', 'origin_sc_3xx', 'origin_sc_4xx', 'origin_sc_5xx', 'resp_time', 'ttfb'],
   tencent_cdn: ['flux', 'bw', 'bs_flux', 'req', 'hit_rate', 'hit_rate_req', 'hit_flux', 'hit_req', 'origin_bw', 'origin_req', 'sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx', 'origin_sc_2xx', 'origin_sc_3xx', 'origin_sc_4xx', 'origin_sc_5xx'],
   aliyun_cdn: ['flux', 'bw', 'req', 'qps', 'hit_rate', 'hit_flux', 'origin_flux', 'origin_bw', 'sc_2xx', 'sc_3xx', 'sc_4xx', 'sc_5xx'],
-  aliyun_esa: ['flux', 'bw', 'req', 'qps', 'hit_rate', 'hit_flux', 'bs_flux', 'origin_bw'],
+  aliyun_esa: ['flux', 'req_flux', 'req', 'pv'],
 };
 
 const STAT_GROUPS: Record<string, string[]> = {
   tencent_edgeone: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status', 'performance', 'top'],
   tencent_cdn: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status'],
   aliyun_cdn: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status', 'top'],
-  aliyun_esa: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin'],
+  aliyun_esa: ['overview', 'traffic', 'request'],
 };
 
 const STAT_GROUP_OF: Record<string, string> = {
   flux: 'traffic', flux_out: 'traffic', flux_in: 'traffic',
   bw: 'bandwidth', bw_out: 'bandwidth', bw_in: 'bandwidth',
-  req: 'request', req_rate: 'request', qps: 'request',
+  req: 'request', req_rate: 'request', qps: 'request', req_flux: 'traffic', pv: 'request',
   hit_rate: 'cache', hit_rate_flux: 'cache', hit_rate_req: 'cache', hit_flux: 'cache', hit_req: 'cache',
   cache_flux_hit: 'cache', cache_flux_miss: 'cache', cache_flux_dynamic: 'cache', cache_req_hit: 'cache', cache_req_miss: 'cache',
   bs_flux: 'origin', origin_flux: 'origin', origin_flux_out: 'origin', origin_bw: 'origin', origin_bw_in: 'origin', origin_bw_out: 'origin', origin_req: 'origin',
@@ -553,7 +554,9 @@ function statSeries(key: string): { key: string; group: string; unit: string; ag
   const unit = STAT_METRIC_UNITS[key] || 'count';
   const group = STAT_GROUP_OF[key] || 'status';
   const rate = unit === 'percent';
-  const base = rate ? 88 : unit === 'byte' ? 3.2e9 : unit === 'bps' ? 5.2e7 : unit === 'ms' ? 120 : 120000;
+  // 派生的请求流量 / 浏览量按比例缩放，避免与流量、请求数完全同形
+  const scale = key === 'req_flux' ? 0.28 : key === 'pv' ? 0.32 : 1;
+  const base = (rate ? 88 : unit === 'byte' ? 3.2e9 : unit === 'bps' ? 5.2e7 : unit === 'ms' ? 120 : 120000) * scale;
   const values = statValues(base, rate ? 4 : base * 0.18).map((v) => (key === 'cache_flux_dynamic' ? Math.round(v * 0.2) : v));
   const summary = rate ? Number((values.reduce((a, b) => a + b, 0) / values.length).toFixed(1)) : values.reduce((a, b) => a + b, 0);
   return {
@@ -573,7 +576,8 @@ function buildStatOverview() {
     tencent_edgeone: [['flux', 'byte', 2.6e12], ['bw', 'bps', 8.4e7], ['bs_flux', 'byte', 2.1e11], ['req', 'count', 2841937], ['hit_rate', 'percent', 92.4]],
     tencent_cdn: [['flux', 'byte', 1.2e12], ['bw', 'bps', 4.1e7], ['bs_flux', 'byte', 9.8e10], ['req', 'count', 1284930], ['hit_rate', 'percent', 88.1]],
     aliyun_cdn: [['flux', 'byte', 6.4e11], ['bw', 'bps', 2.2e7], ['bs_flux', 'byte', 5.2e10], ['req', 'count', null], ['hit_rate', 'percent', 90.7]],
-    aliyun_esa: [['flux', 'byte', null], ['bw', 'bps', null], ['bs_flux', 'byte', null], ['req', 'count', null], ['hit_rate', 'percent', null]],
+    // ESA 时序接口只提供这四项，卡片按真实能力展示
+    aliyun_esa: [['flux', 'byte', 3.1e11], ['req', 'count', 642318], ['req_flux', 'byte', 8.7e10], ['pv', 'count', 198420]],
   };
   const names: Record<string, string> = { tencent_edgeone: '腾讯云 EdgeOne', tencent_cdn: '腾讯云 CDN', aliyun_cdn: '阿里云 CDN', aliyun_esa: '阿里云 ESA' };
   const tones: Record<string, string> = { tencent_edgeone: 'primary', tencent_cdn: 'info', aliyun_cdn: 'success', aliyun_esa: 'warning' };
@@ -581,14 +585,13 @@ function buildStatOverview() {
     dataUntil: '2026-10-18 17:50:00',
     providers: Object.keys(names).map((route) => {
       const basics = values[route];
-      const empty = route === 'aliyun_esa';
       return {
         route,
         name: names[route],
         tone: tones[route],
-        status: empty ? 'empty' : route === 'tencent_cdn' ? 'partial' : 'ok',
-        accountCount: empty ? 0 : route === 'tencent_edgeone' ? 1 : 2,
-        domainCount: empty ? 0 : route === 'tencent_edgeone' ? 3 : 5,
+        status: route === 'tencent_cdn' ? 'partial' : 'ok',
+        accountCount: route === 'tencent_edgeone' || route === 'aliyun_esa' ? 1 : 2,
+        domainCount: route === 'tencent_edgeone' ? 3 : route === 'aliyun_esa' ? 2 : 5,
         basics: basics.map(([key, unit, value]) => ({ key, unit, value })),
         ...(route === 'tencent_cdn' ? { error: '部分站点查询超时' } : {}),
         dataUntil: '2026-10-18 17:50:00',
@@ -603,7 +606,7 @@ function buildStatDetail(route: string, groups: string, top: string) {
   const keys = STAT_KEYS[route] || STAT_KEYS.tencent_edgeone;
   const wanted = groups ? groups.split(',') : [];
   const series = keys
-    .filter((key) => !wanted.length || wanted.includes('overview') && ['flux', 'bw', 'bs_flux', 'req', 'hit_rate'].includes(key) || wanted.includes(STAT_GROUP_OF[key] || 'status'))
+    .filter((key) => !wanted.length || wanted.includes('overview') && ['flux', 'bw', 'bs_flux', 'req', 'hit_rate', 'req_flux', 'pv'].includes(key) || wanted.includes(STAT_GROUP_OF[key] || 'status'))
     .map(statSeries);
   const breakdowns: any[] = [];
   const dims = (top ? top.split(',') : []).filter(Boolean);

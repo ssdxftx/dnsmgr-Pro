@@ -141,7 +141,8 @@ export async function buildProviderCard(
   const merged = mergeSeriesList(parts.flatMap((p) => p.series));
   const byKey = new Map(merged.map((s) => [s.key, s]));
   const errors = parts.flatMap((p) => p.errors);
-  card.basics = BASIC_KEYS.map((key) => {
+  const basicKeys = catalog.basicKeys?.length ? catalog.basicKeys : [...BASIC_KEYS];
+  card.basics = basicKeys.map((key) => {
     const alias = BASIC_ALIAS[key] || [key];
     const s = alias.map((k) => byKey.get(k)).find((x) => x != null);
     return { key, unit: basicUnit(key), value: s?.summary ?? null };

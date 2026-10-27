@@ -272,6 +272,8 @@ export default {
       bw: 'Peak Bandwidth',
       bs_flux: 'Origin Traffic',
       req: 'Total Requests',
+      req_flux: 'Request traffic',
+      pv: 'Page views',
       hit_rate: 'Cache Hit Rate',
     },
     group: {
@@ -289,6 +291,8 @@ export default {
       flux: 'Traffic',
       flux_out: 'Response Traffic',
       flux_in: 'Client Request Traffic',
+      req_flux: 'Request traffic',
+      pv: 'Page views',
       bw: 'Peak Bandwidth',
       bw_out: 'Response Bandwidth',
       bw_in: 'Request Bandwidth',

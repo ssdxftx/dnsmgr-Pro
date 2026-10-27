@@ -272,6 +272,8 @@ export default {
       bw: '峰值带宽',
       bs_flux: '回源流量',
       req: '请求总数',
+      req_flux: '请求流量',
+      pv: '页面浏览量',
       hit_rate: '缓存命中率',
     },
     group: {
@@ -289,6 +291,8 @@ export default {
       flux: '访问流量',
       flux_out: '响应流量',
       flux_in: '客户端请求流量',
+      req_flux: '客户端请求流量',
+      pv: '页面浏览量',
       bw: '峰值带宽',
       bw_out: '响应带宽',
       bw_in: '请求带宽',
