@@ -13,7 +13,12 @@ WORKDIR /app
 
 # buildPfx（证书 PFX 下载 / PFX 部署）依赖 openssl CLI；unzip 用于证书包解压。
 # 显式安装，避免依赖基础镜像的偶然内容（alpine 基础镜像不含 openssl）。
-RUN apk add --no-cache openssl unzip
+# 默认走官方源；国内构建可用 --build-arg APK_MIRROR=https://mirrors.aliyun.com 加速
+ARG APK_MIRROR=https://dl-cdn.alpinelinux.org
+RUN if [ "$APK_MIRROR" != "https://dl-cdn.alpinelinux.org" ]; then \
+      sed -i "s#https://dl-cdn.alpinelinux.org#${APK_MIRROR}#g" /etc/apk/repositories; \
+    fi \
+    && apk add --no-cache openssl unzip
 
 ENV NODE_ENV=production \
     TZ=Asia/Shanghai \
