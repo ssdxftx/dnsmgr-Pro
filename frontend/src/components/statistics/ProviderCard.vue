@@ -6,7 +6,7 @@
         <h3>{{ data.name }}</h3>
         <p>{{ t('statistics.cardMeta', { accounts: data.accountCount, domains: data.domainCount }) }}</p>
       </div>
-      <span class="pcard__dot" :class="`is-${data.status}`" :title="t(`statistics.status.${data.status}`)" />
+      <StatusBadge :tone="statusTone" variant="dot" :title="t(`statistics.status.${data.status}`)" />
     </header>
 
     <div v-if="loading" class="pcard__basics">
@@ -47,6 +47,7 @@ import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NIcon, NSkeleton } from 'naive-ui';
 import { ArrowForwardOutline, CloudOutline, ServerOutline } from '@vicons/ionicons5';
+import StatusBadge from '../StatusBadge.vue';
 import { formatMetric, type MetricUnit } from '../../lib/statistics/format';
 
 export interface ProviderCardData {
@@ -73,6 +74,21 @@ const { t } = useI18n();
 
 const icon = computed(() => (props.data.route === 'tencent_edgeone' || props.data.route === 'tencent_cdn' ? CloudOutline : ServerOutline));
 
+// 服务商状态 → 统一语义色
+const statusTone = computed<'success' | 'warning' | 'error' | 'default'>(() => {
+  switch (props.data.status) {
+    case 'ok':
+      return 'success';
+    case 'partial':
+      return 'warning';
+    case 'error':
+    case 'timeout':
+      return 'error';
+    default:
+      return 'default';
+  }
+});
+
 const emptyText = computed(() => {
   if (props.data.status === 'empty') return t('statistics.notConnected');
   if (props.data.status === 'timeout') return t('statistics.timeout');
@@ -93,9 +109,9 @@ const emptyText = computed(() => {
   padding: 16px 18px 12px;
   box-shadow: var(--app-shadow-sm);
   transition:
-    transform var(--app-dur-fast) var(--app-ease),
-    box-shadow var(--app-dur-fast) var(--app-ease),
-    border-color var(--app-dur-fast) var(--app-ease);
+    transform 0.2s var(--app-ease),
+    box-shadow 0.2s var(--app-ease),
+    border-color 0.2s var(--app-ease);
 }
 .pcard:hover {
   transform: translateY(-2px);
@@ -181,22 +197,6 @@ const emptyText = computed(() => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.pcard__dot {
-  width: 8px;
-  height: 8px;
-  flex: 0 0 auto;
-  border-radius: 50%;
-  background: var(--app-text-3);
-}
-.pcard__dot.is-ok {
-  background: var(--app-success);
-}
-.pcard__dot.is-partial {
-  background: var(--app-warning);
-}
-.pcard__dot.is-error {
-  background: var(--app-error);
 }
 .pcard__basics {
   display: grid;

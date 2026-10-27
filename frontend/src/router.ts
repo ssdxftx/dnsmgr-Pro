@@ -62,6 +62,8 @@ const routes = [
       { path: 'users', component: () => import('./views/UserList.vue'), meta: { titleKey: 'route.users' } },
       { path: 'logs', component: () => import('./views/UserLog.vue'), meta: { titleKey: 'route.logs' } },
       { path: 'about', component: () => import('./views/About.vue'), meta: { titleKey: 'route.about' } },
+      // 兜底：未匹配的路径不再渲染成整页空白，统一进 404 页
+      { path: ':pathMatch(.*)*', component: () => import('./views/NotFound.vue'), meta: { titleKey: 'route.notFound' } },
     ],
   },
 ];

@@ -99,14 +99,23 @@ function goBack() {
     align-items: flex-start;
     flex-direction: column;
   }
+  /* column 布局下 align-items:flex-start 取消了拉伸，left 会被长标题撑出视口
+     （ESA 账户控制台在 390px 下宽 410px），这里显式占满并允许收缩 */
   .page-header__left {
     align-items: flex-start;
+    width: 100%;
+    max-width: 100%;
   }
   .page-header__back {
     margin-left: 0;
     margin-top: -5px;
   }
+  .page-header__title {
+    min-width: 0;
+    max-width: 100%;
+  }
   .page-header__title-text {
+    flex: 0 1 auto;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;

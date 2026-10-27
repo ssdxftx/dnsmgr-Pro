@@ -25,7 +25,6 @@
             :show-indicator="false"
             :height="6"
           />
-          <span class="esa-cap__code">{{ q.key }}</span>
         </div>
       </div>
       <n-empty v-else-if="!busy && !error" size="small" :description="t('esaZone.empty')" />
@@ -191,7 +190,7 @@ onMounted(load);
 }
 .esa-cap__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 10px;
 }
 .esa-cap__card {

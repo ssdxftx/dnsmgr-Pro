@@ -62,18 +62,16 @@
           </div>
 
           <div class="app-panel" style="margin-top: 12px">
-            <n-descriptions :column="2" label-placement="left" size="small">
-              <n-descriptions-item :label="t('cdnZoneSetting.ovZoneId')">
-                <span class="app-mono">{{ zoneId }}</span>
-              </n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovZoneName')">{{ zoneInfo.zone_name || zoneInfo.name || '-' }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovStatus')">{{ statusLabel }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovArea')">{{ zoneInfo.area || '-' }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovAccess')">{{ accessTypeLabel }}</n-descriptions-item>
-              <n-descriptions-item :label="t('cdnZoneSetting.ovDomains')">
-                <span class="tnum">{{ zoneInfo.domain_count ?? 0 }}</span>
-              </n-descriptions-item>
-            </n-descriptions>
+            <DetailGrid
+              :items="[
+                { key: 'id', label: t('cdnZoneSetting.ovZoneId'), value: zoneId, mono: true },
+                { key: 'name', label: t('cdnZoneSetting.ovZoneName'), value: zoneInfo.zone_name || zoneInfo.name },
+                { key: 'status', label: t('cdnZoneSetting.ovStatus'), value: statusLabel },
+                { key: 'area', label: t('cdnZoneSetting.ovArea'), value: areaLabel },
+                { key: 'access', label: t('cdnZoneSetting.ovAccess'), value: accessTypeLabel },
+                { key: 'domains', label: t('cdnZoneSetting.ovDomains'), value: zoneInfo.domain_count ?? 0, numeric: true },
+              ]"
+            />
           </div>
 
           <div v-if="isEsa" class="app-panel">
@@ -100,7 +98,7 @@
                   {{ versionManagement ? t('cdnZoneSetting.ovEnabled') : t('cdnZoneSetting.ovDisabled') }}
                 </n-tag>
               </n-form-item>
-              <n-form-item :label="t('cdnZoneSetting.ovVanityNs')">
+              <n-form-item v-if="!isCnameAccess" :label="t('cdnZoneSetting.ovVanityNs')">
                 <n-input v-model:value="propsForm.vanityNs" :placeholder="t('cdnZoneSetting.ovVanityNsHint')" />
               </n-form-item>
             </n-form>
@@ -115,7 +113,8 @@
             </div>
           </div>
 
-          <div class="app-panel">
+          <!-- CNAME 接入的站点没有 NS 可言，空面板会让人以为「没配好」 -->
+          <div v-if="showNsPanel" class="app-panel">
             <div class="app-panel__head">
               <h3 class="app-panel__title">{{ t('cdnZoneSetting.ovNs') }}</h3>
             </div>
@@ -123,6 +122,25 @@
               <n-tag v-for="ns in nsList" :key="ns" size="small" :bordered="false" class="app-mono">{{ ns }}</n-tag>
             </n-space>
             <span v-else class="hint-text">{{ t('cdnZoneSetting.ovNsEmpty') }}</span>
+          </div>
+
+          <!-- EO 概览由站点列表接口直接给出，字段有限；给一排常去模块的直达入口填补留白 -->
+          <div v-if="!isEsa" class="app-panel">
+            <div class="app-panel__head">
+              <h3 class="app-panel__title">{{ t('cdnZoneSetting.ovQuickNav') }}</h3>
+            </div>
+            <div class="zone-quick">
+              <button
+                v-for="m in quickModules"
+                :key="m.key"
+                type="button"
+                class="zone-quick__item"
+                @click="onModuleSelect(m.key)"
+              >
+                <span>{{ m.label }}</span>
+                <n-icon :component="ArrowForwardOutline" size="14" />
+              </button>
+            </div>
           </div>
         </template>
 
@@ -161,7 +179,7 @@
               <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" class="zone-form-strip__wide mono-input" />
               <n-input v-if="isEsa" v-model:value="ogForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loadBusy" />
+            <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loadBusy" :empty-text="t('cdnAdvanced.ogEmpty')" :empty-description="t('cdnAdvanced.ogEmptyHint')" />
           </div>
 
           <div class="app-panel">
@@ -187,7 +205,7 @@
               />
               <n-input v-if="isEsa" v-model:value="lbForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loadBusy" />
+            <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loadBusy" :empty-text="t('cdnAdvanced.lbEmpty')" :empty-description="t('cdnAdvanced.lbEmptyHint')" />
           </div>
         </template>
 
@@ -284,7 +302,7 @@
               <n-button size="small" type="primary" :loading="ipSaveBusy" @click="createIpGroup">{{ t('cdnZoneSetting.create') }}</n-button>
               <n-input v-model:value="ipForm.content" type="textarea" :rows="3" :placeholder="t('cdnSecurity.contentHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="ipColumns" :data="ipGroups" size="small" :loading="loadBusy" />
+            <ResponsiveDataTable :columns="ipColumns" :data="ipGroups" size="small" :loading="loadBusy" :empty-text="t('cdnAdvanced.ipEmpty')" :empty-description="t('cdnAdvanced.ipEmptyHint')" />
           </div>
 
           <div v-for="cfg in securityCfgs.filter((c) => caps[c.cap])" :key="cfg.key" class="app-panel">
@@ -321,7 +339,7 @@
               <n-button size="small" type="primary" :loading="l4Saving" @click="createL4Proxy">{{ t('cdnZoneSetting.create') }}</n-button>
               <n-input v-if="isEsa" v-model:value="l4Form.params" type="textarea" :rows="2" :placeholder="t('cdnAdvanced.extraParamsHint')" class="zone-form-strip__wide mono-input" />
             </div>
-            <ResponsiveDataTable :columns="l4Columns" :data="l4Proxies" size="small" :loading="loadBusy" />
+            <ResponsiveDataTable :columns="l4Columns" :data="l4Proxies" size="small" :loading="loadBusy" :empty-text="t('cdnAdvanced.l4Empty')" :empty-description="t('cdnAdvanced.l4EmptyHint')" />
           </div>
         </template>
 
@@ -412,9 +430,11 @@ import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDialog, useMessage, NButton, NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
-import { CheckmarkCircleOutline } from '@vicons/ionicons5';
+import { ArrowForwardOutline, CheckmarkCircleOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import { zoneAreaKey } from '../lib/zoneLabels';
+import DetailGrid from '../components/DetailGrid.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import RuleEditor from '../components/cdn/RuleEditor.vue';
 import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
@@ -453,7 +473,13 @@ const providers = ref<Record<string, any>>({});
 const accountType = ref('');
 const zoneInfo = ref<Record<string, any>>({});
 const domains = ref<any[]>([]);
-const nsList = ref<string[]>([]);
+/** /sites/{id}/ns 的返回值；为空时回退到站点列表里的 nameServers */
+const nsFromApi = ref<string[]>([]);
+const nsList = computed<string[]>(() => {
+  if (nsFromApi.value.length) return nsFromApi.value;
+  const raw = (zoneInfo.value as any)?.nameServers;
+  return Array.isArray(raw) ? raw.filter((x: any) => typeof x === 'string' && x.trim()) : [];
+});
 
 const isEsa = computed(() => accountType.value === 'aliyun_esa' || String(zoneInfo.value.route || '') === 'aliyun_esa');
 const providerMeta = computed(() => providers.value[String(zoneInfo.value.route || accountType.value || '')] || {});
@@ -479,6 +505,10 @@ const eoTabItems = computed<ZoneModuleMenuItem[]>(() =>
     label: t(item.labelKey),
   })),
 );
+const quickModules = computed(() =>
+  eoTabItems.value.filter((m) => m.key !== 'overview' && m.key !== 'global'),
+);
+
 const activeModule = computed(() => (isEsa.value ? esaTab.value : tab.value));
 const activeSub = computed(() => (isEsa.value ? esaSub[esaTab.value] || '' : ''));
 const activeModuleItems = computed<ZoneModuleMenuItem[]>(() => (isEsa.value ? esaTabItems.value : eoTabItems.value));
@@ -530,7 +560,39 @@ const coverageOptions = computed(() => [
   { label: t('cdnSite.coverageGlobal'), value: 'global' },
   { label: t('cdnSite.coverageOverseas'), value: 'overseas' },
 ]);
-const accessTypeLabel = computed(() => (isEsa.value ? siteProps.value.accessType || siteProps.value.AccessType || zoneInfo.value.accessType || '-' : zoneInfo.value.type || '-'));
+// 非 ESA 站点的 type 是 API 原值（partial / full），直接透出看不出接入方式
+const accessTypeLabel = computed(() => {
+  if (isEsa.value) {
+    return siteProps.value.accessType || siteProps.value.AccessType || zoneInfo.value.accessType || '-';
+  }
+  const type = String(zoneInfo.value.type || '').toLowerCase();
+  if (type === 'partial') return t('cdnSite.typePartial');
+  if (type === 'full') return t('cdnSite.typeFull');
+  return zoneInfo.value.type || '-';
+});
+
+const areaLabel = computed(() => {
+  const key = zoneAreaKey(zoneInfo.value.area);
+  return key ? t(`common.${key}`) : zoneInfo.value.area || '-';
+});
+
+/**
+ * 是否 CNAME 接入。
+ * EO 的 `type` 为 partial/full；ESA 用 accessType（NS/CNAME）。
+ * 未知取值一律按「非 CNAME」处理——宁可多显示，也不要把有用的面板藏掉。
+ */
+const isCnameAccess = computed(() => {
+  if (!isEsa.value) {
+    const type = String(zoneInfo.value.type || '').toLowerCase();
+    return type === 'partial' || type === 'cname';
+  }
+  const access = String(
+    siteProps.value.accessType || siteProps.value.AccessType || zoneInfo.value.accessType || '',
+  ).toUpperCase();
+  return access === 'CNAME';
+});
+
+const showNsPanel = computed(() => nsList.value.length > 0 || !isCnameAccess.value);
 
 // ===================== 数据加载 =====================
 async function loadProviders() {
@@ -559,7 +621,7 @@ async function loadDomains() {
 async function loadNs() {
   if (!zoneId) return;
   const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/ns`);
-  nsList.value = res.code === 0 && Array.isArray(res.data) ? res.data : [];
+  nsFromApi.value = res.code === 0 && Array.isArray(res.data) ? res.data : [];
 }
 
 async function loadSiteProperties(): Promise<boolean> {
@@ -1262,6 +1324,40 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.zone-quick {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 8px;
+}
+.zone-quick__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--app-border);
+  border-radius: var(--app-radius-sm);
+  background: var(--app-panel-sunken);
+  color: var(--app-text-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s var(--app-ease), background 0.2s var(--app-ease), color 0.2s var(--app-ease);
+}
+.zone-quick__item:hover {
+  background: var(--app-surface);
+  border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
+  color: var(--app-text);
+}
+.zone-quick__item:hover :deep(.n-icon) {
+  color: var(--app-primary);
+  transform: translateX(2px);
+}
+.zone-quick__item :deep(.n-icon) {
+  color: var(--app-text-3);
+  transition: color 0.2s var(--app-ease), transform 0.2s var(--app-ease);
+}
+
 .zone-header :deep(.page-header__left) {
   flex: 1 1 auto;
   min-width: 0;
@@ -1322,10 +1418,10 @@ onMounted(async () => {
 
 /* ESA 规则：官方分类 + 规则类型卡片墙 */
 .esa-rules__cats {
-  display: flex;
+  /* 同上：flex 横排在窄容器下会裁掉末张卡，改为自适应网格 */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
   margin-bottom: 12px;
 }
 .esa-rules__cat {
@@ -1358,7 +1454,7 @@ onMounted(async () => {
   white-space: nowrap;
 }
 .esa-rules__cat-desc {
-  max-width: 220px;
+  max-width: 100%;
   font-size: 11px;
   color: var(--app-text-3);
   white-space: nowrap;

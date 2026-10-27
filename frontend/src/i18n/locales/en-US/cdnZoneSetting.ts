@@ -35,6 +35,7 @@ export default {
     ovAccess: 'Access type',
     ovDomains: 'Onboarded domains',
     ovNs: 'Nameservers',
+    ovQuickNav: 'Quick actions',
     ovNsEmpty: 'No nameserver info',
     ovVerify: 'Verify ownership',
     ovVerifiedBadge: 'Ownership verified',

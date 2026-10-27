@@ -24,11 +24,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('userList.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('userList.normal')">{{ normalCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('userList.banned')">{{ users.length - normalCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('userList.neverLogin')">{{ neverLoginCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('userList.normal'), value: normalCount, tone: 'success' },
+            { label: t('userList.banned'), value: users.length - normalCount, tone: users.length - normalCount ? 'error' : 'default' },
+            { label: t('userList.neverLogin'), value: neverLoginCount },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -41,6 +43,7 @@
           :pagination="pagination"
           :row-key="(row: any) => row.id"
           :empty-text="t('userList.empty')"
+          :empty-description="t('userList.emptyHint')"
         />
       </div>
     </n-card>
@@ -118,6 +121,7 @@ import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import { useAction } from '../composables/useAction';
 
 const message = useMessage();
@@ -477,7 +481,7 @@ onMounted(() => {
   width: 110px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .perm-row {
     flex-direction: column;
     align-items: stretch;

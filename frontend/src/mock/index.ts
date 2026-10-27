@@ -23,21 +23,34 @@ const CATEGORIES = [
 ];
 
 const DNS_ACCOUNTS = [
-  { id: 1, type: 'aliyun', name: '阿里云主账号' },
-  { id: 2, type: 'tencent', name: '腾讯云 DNSPod' },
-  { id: 3, type: 'cloudflare', name: 'Cloudflare' },
+  { id: 1, type: 'aliyun', name: '阿里云主账号', remark: '生产环境主账号', config_error: 0, addtime: '2024-05-12 09:20:00' },
+  { id: 2, type: 'tencent', name: '腾讯云 DNSPod', remark: '主站解析', config_error: 0, addtime: '2024-05-12 09:24:00' },
+  { id: 3, type: 'cloudflare', name: 'Cloudflare Global', remark: '海外站点 / 代理开启', config_error: 0, addtime: '2024-06-01 14:10:00' },
+  { id: 4, type: 'huawei', name: '华为云 DNS（华东-上海一）', remark: '政务云项目专用', config_error: 0, addtime: '2024-07-08 10:02:00' },
+  { id: 5, type: 'volcengine', name: '火山引擎 ByteDance DNS', remark: '', config_error: 1, addtime: '2024-08-19 16:45:00' },
+  { id: 6, type: 'aws', name: 'AWS Route 53 · us-east-1', remark: 'Global Accelerator 配套解析', config_error: 0, addtime: '2024-09-02 11:30:00' },
+  { id: 7, type: 'namesilo', name: 'NameSilo', remark: '域名注册商默认 DNS', config_error: 0, addtime: '2024-10-11 08:15:00' },
+  { id: 8, type: 'goedge', name: 'GoEdge 自建集群', remark: '内部 CDN 节点解析，主备双机 + Anycast 出口，仅内网可达', config_error: 0, addtime: '2024-11-20 19:40:00' },
+  { id: 9, type: 'baidu', name: '百度云智能 DNS（已弃用）', remark: '历史账户，仅保留只读，等待迁移完成后删除', config_error: 1, addtime: '2023-12-01 10:00:00' },
 ];
 
 // 字段对齐 DomainList.vue 所需：id/name/category_name/remark/recordcount/expiretime/checkstatus/is_notice/addtime/cid/is_hide/is_sso
 const DOMAINS = [
-  { id: 101, name: 'example.com', category_name: '生产环境', remark: '主站', recordcount: 42, expiretime: '2027-03-18 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-06-01 10:24:00', cid: 1, is_hide: 0, is_sso: 0 },
-  { id: 102, name: 'api.example.com', category_name: '生产环境', remark: 'API 网关', recordcount: 12, expiretime: '2027-03-18 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-06-01 10:25:00', cid: 1, is_hide: 0, is_sso: 0 },
-  { id: 103, name: 'cdn-static.com', category_name: 'CDN 加速', remark: '静态资源', recordcount: 8, expiretime: '2026-11-02 00:00:00', checkstatus: 1, is_notice: 0, addtime: '2024-07-12 09:10:00', cid: 2, is_hide: 0, is_sso: 0 },
-  { id: 104, name: 'img-cdn.com', category_name: 'CDN 加速', remark: '图片加速', recordcount: 5, expiretime: '2026-08-21 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-07-15 14:02:00', cid: 2, is_hide: 0, is_sso: 0 },
-  { id: 105, name: 'shop-example.cn', category_name: '生产环境', remark: '电商', recordcount: 23, expiretime: '2024-01-01 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-05-20 08:00:00', cid: 1, is_hide: 0, is_sso: 0 },
-  { id: 106, name: 'blog.example.net', category_name: '测试', remark: '', recordcount: 6, expiretime: '', checkstatus: 2, is_notice: 0, addtime: '2024-09-03 16:40:00', cid: 3, is_hide: 0, is_sso: 0 },
+  { id: 101, name: 'example.com', category_name: '生产环境', remark: '主站', recordcount: 16, expiretime: '2027-03-18 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-06-01 10:24:00', cid: 1, is_hide: 0, is_sso: 0 },
+  { id: 102, name: 'api.example.com', category_name: '生产环境', remark: 'API 网关', recordcount: 6, expiretime: '2027-03-18 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-06-01 10:25:00', cid: 1, is_hide: 0, is_sso: 0 },
+  { id: 103, name: 'cdn-static.com', category_name: 'CDN 加速', remark: '静态资源', recordcount: 4, expiretime: '2026-11-02 00:00:00', checkstatus: 1, is_notice: 0, addtime: '2024-07-12 09:10:00', cid: 2, is_hide: 0, is_sso: 0 },
+  { id: 104, name: 'img-cdn.com', category_name: 'CDN 加速', remark: '图片加速', recordcount: 3, expiretime: '2026-08-21 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-07-15 14:02:00', cid: 2, is_hide: 0, is_sso: 0 },
+  { id: 105, name: 'shop-example.cn', category_name: '生产环境', remark: '电商主站（含权重解析）', recordcount: 8, expiretime: '2024-01-01 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-05-20 08:00:00', cid: 1, is_hide: 0, is_sso: 0 },
+  { id: 106, name: 'blog.example.net', category_name: '测试', remark: '', recordcount: 2, expiretime: '', checkstatus: 2, is_notice: 0, addtime: '2024-09-03 16:40:00', cid: 3, is_hide: 0, is_sso: 0 },
   { id: 107, name: 'mail-gateway.com', category_name: '生产环境', remark: '邮件', recordcount: 9, expiretime: '2028-01-15 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2024-04-11 11:11:00', cid: 1, is_hide: 0, is_sso: 0 },
   { id: 108, name: 'dev-internal.local', category_name: '测试', remark: '内网', recordcount: 3, expiretime: '2030-12-31 00:00:00', checkstatus: 0, is_notice: 0, addtime: '2024-10-01 09:00:00', cid: 3, is_hide: 1, is_sso: 0 },
+  { id: 109, name: 'promo-2026-autumn-shopping-festival.example.com', category_name: 'CDN 加速', remark: '大促活动页，峰值 QPS 30 万，源站为多活架构', recordcount: 37, expiretime: '2026-11-15 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2025-08-01 09:00:00', cid: 2, is_hide: 0, is_sso: 0 },
+  { id: 110, name: 'gov-service.example.gov.cn', category_name: '生产环境', remark: '政务门户（SSO 托管）', recordcount: 12, expiretime: '2029-06-30 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2023-11-11 10:00:00', cid: 1, is_hide: 0, is_sso: 1 },
+  { id: 111, name: 'legacy-oa.example.cn', category_name: '测试', remark: '旧 OA，待下线', recordcount: 5, expiretime: '2025-12-31 00:00:00', checkstatus: 2, is_notice: 0, addtime: '2022-03-08 15:20:00', cid: 3, is_hide: 0, is_sso: 0 },
+  { id: 112, name: 'edge-assets.example.com', category_name: 'CDN 加速', remark: 'EdgeOne 回源', recordcount: 6, expiretime: '2027-09-09 00:00:00', checkstatus: 1, is_notice: 1, addtime: '2025-01-20 11:00:00', cid: 2, is_hide: 0, is_sso: 0 },
+  { id: 113, name: 'staging.example.com', category_name: '测试', remark: '预发环境，禁止外网直接访问', recordcount: 4, expiretime: '2026-10-30 00:00:00', checkstatus: 0, is_notice: 1, addtime: '2025-02-14 09:30:00', cid: 3, is_hide: 1, is_sso: 0 },
+  { id: 114, name: 'xn--fiqs8s-example.cn', category_name: '生产环境', remark: '中文域名（Punycode）', recordcount: 3, expiretime: '2027-05-05 00:00:00', checkstatus: 1, is_notice: 0, addtime: '2024-12-12 12:12:00', cid: 1, is_hide: 0, is_sso: 0 },
+  { id: 115, name: 'very-long-subdomain-for-cdn-origin-testing.example.com', category_name: 'CDN 加速', remark: '', recordcount: 1, expiretime: '2026-11-08 00:00:00', checkstatus: 1, is_notice: 0, addtime: '2025-03-03 03:03:00', cid: 2, is_hide: 0, is_sso: 0 },
 ];
 
 // 仅用于 Dashboard 计数（取 length）
@@ -60,6 +73,73 @@ const RECORDS = [
   { RecordId: 'r6', Name: '@', Type: 'TXT', Value: 'v=spf1 include:spf.example.com ~all', Line: '默认', TTL: 3600, MX: 0, Status: '1', Remark: 'SPF', did: 101, Domain: 'example.com', Weight: 0 },
   { RecordId: 'r7', Name: 'cdn', Type: 'CNAME', Value: 'edge.tencent.com.', Line: '境外', TTL: 300, MX: 0, Status: '0', Remark: 'CDN 回源', did: 101, Domain: 'example.com', Weight: 0 },
   { RecordId: 'r8', Name: 'ns1', Type: 'A', Value: '198.51.100.7', Line: '境内', TTL: 600, MX: 0, Status: '1', Remark: '', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r9', Name: '_dmarc', Type: 'TXT', Value: 'v=DMARC1; p=quarantine; rua=mailto:dmarc-reports@example.com; ruf=mailto:forensic@example.com; fo=1; adkim=s; aspf=s; pct=100', Line: '默认', TTL: 3600, MX: 0, Status: '1', Remark: 'DMARC 策略（长文本测试）', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r10', Name: '_sip._tcp', Type: 'SRV', Value: '10 60 5060 sipserver.example.com.', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: 'SIP 服务', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r11', Name: '@', Type: 'CAA', Value: '0 issue "letsencrypt.org"', Line: '默认', TTL: 3600, MX: 0, Status: '1', Remark: '证书颁发限制', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r12', Name: 'go', Type: 'REDIRECT_URL', Value: 'https://www.example.com/promo?utm_source=dns&utm_medium=redirect', Line: '默认', TTL: 300, MX: 0, Status: '1', Remark: '短链跳转', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r13', Name: 'legacy', Type: 'FORWARD_URL', Value: 'https://legacy.example.org/', Line: '默认', TTL: 300, MX: 0, Status: '0', Remark: '旧站转发（已停用）', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r14', Name: 'ns2', Type: 'NS', Value: 'ns2.example.com.', Line: '默认', TTL: 86400, MX: 0, Status: '1', Remark: '', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r15', Name: 'test-long-remark', Type: 'A', Value: '203.0.113.99', Line: '电信', TTL: 60, MX: 0, Status: '1', Remark: '这条备注特别长，用于验证表格与移动端卡片在超长中文备注下的换行与省略表现，不应撑破容器', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r16', Name: 'www', Type: 'A', Value: '203.0.113.11', Line: '联通', TTL: 600, MX: 0, Status: '1', Remark: '', did: 101, Domain: 'example.com', Weight: 0 },
+  { RecordId: 'r101', Name: 'api', Type: 'A', Value: '203.0.113.31', Line: '默认', TTL: 300, MX: 0, Status: '1', Remark: 'API 主节点', did: 102, Domain: 'api.example.com', Weight: 0 },
+  { RecordId: 'r102', Name: 'api', Type: 'A', Value: '203.0.113.32', Line: '默认', TTL: 300, MX: 0, Status: '1', Remark: 'API 备节点', did: 102, Domain: 'api.example.com', Weight: 0 },
+  { RecordId: 'r103', Name: 'gw', Type: 'CNAME', Value: 'api.example.com.', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: '', did: 102, Domain: 'api.example.com', Weight: 0 },
+  { RecordId: 'r104', Name: 'v2', Type: 'A', Value: '203.0.113.33', Line: '境内', TTL: 300, MX: 0, Status: '1', Remark: 'v2 接口', did: 102, Domain: 'api.example.com', Weight: 0 },
+  { RecordId: 'r105', Name: 'v2', Type: 'A', Value: '203.0.113.34', Line: '境外', TTL: 300, MX: 0, Status: '1', Remark: 'v2 接口（海外）', did: 102, Domain: 'api.example.com', Weight: 0 },
+  { RecordId: 'r106', Name: '_acme-challenge', Type: 'TXT', Value: 'bXlzdXBlcmxvbmdhY21lY2hhbGxlbmdldG9rZW52YWx1ZWZvcnRlc3Rpbmc=', Line: '默认', TTL: 60, MX: 0, Status: '1', Remark: '', did: 102, Domain: 'api.example.com', Weight: 0 },
+  { RecordId: 'r201', Name: '@', Type: 'CNAME', Value: 'cdn-static.com.w.cdngslb.com.', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: 'CDN 接入', did: 103, Domain: 'cdn-static.com', Weight: 0 },
+  { RecordId: 'r202', Name: 'www', Type: 'CNAME', Value: 'cdn-static.com.w.cdngslb.com.', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: '', did: 103, Domain: 'cdn-static.com', Weight: 0 },
+  { RecordId: 'r203', Name: '_acme-challenge', Type: 'TXT', Value: 'certificate-validation-token-placeholder-0001', Line: '默认', TTL: 60, MX: 0, Status: '1', Remark: '证书验证', did: 103, Domain: 'cdn-static.com', Weight: 0 },
+  { RecordId: 'r204', Name: 'status', Type: 'CNAME', Value: 'statuspage.example.com.', Line: '默认', TTL: 600, MX: 0, Status: '0', Remark: '状态页（暂停）', did: 103, Domain: 'cdn-static.com', Weight: 0 },
+  { RecordId: 'r301', Name: 'img', Type: 'CNAME', Value: 'img-cdn.com.edgekey.net.', Line: '默认', TTL: 300, MX: 0, Status: '1', Remark: '', did: 104, Domain: 'img-cdn.com', Weight: 0 },
+  { RecordId: 'r302', Name: 'static', Type: 'CNAME', Value: 'img-cdn.com.edgekey.net.', Line: '默认', TTL: 300, MX: 0, Status: '1', Remark: '', did: 104, Domain: 'img-cdn.com', Weight: 0 },
+  { RecordId: 'r303', Name: '@', Type: 'A', Value: '198.51.100.88', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: '', did: 104, Domain: 'img-cdn.com', Weight: 0 },
+  { RecordId: 'r401', Name: 'shop', Type: 'A', Value: '203.0.113.40', Line: '默认', TTL: 120, MX: 0, Status: '1', Remark: '权重 30', did: 105, Domain: 'shop-example.cn', Weight: 30 },
+  { RecordId: 'r402', Name: 'shop', Type: 'A', Value: '203.0.113.41', Line: '默认', TTL: 120, MX: 0, Status: '1', Remark: '权重 50', did: 105, Domain: 'shop-example.cn', Weight: 50 },
+  { RecordId: 'r403', Name: 'shop', Type: 'A', Value: '203.0.113.42', Line: '默认', TTL: 120, MX: 0, Status: '1', Remark: '权重 20', did: 105, Domain: 'shop-example.cn', Weight: 20 },
+  { RecordId: 'r404', Name: 'pay', Type: 'A', Value: '203.0.113.50', Line: '默认', TTL: 60, MX: 0, Status: '1', Remark: '支付网关', did: 105, Domain: 'shop-example.cn', Weight: 0 },
+  { RecordId: 'r405', Name: 'pay', Type: 'A', Value: '203.0.113.51', Line: '默认', TTL: 60, MX: 0, Status: '1', Remark: '支付网关备', did: 105, Domain: 'shop-example.cn', Weight: 0 },
+  { RecordId: 'r406', Name: 'm', Type: 'CNAME', Value: 'shop-example.cn.', Line: '默认', TTL: 300, MX: 0, Status: '1', Remark: '移动端', did: 105, Domain: 'shop-example.cn', Weight: 0 },
+  { RecordId: 'r407', Name: '@', Type: 'MX', Value: 'mx1.qiye.aliyun.com.', Line: '默认', TTL: 3600, MX: 5, Status: '1', Remark: '', did: 105, Domain: 'shop-example.cn', Weight: 0 },
+  { RecordId: 'r408', Name: '@', Type: 'TXT', Value: 'google-site-verification=abcdefghijklmnopqrstuvwxyz0123456789', Line: '默认', TTL: 3600, MX: 0, Status: '1', Remark: '', did: 105, Domain: 'shop-example.cn', Weight: 0 },
+  { RecordId: 'r501', Name: '@', Type: 'A', Value: '198.51.100.120', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: '', did: 106, Domain: 'blog.example.net', Weight: 0 },
+  { RecordId: 'r502', Name: 'www', Type: 'CNAME', Value: 'blog.example.net.', Line: '默认', TTL: 600, MX: 0, Status: '1', Remark: '', did: 106, Domain: 'blog.example.net', Weight: 0 },
+];
+
+
+const ESA_RULE_CONFIGS = {
+  RedirectRule: [
+    { ruleId: 'rr-001', ruleName: '全站 HTTP → HTTPS 强制跳转', kind: 'RedirectRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'rr-002', ruleName: '旧域名 legacy.example.com 永久重定向到主站', kind: 'RedirectRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'rr-003', ruleName: '移动端 UA 跳转 m.example.com', kind: 'RedirectRule', enabled: false, rules: [{ RuleEnable: 'off' }] },
+    { ruleId: 'rr-004', ruleName: '大促期间临时跳转（2026-11-01 至 2026-11-15）', kind: 'RedirectRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+  ],
+  HttpsRule: [
+    { ruleId: 'ht-001', ruleName: '强制 HTTPS 并启用 HSTS（max-age=31536000）', kind: 'HttpsRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'ht-002', ruleName: 'TLS 最低版本 1.2', kind: 'HttpsRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'ht-003', ruleName: '仅允许 TLS 1.3 的严格模式', kind: 'HttpsRule', enabled: false, rules: [{ RuleEnable: 'off' }] },
+  ],
+  CacheRule: [
+    { ruleId: 'ca-001', ruleName: '静态资源（js/css/图片）缓存 30 天', kind: 'CacheRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'ca-002', ruleName: 'HTML 不缓存，回源校验', kind: 'CacheRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'ca-003', ruleName: 'API 接口绕过缓存', kind: 'CacheRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'ca-004', ruleName: '边缘缓存 1 小时（大促页面临时策略）', kind: 'CacheRule', enabled: false, rules: [{ RuleEnable: 'off' }] },
+    { ruleId: 'ca-005', ruleName: '忽略源站 no-cache 头', kind: 'CacheRule', enabled: false, rules: [{ RuleEnable: 'off' }] },
+  ],
+  TransformRule: [
+    { ruleId: 'tr-001', ruleName: '移除响应头 X-Powered-By', kind: 'TransformRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'tr-002', ruleName: '追加 CORS 响应头', kind: 'TransformRule', enabled: true, rules: [{ RuleEnable: 'on' }] },
+  ],
+  NetworkOptimization: [
+    { ruleId: 'no-001', ruleName: '开启 Brotli 压缩', kind: 'NetworkOptimization', enabled: true, rules: [{ RuleEnable: 'on' }] },
+    { ruleId: 'no-002', ruleName: 'HTTP/3 与 0-RTT', kind: 'NetworkOptimization', enabled: true, rules: [{ RuleEnable: 'on' }] },
+  ],
+};
+
+const WEIGHT_ROWS = [
+  { rr: 'shop', SubDomain: 'shop.shop-example.cn', Open: true, Type: 'A', Line: '默认' },
+  { rr: 'pay', SubDomain: 'pay.shop-example.cn', Open: false, Type: 'A', Line: '默认' },
+  { rr: 'api', SubDomain: 'api.shop-example.cn', Open: true, Type: 'A', Line: '境内' },
 ];
 
 // 用户列表（UserList：{ list, total }）
@@ -1439,8 +1519,15 @@ export function installMock() {
       // 域名下的解析记录
       const recMatch = path.match(/^\/api\/domains\/(\d+)\/records$/);
       if (recMatch) {
-        const list = RECORDS.map((r) => ({ ...r, did: Number(recMatch[1]) }));
+        const did = Number(recMatch[1]);
+        const list = RECORDS.filter((r) => r.did === did);
         return json({ list, total: list.length, _access: { admin: true, readonly: false, writable: true } });
+      }
+      const weightMatch = path.match(/^\/api\/domains\/(\d+)\/weight$/);
+      if (weightMatch) {
+        const did = Number(weightMatch[1]);
+        const pool = did === 105 ? WEIGHT_ROWS : [];
+        return json({ list: pool, total: pool.length });
       }
       // 单个域名信息
       const domMatch = path.match(/^\/api\/domains\/(\d+)$/);
@@ -1453,12 +1540,36 @@ export function installMock() {
       }
       if (path === '/api/domains') return json(DOMAINS);
       if (path === '/api/dns/accounts') return json(DNS_ACCOUNTS);
+      // 仪表盘计数跟随注入的数据规模，避免首页显示 0 而列表里有 15 条
+      if (path === '/api/dashboard/summary') {
+        return json({
+          domains: DOMAINS.length,
+          accounts: DNS_ACCOUNTS.length,
+          cdnDomains: CDN_DOMAINS.length,
+        });
+      }
 
       // ---- 阿里云 ESA 演示站点（静态预览专用假数据）----
       if (path === '/api/cdn/providers') return json(CDN_PROVIDERS);
       if (path === '/api/cdn/zones') {
         if (!aid || aid === 5) {
-          return json([{ ...ESA_SITE, aid: 5, typename: '阿里云 ESA', accountName: '阿里云 ESA 演示账户' }]);
+          return json([
+            { ...ESA_SITE, aid: 5, typename: '阿里云 ESA', accountName: '阿里云 ESA 演示账户' },
+            {
+              ...ESA_SITE,
+              zone_id: '1000000009',
+              zone_name: 'backup-esa.com',
+              status: 'pending',
+              paused: true,
+              domain_count: 1,
+              planName: 'ESA 基础版',
+              ownershipVerified: false,
+              nameServers: [],
+              aid: 5,
+              typename: '阿里云 ESA',
+              accountName: '阿里云 ESA 演示账户',
+            },
+          ]);
         }
         if (aid === 6) {
           return json([{ ...EO_SITE, aid: 6, typename: '腾讯云 EdgeOne', accountName: '腾讯云 EdgeOne 演示账户' }]);
@@ -1492,7 +1603,11 @@ export function installMock() {
         if (!kind) return json({ vendor: 'esa', kinds: ESA_RULE_SCHEMA });
         return json({ vendor: 'esa', kind, fields: ESA_RULE_SCHEMA.find((k) => k.kind === kind)?.fields || [] });
       }
-      if (path === '/api/cdn/accounts/5/rule-configs') return json({ total: 0, list: [] });
+      if (path === '/api/cdn/accounts/5/rule-configs') {
+        const kind = String(q.get('kind') || 'RedirectRule');
+        const list = (ESA_RULE_CONFIGS as any)[kind] || [];
+        return json({ total: list.length, list });
+      }
       if (path === '/api/cdn/accounts/5/origin-groups') return json({ total: 0, list: [] });
       if (path === '/api/cdn/accounts/5/load-balancers') return json({ total: 0, list: [] });
       if (path === '/api/cdn/accounts/5/security/ip-groups') return json([]);

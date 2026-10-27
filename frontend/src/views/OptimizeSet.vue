@@ -149,7 +149,7 @@ onMounted(load);
   width: 220px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .desc,
   .tips {
     font-size: 13px;

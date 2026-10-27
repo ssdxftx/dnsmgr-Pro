@@ -39,7 +39,7 @@
       />
     </div>
 
-    <div v-if="!busy && !errors.length && !providers.length" class="empty-panel">
+    <div v-if="!busy && !errors.length && !providers.length" class="app-panel empty-panel">
       <EmptyState :icon="CloudOutline" :title="t('statistics.noProviders')">
         <template #actions>
           <n-button type="primary" @click="router.push('/cdn-accounts')">
@@ -162,13 +162,7 @@ onMounted(() => {
 .empty-panel {
   display: flex;
   justify-content: center;
-  padding: 48px 0;
-  background: var(--app-surface);
-  border: 1px solid var(--app-border);
-  border-radius: var(--app-radius-lg);
-}
-.mb-3 {
-  margin-bottom: 12px;
+  padding: 40px 0;
 }
 @media (max-width: 767px) {
   .provider-grid {
@@ -176,7 +170,7 @@ onMounted(() => {
     gap: 12px;
   }
   .empty-panel {
-    padding: 32px 0;
+    padding: 24px 0;
   }
 }
 </style>

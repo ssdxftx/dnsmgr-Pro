@@ -39,7 +39,7 @@
 }
 
 /* 旧版工具栏布局兼容：标题换行、按钮横向滚动不换行 */
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .toolbar {
     flex-direction: column;
     align-items: stretch !important;

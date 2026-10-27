@@ -89,7 +89,7 @@ onMounted(load);
   width: 200px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .clean-row {
     flex-direction: column;
     align-items: stretch;

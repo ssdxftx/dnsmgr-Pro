@@ -368,7 +368,7 @@ onMounted(async () => {
   font-size: 13px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .app-logo {
     width: 42px;
     height: 42px;

@@ -35,6 +35,7 @@ export default {
     ovAccess: '接入类型',
     ovDomains: '已接入域名',
     ovNs: 'NS 服务器',
+    ovQuickNav: '常用操作',
     ovNsEmpty: '暂无 NS 信息',
     ovVerify: '验证归属',
     ovVerifiedBadge: '已验证站点归属',

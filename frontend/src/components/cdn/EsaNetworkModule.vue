@@ -75,17 +75,17 @@ const compressionColumns = computed<EsaTableColumn[]>(() => [
   { key: 'Brotli', label: 'Brotli', width: 80 },
   { key: 'Zstd', label: 'Zstd', width: 80 },
   { key: 'RuleEnable', label: t('esaZone.ruleStatus'), width: 100 },
-  { key: 'Sequence', label: 'Sequence', width: 100 },
+  { key: 'Sequence', label: t('esaZone.erSequence'), width: 100 },
 ]);
 
 const compressionFields = computed<EsaFieldDef[]>(() => [
   { name: 'RuleName', label: t('esaZone.ruleName'), type: 'text', required: true },
   { name: 'RuleEnable', label: t('esaZone.ruleStatus'), type: 'select', default: 'on', options: onoffOptions },
-  { name: 'Rule', label: 'Rule', type: 'text', placeholder: '(http.host eq "example.com")' },
+  { name: 'Rule', label: t('esaZone.erRuleCond'), type: 'text', placeholder: '(http.host eq "example.com")' },
   { name: 'Gzip', label: 'Gzip', type: 'select', default: 'on', options: onoffOptions },
   { name: 'Brotli', label: 'Brotli', type: 'select', default: 'on', options: onoffOptions },
   { name: 'Zstd', label: 'Zstd', type: 'select', default: 'off', options: onoffOptions },
-  { name: 'Sequence', label: 'Sequence', type: 'number', default: 0 },
+  { name: 'Sequence', label: t('esaZone.erSequence'), type: 'number', default: 0 },
 ]);
 
 const networkColumns = computed<EsaTableColumn[]>(() => [
@@ -94,7 +94,7 @@ const networkColumns = computed<EsaTableColumn[]>(() => [
   { key: 'Http2Origin', label: 'HTTP/2 Origin', width: 120 },
   { key: 'Websocket', label: 'WebSocket', width: 110 },
   { key: 'Grpc', label: 'gRPC', width: 90 },
-  { key: 'UploadMaxFilesize', label: 'Upload MB', width: 110 },
+  { key: 'UploadMaxFilesize', label: t('esaZone.uploadMaxMb'), width: 110 },
   { key: 'RuleEnable', label: t('esaZone.ruleStatus'), width: 100 },
 ]);
 
@@ -106,8 +106,8 @@ const networkFields = computed<EsaFieldDef[]>(() => [
   { name: 'Http2Origin', label: 'HTTP/2 Origin', type: 'select', default: 'off', options: onoffOptions },
   { name: 'Websocket', label: 'WebSocket', type: 'select', default: 'on', options: onoffOptions },
   { name: 'Grpc', label: 'gRPC', type: 'select', default: 'off', options: onoffOptions },
-  { name: 'UploadMaxFilesize', label: 'Upload MB', type: 'number', default: 100, min: 100, max: 500 },
-  { name: 'Sequence', label: 'Sequence', type: 'number', default: 0 },
+  { name: 'UploadMaxFilesize', label: t('esaZone.uploadMaxMb'), type: 'number', default: 100, min: 100, max: 500 },
+  { name: 'Sequence', label: t('esaZone.erSequence'), type: 'number', default: 0 },
 ]);
 </script>
 

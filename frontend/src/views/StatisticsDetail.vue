@@ -48,7 +48,13 @@
           class="filter-domains"
           @update:value="reload"
         />
-        <StatusChip :status="detail?.meta?.status || 'ok'" :errors="errors" />
+        <StatusBadge
+          :tone="statusTone"
+          variant="pill"
+          size="sm"
+          :label="t(`statistics.status.${statusKey}`)"
+          :errors="errors"
+        />
       </div>
     </n-card>
 
@@ -109,7 +115,7 @@ import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import KpiRow, { type KpiItem } from '../components/statistics/KpiRow.vue';
 import RangeFilter from '../components/statistics/RangeFilter.vue';
-import StatusChip from '../components/statistics/StatusChip.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import { PROVIDERS, GROUP_BREAKDOWNS } from '../lib/statistics/catalog';
 import { formatMetric, type MetricUnit } from '../lib/statistics/format';
 
@@ -162,6 +168,22 @@ const selectedDomains = ref<string[]>([]);
 const accountOptions = ref<Array<{ label: string; value: number }>>([]);
 const domainOptions = ref<Array<{ label: string; value: string }>>([]);
 const detail = ref<DetailData | null>(null);
+
+// 数据源状态 → 统一语义色（原 StatusChip 内部各写一套，现改为走 StatusBadge）
+const statusKey = computed(() => String(detail.value?.meta?.status || 'ok'));
+const statusTone = computed<'success' | 'warning' | 'error' | 'default'>(() => {
+  switch (statusKey.value) {
+    case 'ok':
+      return 'success';
+    case 'partial':
+      return 'warning';
+    case 'error':
+    case 'timeout':
+      return 'error';
+    default:
+      return 'default';
+  }
+});
 const busy = ref(false);
 const tab = ref('overview');
 const topDim = ref(meta.topDims[0] || '');

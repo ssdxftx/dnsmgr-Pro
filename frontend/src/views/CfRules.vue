@@ -46,11 +46,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('cfRules.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('cfRules.credentialSource')">{{ credentialSourceLabel }}</n-descriptions-item>
-          <n-descriptions-item :label="t('cfRules.statusOn')">{{ enabledCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('cfRules.statusOff')">{{ rules.length - enabledCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('cfRules.credentialSource'), value: credentialSourceLabel },
+            { label: t('cfRules.statusOn'), value: enabledCount, tone: 'success' },
+            { label: t('cfRules.statusOff'), value: rules.length - enabledCount },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -232,6 +234,7 @@ import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { api } from '../api';
 import { ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import EmptyState from '../components/EmptyState.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';

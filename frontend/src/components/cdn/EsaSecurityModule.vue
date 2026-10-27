@@ -256,7 +256,8 @@ onMounted(loadCounts);
 }
 .esa-sec__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* auto-fit 会折叠空轨道：卡片数量少于列数时不会在右侧留下空格 */
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 10px;
 }
 .esa-sec__card {

@@ -31,11 +31,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('cdnDomain.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('cdnDomain.statusEnabled')">{{ enabledCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('cdnDomain.statusStopped')">{{ stoppedCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('cdnDomain.certPending')">{{ certPendingCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('cdnDomain.statusEnabled'), value: enabledCount, tone: 'success' },
+            { label: t('cdnDomain.statusStopped'), value: stoppedCount },
+            { label: t('cdnDomain.certPending'), value: certPendingCount, tone: certPendingCount ? 'warning' : 'default' },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -48,6 +50,7 @@
           :row-key="(row: any) => row.id"
           v-model:checked-row-keys="checkedIds"
           :empty-text="t('cdnDomain.empty')"
+          :empty-description="t('cdnDomain.emptyHint')"
           :virtual-scroll="domains.length > 200"
           :max-height="620"
         />
@@ -529,6 +532,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 import EmptyState from '../components/EmptyState.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
 import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
 import { EO_PRESET_RULES } from '../lib/eoPresetRules';
@@ -1650,7 +1654,7 @@ onUnmounted(() => {
   width: 100%;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   .port-grid {
     max-width: none;
     gap: 8px;

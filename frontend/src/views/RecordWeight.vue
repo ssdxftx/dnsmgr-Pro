@@ -11,10 +11,12 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('record.weightOverview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('record.weightOn')">{{ onCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('record.weightOff')">{{ rows.length - onCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('record.weightOn'), value: onCount, tone: 'success' },
+            { label: t('record.weightOff'), value: rows.length - onCount },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -28,7 +30,7 @@
       <n-spin :show="editBusy">
       <n-space vertical :size="10">
         <n-text depth="3">{{ current?.SubDomain }}</n-text>
-        <n-table :bordered="false" :single-line="false" size="small">
+        <n-table v-if="!isMobile" :bordered="false" :single-line="false" size="small">
           <thead><tr><th>{{ t('record.hostRecord') }}</th><th>{{ t('record.recordValue') }}</th><th style="width:140px">{{ t('record.weightValue') }}</th></tr></thead>
           <tbody>
             <tr v-for="r in records" :key="r.RecordId">
@@ -38,6 +40,19 @@
             </tr>
           </tbody>
         </n-table>
+        <!-- 移动端三列会把记录值和输入框一起压扁，改为每条记录一张卡 -->
+        <div v-else class="weight-cards">
+          <div v-for="r in records" :key="r.RecordId" class="weight-card">
+            <div class="weight-card__head">
+              <span class="weight-card__name">{{ r.Name }}</span>
+              <span class="weight-card__value app-mono">{{ r.Value }}</span>
+            </div>
+            <div class="weight-card__row">
+              <span class="weight-card__label">{{ t('record.weightValue') }}</span>
+              <n-input-number v-model:value="weights[r.RecordId]" :min="1" :max="100" size="small" style="width: 120px" />
+            </div>
+          </div>
+        </div>
       </n-space>
       </n-spin>
       <template #footer>
@@ -58,12 +73,15 @@ import { NButton, NTag, NModal, NText, NTable, NInputNumber, useMessage } from '
 import { api } from '../api';
 import { ListOutline, LayersOutline, BarChartOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
+import { useResponsive } from '../composables/useResponsive';
 import { useAction } from '../composables/useAction';
 
 const route = useRoute();
 const { t } = useI18n();
+const { isMobile } = useResponsive();
 const message = useMessage();
 const { busy, run } = useAction();
 const domainId = Number(route.params.id);
@@ -179,6 +197,49 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 移动端权重编辑卡片 */
+.weight-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.weight-card {
+  padding: 10px 12px;
+  background: var(--app-surface);
+  border: 1px solid var(--app-divider);
+  border-radius: var(--app-radius);
+}
+.weight-card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.weight-card__name {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--app-text);
+  word-break: break-all;
+}
+.weight-card__value {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--app-text-3);
+  text-align: right;
+  word-break: break-all;
+}
+.weight-card__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.weight-card__label {
+  font-size: 12.5px;
+  color: var(--app-text-3);
+}
 .mono {
   font-family: ui-monospace, Menlo, monospace;
   word-break: break-all;

@@ -227,7 +227,8 @@ const ruleColumns = computed(() => [
             disabled: !!busy[`rule:${r.ruleId || r.ruleName}`],
             onClick: () => run(`rule:${r.ruleId || r.ruleName}`, () => toggleRuleEnabled(r)),
           },
-          { default: () => (ruleEnabled(r) ? t('esaZone.disabled') : t('esaZone.enabled')) },
+          // 动作按钮用「启用/停用」，避免与左侧状态列「已开启/已关闭」读起来自相矛盾
+          { default: () => (ruleEnabled(r) ? t('esaZone.disableAction') : t('esaZone.enableAction')) },
         ),
         h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delRule(r) }, { default: () => t('esaZone.delete') }),
       ]),
@@ -312,10 +313,11 @@ defineExpose({ load: loadRules, selectCategory });
 
 <style scoped>
 .esa-rules__cats {
-  display: flex;
+  /* 原来 flex 横排 + 固定卡宽，5 类规则会超出内容区（约 932px > 830px），末张被裁；
+     改为自适应列数，所有类型一屏可见，窄屏自动折行 */
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 8px;
-  overflow-x: auto;
-  padding-bottom: 4px;
   margin-bottom: 12px;
 }
 .esa-rules__cat {
@@ -348,7 +350,7 @@ defineExpose({ load: loadRules, selectCategory });
   white-space: nowrap;
 }
 .esa-rules__cat-desc {
-  max-width: 220px;
+  max-width: 100%;
   font-size: 11px;
   color: var(--app-text-3);
   white-space: nowrap;

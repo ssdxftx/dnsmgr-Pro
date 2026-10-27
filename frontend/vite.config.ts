@@ -37,10 +37,16 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    port: 4173,
+    host: '0.0.0.0',
+    allowedHosts: ['.monkeycode-ai.online', '.trycloudflare.com'],
+  },
   server: {
     port: 5173,
     host: '0.0.0.0',
-    allowedHosts: ['.monkeycode-ai.online'],
+    // 本地预览：除平台域名外，允许 Cloudflare 快速隧道域名
+    allowedHosts: ['.monkeycode-ai.online', '.trycloudflare.com'],
     proxy: {
       '/api': {
         target: 'http://localhost:8082',

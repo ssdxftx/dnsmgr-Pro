@@ -90,7 +90,7 @@
         </div>
         <div class="app-header__right">
           <span v-if="!isMobile" ref="clockEl" class="hdr-clock font-mono"></span>
-          <span v-if="!isMobile" class="hdr-pulse"><span class="hdr-pulse__dot"></span>{{ t('layout.online') }}</span>
+          <StatusBadge v-if="!isMobile" class="hdr-online" tone="success" variant="pill" size="sm" pulse :label="t('layout.online')" />
           <n-button v-if="!isMobile" quaternary circle @click="toggleTheme">
             <template #icon><n-icon :component="isDark ? SunnyOutline : MoonOutline" /></template>
           </n-button>
@@ -132,6 +132,7 @@ import { useThemeMode } from '../composables/useThemeMode';
 import { useLocale } from '../composables/useLocale';
 import { useI18n } from 'vue-i18n';
 import type { AppLocale } from '../i18n';
+import StatusBadge from '../components/StatusBadge.vue';
 
 const route = useRoute();
 const router = useRouter();
@@ -570,32 +571,8 @@ function onUserSelect(key: string) {
   color: var(--app-text-2);
   letter-spacing: 0.05em;
 }
-.hdr-pulse {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 11px;
-  border: 1px solid var(--app-border);
-  border-radius: 99px;
-  background: var(--app-surface-2);
-  font-size: 12px;
-  color: var(--app-text-2);
-  white-space: nowrap;
-}
-.hdr-pulse__dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--app-success);
-  position: relative;
-}
-.hdr-pulse__dot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 50%;
-  background: var(--app-success);
-  animation: ping 1.8s var(--app-ease) infinite;
+.hdr-online {
+  flex: 0 0 auto;
 }
 .user-chip {
   display: flex;

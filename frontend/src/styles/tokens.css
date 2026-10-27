@@ -7,11 +7,20 @@
   --app-bg-soft: #e6ecf5;
   --app-surface: #ffffff;
   --app-surface-2: #f7fafc;
+  /* 面板表面：页面里的分区容器。浅色与卡片同为纯白，靠 border + 弱阴影浮起；
+     之前误用 surface-2，导致「面板灰、表格白」的层次颠倒 */
+  --app-panel: #ffffff;
+  /* 面板内嵌分区（卡片里的卡片）：退为次级表面，避免纯白叠纯白成一张平板 */
+  --app-panel-sunken: #f7fafc;
   --app-text: #0f1b2d;
   /* 兼容历史样式：部分页面使用 --app-text-1 表示主文本 */
   --app-text-1: var(--app-text);
   --app-text-2: #4a5872;
-  --app-text-3: #8593a8;
+  /* 第三级文字（标签/次要列/说明）。原 #8593a8 在白底只有 3.12:1，低于 AA 4.5，
+     现取 #63718a：白底 4.93、槽位 4.70 */
+  --app-text-3: #63718a;
+  /* 占位符不承载信息，保持原浅度，避免和已填内容混淆 */
+  --app-text-placeholder: #8593a8;
   --app-border: #dde5f0;
   --app-divider: #e8edf5;
 
@@ -26,6 +35,8 @@
   --app-warning-weak: #fef5e7;
   --app-error: #e5484d;
   --app-error-weak: #fdecec;
+  /* info 用于中性提示/进行中状态，取蓝以保证与青绿 primary 区分 */
+  --app-info: #0b7fc4;
 
   /* ---- 字体 ---- */
   --app-font-display: 'Chakra Petch', 'Noto Sans SC', -apple-system, 'Segoe UI', sans-serif;
@@ -41,7 +52,8 @@
   --app-radius-xl: 20px;
 
   /* ---- 阴影 ---- */
-  --app-shadow-sm: 0 1px 2px rgba(20, 35, 60, 0.06);
+  --app-shadow-xs: 0 1px 2px rgba(20, 35, 60, 0.05), 0 6px 16px -10px rgba(20, 35, 60, 0.14);
+  --app-shadow-sm: 0 1px 2px rgba(20, 35, 60, 0.06), 0 4px 10px -4px rgba(20, 35, 60, 0.08);
   --app-shadow: 0 6px 20px rgba(20, 35, 60, 0.10);
   --app-shadow-lg: 0 18px 48px rgba(20, 35, 60, 0.14);
 
@@ -64,9 +76,12 @@
   --app-bg-soft: #0d1320;
   --app-surface: #111927;
   --app-surface-2: #161f30;
+  --app-panel: #161f30;
+  --app-panel-sunken: #0f1725;
   --app-text: #e8edf5;
   --app-text-2: #9aa7bd;
-  --app-text-3: #5e6b82;
+  --app-text-3: #7a8aa2;
+  --app-text-placeholder: #5e6b82;
   --app-border: #24314e;
   --app-divider: #1b2538;
 
@@ -80,6 +95,8 @@
   --app-warning-weak: #2a2113;
   --app-error: #fb7185;
   --app-error-weak: #2a1517;
+  --app-info: #38bdf8;
+  --app-shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.28);
   --app-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --app-shadow: 0 8px 26px rgba(0, 0, 0, 0.42);
   --app-shadow-lg: 0 20px 52px rgba(0, 0, 0, 0.55);
@@ -371,6 +388,14 @@ a {
   color: var(--app-text);
   word-break: break-all;
 }
+/* 副标题补上下文（记录类型 / 账户名），避免卡片标题只剩「@」「www」 */
+.m-card__subtitle {
+  margin-top: 2px;
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--app-text-3);
+}
 .m-card__rows {
   display: flex;
   flex-direction: column;
@@ -379,7 +404,8 @@ a {
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  padding: 10px 14px;
+  /* 43px 行高让一张 4 字段卡占到 291px，首屏只能放 2.5 张；收到 34px 左右 */
+  padding: 7px 14px;
   border-bottom: 1px solid var(--app-divider);
 }
 .m-card__row:last-child {
@@ -387,14 +413,19 @@ a {
 }
 .m-card__label {
   flex-shrink: 0;
-  width: 92px;
-  font-size: 13px;
+  /* 92px 固定宽遇到「证书验证状态」这类 5–6 字标签会折行或截断，改为按内容自适应 */
+  width: auto;
+  min-width: 72px;
+  max-width: 40%;
+  font-size: 12.5px;
+  line-height: 1.45;
   color: var(--app-text-3);
 }
 .m-card__value {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: 13.5px;
+  line-height: 1.45;
   color: var(--app-text-2);
   word-break: break-word;
 }
@@ -405,6 +436,81 @@ a {
   padding: 12px 14px;
   border-top: 1px solid var(--app-divider);
   background: var(--app-surface-2);
+}
+
+/* ---- 卡片交互状态 ---- */
+/* 选中态：桌面表格整行高亮，移动端卡片此前只有 checkbox 变化，批量操作时无法确认选了哪几张 */
+.m-card.is-checked {
+  border-color: color-mix(in srgb, var(--app-primary) 55%, var(--app-divider));
+  background: color-mix(in srgb, var(--app-primary) 6%, var(--app-surface));
+  box-shadow: inset 3px 0 0 var(--app-primary);
+}
+
+/* 整卡可点（rowProps 带 onClick）时给出提示，否则用户不知道卡片能点 */
+.m-card.is-clickable {
+  position: relative;
+  cursor: pointer;
+  transition: border-color 0.16s var(--app-ease), background 0.16s var(--app-ease);
+}
+.m-card.is-clickable::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: 13px;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-right: 1.5px solid var(--app-text-3);
+  border-top: 1.5px solid var(--app-text-3);
+  transform: rotate(45deg);
+  opacity: 0.55;
+  pointer-events: none;
+}
+.m-card.is-clickable .m-card__row {
+  padding-right: 26px;
+}
+.m-card.is-clickable:active {
+  background: color-mix(in srgb, var(--app-primary) 5%, var(--app-surface));
+}
+
+/* 字段多时折叠：默认 5 行，超出部分收进「展开全部」 */
+.m-card__rows.is-clamped .m-card__row:nth-child(n + 6) {
+  display: none;
+}
+.m-card__more {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-top: 1px dashed var(--app-divider);
+  background: transparent;
+  color: var(--app-primary);
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.m-card__more:active {
+  background: var(--app-surface-2);
+}
+
+/* 状态列提升到标题行右侧，不再作为普通字段埋在中部 */
+.m-card__status {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 空值字段不占行；全部为空时给一行提示，避免卡片只剩标题 */
+.m-card__empty-row {
+  padding: 12px 14px;
+  font-size: 12px;
+  color: var(--app-text-3);
 }
 
 /* ===========================================================================

@@ -26,6 +26,7 @@ export default {
     settings: '计划任务设置',
     apply: '申请证书',
     empty: '暂无证书订单',
+    emptyHint: '在「证书账户」配置签发渠道后，可在此申请免费或商业证书',
     editTitle: '编辑订单',
     applyTitle: '申请证书',
     tabApply: '自动申请',

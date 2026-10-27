@@ -19,6 +19,8 @@
       :pagination="pagination"
       :row-key="recordKey"
       :empty-text="t('record.empty')"
+      :empty-description="t('record.emptyHint')"
+      subtitle-key="Type"
     />
 
     <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('record.editTitle') : t('record.addTitle')" :style="modalStyle" :mask-closable="false">
@@ -412,17 +414,29 @@ const columns = computed<any[]>(() => {
     {
       title: t('record.typeCol'),
       key: 'Type',
-      width: 96,
+      // REDIRECT_URL / FORWARD_URL 为 11–12 字符，96px 下会被 break-word 拆成两行并撑高整行
+      width: 120,
       render(row: any) {
         const type = String(row.Type ?? '');
-        return h('span', { class: `rec-type rec-type--${typeClass(type)}` }, type);
+        return h('span', { class: `rec-type rec-type--${typeClass(type)}`, style: 'white-space:nowrap' }, type);
       },
     },
     {
       title: t('record.valueCol'),
       key: 'Value',
       width: 90,
-      render: (row: any) => h(NButton, { text: true, size: 'tiny', type: 'primary', onClick: () => openValue(row.Value) }, { default: () => t('record.view') }),
+      // 桌面沿用「查看」按钮；移动端卡片有整行空间，直接显示记录值，避免只看到一个按钮
+      render: (row: any) =>
+        isMobile.value
+          ? h('div', { class: 'rec-value-mobile' }, [
+              h('span', { class: 'app-mono' }, row.Value || '-'),
+              h(
+                NButton,
+                { text: true, size: 'tiny', type: 'primary', onClick: () => openValue(row.Value) },
+                { default: () => t('record.view') },
+              ),
+            ])
+          : h(NButton, { text: true, size: 'tiny', type: 'primary', onClick: () => openValue(row.Value) }, { default: () => t('record.view') }),
     },
     {
       title: t('common.remark'),
@@ -603,6 +617,22 @@ defineExpose({ openAdd });
 </script>
 
 <style scoped>
+/* 移动端记录值：直接显示值，长值换行，右侧保留「查看」入口 */
+.rec-value-mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rec-value-mobile > span {
+  font-size: 13px;
+  color: var(--app-text);
+  word-break: break-all;
+}
+.rec-value-mobile :deep(.n-button) {
+  align-self: flex-start;
+  padding: 0;
+}
 /* 表单内容超出视口时内部滚动，避免 Naive UI 模态卡片居中导致顶部字段被裁掉无法触达 */
 .record-form-scroll {
   max-height: calc(100dvh - 200px);

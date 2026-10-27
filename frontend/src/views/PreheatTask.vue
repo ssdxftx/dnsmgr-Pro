@@ -18,10 +18,12 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('preheat.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('common.enable')">{{ activeCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('preheat.stopped')">{{ tasks.length - activeCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('common.enable'), value: activeCount, tone: 'success' },
+            { label: t('preheat.stopped'), value: tasks.length - activeCount },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -85,6 +87,7 @@ import { useI18n } from 'vue-i18n';
 import { AddOutline, ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import { useAction } from '../composables/useAction';

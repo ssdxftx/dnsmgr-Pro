@@ -14,12 +14,14 @@
           <n-button size="small" :loading="busy" :disabled="busy" @click="emit('refresh')">{{ t('esaZone.reload') }}</n-button>
         </div>
       </div>
-      <n-descriptions :column="2" label-placement="left" size="small">
-        <n-descriptions-item :label="t('esaAccount.account')">{{ accountName || '-' }}</n-descriptions-item>
-        <n-descriptions-item :label="t('esaAccount.plan')">{{ planName || '-' }}</n-descriptions-item>
-        <n-descriptions-item :label="t('esaAccount.instance')"><span class="app-mono">{{ instanceId || '-' }}</span></n-descriptions-item>
-        <n-descriptions-item :label="t('esaAccount.sites')"><span class="tnum">{{ sites }}</span></n-descriptions-item>
-      </n-descriptions>
+      <DetailGrid
+        :items="[
+          { key: 'account', label: t('esaAccount.account'), value: accountName },
+          { key: 'plan', label: t('esaAccount.plan'), value: planName },
+          { key: 'instance', label: t('esaAccount.instance'), value: instanceId, mono: true },
+          { key: 'sites', label: t('esaAccount.sites'), value: sites, numeric: true },
+        ]"
+      />
     </div>
 
     <div class="app-panel">
@@ -40,9 +42,10 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NDescriptions, NDescriptionsItem, NGrid, NGridItem } from 'naive-ui';
+import { NButton, NGrid, NGridItem } from 'naive-ui';
 import { CodeSlashOutline, GlobeOutline, ListOutline, ShieldCheckmarkOutline } from '@vicons/ionicons5';
 import TelemetryCard from '../TelemetryCard.vue';
+import DetailGrid from '../DetailGrid.vue';
 
 const props = defineProps<{
   accountName: string;

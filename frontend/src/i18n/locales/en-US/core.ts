@@ -1,6 +1,12 @@
 export default {
   common: {
     confirm: 'Confirm',
+    areaMainland: 'Chinese mainland',
+    areaOverseas: 'Global (excl. mainland China)',
+    areaGlobal: 'Global',
+    noExtraInfo: 'No extra info',
+    expandAll: 'Show all {n}',
+    collapseList: 'Collapse',
     cancel: 'Cancel',
     save: 'Save',
     saved: 'Saved successfully',
@@ -128,8 +134,14 @@ export default {
     backup: 'Backup & restore',
     about: 'About',
   },
+  notFound: {
+    desc: 'No page matches {path}. It may have been moved or removed.',
+    back: 'Go back',
+    home: 'Go to domains',
+  },
   route: {
     dashboard: 'Dashboard',
+    notFound: 'Page not found',
     domains: 'Domains',
     records: 'DNS Records',
     recordImport: 'Import Records',

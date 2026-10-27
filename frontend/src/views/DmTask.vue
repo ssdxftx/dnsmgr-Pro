@@ -31,11 +31,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('dm.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('dm.running')">{{ runningCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('dm.stopped')">{{ tasks.length - runningCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('dm.abnormal')">{{ abnormalCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('dm.running'), value: runningCount, tone: 'success' },
+            { label: t('dm.stopped'), value: tasks.length - runningCount },
+            { label: t('dm.abnormal'), value: abnormalCount, tone: abnormalCount ? 'error' : 'default' },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -49,6 +51,7 @@
           :pagination="pagination"
           :row-key="(row: any) => row.id"
           :empty-text="t('dm.empty')"
+          :empty-description="t('dm.emptyHint')"
         />
       </div>
     </n-card>
@@ -63,6 +66,7 @@ import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, ChevronDownOutline, ListOutline, LayersOutline, SwapHorizontalOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import { useAction } from '../composables/useAction';

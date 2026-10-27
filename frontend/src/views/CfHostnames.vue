@@ -223,21 +223,14 @@
       </n-descriptions>
       <template v-if="detailRow">
         <n-divider v-if="detailRow.ssl_validation_records?.length">{{ t('cfHostnames.certVerifyRecords') }}</n-divider>
-        <n-table v-if="detailRow.ssl_validation_records?.length" :bordered="true" size="small">
-          <thead>
-            <tr><th>{{ t('cfHostnames.colStatus') }}</th><th>{{ t('cfHostnames.colTxtName') }}</th><th>{{ t('cfHostnames.colTxtValue') }}</th><th>{{ t('cfHostnames.colCnameName') }}</th><th>{{ t('cfHostnames.colCnameTarget') }}</th><th>{{ t('cfHostnames.colHttpUrl') }}</th></tr>
-          </thead>
-          <tbody>
-            <tr v-for="(r, i) in detailRow.ssl_validation_records" :key="i">
-              <td>{{ r.status || '-' }}</td>
-              <td class="mono">{{ r.txt_name || '-' }}</td>
-              <td class="mono">{{ r.txt_value || '-' }}</td>
-              <td class="mono">{{ r.cname_name || '-' }}</td>
-              <td class="mono">{{ r.cname_target || '-' }}</td>
-              <td class="mono">{{ r.http_url || '-' }}</td>
-            </tr>
-          </tbody>
-        </n-table>
+        <!-- 6 列在移动端弹窗里必然溢出，交给响应式表格：桌面可横滚，手机自动卡片化 -->
+        <ResponsiveDataTable
+          v-if="detailRow.ssl_validation_records?.length"
+          :columns="validationColumns"
+          :data="validationRows"
+          size="small"
+          :empty-text="t('cfHostnames.certVerifyRecords')"
+        />
       </template>
     </n-modal>
   </div>
@@ -289,6 +282,19 @@ const fallbackForm = reactive<any>({ origin: '' });
 
 const showDetail = ref(false);
 const detailRow = ref<any>(null);
+
+// 证书验证记录：6 列长字段（TXT 值 / CNAME 目标常有 40–100 字符）
+const validationRows = computed(() =>
+  (detailRow.value?.ssl_validation_records || []).map((r: any, i: number) => ({ ...r, _key: String(i) })),
+);
+const validationColumns = computed(() => [
+  { title: t('cfHostnames.colStatus'), key: 'status', width: 96 },
+  { title: t('cfHostnames.colTxtName'), key: 'txt_name', minWidth: 180, render: (r: any) => h('span', { class: 'app-mono' }, r.txt_name || '-') },
+  { title: t('cfHostnames.colTxtValue'), key: 'txt_value', minWidth: 240, render: (r: any) => h('span', { class: 'app-mono' }, r.txt_value || '-') },
+  { title: t('cfHostnames.colCnameName'), key: 'cname_name', minWidth: 180, render: (r: any) => h('span', { class: 'app-mono' }, r.cname_name || '-') },
+  { title: t('cfHostnames.colCnameTarget'), key: 'cname_target', minWidth: 240, render: (r: any) => h('span', { class: 'app-mono' }, r.cname_target || '-') },
+  { title: t('cfHostnames.colHttpUrl'), key: 'http_url', minWidth: 220, render: (r: any) => h('span', { class: 'app-mono' }, r.http_url || '-') },
+]);
 
 // 并发工作池：批量操作由 N 次串行请求改为限流并发，保持结果与输入同序
 async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {

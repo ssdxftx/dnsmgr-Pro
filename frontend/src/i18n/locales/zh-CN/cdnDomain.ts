@@ -5,6 +5,7 @@ export default {
     overview: '域名概览',
     listTitle: '域名列表',
     empty: '暂无 CDN 加速域名',
+    emptyHint: '先在「CDN 账户」完成厂商授权，再回到这里接入域名',
     freeCert: '平台免费证书',
     certLink: '项目申请证书',
     addDomain: '接入域名',

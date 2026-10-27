@@ -55,11 +55,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('esaZone.sslFreeQuota') }}</h3>
         </div>
-        <n-descriptions :column="3" label-placement="left" size="small">
-          <n-descriptions-item :label="t('esaZone.sslQuota')">{{ quota?.Quota ?? '-' }}</n-descriptions-item>
-          <n-descriptions-item :label="t('esaZone.sslUsage')">{{ quota?.QuotaUsage ?? '-' }}</n-descriptions-item>
-          <n-descriptions-item :label="t('esaZone.sslType')">{{ quota?.Type ?? 'free' }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('esaZone.sslQuota'), value: quota?.Quota ?? '-' },
+            { label: t('esaZone.sslUsage'), value: quota?.QuotaUsage ?? '-' },
+            { label: t('esaZone.sslType'), value: quota?.Type ?? 'free' },
+          ]"
+        />
       </div>
     </template>
 
@@ -120,6 +122,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage, NAlert, NButton, NDescriptions, NDescriptionsItem, NForm, NFormItem, NInput, NModal, NSpace } from 'naive-ui';
 import { api } from '../../api';
+import OverviewStats from '../OverviewStats.vue';
 import EsaCardSelect from './EsaCardSelect.vue';
 import EsaActionTable, { type EsaTableColumn } from './EsaActionTable.vue';
 
@@ -217,7 +220,7 @@ onMounted(loadCounts);
 <style scoped>
 .esa-ssl__grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
   gap: 10px;
 }
 .esa-ssl__card {

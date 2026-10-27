@@ -23,6 +23,7 @@ export default {
     keyword: 'Keyword',
     health: 'Health Status',
     empty: 'No failover policies yet',
+    emptyHint: 'Configure primary and backup addresses for critical records; traffic switches automatically when probes fail',
     searchDomain: 'Domain',
     searchRecordId: 'Record ID',
     searchRecord: 'DNS Record',

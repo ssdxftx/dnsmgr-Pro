@@ -19,11 +19,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('deployTask.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('common.enable')">{{ activeTasks }}</n-descriptions-item>
-          <n-descriptions-item :label="t('common.disabled')">{{ tasks.length - activeTasks }}</n-descriptions-item>
-          <n-descriptions-item :label="t('deployTask.lastDeploy')">{{ lastDeployAt }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('common.enable'), value: activeTasks, tone: 'success' },
+            { label: t('common.disabled'), value: tasks.length - activeTasks },
+            { label: t('deployTask.lastDeploy'), value: lastDeployAt },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -74,6 +76,7 @@ import { AddOutline, ListOutline, CheckmarkCircleOutline, TimeOutline, CloseCirc
 import { api } from '../api';
 import { evalShow, isSecretField } from '../lib/safe';
 import PageHeader from '../components/PageHeader.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import { useAction } from '../composables/useAction';

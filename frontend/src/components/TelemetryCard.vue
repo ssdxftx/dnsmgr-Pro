@@ -111,7 +111,7 @@ onMounted(() => {
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius-lg);
   box-shadow: var(--app-shadow-sm);
-  transition: transform 0.25s var(--app-ease), border-color 0.25s var(--app-ease), box-shadow 0.25s var(--app-ease);
+  transition: transform 0.2s var(--app-ease), border-color 0.2s var(--app-ease), box-shadow 0.2s var(--app-ease);
 }
 .tele-card::before {
   content: "";
@@ -125,7 +125,8 @@ onMounted(() => {
   transition: opacity 0.25s var(--app-ease);
 }
 .tele-card:hover {
-  transform: translateY(-4px);
+  /* 与其他卡片卡（-2px）保持接近的抬升幅度，避免同屏位移不一致 */
+  transform: translateY(-3px);
   border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
   box-shadow: var(--app-shadow);
 }

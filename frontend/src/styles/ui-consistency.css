@@ -30,14 +30,23 @@
 
 /* ---- 分区面板：由 .zone-panel 提升为全站可复用的语义分区 ---- */
 .app-panel {
-  background: var(--app-surface-2);
-  border: 1px solid var(--app-divider);
+  background: var(--app-panel);
+  border: 1px solid var(--app-border);
   border-radius: var(--app-radius-lg);
   padding: 16px 18px;
+  box-shadow: var(--app-shadow-xs);
   transition: border-color 0.2s var(--app-ease);
 }
 .app-panel + .app-panel {
   margin-top: 12px;
+}
+
+/* 卡片套卡片：外层已是白色表面时，内层降为次级表面并去掉阴影，
+   避免纯白叠纯白糊成一张纸；app-panel 套 app-panel 同理 */
+.n-card .n-card,
+.app-panel .app-panel {
+  background: var(--app-panel-sunken);
+  box-shadow: none;
 }
 .app-panel__head {
   display: flex;
@@ -102,18 +111,56 @@
 .mb-3 { margin-bottom: 12px; }
 .mb-4 { margin-bottom: 16px; }
 
-/* ---- 移动端：卡内已有分区面板时，外层卡片退化为容器，避免边框套边框、padding 叠加 ---- */
+/* ---- 卡内已是分区面板时，外层卡片退化为纯容器，避免白卡套白面板 ----
+   这条原来只在移动端生效，桌面端仍然「边框套边框」，是浅色主题层次发糊的主因之一 ---- */
+.n-card:has(> .n-card-content > .app-panel) {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+}
+.n-card:has(> .n-card-content > .app-panel) > .n-card-content {
+  padding: 0;
+}
+
 @media (max-width: 767px) {
-  .n-card:has(> .n-card-content > .app-panel) {
-    padding: 0;
-    background: transparent;
-    box-shadow: none;
-    border: 0;
-  }
-  .n-card:has(> .n-card-content > .app-panel) > .n-card-content {
-    padding: 0;
-  }
   .app-panel {
     padding: 14px 12px;
+  }
+}
+
+/* ===========================================================================
+   表格空态：默认上下各 48px + EmptyState 自身 56px，空表时表头与空态之间
+   会拉开 300px，看起来像「内容掉出去了」。收紧到贴近表头。
+   =========================================================================== */
+.n-data-table-empty {
+  padding: 12px 0 !important;
+}
+.n-data-table-empty .empty-state {
+  padding: 24px 16px;
+  gap: 8px;
+}
+.n-data-table-empty .empty-state__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+}
+
+/* ===========================================================================
+   指标卡网格：数量不是列数整数倍时最后一行会落单（安全概览 6 张排 5+1、
+   配额 9 张排 4+4+1）。按常见数量收敛成 3 列，让每行都填满。
+   =========================================================================== */
+.esa-sec__grid:has(> :nth-child(6):last-child),
+.esa-cap__grid:has(> :nth-child(9):last-child) {
+  /* 组件 scoped 的 auto-fit 与本规则特异性相同，加 important 保证按数量分栏生效 */
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+/* 窄屏统一 2 列：minmax(200px) 在 390px 下会退化成单列超宽卡 */
+@media (max-width: 767.98px) {
+  .esa-sec__grid,
+  .esa-cap__grid,
+  .esa-ssl__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }

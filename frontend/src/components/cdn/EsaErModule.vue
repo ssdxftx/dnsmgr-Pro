@@ -84,12 +84,12 @@ const routineColumns = computed<EsaTableColumn[]>(() => [
 
 const routeColumns = computed<EsaTableColumn[]>(() => [
   { key: 'RouteName', label: t('esaZone.ruleName'), minWidth: 170 },
-  { key: 'RouteEnable', label: t('esaZone.status'), width: 90 },
-  { key: 'Rule', label: 'Rule', minWidth: 300, mono: true },
-  { key: 'Bypass', label: 'Bypass', width: 90 },
-  { key: 'Sequence', label: 'Sequence', width: 100 },
-  { key: 'Fallback', label: 'Fallback', width: 90 },
-  { key: 'Timeout', label: 'Timeout(s)', width: 110 },
+  { key: 'RouteEnable', label: t('esaZone.status'), width: 90, format: 'bool' },
+  { key: 'Rule', label: t('esaZone.erRuleCond'), minWidth: 300, mono: true },
+  { key: 'Bypass', label: t('esaZone.erBypass'), width: 90, format: 'bool' },
+  { key: 'Sequence', label: t('esaZone.erSequence'), width: 100 },
+  { key: 'Fallback', label: t('esaZone.erFallback'), width: 90, format: 'bool' },
+  { key: 'Timeout', label: t('esaZone.erTimeout'), width: 110 },
 ]);
 
 const onoffOptions = [
@@ -100,11 +100,11 @@ const onoffOptions = [
 const routeFields = computed<EsaFieldDef[]>(() => [
   { name: 'RouteName', label: t('esaZone.ruleName'), type: 'text', required: true },
   { name: 'RouteEnable', label: t('esaZone.ruleStatus'), type: 'select', default: 'on', options: onoffOptions },
-  { name: 'Rule', label: 'Rule', type: 'text', required: true, placeholder: '(http.host eq "example.com")' },
-  { name: 'Bypass', label: 'Bypass', type: 'select', default: 'off', options: onoffOptions },
-  { name: 'Sequence', label: 'Sequence', type: 'number', default: 0 },
-  { name: 'Fallback', label: 'Fallback', type: 'select', default: 'on', options: onoffOptions },
-  { name: 'Timeout', label: 'Timeout(s)', type: 'text', default: '30', help: t('esaZone.erTimeoutHelp') },
+  { name: 'Rule', label: t('esaZone.erRuleCond'), type: 'text', required: true, placeholder: '(http.host eq "example.com")' },
+  { name: 'Bypass', label: t('esaZone.erBypass'), type: 'select', default: 'off', options: onoffOptions },
+  { name: 'Sequence', label: t('esaZone.erSequence'), type: 'number', default: 0 },
+  { name: 'Fallback', label: t('esaZone.erFallback'), type: 'select', default: 'on', options: onoffOptions },
+  { name: 'Timeout', label: t('esaZone.erTimeout'), type: 'text', default: '30', help: t('esaZone.erTimeoutHelp') },
 ]);
 
 async function loadRoutines() {

@@ -23,6 +23,7 @@ export default {
     keyword: '关键词',
     health: '健康状况',
     empty: '暂无容灾切换策略',
+    emptyHint: '为关键记录配置主备地址，探测失败时自动切到备用',
     searchDomain: '域名',
     searchRecordId: '解析记录ID',
     searchRecord: '解析记录',

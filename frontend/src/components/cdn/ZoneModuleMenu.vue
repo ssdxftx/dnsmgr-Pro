@@ -216,7 +216,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   box-sizing: border-box;
   min-width: 200px;
   max-width: 320px;
-  max-height: min(60vh, 480px);
+  /* 14 个一级模块 + 子项，40px 行高需要更高面板才能一屏放下 */
+  max-height: min(70vh, 640px);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 6px;
@@ -236,7 +237,8 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 32px;
+  /* 32px 低于项目统一要求的 36px 触控下限，移动端容易点偏 */
+  min-height: 40px;
   padding: 0 10px;
   border: 0;
   border-radius: var(--app-radius-sm);
@@ -289,7 +291,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onDocumentKeydown)
   align-items: center;
   gap: 8px;
   width: 100%;
-  min-height: 30px;
+  min-height: 36px;
   padding: 0 10px 0 28px;
   border: 0;
   border-radius: var(--app-radius-sm);

@@ -64,6 +64,7 @@ interface Surface {
   text1: string;
   text2: string;
   text3: string;
+  placeholder: string;
   border: string;
   divider: string;
   inputBg: string;
@@ -77,11 +78,12 @@ const lightColors: Surface = {
   card: '#ffffff',
   modal: '#ffffff',
   popover: '#ffffff',
-  tableHead: '#f2f6fb',
+  tableHead: '#edf2f9',
   hover: '#f0f4fa',
   text1: '#0f1b2d',
   text2: '#4a5872',
-  text3: '#8593a8',
+  text3: '#63718a',
+  placeholder: '#8593a8',
   border: '#dde5f0',
   divider: '#e8edf5',
   inputBg: '#fbfdff',
@@ -99,7 +101,8 @@ const darkColors: Surface = {
   hover: '#16202f',
   text1: '#e8edf5',
   text2: '#9aa7bd',
-  text3: '#5e6b82',
+  text3: '#7a8aa2',
+  placeholder: '#5e6b82',
   border: '#24314e',
   divider: '#1b2538',
   inputBg: '#101725',
@@ -177,6 +180,8 @@ function buildOverrides(c: Surface, b: Brand, dark: boolean): GlobalThemeOverrid
     },
     Input: {
       borderRadius: '10px',
+      // 占位符不跟随 text3 加深，否则空输入框看起来像已填内容
+      placeholderColor: c.placeholder,
       color: c.inputBg,
       colorFocus: dark ? '#141d2d' : '#ffffff',
       border: `1px solid ${c.border}`,

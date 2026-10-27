@@ -40,11 +40,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('domain.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('domain.recordCountCol')">{{ recordTotal }}</n-descriptions-item>
-          <n-descriptions-item :label="t('domain.categoryCol')">{{ categoryCount }}</n-descriptions-item>
-          <n-descriptions-item :label="t('domain.expired')">{{ expiredCount }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('domain.recordCountCol'), value: recordTotal },
+            { label: t('domain.categoryCol'), value: categoryCount },
+            { label: t('domain.expired'), value: expiredCount, tone: expiredCount ? 'error' : 'default' },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -68,6 +70,7 @@
           :loading="loadBusy"
           :row-key="(row: any) => row._key || row.id"
           :empty-text="t('domain.empty')"
+          :empty-description="t('domain.emptyHint')"
           :error="loadError"
           :virtual-scroll="domains.length > 200"
           :max-height="620"
@@ -144,6 +147,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import RecordTable from '../components/RecordTable.vue';
 import EmptyState from '../components/EmptyState.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import { useAction } from '../composables/useAction';
 import { useResponsive } from '../composables/useResponsive';
 
@@ -237,42 +241,46 @@ const columns = computed(() => {
       const expired = val && expireTs(val) < Date.now();
       const text = val ? String(val).slice(0, 10) : (row.checkstatus === 2 ? t('domain.queryFailed') : t('domain.notQueried'));
       const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
-      const children: any[] = [h('span', { style: { whiteSpace: 'nowrap', ...(color ? { color } : {}) } }, text || '-')];
-      if (isAdmin.value) {
-        const refreshLabel = isMobile.value ? t('common.refresh') : t('domain.refreshExpire');
-        children.push(
+      const label = h('span', { style: { whiteSpace: 'nowrap', ...(color ? { color } : {}) } }, text || '-');
+      // 移动端只保留日期本身：刷新按钮与提醒开关原本挤在同一格，
+      // 卡片里会读成「2027-03-18 刷新 已开启」三个语义混在一起
+      if (!isAdmin.value || isMobile.value) return label;
+      return h(NSpace, { size: 4, align: 'center', wrap: false }, {
+        default: () => [
+          label,
           h(
             NButton,
             {
-              size: isMobile.value ? 'small' : 'tiny',
+              size: 'tiny',
               quaternary: true,
-              title: refreshLabel,
-              'aria-label': refreshLabel,
+              title: t('domain.refreshExpire'),
+              'aria-label': t('domain.refreshExpire'),
               onClick: () => updateDate(row),
             },
-            isMobile.value ? { default: () => refreshLabel } : { icon: () => h(RefreshOutline) },
+            { icon: () => h(RefreshOutline) },
           ),
-        );
-      }
-      // 到期提醒开关并入本格，避免单独占一列
-      const noticeLabel = row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff');
-      children.push(
-        h(
-          NButton,
-          {
-            size: isMobile.value ? 'small' : 'tiny',
-            quaternary: true,
-            type: row.is_notice == 1 ? 'success' : 'default',
-            title: noticeLabel,
-            'aria-label': noticeLabel,
-            disabled: !isAdmin.value,
-            onClick: isAdmin.value ? () => toggleNotice(row) : undefined,
-          },
-          isMobile.value ? { default: () => noticeLabel } : { icon: () => h(NotificationsOutline) },
-        ),
-      );
-      return h(NSpace, { size: 4, align: 'center', wrap: isMobile.value }, { default: () => children });
+        ],
+      });
     },
+  });
+  // 到期提醒独立成列：移动端由 mobile:'status' 提升到卡片标题行右侧
+  cols.push({
+    title: t('domain.noticeCol'),
+    key: 'is_notice',
+    width: 100,
+    mobile: 'status',
+    render: (row: any) =>
+      h(
+        NButton,
+        {
+          size: isMobile.value ? 'small' : 'tiny',
+          quaternary: true,
+          type: row.is_notice == 1 ? 'success' : 'default',
+          disabled: !isAdmin.value,
+          onClick: isAdmin.value ? () => toggleNotice(row) : undefined,
+        },
+        { default: () => (row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff')) },
+      ),
   });
   cols.push({
     title: t('domain.addTimeCol'),
@@ -288,7 +296,7 @@ const columns = computed(() => {
     render(row: any) {
       const btns: any[] = [h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
       if (isAdmin.value) {
-        btns.push(h(NButton, { size: 'tiny', onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
       }
       return h('div', { class: 'row-actions' }, btns);

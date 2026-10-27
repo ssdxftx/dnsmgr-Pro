@@ -113,6 +113,7 @@
           :row-key="(row: any) => row.id"
           :row-props="rowProps"
           :empty-text="t('audit.empty')"
+          :empty-description="t('audit.emptyHint')"
           title-key="target_name"
         />
       </div>
@@ -123,9 +124,12 @@
         <div class="audit-summary">
           <div class="audit-summary__head">
             <span class="audit-summary__action">{{ actionLabel(cur.action) }}</span>
-            <span class="audit-result" :class="cur.result ? 'is-ok' : 'is-fail'">
-              <i class="audit-result__dot" />{{ cur.result ? t('audit.success') : t('audit.failure') }}
-            </span>
+            <StatusBadge
+              :tone="cur.result ? 'success' : 'error'"
+              variant="text"
+              size="sm"
+              :label="cur.result ? t('audit.success') : t('audit.failure')"
+            />
           </div>
           <div class="audit-summary__text">{{ cur.summary || '-' }}</div>
           <div v-if="cur.errmsg" class="audit-summary__err">{{ cur.errmsg }}</div>
@@ -172,7 +176,8 @@
       </n-drawer-content>
     </n-drawer>
 
-    <n-drawer v-model:show="showFilters" placement="bottom" height="420px" @update:show="onFilterShow">
+    <!-- 高度按内容自适应：常规 3 个筛选 340px 足够，展开自定义时间时才加高；原来固定 420px 会留出 300px 空白 -->
+    <n-drawer v-model:show="showFilters" placement="bottom" :height="range === 'custom' ? 470 : 340" @update:show="onFilterShow">
       <n-drawer-content :title="t('audit.filter')" closable>
         <div class="audit-filter">
           <n-select
@@ -234,6 +239,7 @@ import {
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import RangeFilter from '../components/statistics/RangeFilter.vue';
 import { useResponsive } from '../composables/useResponsive';
@@ -374,10 +380,13 @@ const columns = computed<any[]>(() => [
     key: 'result',
     width: 78,
     render: (row: any) =>
-      h('span', { class: `audit-result ${row.result ? 'is-ok' : 'is-fail'}`, title: row.errmsg || '' }, [
-        h('i', { class: 'audit-result__dot' }),
-        row.result ? t('audit.success') : t('audit.failure'),
-      ]),
+      h(StatusBadge, {
+        tone: row.result ? 'success' : 'error',
+        variant: 'text',
+        size: 'sm',
+        label: row.result ? t('audit.success') : t('audit.failure'),
+        title: row.errmsg || '',
+      }),
   },
   {
     title: '',
@@ -607,27 +616,6 @@ onMounted(() => {
   height: 6px;
   border-radius: 50%;
   flex: 0 0 auto;
-}
-.audit-result {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--app-text-2);
-  white-space: nowrap;
-}
-.audit-result__dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--app-success);
-  flex: 0 0 auto;
-}
-.audit-result.is-fail {
-  color: var(--app-error);
-}
-.audit-result.is-fail .audit-result__dot {
-  background: var(--app-error);
 }
 :deep(.n-data-table-tbody .n-data-table-tr) {
   cursor: pointer;

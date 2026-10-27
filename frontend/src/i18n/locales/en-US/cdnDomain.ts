@@ -5,6 +5,7 @@ export default {
     overview: 'Domain Overview',
     listTitle: 'Domain List',
     empty: 'No CDN acceleration domains yet',
+    emptyHint: 'Authorize a provider under "CDN Accounts" first, then add domains here',
     freeCert: 'Platform Free Cert',
     certLink: 'Apply Project Cert',
     addDomain: 'Connect Domain',

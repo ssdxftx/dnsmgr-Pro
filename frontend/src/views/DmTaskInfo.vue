@@ -14,20 +14,26 @@
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="logs.length" :label="t('common.total')" tone="primary" :icon="DocumentTextOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
     <n-card :bordered="false">
-      <n-descriptions v-if="task" bordered :column="2" size="small" class="mb-4">
-        <n-descriptions-item :label="t('dm.infoDomain')">{{ task.rr }}.{{ task.domain || '' }}</n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoRecord')">{{ task.main_value }}</n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoSwitchSet')">{{ typeLabel }}</n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoCheckProto')">{{ checktypeLabel }}</n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoStatus')">
+      <DetailGrid
+        v-if="task"
+        :items="[
+          { key: 'domain', label: t('dm.infoDomain'), value: `${task.rr}.${task.domain || ''}` },
+          { key: 'record', label: t('dm.infoRecord'), value: task.main_value },
+          { key: 'type', label: t('dm.infoSwitchSet'), value: typeLabel },
+          { key: 'proto', label: t('dm.infoCheckProto'), value: checktypeLabel },
+          { key: 'status', label: t('dm.infoStatus'), slot: 'status' },
+          { key: 'run', label: t('dm.infoRunStatus'), slot: 'run' },
+          { key: 'fail', label: t('dm.infoFailCount24'), value: task.fail_count, numeric: true },
+          { key: 'switch', label: t('dm.infoSwitchCount24'), value: task.switch_count, numeric: true },
+        ]"
+      >
+        <template #status>
           <n-tag :type="task.status ? 'error' : 'success'" size="small">{{ task.status ? t('dm.abnormal') : t('dm.normal') }}</n-tag>
-        </n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoRunStatus')">
+        </template>
+        <template #run>
           <n-tag :type="task.active ? 'success' : 'default'" size="small" bordered>{{ task.active ? t('dm.running') : t('dm.stopped') }}</n-tag>
-        </n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoFailCount24')">{{ task.fail_count }}</n-descriptions-item>
-        <n-descriptions-item :label="t('dm.infoSwitchCount24')">{{ task.switch_count }}</n-descriptions-item>
-      </n-descriptions>
+        </template>
+      </DetailGrid>
     </n-card>
 
     <div class="app-toolbar">
@@ -50,6 +56,7 @@ import { NTag } from 'naive-ui';
 import { ArrowBackOutline, RefreshOutline, AlertCircleOutline, SwapHorizontalOutline, DocumentTextOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import DetailGrid from '../components/DetailGrid.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 

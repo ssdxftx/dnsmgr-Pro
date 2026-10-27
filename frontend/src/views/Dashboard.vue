@@ -29,7 +29,7 @@
                 <div class="health__name">{{ a.name }}</div>
                 <div class="health__sub font-mono">{{ a.type }} · {{ t('dashboard.statusConnected') }}</div>
               </div>
-              <span class="ok-badge"><i class="dot" />{{ t('dashboard.statusOk') }}</span>
+              <StatusBadge tone="success" variant="pill" size="sm" :label="t('dashboard.statusOk')" />
             </div>
           </div>
           <EmptyState v-else :title="t('dashboard.noPlatforms')" :icon="CloudOutline" />
@@ -68,6 +68,7 @@ import { useResponsive } from '../composables/useResponsive';
 import PageHeader from '../components/PageHeader.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import EmptyState from '../components/EmptyState.vue';
+import StatusBadge from '../components/StatusBadge.vue';
 import AnnouncementModal from '../components/AnnouncementModal.vue';
 
 const router = useRouter();
@@ -149,6 +150,8 @@ onMounted(async () => {
 }
 .ring__num {
   position: relative;
+  /* 内圈遮罩 .ring::after 在 DOM 顺序上晚于本节点，不显式提层会把数值完全盖住 */
+  z-index: 1;
   font-size: 13px;
   font-weight: 600;
   color: var(--app-text);
@@ -170,25 +173,6 @@ onMounted(async () => {
   color: var(--app-text-3);
   margin-top: 2px;
 }
-.ok-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 10px;
-  border-radius: 99px;
-  font-size: 11px;
-  font-family: var(--app-font-mono);
-  color: var(--app-success);
-  border: 1px solid color-mix(in srgb, var(--app-success) 35%, transparent);
-  background: color-mix(in srgb, var(--app-success) 12%, transparent);
-  flex: 0 0 auto;
-}
-.ok-badge .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--app-success);
-}
 
 /* ---- 快捷操作 ---- */
 .quick-grid {
@@ -204,12 +188,14 @@ onMounted(async () => {
   text-align: left;
   border: 1px solid var(--app-border);
   border-radius: var(--app-radius);
-  background: var(--app-surface);
+  /* 卡片内嵌入口：用次级表面区分，hover 再抬回纯白 */
+  background: var(--app-panel-sunken);
   cursor: pointer;
   transition: transform 0.2s var(--app-ease), box-shadow 0.2s var(--app-ease), border-color 0.2s var(--app-ease);
 }
 .quick-tile:hover {
   transform: translateY(-3px);
+  background: var(--app-surface);
   border-color: color-mix(in srgb, var(--app-primary) 40%, var(--app-border));
   box-shadow: var(--app-shadow);
 }

@@ -21,14 +21,16 @@
         </div>
 
         <div class="app-panel">
-          <n-descriptions :column="2" label-placement="left" size="small">
-            <n-descriptions-item :label="t('esaZone.zoneId')"><span class="app-mono">{{ zoneId }}</span></n-descriptions-item>
-            <n-descriptions-item :label="t('esaZone.zoneName')">{{ zoneInfo.zone_name || zoneInfo.name || '-' }}</n-descriptions-item>
-            <n-descriptions-item :label="t('esaZone.status')">{{ statusLabel }}</n-descriptions-item>
-            <n-descriptions-item :label="t('esaZone.area')">{{ zoneInfo.area || '-' }}</n-descriptions-item>
-            <n-descriptions-item :label="t('esaZone.access')">{{ accessTypeLabel }}</n-descriptions-item>
-            <n-descriptions-item :label="t('esaZone.domains')"><span class="tnum">{{ domains.length }}</span></n-descriptions-item>
-          </n-descriptions>
+          <DetailGrid
+            :items="[
+              { key: 'id', label: t('esaZone.zoneId'), value: zoneId, mono: true },
+              { key: 'name', label: t('esaZone.zoneName'), value: zoneInfo.zone_name || zoneInfo.name },
+              { key: 'status', label: t('esaZone.status'), value: statusLabel },
+              { key: 'area', label: t('esaZone.area'), value: areaLabel },
+              { key: 'access', label: t('esaZone.access'), value: accessTypeLabel },
+              { key: 'domains', label: t('esaZone.domains'), value: domains.length, numeric: true },
+            ]"
+          />
         </div>
 
         <div class="app-panel">
@@ -68,7 +70,7 @@
           </div>
         </div>
 
-        <div class="app-panel">
+        <div v-if="showNsPanel" class="app-panel">
           <div class="app-panel__head">
             <h3 class="app-panel__title">{{ t('esaZone.nsServers') }}</h3>
           </div>
@@ -130,11 +132,13 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useDialog, useMessage, NCard, NButton, NDescriptions, NDescriptionsItem, NForm, NFormItem, NIcon, NInput, NSpace, NSwitch, NTag } from 'naive-ui';
+import { useDialog, useMessage, NCard, NButton, NForm, NFormItem, NIcon, NInput, NSpace, NSwitch, NTag } from 'naive-ui';
 import { CheckmarkCircleOutline } from '@vicons/ionicons5';
 import { useRouter } from 'vue-router';
 import { api } from '../../api';
 import { formatDateTime } from '../../lib/datetime';
+import { zoneAreaKey } from '../../lib/zoneLabels';
+import DetailGrid from '../DetailGrid.vue';
 import EsaCardSelect from './EsaCardSelect.vue';
 import EsaSettingsList from './EsaSettingsList.vue';
 import EsaVersionsModule from './EsaVersionsModule.vue';
@@ -203,6 +207,21 @@ const statusLabel = computed(() => {
 const accessTypeLabel = computed(
   () => siteProps.value.accessType || siteProps.value.AccessType || props.zoneInfo?.accessType || '-',
 );
+
+/** CNAME 接入且平台没有下发 NS 时，整块隐藏——空面板会让人以为「没配好」 */
+const showNsPanel = computed(() => {
+  if (props.nsList.length) return true;
+  const access = String(
+    siteProps.value.accessType || siteProps.value.AccessType || props.zoneInfo?.accessType || '',
+  ).toUpperCase();
+  return access !== 'CNAME';
+});
+
+// domestic / overseas 直接透出对用户没有意义
+const areaLabel = computed(() => {
+  const key = zoneAreaKey(props.zoneInfo?.area);
+  return key ? t(`common.${key}`) : props.zoneInfo?.area || '-';
+});
 const versionManagement = computed(
   () =>
     siteProps.value.versionManagement === true ||

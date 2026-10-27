@@ -150,7 +150,7 @@ const columns = computed<any[]>(() => [
       h(
         NTag,
         { size: 'small', bordered: false, type: row.Status === 'off' ? 'default' : 'success' },
-        { default: () => (row.Status === 'off' ? t('esaZone.disabled') : t('esaZone.enabled')) },
+        { default: () => (row.Status === 'off' ? t('esaZone.enableAction') : t('esaZone.disableAction')) },
       ),
   },
   {

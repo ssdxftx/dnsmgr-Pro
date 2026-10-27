@@ -26,6 +26,7 @@ export default {
     settings: 'Scheduled Task Settings',
     apply: 'Apply for Certificate',
     empty: 'No certificate orders',
+    emptyHint: 'Configure an issuing channel under "Cert Accounts" to request free or commercial certificates here',
     editTitle: 'Edit Order',
     applyTitle: 'Apply for Certificate',
     tabApply: 'Auto Apply',

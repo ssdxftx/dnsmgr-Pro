@@ -16,11 +16,13 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('cfTunnels.overview') }}</h3>
         </div>
-        <n-descriptions :column="3" size="small" label-placement="top">
-          <n-descriptions-item :label="t('cfTunnels.connectionCount')">{{ totalConnections }}</n-descriptions-item>
-          <n-descriptions-item :label="t('cfTunnels.activeTunnels')">{{ activeTunnels }}</n-descriptions-item>
-          <n-descriptions-item :label="t('cfTunnels.idleTunnels')">{{ rows.length - activeTunnels }}</n-descriptions-item>
-        </n-descriptions>
+        <OverviewStats
+          :items="[
+            { label: t('cfTunnels.connectionCount'), value: totalConnections },
+            { label: t('cfTunnels.activeTunnels'), value: activeTunnels, tone: 'success' },
+            { label: t('cfTunnels.idleTunnels'), value: rows.length - activeTunnels },
+          ]"
+        />
       </div>
       <div class="app-panel">
         <div class="app-panel__head">
@@ -113,6 +115,7 @@ import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, ListOutline, LayersOutline, GlobeOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
+import OverviewStats from '../components/OverviewStats.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 

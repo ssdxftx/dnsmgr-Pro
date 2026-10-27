@@ -182,7 +182,7 @@ onMounted(() => {
   line-height: 1.6;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767.98px) {
   :deep(.n-card__footer .n-space) {
     width: 100%;
     justify-content: space-between;

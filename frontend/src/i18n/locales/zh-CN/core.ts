@@ -1,6 +1,12 @@
 export default {
   common: {
     confirm: '确定',
+    areaMainland: '中国内地',
+    areaOverseas: '全球（不含中国内地）',
+    areaGlobal: '全球',
+    noExtraInfo: '未配置额外信息',
+    expandAll: '展开全部 {n} 项',
+    collapseList: '收起',
     cancel: '取消',
     save: '保存',
     saved: '保存成功',
@@ -128,8 +134,14 @@ export default {
     backup: '备份与恢复',
     about: '关于',
   },
+  notFound: {
+    desc: '路径 {path} 没有匹配的页面，可能已被移动或删除。',
+    back: '返回上一页',
+    home: '回到域名列表',
+  },
   route: {
     dashboard: '仪表盘',
+    notFound: '页面不存在',
     domains: '域名管理',
     records: '解析记录',
     recordImport: '解析记录导入',
