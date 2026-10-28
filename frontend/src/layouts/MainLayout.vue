@@ -203,7 +203,6 @@ const menuOptions = computed<MenuOption[]>(() => [
       { label: t('nav.cdnZones'), key: 'cdn-zones', icon: renderIcon(FolderOutline) },
       { label: t('nav.cacheRefresh'), key: 'cache-refresh', icon: renderIcon(RefreshOutline) },
       { label: t('nav.preheatTasks'), key: 'preheat-tasks', icon: renderIcon(TimeOutline) },
-      { label: t('nav.cfRules'), key: 'cf-rules', icon: renderIcon(ShieldCheckmarkOutline) },
       { label: t('nav.statistics'), key: 'statistics', icon: renderIcon(BarChartOutline) },
     ],
   },
@@ -272,7 +271,6 @@ const visibleMenu = computed<MenuOption[]>(() => {
 });
 
 const ROUTE_ALIAS: Array<[RegExp, string]> = [
-  [/^\/cf-rules/, 'cf-rules'],
   [/^\/cloudflare\/domains\//, 'cdn-domains'],
   [/^\/cloudflare\/accounts\//, 'cdn-accounts'],
   [/^\/preferences/, 'preferences'],
@@ -284,7 +282,7 @@ const activeKey = computed(() => {
   if (alias) return alias;
   const matched = [
     'dashboard', 'domains', 'dns-accounts', 'expire-notice', 'dns-check',
-    'cdn-accounts', 'cdn-domains', 'cdn-zones', 'cf-rules', 'cache-refresh', 'preheat-tasks', 'statistics',
+    'cdn-accounts', 'cdn-domains', 'cdn-zones', 'cache-refresh', 'preheat-tasks', 'statistics',
     'dm-overview', 'dm-tasks', 'schedule-tasks',
     'optimize-settings', 'optimize-tasks',
     'cert-accounts', 'cert-orders', 'deploy-accounts', 'deploy-tasks', 'cert-settings',
@@ -302,7 +300,7 @@ const pageTitle = computed(() => {
 
 const activeGroupMap: Record<string, string> = {
   domains: 'group-domain', 'dns-accounts': 'group-domain', 'expireNotice': 'group-domain', 'expire-notice': 'group-domain', 'dns-check': 'group-domain',
-  'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cf-rules': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
+  'cdn-accounts': 'group-cdn', 'cdn-domains': 'group-cdn', 'cdn-zones': 'group-cdn', 'cache-refresh': 'group-cdn', 'preheat-tasks': 'group-cdn', statistics: 'group-cdn',
   'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
   'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
   'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert', 'cert-cname': 'group-cert',

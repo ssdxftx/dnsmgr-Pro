@@ -103,8 +103,6 @@ export default {
     title: '解析记录 · {title}',
     subtitle: '查看并维护当前域名的 DNS 解析记录',
     nameCol: '子域名',
-    customHostnames: '自定义主机名',
-    rulesEngine: '规则引擎',
     addRecord: '添加记录',
     empty: '暂无解析记录',
     emptyHint: '点「添加记录」新建，或先确认域名已切换到本站点的 NS',

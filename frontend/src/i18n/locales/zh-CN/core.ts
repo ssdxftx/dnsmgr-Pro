@@ -1,5 +1,6 @@
 export default {
   common: {
+    networkError: '网络异常，请稍后重试',
     confirm: '确定',
     areaMainland: '中国内地',
     areaOverseas: '全球（不含中国内地）',

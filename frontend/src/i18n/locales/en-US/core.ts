@@ -1,5 +1,6 @@
 export default {
   common: {
+    networkError: 'Network error, please try again later',
     confirm: 'Confirm',
     areaMainland: 'Chinese mainland',
     areaOverseas: 'Global (excl. mainland China)',

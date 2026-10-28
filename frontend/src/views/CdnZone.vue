@@ -134,6 +134,12 @@
         </n-space>
       </template>
     </n-modal>
+
+    <n-drawer v-model:show="showCfPanel" placement="right" width="min(1180px, 94vw)">
+      <n-drawer-content closable :native-scrollbar="false" :title="cfPanelTitle">
+        <CfRulesPanel v-if="showCfPanel && cfPanelAid" :key="cfPanelAid" :aid="cfPanelAid" />
+      </n-drawer-content>
+    </n-drawer>
   </div>
 </template>
 
@@ -143,6 +149,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NCard, NSpin, NTag, useMessage } from 'naive-ui';
 import { FolderOpenOutline } from '@vicons/ionicons5';
+import CfRulesPanel from '../components/cf/CfRulesPanel.vue';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -159,6 +166,13 @@ const accounts = ref<any[]>([]);
 const cfAccounts = ref<any[]>([]);
 const providers = ref<Record<string, any>>({});
 const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+
+const showCfPanel = ref(false);
+const cfPanelAid = ref(0);
+const cfPanelName = ref('');
+const cfPanelTitle = computed(() =>
+  cfPanelName.value ? `${t('cfRules.title')} · ${cfPanelName.value}` : t('cfRules.title'),
+);
 
 const showCreate = ref(false);
 const createBusy = ref(false);
@@ -374,7 +388,10 @@ async function loadCfAccounts() {
 }
 
 function openCfRules(a: any) {
-  router.push({ path: '/cf-rules', query: { aid: String(a.aid) } });
+  // 在 CDN 站点页内直接展开规则引擎，避免再跳转到独立页面
+  cfPanelAid.value = Number(a.aid);
+  cfPanelName.value = String(a.name || '');
+  showCfPanel.value = true;
 }
 
 onMounted(async () => {

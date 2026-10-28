@@ -1,17 +1,15 @@
 <template>
   <div class="app-stack">
-    <PageHeader :title="t('cfHostnames.title', { domain: domainName || domainId })" :subtitle="t('cfHostnames.subtitle')" back="/cdn-domains">
-      <template #title-suffix>
+    <div class="app-toolbar">
+      <n-space align="center">
         <n-tag v-if="fallbackOrigin" size="small" type="info">Fallback: {{ fallbackOrigin }}</n-tag>
-      </template>
-      <template #actions>
-        <n-space>
-          <n-tag size="small" v-if="dcvUuid">DCV UUID: {{ dcvUuid }}</n-tag>
-          <n-button :loading="!!busy['dcv']" :disabled="!!busy['dcv']" @click="run('dcv', loadDcvUuid)">{{ t('cfHostnames.getDcvUuid') }}</n-button>
-          <n-button @click="openFallback">{{ t('cfHostnames.fallbackOriginBtn') }}</n-button>
-        </n-space>
-      </template>
-    </PageHeader>
+        <n-tag v-if="dcvUuid" size="small">DCV UUID: {{ dcvUuid }}</n-tag>
+      </n-space>
+      <n-space>
+        <n-button size="small" :loading="!!busy['dcv']" :disabled="!!busy['dcv']" @click="run('dcv', loadDcvUuid)">{{ t('cfHostnames.getDcvUuid') }}</n-button>
+        <n-button size="small" @click="openFallback">{{ t('cfHostnames.fallbackOriginBtn') }}</n-button>
+      </n-space>
+    </div>
     <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rows.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -239,23 +237,21 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute } from 'vue-router';
 import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
 import { RefreshOutline, ListOutline, LayersOutline, GlobeOutline, FolderOpenOutline } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
-import PageHeader from '../components/PageHeader.vue';
-import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
-import TelemetryCard from '../components/TelemetryCard.vue';
-import EmptyState from '../components/EmptyState.vue';
-import { useAction } from '../composables/useAction';
+import { api } from '../../api';
+import ResponsiveDataTable from '../ResponsiveDataTable.vue';
+import TelemetryCard from '../TelemetryCard.vue';
+import EmptyState from '../EmptyState.vue';
+import { useAction } from '../../composables/useAction';
 
-const route = useRoute();
+const props = defineProps<{ domainId: number; domainName?: string }>();
 const { t, locale } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
 const { busy, run } = useAction();
-const domainId = Number(route.params.id);
-const domainName = ref('');
+const domainId = props.domainId;
+const domainName = ref(props.domainName || '');
 const loadBusy = ref(false);
 const loadError = ref(false);
 const rows = ref<any[]>([]);

@@ -103,8 +103,6 @@ export default {
     title: 'DNS Records · {title}',
     subtitle: 'View and maintain DNS records for the current domain',
     nameCol: 'Subdomain',
-    customHostnames: 'Custom Hostnames',
-    rulesEngine: 'Rules Engine',
     addRecord: 'Add Record',
     empty: 'No DNS records',
     emptyHint: 'Click "Add Record" to create one, or make sure the domain has switched to this site\'s nameservers',

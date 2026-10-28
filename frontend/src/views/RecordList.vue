@@ -3,8 +3,6 @@
     <PageHeader :title="t('record.title', { title: displayTitle })" :subtitle="t('record.subtitle')" back="/domains">
       <template #actions>
         <n-space>
-          <n-button v-if="accountType === 'cloudflare' && isAdmin" type="info" @click="router.push(`/cloudflare/domains/${domainId}/hostnames`)">{{ t('record.customHostnames') }}</n-button>
-          <n-button v-if="accountType === 'cloudflare' && isAdmin" type="primary" secondary @click="router.push(`/cf-rules?domain=${domainId}`)">{{ t('record.rulesEngine') }}</n-button>
           <n-button v-if="access.writable" @click="router.push(`/domains/${domainId}/records/import`)">{{ t('route.recordImport') }}</n-button>
           <n-button v-if="accountType === 'aliyun'" @click="router.push(`/domains/${domainId}/weight`)">{{ t('route.recordWeight') }}</n-button>
           <n-button v-if="accountType === 'dnspod'" @click="router.push(`/domains/${domainId}/alias`)">{{ t('route.recordAlias') }}</n-button>
@@ -46,7 +44,7 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { NButton, NSpace, useMessage } from 'naive-ui';
 import { AddOutline } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
+import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import RecordTable from '../components/RecordTable.vue';
 
@@ -57,7 +55,6 @@ const message = useMessage();
 const domainId = Number(route.params.id);
 const domainName = ref('');
 const accountType = ref('');
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
 const subFilter = computed(() => (route.query.sub as string) || '');
 const displayTitle = computed(() => {
   if (!domainName.value) return t('record.domainFallback', { id: domainId });

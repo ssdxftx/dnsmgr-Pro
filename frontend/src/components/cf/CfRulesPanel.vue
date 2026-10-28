@@ -1,25 +1,6 @@
 <template>
   <div class="app-stack">
-    <PageHeader
-      :title="accountName ? `${t('cfRules.title')} · ${accountName}` : t('cfRules.title')"
-      :subtitle="t('cfRules.subtitle')"
-      back="/cdn-zones"
-    >
-      <template #actions>
-        <n-space>
-          <n-button :loading="loadBusy" @click="loadRules">{{ t('common.refresh') }}</n-button>
-          <n-button :disabled="!selectedDomain" :loading="!!busy['cred']" @click="run('cred', openCredential)">{{ t('cfRules.credentialSettings') }}</n-button>
-          <n-button type="primary" :disabled="!selectedDomain" @click="openAdd">{{ t('cfRules.addRule') }}</n-button>
-        </n-space>
-      </template>
-    </PageHeader>
-    <n-grid v-if="!emptyAccount" class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rules.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
-      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" :caption="t('common.cumulative')" /></n-grid-item>
-    </n-grid>
-
-    <div v-if="!emptyAccount" class="app-toolbar">
+    <div class="app-toolbar">
       <n-select
         v-model:value="selectedDomain"
         :options="domainOptions"
@@ -29,6 +10,26 @@
         filterable
         @update:value="onDomainChange"
       />
+      <n-radio-group v-model:value="mode" size="small">
+        <n-radio-button value="rules">{{ t('cfRules.tabRules') }}</n-radio-button>
+        <n-radio-button value="hostnames">{{ t('cfRules.tabHostnames') }}</n-radio-button>
+      </n-radio-group>
+      <div class="app-toolbar__spacer" />
+      <template v-if="mode === 'rules'">
+        <n-button size="small" :loading="loadBusy" @click="loadRules">{{ t('common.refresh') }}</n-button>
+        <n-button size="small" :disabled="!selectedDomain" :loading="!!busy['cred']" @click="run('cred', openCredential)">{{ t('cfRules.credentialSettings') }}</n-button>
+        <n-button size="small" type="primary" :disabled="!selectedDomain" @click="openAdd">{{ t('cfRules.addRule') }}</n-button>
+      </template>
+    </div>
+
+    <template v-if="mode === 'rules'">
+    <n-grid v-if="!emptyAccount" class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="rules.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="FlashOutline" :caption="t('common.cumulative')" /></n-grid-item>
+    </n-grid>
+
+    <div v-if="!emptyAccount" class="app-toolbar">
       <n-select
         v-model:value="selectedPhase"
         :options="phaseOptions"
@@ -223,26 +224,42 @@
         </n-space>
       </template>
     </n-modal>
+    </template>
+
+    <template v-else>
+      <n-card v-if="emptyAccount" :bordered="false">
+        <EmptyState :icon="ListOutline" :title="t('cfRules.noDomainInAccount')" />
+      </n-card>
+      <n-card v-else-if="!selectedDomain" :bordered="false">
+        <EmptyState :icon="ListOutline" :title="t('cfRules.selectDomainFirst')" />
+      </n-card>
+      <CfHostnamePanel
+        v-else
+        :key="String(selectedDomain)"
+        :domain-id="Number(selectedDomain)"
+        :domain-name="selectedDomainName"
+      />
+    </template>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, h } from 'vue';
-import { useRoute } from 'vue-router';
+import { computed, onMounted, reactive, ref, watch, h } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
-import { api } from '../api';
+import { api } from '../../api';
 import { ListOutline, LayersOutline, FlashOutline } from '@vicons/ionicons5';
-import PageHeader from '../components/PageHeader.vue';
-import OverviewStats from '../components/OverviewStats.vue';
-import EmptyState from '../components/EmptyState.vue';
-import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
-import TelemetryCard from '../components/TelemetryCard.vue';
-import { useAction } from '../composables/useAction';
+import OverviewStats from '../OverviewStats.vue';
+import EmptyState from '../EmptyState.vue';
+import ResponsiveDataTable from '../ResponsiveDataTable.vue';
+import TelemetryCard from '../TelemetryCard.vue';
+import CfHostnamePanel from './CfHostnamePanel.vue';
+import { useAction } from '../../composables/useAction';
 
-const route = useRoute();
 const { t } = useI18n();
 const message = useMessage();
+// 视图切换：规则 / 自定义主机名（两者共用上方域名选择）
+const mode = ref<'rules' | 'hostnames'>('rules');
 const dialog = useDialog();
 const { busy, run } = useAction();
 
@@ -254,14 +271,15 @@ interface DomainItem {
   account_name: string;
 }
 
-const presetAid = Number(route.query.aid || 0);
+const props = defineProps<{ aid?: number }>();
+// 由 CDN 站点页传入账户 ID，只展示该账户下的 Cloudflare 域名
+const presetAid = Number(props.aid || 0);
 const domains = ref<DomainItem[]>([]);
 const domainsLoaded = ref(false);
 const scopedDomains = computed(() =>
   presetAid ? domains.value.filter((d: any) => Number(d.aid) === presetAid) : domains.value,
 );
 const emptyAccount = computed(() => presetAid > 0 && domainsLoaded.value && !scopedDomains.value.length);
-const accountName = computed(() => scopedDomains.value[0]?.account_name || '');
 const selectedDomain = ref<number | null>(null);
 const selectedPhase = ref('http_request_origin');
 const rules = ref<any[]>([]);
@@ -296,6 +314,7 @@ const domainOptions = computed(() => scopedDomains.value.map((d: any) => ({ labe
 
 const selectedAid = computed(() => domains.value.find((d) => d.id === selectedDomain.value)?.aid || 0);
 const selectedDomainName = computed(() => domains.value.find((d) => d.id === selectedDomain.value)?.name || '');
+
 
 const matchTypeOptions = computed(() => [
   { label: t('cfRules.matchHostname'), value: 'hostname' },
@@ -448,17 +467,18 @@ async function loadDomains() {
   if (res.code === 0) {
     domains.value = res.data || [];
     domainsLoaded.value = true;
-    const preset = Number(route.query.domain || 0);
     const pool = presetAid ? domains.value.filter((d: any) => Number(d.aid) === presetAid) : domains.value;
-    if (preset && pool.some((d) => d.id === preset)) selectedDomain.value = preset;
-    else if (pool.length) selectedDomain.value = pool[0].id;
+    if (pool.length) selectedDomain.value = pool[0].id;
     else selectedDomain.value = null;
   } else {
     message.error(res.msg);
   }
 }
 
+
 async function onDomainChange() {
+  // 主机名面板以 selectedDomain 作为 key，切换域名会自动重建并加载，无需请求规则接口
+  if (mode.value === 'hostnames') return;
   await loadRules();
 }
 
@@ -778,6 +798,12 @@ function removeCredential() {
     },
   });
 }
+
+watch(mode, (m) => {
+  // 切回规则页时按当前域名重新拉取，避免显示上一个域名的缓存结果；切页后回到顶部
+  if (m === 'rules') void loadRules();
+  window.scrollTo({ top: 0 });
+});
 
 onMounted(async () => {
   // loadPhases 与 loadDomains 无依赖关系，并行发起；loadRules 依赖已加载的域名，随后执行

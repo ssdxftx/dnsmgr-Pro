@@ -33,9 +33,11 @@ const routes = [
       { path: 'cdn-accounts/:aid/esa-api', component: () => import('./views/CdnEsaApi.vue'), meta: { titleKey: 'route.cdnEsaApi' } },
       { path: 'cdn-accounts/:aid/esa-console', component: () => import('./views/CdnEsaConsole.vue'), meta: { titleKey: 'route.cdnEsaConsole' } },
       { path: 'cdn-zones/:aid/:zoneId', component: () => import('./views/CdnZoneSetting.vue'), meta: { titleKey: 'route.cdnZones' } },
-      { path: 'cf-rules', component: () => import('./views/CfRules.vue'), meta: { titleKey: 'route.cfRules' } },
+      // 规则引擎已内嵌到 CDN 站点页（抽屉），保留旧链接重定向，避免书签 404
+      { path: 'cf-rules', redirect: '/cdn-zones' },
       { path: 'cdn-domains/:id/setting', component: () => import('./views/CdnDomainSetting.vue'), meta: { titleKey: 'route.cdnSetting' } },
-      { path: 'cloudflare/domains/:id/hostnames', component: () => import('./views/CfHostnames.vue'), meta: { titleKey: 'route.cfHostnames' } },
+      // 自定义主机名已内嵌到 CDN 站点页的规则引擎抽屉，旧链接重定向
+      { path: 'cloudflare/domains/:id/hostnames', redirect: '/cdn-domains' },
       { path: 'cloudflare/accounts/:id/tunnels', component: () => import('./views/CfTunnels.vue'), meta: { titleKey: 'route.cfTunnels' } },
       { path: 'expire-notice', component: () => import('./views/ExpireNotice.vue'), meta: { titleKey: 'route.expireNotice' } },
       { path: 'totp', component: () => import('./views/TotpSet.vue'), meta: { titleKey: 'route.totp' } },
