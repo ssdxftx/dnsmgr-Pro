@@ -130,7 +130,14 @@ export class QqBot {
     }
     const token = String(arr.access_token);
     const ttl = Math.max(60, Number(arr.expires_in || 7200) - 120);
-    tokenCache.set(cacheKey, { token, expireAt: Date.now() + ttl * 1000 });
+    // 缓存上限 + 过期清理：避免配置频繁变更导致 Map 无界增长
+    const now = Date.now();
+    for (const [k, v] of tokenCache) if (v.expireAt <= now) tokenCache.delete(k);
+    if (tokenCache.size >= 200) {
+      const oldest = tokenCache.keys().next().value;
+      if (oldest !== undefined) tokenCache.delete(oldest);
+    }
+    tokenCache.set(cacheKey, { token, expireAt: now + ttl * 1000 });
     return token;
   }
 

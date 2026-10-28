@@ -1,6 +1,7 @@
 import { Client, ConnectConfig } from 'ssh2';
 import { X509Certificate } from 'node:crypto';
 import { applyHostKeyVerification } from '../sshHostKey.js';
+import { assertNotMetadataHost } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 // POSIX 单引号转义：整体包裹为单引号字符串，内部的单引号按 '\'' 处理。
@@ -26,7 +27,7 @@ export class FnosDeploy implements DeployProvider {
     if (this.logger) this.logger(txt);
   }
 
-  private connect(): Promise<Client> {
+  private async connect(): Promise<Client> {
     const cfg = this.config;
     if (!cfg.host || !cfg.port || !cfg.username || !cfg.password) {
       throw new Error('必填参数不能为空');
@@ -45,6 +46,7 @@ export class FnosDeploy implements DeployProvider {
       username: cfg.username,
       password: cfg.password,
     };
+    await assertNotMetadataHost(String(cfg.host));
     // 如配置了主机密钥指纹/公钥则严格校验，防止中间人攻击
     applyHostKeyVerification(connectConfig, cfg);
 

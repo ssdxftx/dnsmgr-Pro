@@ -85,3 +85,17 @@ export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, ind
   await Promise.all(workers);
   return results;
 }
+
+/**
+ * 将内部错误转换为可返回给客户端的文案。
+ * 数据库/文件系统错误可能包含 SQL 片段、表名、约束名或容器内路径，
+ * 统一替换为通用提示，具体原因只写服务端日志。
+ */
+export function publicError(e: any, fallback = '操作失败，请稍后重试'): string {
+  const msg = String(e?.message || e || '').trim();
+  if (!msg) return fallback;
+  const internal =
+    /^(SQL|ER_|SQLITE|node:)/i.test(msg) ||
+    /constraint failed|duplicate entry|syntax error|no such table|no such column|unknown column|foreign key|ECONNREFUSED|ENOENT|EACCES/i.test(msg);
+  return internal ? fallback : msg.slice(0, 300);
+}

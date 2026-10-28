@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { query, queryOne, table, withTransaction } from '../../db.js';
 import { getSysKey } from '../../config.js';
 import {
@@ -19,6 +19,7 @@ import {
   setVaultSession,
   vaultSessionExpiry,
 } from './session.js';
+import { currentRequestContext } from '../requestContext.js';
 
 export class VaultError extends Error {
   status: number;
@@ -63,6 +64,19 @@ function sha256(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }
 
+/** 恢复码哈希：加入每用户独立 salt，避免数据库泄露后被彩虹表/离线爆破直接命中 */
+function hashRecovery(code: string, salt: Buffer): string {
+  return createHash('sha256').update(salt).update(code.normalize('NFKC')).digest('hex');
+}
+
+/** 恒定时间比较十六进制摘要，避免字符串比较泄露匹配前缀 */
+function sameHash(a: string, b: string): boolean {
+  const ba = Buffer.from(String(a || ''), 'utf8');
+  const bb = Buffer.from(String(b || ''), 'utf8');
+  if (!ba.length || ba.length !== bb.length) return false;
+  return timingSafeEqual(ba, bb);
+}
+
 export function genRecoveryCode(): string {
   const raw = randomBytes(10).toString('hex').toUpperCase();
   return raw.match(/.{1,5}/g)!.join('-');
@@ -74,7 +88,7 @@ async function buildRecovery(uid: number, dek: Buffer, input: string) {
   const salt = newSalt();
   const kek = await deriveKek(code, salt);
   const wrapped = wrapDek(kek, dek, uid);
-  return { code, salt, wrapped, hash: sha256(code.normalize('NFKC')) };
+  return { code, salt, wrapped, hash: hashRecovery(code, salt) };
 }
 
 async function sysDek(row: VaultRow | null): Promise<Buffer | null> {
@@ -139,16 +153,18 @@ async function checkLocked(row: VaultRow): Promise<void> {
   }
 }
 
-async function bumpFail(uid: number, fail: number, message = '保险库口令错误'): Promise<never> {
-  const next = fail + 1;
-  if (next >= MAX_FAIL) {
-    await query(
-      `UPDATE ${table('user_vault')} SET fail_count = 0, locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE uid = ?`,
-      [uid],
-    );
+async function bumpFail(uid: number, message = '保险库口令错误'): Promise<never> {
+  // 原子累加：并发错误请求各自 +1，不会互相覆盖导致计数停在阈值以下。
+  // 达到阈值后由单条条件 UPDATE 完成「清零 + 锁定」，避免先读后写产生竞态。
+  await query(`UPDATE ${table('user_vault')} SET fail_count = fail_count + 1 WHERE uid = ?`, [uid]);
+  const locked: any = await query(
+    `UPDATE ${table('user_vault')} SET fail_count = 0, locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE)
+      WHERE uid = ? AND fail_count >= ?`,
+    [uid, MAX_FAIL],
+  );
+  if (Number(locked?.affectedRows || 0) > 0) {
     throw new VaultError('口令错误次数过多，已锁定 15 分钟', 429);
   }
-  await query(`UPDATE ${table('user_vault')} SET fail_count = ? WHERE uid = ?`, [next, uid]);
   throw new VaultError(message);
 }
 
@@ -162,7 +178,7 @@ export async function unlockVault(uid: number, jti: string, passphrase: string):
   }
   await checkLocked(row);
   const dek = unwrapDek(await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer), buf(row.wrapped_dek) as Buffer, uid);
-  if (!dek) return await bumpFail(uid, Number(row.fail_count || 0));
+  if (!dek) return await bumpFail(uid);
   await query(`UPDATE ${table('user_vault')} SET fail_count = 0, locked_until = NULL WHERE uid = ?`, [uid]);
   return setVaultSession(uid, jti, dek);
 }
@@ -200,7 +216,7 @@ export async function downgradeVault(uid: number, jti: string, passphrase: strin
   if (row.mode !== 'passphrase') throw new VaultError('当前已是便捷模式');
   await checkLocked(row);
   const dek = unwrapDek(await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer), buf(row.wrapped_dek) as Buffer, uid);
-  if (!dek) return await bumpFail(uid, Number(row.fail_count || 0));
+  if (!dek) return await bumpFail(uid);
   await query(
     `UPDATE ${table('user_vault')}
      SET mode = 'none', salt = NULL, wrapped_dek = NULL, wrapped_dek_sys = ?, updated_at = NOW()
@@ -216,7 +232,7 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
   if (row.mode !== 'passphrase') throw new VaultError('便捷模式没有口令');
   await checkLocked(row);
   const dek = unwrapDek(await deriveKek(String(oldPass || ''), buf(row.salt) as Buffer), buf(row.wrapped_dek) as Buffer, uid);
-  if (!dek) return await bumpFail(uid, Number(row.fail_count || 0));
+  if (!dek) return await bumpFail(uid);
   const pass = String(nextPass || '');
   if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   const salt = newSalt();
@@ -237,19 +253,29 @@ export async function recoverVault(uid: number, jti: string, recovery: string, n
   }
   await checkLocked(row);
   const code = String(recovery || '').trim();
-  if (sha256(code.normalize('NFKC')) !== row.recovery_hash) {
-    return await bumpFail(uid, Number(row.fail_count || 0), '恢复码错误');
+  const salted = hashRecovery(code, buf(row.salt_recovery) as Buffer);
+  let matched = sameHash(salted, String(row.recovery_hash));
+  let legacyMatched = false;
+  if (!matched) {
+    // 兼容历史无盐哈希；命中后立即升级为加盐哈希
+    if (sameHash(sha256(code.normalize('NFKC')), String(row.recovery_hash))) {
+      matched = true;
+      legacyMatched = true;
+    }
+  }
+  if (!matched) {
+    return await bumpFail(uid, '恢复码错误');
   }
   const dek = unwrapDek(await deriveKek(code, buf(row.salt_recovery) as Buffer), buf(row.wrapped_dek_recovery) as Buffer, uid);
-  if (!dek) return await bumpFail(uid, Number(row.fail_count || 0), '恢复码错误');
+  if (!dek) return await bumpFail(uid, '恢复码错误');
   const pass = String(nextPass || '');
   if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   const salt = newSalt();
   const wrapped = wrapDek(await deriveKek(pass, salt), dek, uid);
   await query(
     `UPDATE ${table('user_vault')} SET mode = 'passphrase', salt = ?, wrapped_dek = ?, wrapped_dek_sys = NULL,
-       fail_count = 0, locked_until = NULL, updated_at = NOW() WHERE uid = ?`,
-    [salt, wrapped, uid],
+       recovery_hash = ?, fail_count = 0, locked_until = NULL, updated_at = NOW() WHERE uid = ?`,
+    [salt, wrapped, legacyMatched ? salted : String(row.recovery_hash), uid],
   );
   setVaultSession(uid, jti, dek);
 }
@@ -284,7 +310,7 @@ export async function destroyVault(uid: number, confirm: string, passphrase?: st
       buf(row.wrapped_dek) as Buffer,
       uid,
     );
-    if (!dek) return await bumpFail(uid, Number(row.fail_count || 0));
+    if (!dek) return await bumpFail(uid);
   }
   const backupFiles = await withTransaction(async (q) => await purgePrivateAssets(q, uid));
   await removeBackupFiles(backupFiles);
@@ -335,6 +361,20 @@ export async function findAnyVaultDekForUser(uid: number): Promise<Buffer | null
   if (!row) return null;
   if (row.mode === 'none') return sysDek(row);
   return findVaultDekByUid(uid);
+}
+
+/**
+ * 请求内读取私有凭证的 DEK：口令模式必须命中「当前请求所属会话」的 jti。
+ * 旧实现取该用户任意活跃会话的 DEK，导致受害者在另一台设备解锁后，
+ * 攻击者用窃取的同用户 JWT 也能读取私有凭证，绕过「必须解锁」的设计。
+ */
+export async function findVaultDekForRequest(uid: number, jti?: string): Promise<Buffer | null> {
+  const row = await getVaultRow(uid);
+  if (!row) return null;
+  if (row.mode === 'none') return sysDek(row);
+  const sessionJti = jti || currentRequestContext()?.jti || '';
+  if (!sessionJti) return null;
+  return getVaultDek(uid, sessionJti);
 }
 
 export function isVaultCipher(v: unknown): boolean {

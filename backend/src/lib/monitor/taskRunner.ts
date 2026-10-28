@@ -99,6 +99,10 @@ async function handle(row: any): Promise<void> {
 
   const accountConfig = drow ? await loadAccountConfig({ config: drow.account_config, owner_uid: drow.account_owner }) : {};
 
+  // DNS 操作结果：状态在调用前已写入，若切换失败必须回滚，
+  // 否则后续轮询会认为已切换而不再重试，且还会发出「切换成功」通知。
+  let opOk = true;
+  let opErr = '';
   if (action === 1) {
     if (row.type === 2) {
       const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
@@ -109,14 +113,18 @@ async function handle(row: any): Promise<void> {
       }
       const res = await dns.updateDomainRecord(row.recordid, row.rr, getDnsType(row.backup_value), row.backup_value, recordinfo.Line, recordinfo.TTL);
       if (!res) {
-        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '修改解析失败', ?, ?)`, [drow.name, dns.getError(), fmtDateTime()]);
+        opOk = false;
+        opErr = dns.getError();
+        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '修改解析失败', ?, ?)`, [drow.name, opErr, fmtDateTime()]);
       }
     } else if (row.type === 1 || row.type === 3) {
       const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
       if (!dns) throw new Error('该厂商暂未支持');
       const res = await dns.setDomainRecordStatus(row.recordid, '0');
       if (!res) {
-        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '暂停解析失败', ?, ?)`, [drow.name, dns.getError(), fmtDateTime()]);
+        opOk = false;
+        opErr = dns.getError();
+        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '暂停解析失败', ?, ?)`, [drow.name, opErr, fmtDateTime()]);
       }
     }
   } else if (action === 2) {
@@ -129,17 +137,29 @@ async function handle(row: any): Promise<void> {
       }
       const res = await dns.updateDomainRecord(row.recordid, row.rr, getDnsType(row.main_value), row.main_value, recordinfo.Line, recordinfo.TTL);
       if (!res) {
-        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '修改解析失败', ?, ?)`, [drow.name, dns.getError(), fmtDateTime()]);
+        opOk = false;
+        opErr = dns.getError();
+        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '修改解析失败', ?, ?)`, [drow.name, opErr, fmtDateTime()]);
       }
     } else if (row.type === 1 || row.type === 3) {
       const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
       if (!dns) throw new Error('该厂商暂未支持');
       const res = await dns.setDomainRecordStatus(row.recordid, '1');
       if (!res) {
-        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '启用解析失败', ?, ?)`, [drow.name, dns.getError(), fmtDateTime()]);
+        opOk = false;
+        opErr = dns.getError();
+        await query(`INSERT INTO ${table('log')} (uid, domain, action, data, addtime) VALUES (0, ?, '启用解析失败', ?, ?)`, [drow.name, opErr, fmtDateTime()]);
       }
     }
   } else {
+    return;
+  }
+
+  if (!opOk) {
+    // 回滚为切换前状态：action=1（切到备用）回滚为 0；action=2（切回主）回滚为 1
+    await query(`UPDATE ${table('dmtask')} SET status = ?, errcount = 0 WHERE id = ?`, [action === 1 ? 0 : 1, row.id]);
+    await insertLog(row.id, action, opErr || 'DNS 操作失败');
+    console.warn(`[dmtask] 任务 ${row.id} DNS 操作失败，已回滚状态：${opErr || '未知错误'}`);
     return;
   }
 

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
-import { query, queryOne, table, withTransaction } from '../db.js';
+import { query, queryOne, table, withTransaction, isDuplicateError } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
@@ -42,16 +42,20 @@ function normalizePermission(input: any[]): PermItem[] {
   return out;
 }
 
+async function applyPermissions(q: any, uid: number, input: any[]) {
+  await q(`DELETE FROM ${table('permission')} WHERE uid = ?`, [uid]);
+  const list = normalizePermission(input);
+  if (list.length) {
+    // 多值 INSERT 替代逐条插入
+    const values = list.map(() => '(?, ?, ?, ?, ?)').join(', ');
+    const params = list.flatMap((p: any) => [uid, p.domain, p.sub, p.readonly, p.expiretime]);
+    await q(`INSERT INTO ${table('permission')} (uid, domain, sub, readonly, expiretime) VALUES ${values}`, params);
+  }
+}
+
 async function savePermissions(uid: number, input: any[]) {
   await withTransaction(async (q) => {
-    await q(`DELETE FROM ${table('permission')} WHERE uid = ?`, [uid]);
-    const list = normalizePermission(input);
-    if (list.length) {
-      // 多值 INSERT 替代逐条插入
-      const values = list.map(() => '(?, ?, ?, ?, ?)').join(', ');
-      const params = list.flatMap((p: any) => [uid, p.domain, p.sub, p.readonly, p.expiretime]);
-      await q(`INSERT INTO ${table('permission')} (uid, domain, sub, readonly, expiretime) VALUES ${values}`, params);
-    }
+    await applyPermissions(q, uid, input);
   });
 }
 
@@ -161,16 +165,19 @@ export default async function userRoutes(app: FastifyInstance) {
 
     let uid: number;
     try {
-      uid = await insertAndGetId(
-        `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, check_whole, regtime, status) VALUES (?, ?, ?, ?, ?, ?, NOW(), 1)`,
-        [username, await bcrypt.hash(password, 10), isApi, apikey, level, checkWhole]
-      );
+      // 建号与授权必须同一事务：否则中途失败会留下「用户已建但没有任何权限」的半更新数据
+      uid = await withTransaction(async (q) => {
+        const ins: any = await q(
+          `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, check_whole, regtime, status) VALUES (?, ?, ?, ?, ?, ?, NOW(), 1)`,
+          [username, await bcrypt.hash(password, 10), isApi, apikey, level, checkWhole]
+        );
+        const id = Number(ins?.insertId || 0);
+        if (level === 1) await applyPermissions(q, id, permission);
+        return id;
+      });
     } catch (e: any) {
-      if (e?.code === 'ER_DUP_ENTRY') return { code: -1, msg: '用户名已存在' };
+      if (isDuplicateError(e)) return { code: -1, msg: '用户名已存在' };
       throw e;
-    }
-    if (level === 1) {
-      await savePermissions(uid, permission);
     }
     audit(req, {
       targetType: 'user',
@@ -248,7 +255,7 @@ export default async function userRoutes(app: FastifyInstance) {
     try {
       await query(`UPDATE ${table('user')} SET ${sets.join(', ')} WHERE id = ?`, params);
     } catch (e: any) {
-      if (e?.code === 'ER_DUP_ENTRY') return { code: -1, msg: '邮箱已被其他账号使用' };
+      if (isDuplicateError(e)) return { code: -1, msg: '邮箱已被其他账号使用' };
       throw e;
     }
     const prevPerm = await queryOne<any>(`SELECT COUNT(*) AS c FROM ${table('permission')} WHERE uid = ?`, [id]);

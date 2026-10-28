@@ -23,7 +23,10 @@ function safeEqual(a: string, b: string): boolean {
   const hb = createHash('sha256').update(String(b)).digest();
   return timingSafeEqual(ha, hb);
 }
-const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_)/;
+// 需要重输登录密码才能修改的敏感项：除凭据/通道配置外，注册开关、定时任务密钥、
+// 审计保留期都可能被会话被盗者用来对抗取证或扩大攻击面，必须纳入二次确认。
+const SENSITIVE_SETTING_RE =
+  /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|audit_retain_days$)/;
 
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
@@ -219,7 +222,9 @@ export default async function systemRoutes(app: FastifyInstance) {
   app.get('/api/system/cron', async (req: any) => {
     // 维护/恢复期间禁止外部 cron 触发解析写入，避免与恢复事务并发
     if (isMaintenance()) return { code: -1, msg: '系统正在恢复数据，请稍后再试' };
-    const key = (req.query?.key || '').toString();
+    // 优先从请求头读取，避免密钥出现在代理/CDN 访问日志与浏览器历史中；query 仅作兼容
+    const authHeader = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
+    const key = String(req.headers?.['x-cron-key'] || authHeader || req.query?.key || '');
     const cronType = await configGet('cron_type', '0');
     const cronKey = await configGet('cron_key');
     if (cronType !== '1' || !cronKey) {

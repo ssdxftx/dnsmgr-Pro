@@ -92,7 +92,8 @@ export async function purgePrivateAssets(
   await delByIds(q, 'cert_order', 'id', certOrderIds);
   await delByIds(q, 'domain', 'id', domainIds);
   if (domainNames.length) {
-    await q(`DELETE FROM ${table('permission')} WHERE LOWER(domain) IN (${marks(domainNames)})`, domainNames);
+    // 必须限定 uid：项目允许不同账户接入同名域名，仅按域名删除会误删其他租户的授权
+    await q(`DELETE FROM ${table('permission')} WHERE uid = ? AND LOWER(domain) IN (${marks(domainNames)})`, [uid, ...domainNames]);
   }
   await delByIds(q, 'account', 'id', accountIds);
   await delByIds(q, 'cdn_account', 'id', cdnAccountIds);

@@ -3150,13 +3150,13 @@ export const deployConfig: Record<string, any> = {
         "required": true
       },
       "secure": {
-        "name": "是否使用SSL",
+        "name": "是否使用SSL（FTPS）",
         "type": "radio",
         "options": [
-          "否",
+          "否（明文传输，凭据可能被窃听）",
           "是"
         ],
-        "value": "0",
+        "value": "1",
         "required": true
       }
     },

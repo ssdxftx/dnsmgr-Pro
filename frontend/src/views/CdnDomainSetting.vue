@@ -261,12 +261,17 @@ function toggleStatus() {
 async function saveOrigin() {
   if (!originForm.origin) return message.warning(t('cdnSetting.originRequired'));
   saveOriginBusy.value = true;
-  const res = await api('POST', `/cdn/domains/${domainId}/origin`, originForm);
-  saveOriginBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cdn/domains/${domainId}/origin`, originForm);
+    if (res.code === 0) {
+      message.success(res.msg);
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveOriginBusy.value = false;
+  }
 }
 
 onMounted(load);

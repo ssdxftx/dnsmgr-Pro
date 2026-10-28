@@ -52,7 +52,9 @@ import backupRoutes, { runDueBackupSchedules } from './routes/backup.js';
 import vaultRoutes from './routes/vault.js';
 import { cleanTmpFiles } from './lib/backup/export.js';
 import { ensureDataDirs } from './lib/backup/archive.js';
-import { initMaintenance, isMaintenance } from './lib/backup/maintenance.js';
+import { initMaintenance, isMaintenance, refreshMaintenance } from './lib/backup/maintenance.js';
+import { enterRequestContext } from './lib/requestContext.js';
+import { isTokenRevoked } from './lib/auth/revocation.js';
 import { refreshGlobalProxyDispatcher } from './lib/proxy.js';
 
 process.on('unhandledRejection', (reason: any) => {
@@ -117,7 +119,13 @@ app.setErrorHandler((err: any, _req: any, reply: any) => {
   if (err instanceof ConfigDecryptError) {
     return reply.send({ code: -1, msg: err.message });
   }
-  reply.send(err);
+  const status = Number(err?.statusCode || err?.status || 500);
+  // 5xx 不回传原始 message：SQL 片段、表名、约束名、内部路径都可能被客户端拿到
+  console.error('[backend] 未处理异常:', err?.message || err);
+  if (status >= 400 && status < 500) {
+    return reply.code(status).send({ code: -1, msg: String(err?.message || '请求处理失败').slice(0, 200) });
+  }
+  return reply.code(500).send({ code: -1, msg: '服务器内部错误' });
 });
 
 // 响应压缩：统计数据集、证书详情（含 base64 PFX）等大 JSON 明文传输体积降 60–80%
@@ -134,6 +142,8 @@ await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024, files: 1 
 
 // 在线恢复期间只放行读请求与备份接口，写请求统一 503
 app.addHook('onRequest', async (req: any, reply: any) => {
+  // 先同步其他副本写入的维护标志（节流 1s），再判断是否拦截
+  await refreshMaintenance();
   if (!isMaintenance()) return;
   if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
   const url = String(req.raw?.url || '').split('?')[0];
@@ -217,16 +227,18 @@ if (bootState !== 'not_installed') {
 }
 // 供账号凭据加解密使用（AES-256-GCM，密钥由 sys_key 派生）
 setSecretKey(sysKey);
-// 业务令牌默认 7 天过期；TOTP 预令牌单独指定 5 分钟。显式限定 HS256，避免算法混淆
+// 业务令牌默认 7 天过期（可通过 DNSMGR_JWT_TTL 缩短，如 12h）；TOTP 预令牌单独指定 5 分钟。
+// 显式限定 HS256，避免算法混淆
+const jwtTtl = String(process.env.DNSMGR_JWT_TTL || '7d');
 await app.register(jwt, {
   secret: sysKey,
-  sign: { algorithm: 'HS256', expiresIn: '7d' },
+  sign: { algorithm: 'HS256', expiresIn: jwtTtl },
   verify: { algorithms: ['HS256'] },
 });
 
-// 每次请求校验账号状态与权限；用 10 秒短缓存避免高频查库
+// 每次请求校验账号状态与权限；用短缓存避免高频查库（封禁/改密延迟上限即该值）
 const authUserCache = new Map<number, { user: any; at: number }>();
-const AUTH_USER_CACHE_MS = 10_000;
+const AUTH_USER_CACHE_MS = 2000;
 
 (app as any).decorate('authenticate', async function (req: any, reply: any) {
   try {
@@ -273,6 +285,13 @@ const AUTH_USER_CACHE_MS = 10_000;
     authUserCache.delete(uid);
     return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
   }
+  // 单会话吊销：登出后 jti 进入吊销表，未过期的同一令牌不得继续使用
+  const jti = String(req.user.jti || '');
+  if (jti && (await isTokenRevoked(jti))) {
+    return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
+  }
+  // 保险库会话绑定 jti：下游私有凭证解密通过请求上下文取当前会话密钥
+  enterRequestContext({ uid, jti });
   return undefined;
 });
 
@@ -288,7 +307,10 @@ if (installed) {
   try {
     await migrate();
   } catch (e: any) {
-    console.error('[dnsmgr-backend] 迁移失败:', e?.message);
+    // 迁移失败意味着表结构不完整（缺列会导致鉴权/限流/归属判断持续 500），
+    // 必须 fail-fast 交给编排层重启，而不是继续注册业务路由带病服务。
+    console.error('[dnsmgr-backend] 数据库迁移失败，终止启动：', e?.message || e);
+    process.exit(1);
   }
   // 系统代理配置在启动时应用到全局 fetch；保存设置时还会再次刷新
   await refreshGlobalProxyDispatcher().catch((e: any) =>
@@ -433,13 +455,15 @@ try {
     console.log('[dnsmgr-backend] SSL证书续签调度器已启动');
 
     // CDN 数据统计缓存：按服务商数据粒度（近 30 天按天、近 48 小时按小时）定时拉取落库
-    let statCacheLast = 0;
     setInterval(
       distributed('statcache', async () => {
         if (!(await isStatCacheEnabled())) return;
         const interval = await getStatCacheIntervalMs();
-        if (Date.now() - statCacheLast < interval) return;
-        statCacheLast = Date.now();
+        // 以数据库中的上次刷新时间判定，而不是进程内时间戳：
+        // 否则每个副本各跑一遍，上游统计调用量随副本数线性放大。
+        const last = String((await configGet('cdn_stats_cache_last', '')) || '');
+        const lastMs = last ? new Date(last.replace(' ', 'T')).getTime() : 0;
+        if (Number.isFinite(lastMs) && lastMs > 0 && Date.now() - lastMs < interval) return;
         const r = await refreshAllStatCache();
         if (r.errors.length) console.error('[cdn-stats-cache] 部分账户刷新失败:', r.errors.join('；'));
         else console.log(`[cdn-stats-cache] 已刷新 ${r.accounts} 个账户统计`);

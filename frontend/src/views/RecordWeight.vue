@@ -95,6 +95,8 @@ const showEdit = ref(false);
 const editBusy = ref(false);
 const saveBusy = ref(false);
 const current = ref<any>(null);
+// 请求序号：避免慢网下上一个记录的响应覆盖当前弹窗
+let editSeq = 0;
 const records = ref<any[]>([]);
 const weights = reactive<Record<string, number>>({});
 
@@ -149,12 +151,14 @@ async function toggle(r: any) {
 
 async function openEdit(r: any) {
   current.value = r;
+  const seq = ++editSeq;
   records.value = [];
   for (const k of Object.keys(weights)) delete weights[k];
   showEdit.value = true; // 先开弹窗，立即给出视觉响应
   editBusy.value = true;
   try {
     const res = await api<any>('GET', `/domains/${domainId}/records`, { subdomain: r.rr, pagesize: 100 });
+    if (seq !== editSeq) return;
     records.value = res.code === 0 ? res.data?.list || [] : [];
     for (const rec of records.value) weights[rec.RecordId] = Number(rec.Weight || 1);
   } finally {
@@ -165,20 +169,25 @@ async function openEdit(r: any) {
 async function saveWeights() {
   if (!current.value) return;
   saveBusy.value = true;
-  const res = await api('POST', `/domains/${domainId}/weight`, {
-    act: 'update',
-    subdomain: current.value.rr,
-    status: '1',
-    type: current.value.Type,
-    line: current.value.Line,
-    weight: { ...weights },
-  });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/domains/${domainId}/weight`, {
+      act: 'update',
+      subdomain: current.value.rr,
+      status: '1',
+      type: current.value.Type,
+      line: current.value.Line,
+      weight: { ...weights },
+    });
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 async function loadDomainName() {

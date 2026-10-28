@@ -127,6 +127,21 @@ export function assertSafeHostname(host: string, label = '主机名'): string {
   return h;
 }
 
+// 非 HTTP 协议（SSH/FTP/面板）无法走 safeFetch：至少阻断云元数据地址，
+// 避免部署凭据被诱导去探测/读取云主机临时凭据。内网面板仍按设计允许。
+export async function assertNotMetadataHost(host: string): Promise<void> {
+  const h = String(host || '').replace(/^\[|\]$/g, '').trim();
+  if (!h) return;
+  if (net.isIP(h)) {
+    if (isMetadataIp(h)) throw new Error('禁止连接云元数据地址：' + host);
+    return;
+  }
+  const addrs = await lookup(h, { all: true }).catch(() => []);
+  for (const a of addrs) {
+    if (isMetadataIp(a.address)) throw new Error('禁止连接云元数据地址：' + host);
+  }
+}
+
 // 部署商目标地址防护：允许内网/局域网面板（自建与内网部署是核心功能），
 // 但禁止指向链路本地/云元数据地址，避免凭据被诱导窃取。
 export async function assertDeployTargetAllowed(raw: string): Promise<void> {

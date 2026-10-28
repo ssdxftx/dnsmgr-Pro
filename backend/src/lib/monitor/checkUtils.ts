@@ -34,7 +34,11 @@ function getIpForcingAgent(host: string, ip: string, family: number): Agent {
   });
   if (ipAgentCache.size >= 200) {
     const oldest = ipAgentCache.keys().next().value;
-    if (oldest !== undefined) ipAgentCache.delete(oldest);
+    if (oldest !== undefined) {
+      // 淘汰时必须关闭，否则底层 socket 池泄漏
+      ipAgentCache.get(oldest)?.close().catch(() => undefined);
+      ipAgentCache.delete(oldest);
+    }
   }
   ipAgentCache.set(key, agent);
   return agent;

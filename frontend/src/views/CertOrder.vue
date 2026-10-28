@@ -459,10 +459,12 @@ function copyText(key: 'crt' | 'key') {
 
 function downloadBlob(filename: string, blob: Blob) {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
+  const url = URL.createObjectURL(blob);
+  a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(a.href);
+  // 立即 revoke 会让部分浏览器（Safari/Firefox）中断下载，延迟释放
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 function downloadCert() {

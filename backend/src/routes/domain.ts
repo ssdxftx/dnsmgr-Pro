@@ -1,12 +1,12 @@
 import type { FastifyInstance } from 'fastify';
 import net from 'node:net';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, withTransaction } from '../db.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, sameDomain, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
 import { detectCloudflareProxy } from '../lib/dns/cloudflare.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig } from '../lib/secret.js';
-import { findAnyVaultDekForUser } from '../lib/vault/service.js';
+import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { getVisibleAccount } from '../lib/accounts/visibility.js';
@@ -26,7 +26,8 @@ function recFull(name: string | undefined | null, domain: string): string {
 
 async function accountConfigOf(acct: any): Promise<Record<string, any>> {
   if (acct?.visibility === 'private') {
-    const dek = await findAnyVaultDekForUser(Number(acct.owner_uid));
+    // 必须绑定当前会话：没有本会话解锁记录时按「已锁定」处理
+    const dek = await findVaultDekForRequest(Number(acct.owner_uid));
     const { config, state } = readAccountConfig(acct.config, dek);
     if (state === 'locked') throw new ConfigDecryptError('保险库已锁定，请先解锁');
     if (state === 'error') throw new ConfigDecryptError('私有账户凭证无法解密，请重新填写');
@@ -560,14 +561,17 @@ export default async function domainRoutes(app: FastifyInstance) {
     const names = await query(`SELECT name FROM ${table('domain')} WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
     await clearDomainPermissions((names as any[]).map((r) => r.name));
     const ph = ids.map(() => '?').join(',');
-    await query(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('cert_cname')} WHERE did IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('cert_link_log')} WHERE did IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('domain_alias')} WHERE did IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('dmtask')} WHERE did IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('sctask')} WHERE did IN (${ph})`, ids);
-    await query(`DELETE FROM ${table('dns_check_task')} WHERE did IN (${ph})`, ids);
+    // 多表级联删除必须原子执行：中途失败会留下「域名已删但任务/别名残留」的孤儿数据
+    await withTransaction(async (q) => {
+      await q(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('cert_cname')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('cert_link_log')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('domain_alias')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('dmtask')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('sctask')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('dns_check_task')} WHERE did IN (${ph})`, ids);
+    });
     audit(req, {
       targetType: 'domain',
       summary: `批量删除 ${ids.length} 个域名`,

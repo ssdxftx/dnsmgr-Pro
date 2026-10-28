@@ -550,8 +550,10 @@ export default async function certRoutes(app: FastifyInstance) {
       // ignore
     }
     const doms = (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [id])).map((r: any) => r.domain);
-    await query(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [id]);
-    await query(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
+    await withTransaction(async (q) => {
+      await q(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [id]);
+      await q(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
+    });
     audit(req, {
       targetType: 'cert_order',
       targetId: id,

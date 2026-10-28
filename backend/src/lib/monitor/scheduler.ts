@@ -51,18 +51,27 @@ async function tick(): Promise<void> {
     [now]
   );
 
-  for (const row of rows) {
-    // 等待任务完成再推进 checknexttime，避免任务耗时超过 frequency 时重叠执行
-    await runMonitorTask(row);
-    // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期
-    const doneAt = Math.floor(Date.now() / 1000);
-    await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
-      doneAt,
-      doneAt + (row.frequency || 60),
-      row.id,
-    ]);
-    count++;
-  }
+  // 任务并发执行：串行时一个慢任务（含最长 15s 的通知渠道）会拖住整轮，
+  // 导致后续任务频繁错过检查窗口。并发度可通过 DNSMGR_MONITOR_CONCURRENCY 调整。
+  const concurrency = Math.max(1, Math.min(8, Number(process.env.DNSMGR_MONITOR_CONCURRENCY || 3) || 3));
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const idx = cursor++;
+      if (idx >= rows.length) return;
+      const row = rows[idx];
+      await runMonitorTask(row);
+      // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期
+      const doneAt = Math.floor(Date.now() / 1000);
+      await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
+        doneAt,
+        doneAt + (row.frequency || 60),
+        row.id,
+      ]);
+      count++;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));
 
   // 心跳写库降频：仅在计数变化或距上次写入超过 30s 时落库，避免每秒 2 次无条件写
   const nowMs = Date.now();

@@ -2,6 +2,14 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import pkg from './package.json' with { type: 'json' };
 
+// 开发/预览隧道域名改为显式放行：通配整个 trycloudflare.com 会把任意临时隧道
+// 当作可信 Host，扩大 DNS rebinding 面。需要时通过 VITE_ALLOWED_HOSTS 追加。
+const extraAllowedHosts = (process.env.VITE_ALLOWED_HOSTS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedHosts = ['.monkeycode-ai.online', ...extraAllowedHosts];
+
 export default defineConfig({
   plugins: [vue()],
   define: {
@@ -40,13 +48,13 @@ export default defineConfig({
   preview: {
     port: 4173,
     host: '0.0.0.0',
-    allowedHosts: ['.monkeycode-ai.online', '.trycloudflare.com'],
+    allowedHosts,
   },
   server: {
     port: 5173,
     host: '0.0.0.0',
-    // 本地预览：除平台域名外，允许 Cloudflare 快速隧道域名
-    allowedHosts: ['.monkeycode-ai.online', '.trycloudflare.com'],
+    // 本地预览：仅放行平台域名；隧道域名通过 VITE_ALLOWED_HOSTS 显式追加
+    allowedHosts,
     proxy: {
       '/api': {
         target: 'http://localhost:8082',

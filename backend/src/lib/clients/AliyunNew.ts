@@ -1,6 +1,6 @@
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { fetch as undiciFetch } from 'undici';
-import { pinnedDispatcherFor, isMetadataIp } from '../netGuard.js';
+import { pinnedDispatcherFor, isPrivateIp } from '../netGuard.js';
 
 export class AliyunNew {
   private AccessKeyId: string;
@@ -49,15 +49,21 @@ export class AliyunNew {
     const qs = this.buildQuery(query);
     if (qs) url += '?' + qs;
 
-    // Endpoint 来自部署配置：校验目标并 pin 解析 IP，避免链路本地/云元数据与 DNS 重绑定
-    const dispatcher = await pinnedDispatcherFor(new URL(url).hostname, isMetadataIp, '禁止访问链路本地/云元数据地址');
+    // Endpoint 来自部署配置：校验目标并 pin 解析 IP，避免链路本地/云元数据与 DNS 重绑定。
+    // 部署商接口不应返回重定向；显式禁止跟随，避免跳转后的新 host 回退系统 DNS 绕过 pin。
+    const dispatcher = await pinnedDispatcherFor(new URL(url).hostname, isPrivateIp, '禁止访问内网地址');
     const res = await undiciFetch(url, {
       method,
       headers,
       body: body || undefined,
+      redirect: 'manual',
       signal: AbortSignal.timeout(15000),
       ...(dispatcher ? { dispatcher } : {}),
     } as any);
+    if (res.status >= 300 && res.status < 400) {
+      await res.body?.cancel().catch(() => undefined);
+      throw new Error(`接口返回异常重定向（HTTP ${res.status}），已拒绝跟随`);
+    }
     const text = await res.text();
     let arr: any = null;
     try {

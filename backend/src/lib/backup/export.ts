@@ -11,6 +11,7 @@ import { ensureBackupKey, getBackupKey } from './key.js';
 import { encodeRow, EXCLUDE_COLUMNS, TABLES, type BackupTable } from './manifest.js';
 import { readSnapshot, type SnapshotRead } from './snapshot.js';
 import { withDistributedLockResult } from '../scheduler/distLock.js';
+import { isTempActive } from './tmpRegistry.js';
 
 export interface ExportOptions {
   scope: 'site' | 'user';
@@ -511,8 +512,11 @@ export async function cleanTmpFiles(): Promise<void> {
     for (const f of files) {
       if (item.onlyTmp && !f.endsWith('.tmp')) continue;
       const p = path.join(item.dir, f);
+      // 跳过正在进行中的导入/导出/恢复写入的临时文件
+      if (isTempActive(p)) continue;
       const st = await stat(p).catch(() => null);
-      if (st && now - st.mtimeMs > 3600_000) await unlink(p).catch(() => undefined);
+      // 6 小时兜底：大库备份可能持续很久，1 小时窗口容易误删仍在使用的文件
+      if (st && now - st.mtimeMs > 6 * 3600_000) await unlink(p).catch(() => undefined);
     }
   }
 }

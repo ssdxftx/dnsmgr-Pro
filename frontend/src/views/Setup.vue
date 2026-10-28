@@ -213,11 +213,16 @@ async function doImport() {
   importBusy.value = true;
   try {
     const fd = new FormData();
-    fd.append('file', importFile.value);
-    fd.append('install_token', installToken.value);
+    // 字段必须在文件之前追加：multipart 字段只有在文件流被消费后才可读
     if (importKey.value) fd.append('backup_key', importKey.value);
     if (importPass.value) fd.append('passphrase', importPass.value);
-    const res = await fetch('/api/setup/import', { method: 'POST', body: fd });
+    fd.append('file', importFile.value);
+    // 安装令牌走请求头，服务端可在落盘前完成校验
+    const res = await fetch('/api/setup/import', {
+      method: 'POST',
+      headers: { 'x-install-token': installToken.value },
+      body: fd,
+    });
     const json = await res.json();
     if (json.code !== 0) return message.error(json.msg || t('setup.importFailed'));
     message.success(t('setup.importDone'));

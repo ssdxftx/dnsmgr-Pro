@@ -14,6 +14,9 @@ export class K8sDeploy implements DeployProvider {
     this.kubeconfig = config.kubeconfig || '';
     // 默认校验证书；确需连接自签名集群时可显式开启 insecure
     this.insecure = config.insecure === true || config.insecure === '1' || config.insecure === 1;
+    if (this.insecure && process.env.DNSMGR_ALLOW_INSECURE_DEPLOY !== '1') {
+      throw new Error('已禁止关闭证书校验：如确需连接自签名集群，请设置 DNSMGR_ALLOW_INSECURE_DEPLOY=1 后重启服务');
+    }
   }
 
   // K8s 资源名遵循 DNS-1123：仅小写字母、数字、- 与 .，用白名单阻止路径/查询注入

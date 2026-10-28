@@ -4,6 +4,7 @@ import { posix } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
 import { applyHostKeyVerification } from '../sshHostKey.js';
+import { assertNotMetadataHost } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 // 远端部署目标路径安全约束：禁止路径穿越；可通过 DNSMGR_SSH_DEPLOY_DIRS 提供目录白名单；
@@ -82,7 +83,7 @@ export class SshDeploy implements DeployProvider {
     if (this.logger) this.logger(txt);
   }
 
-  private connect(): Promise<Client> {
+  private async connect(): Promise<Client> {
     const cfg = this.config;
     if (!cfg.host || !cfg.username) throw new Error('必填参数不能为空');
     if (cfg.auth === '1' && !cfg.privatekey) throw new Error('私钥不能为空');
@@ -99,6 +100,8 @@ export class SshDeploy implements DeployProvider {
     } else {
       connectConfig.password = cfg.password;
     }
+    // 禁止把部署凭据发往云元数据地址（SSH 不走 safeFetch，需单独校验）
+    await assertNotMetadataHost(String(cfg.host));
     // 如配置了主机密钥指纹/公钥则严格校验，防止中间人攻击
     applyHostKeyVerification(connectConfig, cfg);
 
@@ -163,10 +166,11 @@ export class SshDeploy implements DeployProvider {
     const conn = await this.connect();
     try {
       if (config.cmd_pre) {
-        assertCommandAllowed();
         for (const raw of String(config.cmd_pre).split('\n')) {
           const cmd = raw.trim();
-          if (cmd) await this.exec(conn, cmd);
+          if (!cmd) continue;
+          assertCommandAllowed(cmd);
+          await this.exec(conn, cmd);
         }
       }
       if (config.format === 'pem') {
@@ -187,10 +191,11 @@ export class SshDeploy implements DeployProvider {
         throw new Error('未知的证书格式：' + String(config.format || '(空)'));
       }
       if (config.cmd) {
-        assertCommandAllowed();
         for (const raw of String(config.cmd).split('\n')) {
           const cmd = raw.trim();
-          if (cmd) await this.exec(conn, cmd);
+          if (!cmd) continue;
+          assertCommandAllowed(cmd);
+          await this.exec(conn, cmd);
         }
       }
     } finally {

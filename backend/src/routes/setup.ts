@@ -10,8 +10,9 @@ import { setSecretKey } from '../lib/secret.js';
 import { importArchive } from '../lib/backup/import.js';
 import { setMaintenance } from '../lib/backup/maintenance.js';
 import { keyForArchive } from '../lib/backup/key.js';
-import { fieldValue, saveUpload } from '../lib/backup/upload.js';
+import { fieldValue, saveUpload, releaseTemp } from '../lib/backup/upload.js';
 import { verifySetupToken } from '../lib/setupToken.js';
+import { publicError } from '../lib/util.js';
 
 function parseDbConfig(body: any): DbConfig {
   const base = getDbConfig();
@@ -46,18 +47,20 @@ export default async function setupRoutes(app: FastifyInstance) {
     const sqliteCfg: DbConfig = { ...cfg, db_type: 'sqlite', db_file: '' };
     const sqlitePathCfg = cfg.db_type === 'sqlite' && cfg.db_file ? cfg : sqliteCfg;
     const installed = state === 'installed';
+    // 仅未安装状态才需要向安装向导展示容器内路径；unknown（数据库不可用）同样是匿名可访问，
+    // 绝不能借该状态泄露数据目录与 SQLite 绝对路径。
+    const fresh = state === 'not_installed';
     return {
       code: 0,
       data: {
         installed,
         db_type: cfg.db_type,
         data_persistent: persistence.persistent,
-        // 已安装站点不再向匿名调用方暴露容器内绝对路径
-        data_dir: installed ? '' : persistence.dataDir,
+        data_dir: fresh ? persistence.dataDir : '',
         sqlite_available: persistence.persistent,
-        sqlite_path: installed ? '' : resolveSqliteFile(sqlitePathCfg),
-        sqlite_reason: installed ? '' : persistence.reason,
-        default_db_type: installed ? cfg.db_type : persistence.persistent ? 'sqlite' : 'mysql',
+        sqlite_path: fresh ? resolveSqliteFile(sqlitePathCfg) : '',
+        sqlite_reason: fresh ? persistence.reason : '',
+        default_db_type: fresh ? (persistence.persistent ? 'sqlite' : 'mysql') : cfg.db_type,
       },
     };
   });
@@ -143,12 +146,16 @@ export default async function setupRoutes(app: FastifyInstance) {
     const cfg = getDbConfig();
     let tmp = '';
     try {
-      const up = await saveUpload(req);
-      tmp = up.file;
-      const token = String(fieldValue(up.fields, 'install_token') || '');
+      // 令牌必须在落盘前校验：saveUpload 会把最多 200MB 的请求体写入数据卷，
+      // 若先落盘再验令牌，未认证请求可用 15 次/分钟的配额持续写入临时文件耗尽磁盘。
+      // 令牌只从请求头读取（multipart 字段必须等文件流消费完才可读）。
+      const token = String(req.headers['x-install-token'] || req.headers['install-token'] || '');
+      if (!token) return { code: -1, msg: '缺少安装令牌' };
       if (!consumeInstallToken(token, dbIdentity(cfg))) {
         return { code: -1, msg: '导入令牌无效或已过期，请跳过此步' };
       }
+      const up = await saveUpload(req);
+      tmp = up.file;
       // 安装后 sys_key 才写入数据库，必须刷新缓存并重置进程内密钥，否则导入时写入的密文重启后无法解密
       await loadConfig(true);
       setSecretKey(await getSysKey());
@@ -188,9 +195,12 @@ export default async function setupRoutes(app: FastifyInstance) {
       setTimeout(() => process.exit(0), 800);
       return { code: 0, msg: '导入完成，应用即将重启', data: report };
     } catch (e: any) {
-      return reply.send({ code: -1, msg: String(e?.message || e) });
+      return reply.send({ code: -1, msg: publicError(e) });
     } finally {
-      if (tmp) await unlink(tmp).catch(() => undefined);
+      if (tmp) {
+        releaseTemp(tmp);
+        await unlink(tmp).catch(() => undefined);
+      }
     }
   });
 }

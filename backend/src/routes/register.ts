@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { randomBytes, randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { sendMail } from '../lib/monitor/msgNotice.js';
@@ -115,12 +115,18 @@ export default async function registerRoutes(app: FastifyInstance) {
           [email]
         );
         if (latest) {
-          const attempts = Number(latest.attempts || 0) + 1;
-          if (attempts >= MAX_VERIFY_ATTEMPTS) {
-            await query(`UPDATE ${table('reg_verify')} SET attempts = ?, used = 1 WHERE id = ?`, [attempts, latest.id]);
+          // 原子累加：并发错误请求不会互相覆盖计数；达到上限时同一条语句作废验证码
+          await query(
+            `UPDATE ${table('reg_verify')}
+                SET used = CASE WHEN attempts + 1 >= ? THEN 1 ELSE used END,
+                    attempts = attempts + 1
+              WHERE id = ?`,
+            [MAX_VERIFY_ATTEMPTS, latest.id]
+          );
+          const cur = await queryOne<any>(`SELECT attempts, used FROM ${table('reg_verify')} WHERE id = ?`, [latest.id]);
+          if (Number(cur?.attempts || 0) >= MAX_VERIFY_ATTEMPTS || Number(cur?.used || 0) === 1) {
             return { code: -1, msg: '验证码错误次数过多，请重新获取验证码' };
           }
-          await query(`UPDATE ${table('reg_verify')} SET attempts = ? WHERE id = ?`, [attempts, latest.id]);
         }
         return { code: -1, msg: '验证码错误或已过期' };
       }
@@ -161,7 +167,7 @@ export default async function registerRoutes(app: FastifyInstance) {
       );
       newId = Number(ins?.insertId || 0);
     } catch (e: any) {
-      if (e?.code === 'ER_DUP_ENTRY') return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
+      if (isDuplicateError(e)) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
       throw e;
     }
     await query(`INSERT INTO ${table('log')} (uid, action, data, addtime) VALUES (?, '用户注册', ?, NOW())`, [newId, 'IP:' + (req.ip || '')]);

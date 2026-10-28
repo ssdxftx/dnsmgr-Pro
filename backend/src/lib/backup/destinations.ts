@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { readFile, stat, unlink } from 'node:fs/promises';
+import { readFile, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -254,21 +254,30 @@ export async function listRemote(destId: number): Promise<RemoteItem[]> {
 export async function downloadRemote(destId: number, name: string, localPath: string): Promise<void> {
   const row = await getDestination(destId);
   if (!row) throw new Error('备份目的地不存在');
-  if (row.type === 'webdav') {
-    const url = joinUrl(String(row.config.url), name);
-    const res = await webdavFetch(row.config, url, { method: 'GET' });
-    if (res.status === 404) throw new Error(`WebDAV 下载失败：远端文件不存在（${urlPath(url)}）`);
-    if (!res.ok || !res.body) {
-      throw new Error(`WebDAV 下载失败（HTTP ${res.status}，路径 ${urlPath(url)}）${await responseSnippet(res)}`);
+  // 先写临时文件，成功后再原子改名：createWriteStream 默认截断目标文件，
+  // 远端 404/网络中断时调用方的 unlink 会直接销毁本地同名的可用备份。
+  const part = `${localPath}.part-${Date.now().toString(36)}`;
+  try {
+    if (row.type === 'webdav') {
+      const url = joinUrl(String(row.config.url), name);
+      const res = await webdavFetch(row.config, url, { method: 'GET' });
+      if (res.status === 404) throw new Error(`WebDAV 下载失败：远端文件不存在（${urlPath(url)}）`);
+      if (!res.ok || !res.body) {
+        throw new Error(`WebDAV 下载失败（HTTP ${res.status}，路径 ${urlPath(url)}）${await responseSnippet(res)}`);
+      }
+      await pipeline(Readable.fromWeb(res.body as any), createWriteStream(part));
+    } else {
+      const client = await s3Client(row.config);
+      const { GetObjectCommand } = await s3Module();
+      const res = await client.send(new GetObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
+      if (!res.Body) throw new Error('S3 下载失败');
+      await pipeline(res.Body as any, createWriteStream(part));
     }
-    await pipeline(Readable.fromWeb(res.body as any), createWriteStream(localPath));
-    return;
+    await rename(part, localPath);
+  } catch (e) {
+    await unlink(part).catch(() => undefined);
+    throw e;
   }
-  const client = await s3Client(row.config);
-  const { GetObjectCommand } = await s3Module();
-  const res = await client.send(new GetObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
-  if (!res.Body) throw new Error('S3 下载失败');
-  await pipeline(res.Body as any, createWriteStream(localPath));
 }
 
 export async function deleteRemote(destId: number, name: string): Promise<void> {

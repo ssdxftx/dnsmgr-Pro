@@ -23,7 +23,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch, type Component } from 'vue';
+import { computed, onMounted, onUnmounted, ref, watch, type Component } from 'vue';
 import { NIcon } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
 
@@ -85,6 +85,11 @@ const points = computed(() => {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(' ');
+});
+
+onUnmounted(() => {
+  // 组件卸载后继续跑动画会持续占用主线程
+  cancelAnimationFrame(raf);
 });
 
 onMounted(() => {

@@ -60,6 +60,15 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
     fn: (read: (sql: string, params?: any[]) => Promise<any[]>) => Promise<T>,
   ): Promise<T> {
     const conn = await pool.getConnection();
+    // 记录并恢复会话隔离级别：连接会被放回池中复用，若不还原会把 REPEATABLE READ
+    // 带到后续事务，改变服务器默认隔离语义并引入长快照读与锁等待。
+    let prevIsolation = '';
+    try {
+      const [rows] = await conn.query('SELECT @@session.transaction_isolation AS iso');
+      prevIsolation = String((rows as any[])[0]?.iso || '');
+    } catch {
+      // 旧版本 MySQL 无该变量，退化为固定还原
+    }
     try {
       await conn.query('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
       await conn.query('START TRANSACTION WITH CONSISTENT SNAPSHOT');
@@ -74,6 +83,10 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
       await conn.query('ROLLBACK').catch(() => undefined);
       throw e;
     } finally {
+      const restore = /SERIALIZABLE|READ COMMITTED|READ UNCOMMITTED/i.test(prevIsolation)
+        ? prevIsolation.toUpperCase()
+        : 'READ COMMITTED';
+      await conn.query(`SET SESSION TRANSACTION ISOLATION LEVEL ${restore}`).catch(() => undefined);
       conn.release();
     }
   }

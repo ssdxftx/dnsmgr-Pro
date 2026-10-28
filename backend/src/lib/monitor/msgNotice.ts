@@ -354,7 +354,7 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
   }
 }
 
-export async function sendExpireNotice(day: number, list: { name: string; expiretime: string }[]): Promise<void> {
+export async function sendExpireNotice(day: number, list: { name: string; expiretime: string }[]): Promise<number> {
   const title = `您有${list.length}个域名即将在${day}天后到期`;
   let content = `尊敬的用户，您好：您有${list.length}个域名即将在${day}天后到期！<br/><b>域名&到期时间：</b><br/>`;
   for (const d of list) content += `<b>${esc(d.name)}</b> - ${esc(d.expiretime)}<br/>`;
@@ -366,57 +366,91 @@ export async function sendExpireNotice(day: number, list: { name: string; expire
     return v === '1' || v === '2';
   };
 
+  // 每个渠道独立 try/catch：某一个渠道抛错不能阻断后续渠道，
+  // 也不能让已成功的渠道在下一轮被重复投递。
+  let ok = 0;
+  const failed: string[] = [];
+  const attempt = async (name: string, p: Promise<boolean | string>) => {
+    try {
+      const r = await p;
+      if (r === true) ok++;
+      else failed.push(`${name}:${String(r || '发送失败')}`);
+    } catch (e: any) {
+      failed.push(`${name}:${String(e?.message || e)}`);
+    }
+  };
+
   if (await on('expire_notice_mail')) {
     const to = (await configGet('mail_recv')) || (await configGet('mail_name')) || '';
-    if (to) await sendMail(to, title, content);
+    if (to) await attempt('mail', sendMail(to, title, content));
+    else failed.push('mail:未配置收件人');
   }
   if (await on('expire_notice_wxtpl')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**'));
-    await sendWechat(title, c);
+    await attempt('wechat', sendWechat(title, c));
   }
   if (await on('expire_notice_tgbot')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n'));
-    await sendTelegram(`<strong>${title}</strong>\n${c}`);
+    await attempt('telegram', sendTelegram(`<strong>${title}</strong>\n${c}`));
   }
   if (await on('expire_notice_qqbot')) {
-    await sendQqbot(title, content);
+    await attempt('qqbot', sendQqbot(title, content));
   }
   if ((await configGet('expire_notice_webhook')) === '1') {
     const c = content.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
-    await sendWebhook(title, c);
+    await attempt('webhook', sendWebhook(title, c));
   }
   if ((await configGet('expire_notice_custom_webhook')) === '1') {
-    await sendCustomWebhook(title, content);
+    await attempt('custom_webhook', sendCustomWebhook(title, content));
   }
+  if (failed.length) console.warn('[notice] 到期提醒部分渠道发送失败：' + failed.join('；'));
+  return ok;
 }
 
-async function certSend(title: string, content: string, result: boolean): Promise<void> {
+async function certSend(title: string, content: string, result: boolean): Promise<boolean> {
   const on = async (key: string) => {
     const v = await configGet(key, '0');
     return v === '1' || (v === '2' && !result);
   };
+  // 逐渠道记录结果：任一渠道抛错/返回错误不能让「已发送」被无条件置位，
+  // 否则证书签发/部署告警会永久丢失。
+  const failed: string[] = [];
+  const attempt = async (name: string, p: Promise<boolean | string>) => {
+    try {
+      const r = await p;
+      if (r !== true) failed.push(`${name}:${String(r || '未配置或发送失败')}`);
+    } catch (e: any) {
+      failed.push(`${name}:${String(e?.message || e)}`);
+    }
+  };
   if (await on('cert_notice_mail')) {
     const to = (await configGet('mail_recv')) || (await configGet('mail_name')) || '';
-    if (to) await sendMail(to, title, content);
+    if (to) await attempt('mail', sendMail(to, title, content));
+    else failed.push('mail:未配置收件人');
   }
   if (await on('cert_notice_wxtpl')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**'));
-    await sendWechat(title, c);
+    await attempt('wechat', sendWechat(title, c));
   }
   if (await on('cert_notice_tgbot')) {
     const c = stripTags(content.replace(/<br\/>/g, '\n'));
-    await sendTelegram(`<strong>${title}</strong>\n${c}`);
+    await attempt('telegram', sendTelegram(`<strong>${title}</strong>\n${c}`));
   }
   if (await on('cert_notice_qqbot')) {
-    await sendQqbot(title, content);
+    await attempt('qqbot', sendQqbot(title, content));
   }
   if ((await configGet('cert_notice_webhook')) === '1') {
     const c = content.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
-    await sendWebhook(title, c);
+    await attempt('webhook', sendWebhook(title, c));
   }
   if (await on('cert_notice_custom_webhook')) {
-    await sendCustomWebhook(title, content);
+    await attempt('custom_webhook', sendCustomWebhook(title, content));
   }
+  if (failed.length) {
+    console.warn('[notice] 证书通知部分渠道发送失败：' + failed.join('；'));
+    return false;
+  }
+  return true;
 }
 
 export async function certOrderSend(orderId: number, result: boolean): Promise<void> {
@@ -445,8 +479,10 @@ export async function certOrderSend(orderId: number, result: boolean): Promise<v
   }
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
-  await certSend(title, content, result);
-  await query(`UPDATE ${table('cert_order')} SET issend = 1 WHERE id = ?`, [orderId]);
+  const sent = await certSend(title, content, result);
+  // 全部渠道成功才标记已发送，否则保留 issend=0 供下一轮重试
+  if (sent) await query(`UPDATE ${table('cert_order')} SET issend = 1 WHERE id = ?`, [orderId]);
+  else console.warn(`[notice] 证书订单 ${orderId} 通知未全部发送成功，保留待重试`);
 }
 
 export async function certDeploySend(deployId: number, result: boolean): Promise<void> {
@@ -469,8 +505,9 @@ export async function certDeploySend(deployId: number, result: boolean): Promise
   }
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
-  await certSend(title, content, result);
-  await query(`UPDATE ${table('cert_deploy')} SET issend = 1 WHERE id = ?`, [deployId]);
+  const sent = await certSend(title, content, result);
+  if (sent) await query(`UPDATE ${table('cert_deploy')} SET issend = 1 WHERE id = ?`, [deployId]);
+  else console.warn(`[notice] 证书部署 ${deployId} 通知未全部发送成功，保留待重试`);
 }
 
 type CheckResultLike = { status: boolean; errmsg: string | null };

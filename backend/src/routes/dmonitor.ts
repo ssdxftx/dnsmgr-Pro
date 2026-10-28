@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
@@ -164,10 +164,16 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     const exists = await queryOne(`SELECT id FROM ${table('dmtask')} WHERE recordid = ?`, [task.recordid]);
     if (exists) return { code: -1, msg: '当前容灾切换策略已存在' };
 
-    await query(
-      `INSERT INTO ${table('dmtask')} (did, rr, recordid, type, main_value, backup_value, checktype, checkurl, tcpport, frequency, cycle, timeout, proxy, cdn, remark, recordinfo, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [task.did, task.rr, task.recordid, task.type, task.main_value, task.backup_value, task.checktype, task.checkurl, task.tcpport, task.frequency, task.cycle, task.timeout, task.proxy, task.cdn, task.remark, task.recordinfo, task.addtime, task.active, Number(req.user.uid)]
-    );
+    try {
+      await query(
+        `INSERT INTO ${table('dmtask')} (did, rr, recordid, type, main_value, backup_value, checktype, checkurl, tcpport, frequency, cycle, timeout, proxy, cdn, remark, recordinfo, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [task.did, task.rr, task.recordid, task.type, task.main_value, task.backup_value, task.checktype, task.checkurl, task.tcpport, task.frequency, task.cycle, task.timeout, task.proxy, task.cdn, task.remark, task.recordinfo, task.addtime, task.active, Number(req.user.uid)]
+      );
+    } catch (e: any) {
+      // 唯一索引兜底：并发双击时先用后插的窗口被数据库拦下
+      if (isDuplicateError(e)) return { code: -1, msg: '当前容灾切换策略已存在' };
+      throw e;
+    }
     return { code: 0, msg: '添加成功' };
   });
 

@@ -993,13 +993,19 @@ const columns = computed<any[]>(() => [
 
 async function loadDomains() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/cdn/domains');
-  domains.value = res.code === 0 ? res.data : [];
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/cdn/domains');
+    domains.value = res.code === 0 ? res.data : [];
+  } catch {
+    domains.value = [];
+  } finally {
+    // 网络异常也必须复位，否则列表永久转圈
+    loadBusy.value = false;
+  }
 }
 
 async function loadAccounts() {
-  const res = await api<any>('GET', '/cdn/accounts');
+  const res = await api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] } as any));
   if (res.code === 0) {
     accountOptions.value = res.data.map((a: any) => ({ label: `${a.id} - ${a.typename}（${a.name}）`, value: a.id }));
     for (const a of res.data) accountTypes.value[a.id] = a.type;
@@ -1301,8 +1307,15 @@ async function openLinkDialog(target: { id?: number; name: string }): Promise<st
   const done = new Promise<string | null>((resolve) => {
     linkResolve = resolve;
   });
-  const res = await fetchCandidates(target.name);
-  linkLoadBusy.value = false;
+  let res: any = { code: -1 };
+  try {
+    res = await fetchCandidates(target.name);
+  } catch (e: any) {
+    res = { code: -1, msg: e?.message || t('cdnDomain.fetchCandidatesFailed') };
+  } finally {
+    // 请求抛错时也要结束加载态，否则弹窗内的按钮一直转圈
+    linkLoadBusy.value = false;
+  }
   // 弹窗已在加载期间被关闭则不再覆盖状态
   if (linkResolve) {
     if (res.code !== 0) {

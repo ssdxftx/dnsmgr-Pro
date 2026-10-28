@@ -7,6 +7,9 @@ import { decryptText, encryptText } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
 import { autoUnlockConvenient } from '../lib/vault/service.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
+import { revokeToken } from '../lib/auth/revocation.js';
+import { clearVaultSession } from '../lib/vault/session.js';
+import { requireLoginPassword } from '../lib/reauth.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 const MAX_AUTH_FAILURES = 5;
@@ -23,16 +26,17 @@ function authLocked(value: any): boolean {
   return lockedUntil(value) > Date.now();
 }
 
+// 失败计数必须由数据库原子累加：先在应用层「读旧值 +1 再写绝对值」会让并发请求
+// 都读到同一个旧值并写回同一数字，5 次锁定永远无法触发。
+// 注意 MySQL 的 SET 子句从左到右求值，locked_until 必须写在 login_fail 之前复用旧计数。
 async function recordLoginFailure(user: any): Promise<void> {
-  const fails = Number(user.login_fail || 0) + 1;
-  if (fails >= MAX_AUTH_FAILURES) {
-    await query(`UPDATE ${table('user')} SET login_fail = 0, login_locked_until = ? WHERE id = ?`, [
-      new Date(Date.now() + AUTH_LOCK_MS),
-      user.id,
-    ]);
-  } else {
-    await query(`UPDATE ${table('user')} SET login_fail = ? WHERE id = ?`, [fails, user.id]);
-  }
+  await query(
+    `UPDATE ${table('user')}
+        SET login_locked_until = CASE WHEN login_fail + 1 >= ? THEN ? ELSE login_locked_until END,
+            login_fail = CASE WHEN login_fail + 1 >= ? THEN 0 ELSE login_fail + 1 END
+      WHERE id = ?`,
+    [MAX_AUTH_FAILURES, new Date(Date.now() + AUTH_LOCK_MS), MAX_AUTH_FAILURES, user.id],
+  );
 }
 
 async function clearLoginFailure(uid: number): Promise<void> {
@@ -40,15 +44,13 @@ async function clearLoginFailure(uid: number): Promise<void> {
 }
 
 async function recordTotpFailure(user: any): Promise<void> {
-  const fails = Number(user.totp_fail || 0) + 1;
-  if (fails >= MAX_AUTH_FAILURES) {
-    await query(`UPDATE ${table('user')} SET totp_fail = 0, totp_locked_until = ? WHERE id = ?`, [
-      new Date(Date.now() + AUTH_LOCK_MS),
-      user.id,
-    ]);
-  } else {
-    await query(`UPDATE ${table('user')} SET totp_fail = ? WHERE id = ?`, [fails, user.id]);
-  }
+  await query(
+    `UPDATE ${table('user')}
+        SET totp_locked_until = CASE WHEN totp_fail + 1 >= ? THEN ? ELSE totp_locked_until END,
+            totp_fail = CASE WHEN totp_fail + 1 >= ? THEN 0 ELSE totp_fail + 1 END
+      WHERE id = ?`,
+    [MAX_AUTH_FAILURES, new Date(Date.now() + AUTH_LOCK_MS), MAX_AUTH_FAILURES, user.id],
+  );
 }
 
 async function clearTotpFailure(uid: number): Promise<void> {
@@ -225,6 +227,11 @@ export default async function authRoutes(app: FastifyInstance) {
     if (decoded.type !== 'totp_pre') return totpFail('bad_pre_token', '请重新登录');
     const user = await findUserById(decoded.uid);
     if (!user) return totpFail('user_missing', '用户不存在');
+    // 按账号做分布式限流：仅靠 IP 桶时，攻击者可用大量伪造来源分摊请求，
+    // 对同一账号的 6 位口令形成有效爆破速率。
+    if (!(await hitRateLimitDistributed(`totp:${decoded.uid}`, 10, 60_000))) {
+      return totpFail('totp_rate_limited', '验证尝试过于频繁，请稍后再试', user);
+    }
     if (Number(user.status) === 0) return totpFail('user_disabled', '账号已被禁用', user);
     // 密码/2FA 变更会自增 token_version，旧的预令牌不得继续完成登录
     if (Number(decoded.token_version || 0) !== Number(user.token_version || 0)) {
@@ -232,7 +239,17 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     if (authLocked(user.totp_locked_until)) return totpFail('totp_locked', '动态口令错误', user);
     if (user.totp_open != 1 || !user.totp_secret) return totpFail('totp_not_enabled', '未开启TOTP二次验证', user);
-    const totpSecret = decryptText(user.totp_secret) || '';
+    // 解密失败必须 fail-closed：旧实现 decryptText(user.totp_secret) || '' 会退化为空 HMAC 密钥，
+    // 攻击者只需密码即可离线算出确定性的 6 位码完成登录。
+    let totpSecret = '';
+    try {
+      totpSecret = String(decryptText(user.totp_secret) || '');
+    } catch {
+      totpSecret = '';
+    }
+    if (!totpSecret) {
+      return totpFail('totp_secret_corrupt', '二次验证配置异常，请联系管理员重置', user);
+    }
     if (!verifyTOTP(totpSecret, code)) {
       await recordTotpFailure(user);
       return totpFail('bad_code', '动态口令错误', user);
@@ -297,6 +314,30 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     await query(`UPDATE ${table('user')} SET totp_open = 0, totp_secret = NULL, token_version = token_version + 1 WHERE id = ?`, [req.user.uid]);
     return { code: 0, msg: '已关闭 TOTP 二次验证' };
+  });
+
+  // 服务端登出：把当前 jti 写入吊销表，令牌在过期前立即失效，而不只是清 localStorage
+  app.post('/api/auth/logout', { preHandler: (app as any).authenticate }, async (req: any) => {
+    const uid = Number(req.user.uid);
+    const jti = String(req.user.jti || '');
+    const exp = Number(req.user.exp || 0);
+    if (jti) await revokeToken(jti, uid, exp ? new Date(exp * 1000) : undefined);
+    clearVaultSession(uid, jti || undefined);
+    return { code: 0, msg: '已退出登录' };
+  });
+
+  // 退出全部设备：自增 token_version 使所有已签发令牌失效；需重输密码确认
+  app.post('/api/auth/logout-all', { preHandler: (app as any).authenticate }, async (req: any) => {
+    const uid = Number(req.user.uid);
+    const passwordErr = await requireLoginPassword(uid, req.body?.password);
+    if (passwordErr) return { code: -1, msg: passwordErr };
+    await query(`UPDATE ${table('user')} SET token_version = token_version + 1 WHERE id = ?`, [uid]);
+    // 当前会话立即失效（其他会话最迟在鉴权缓存 TTL 内失效）
+    const jti = String(req.user.jti || '');
+    const exp = Number(req.user.exp || 0);
+    if (jti) await revokeToken(jti, uid, exp ? new Date(exp * 1000) : undefined);
+    clearVaultSession(uid);
+    return { code: 0, msg: '已退出全部设备，请重新登录' };
   });
 
   app.get('/api/auth/me', { preHandler: (app as any).authenticate }, async (req: any) => {

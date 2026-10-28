@@ -145,10 +145,17 @@ function issueInstallToken(identity: string): string {
 }
 
 export function consumeInstallToken(token: string, identity: string): boolean {
-  const hit = installTokens.get(String(token || ''));
+  const id = String(token || '');
+  const hit = installTokens.get(id);
   if (!hit) return false;
-  installTokens.delete(token);
-  if (hit.exp <= Date.now() || hit.identity !== identity) return false;
+  // 必须先用后删：身份不匹配/已过期的请求不能消耗合法令牌，否则攻击者可用错误 identity
+  // 反复使安装令牌失效，阻断正常安装流程。
+  if (hit.exp <= Date.now()) {
+    installTokens.delete(id);
+    return false;
+  }
+  if (hit.identity !== identity) return false;
+  installTokens.delete(id);
   return true;
 }
 

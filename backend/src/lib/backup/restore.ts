@@ -16,9 +16,43 @@ export interface RestoreOptions {
   actor: { uid: number; username: string };
 }
 
+interface RunOptions {
+  archivePath: string;
+  /** 上传归档由调用方按口令/密钥解析后传入；备份目录内的归档不传，使用整站备份密钥 */
+  key?: Buffer;
+  fileName: string;
+  mode: 'replace' | 'merge';
+  actor: { uid: number; username: string };
+}
+
 /** 在线恢复：先自动快照，再进入维护模式执行导入；失败保留维护模式以便重试或回滚 */
 export async function restoreBackup(opts: RestoreOptions): Promise<any> {
+  return runLocked({
+    archivePath: resolveArchivePath(opts.fileName),
+    fileName: opts.fileName,
+    mode: opts.mode,
+    actor: opts.actor,
+  });
+}
+
+/**
+ * 上传的归档（临时文件，未进入备份目录）走同一条恢复流水线。
+ * 这是 replace 导入的唯一入口：维护模式、pre_restore 快照、token_version 自增、
+ * 旧 backup_job 清理都必须与在线恢复保持一致，否则普通管理员可绕过全部恢复保护。
+ */
+export async function restoreFromArchive(opts: {
+  archivePath: string;
+  key: Buffer;
+  fileName: string;
+  mode: 'replace' | 'merge';
+  actor: { uid: number; username: string };
+}): Promise<any> {
+  return runLocked(opts);
+}
+
+async function runLocked(opts: RunOptions): Promise<any> {
   let result: any;
+  // 分布式锁：多副本下同一时刻只允许一个恢复/替换任务，避免维护标志与导入互斥只在单进程生效
   const locked = await withDistributedLock('dnsmgr:backup:restore', async () => {
     result = await runRestore(opts);
   });
@@ -26,9 +60,9 @@ export async function restoreBackup(opts: RestoreOptions): Promise<any> {
   return result;
 }
 
-async function runRestore(opts: RestoreOptions): Promise<any> {
+async function runRestore(opts: RunOptions): Promise<any> {
   if (getRestoreStatus().running) throw new Error('已有恢复任务正在执行');
-  const archivePath = resolveArchivePath(opts.fileName);
+  const archivePath = opts.archivePath;
   const header = (await readArchiveHeader(archivePath)).header;
   if (String(header.scope || '') !== 'site') {
     throw new Error('仅支持恢复整站备份');
@@ -40,7 +74,7 @@ async function runRestore(opts: RestoreOptions): Promise<any> {
     const snapshot = await exportBackup({ scope: 'site', kind: 'pre_restore', includeLogs: true });
     setRestoreStatus({ stage: 'import', message: `快照 ${snapshot.file} 已生成，正在导入` });
 
-    const key = await getBackupKey();
+    const key = opts.key ?? (await getBackupKey());
     if (!key) throw new Error('未设置备份密钥，无法恢复');
     const report = await importArchive(archivePath, { key, mode: opts.mode, actor: opts.actor, actorIsAdmin: true, trusted: true });
     if (opts.mode === 'replace') {

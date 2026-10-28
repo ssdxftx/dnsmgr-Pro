@@ -80,7 +80,8 @@ router.beforeEach(async (to, from, next) => {
   if (to.path === '/setup') return next();
   if (!setupChecked) {
     try {
-      const res = await fetch('/api/setup/status');
+      // 首次安装状态探测必须有超时：后端无响应时不能让所有路由永久挂起
+      const res = await fetch('/api/setup/status', { signal: AbortSignal.timeout(5000) });
       const json = await res.json();
       setupInstalled = json?.data?.installed ?? true;
     } catch {

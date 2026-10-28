@@ -1,4 +1,5 @@
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
+import { markTempActive, markTempDone } from './tmpRegistry.js';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -81,9 +82,9 @@ export function archiveFileName(scope: string, at = new Date()): string {
 }
 
 export function resolveArchivePath(fileName: string): string {
-  // 只接受纯文件名，杜绝 ../ 穿越
+  // 只接受纯文件名，杜绝 ../ 穿越；'..' 经 basename 后仍等于自身，必须显式拒绝
   const base = path.basename(String(fileName || ''));
-  if (!base || base !== fileName) throw new Error('非法的备份文件名');
+  if (!base || base === '.' || base === '..' || base !== fileName) throw new Error('非法的备份文件名');
   return path.join(backupsDir(), base);
 }
 
@@ -100,6 +101,7 @@ async function writeChunk(ws: NodeJS.WritableStream, text: string): Promise<void
 export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: string): Promise<WriteResult> {
   await ensureDataDirs();
   const tmp = outPath + '.tmp';
+  markTempActive(tmp);
   const stats: ArchiveStats = { tables: {} };
   const hash = createHash('sha256');
   let size = 0;
@@ -174,6 +176,7 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
   } finally {
     // 无论成功失败都清理包含明文的 gzip 临时文件
     await unlink(tmp).catch(() => undefined);
+    markTempDone(tmp);
   }
   const st = await stat(outPath);
   return { size: st.size, checksum, plainSize: size, stats };
@@ -234,7 +237,8 @@ export async function readArchiveHeader(file: string): Promise<OpenedHeader> {
 export function verifyArchiveKey(header: ArchiveHeader, key: Buffer): void {
   const expect = keyCheck(key);
   const got = Buffer.from(String(header.check || ''), 'base64');
-  if (got.length !== expect.length || !got.equals(expect)) {
+  // 恒定时间比较，避免通过响应时间侧信道逐字节猜测校验值
+  if (got.length !== expect.length || !timingSafeEqual(got, expect)) {
     throw new Error('备份密钥错误');
   }
   // 新归档必须通过头签名校验；无 sig 的旧归档默认拒绝，避免 scope/ownerUid 被篡改

@@ -1,5 +1,6 @@
 import { Client } from 'basic-ftp';
 import { buildPfx } from '../../cert/utils.js';
+import { assertNotMetadataHost } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
 
 export class FtpDeploy implements DeployProvider {
@@ -20,13 +21,24 @@ export class FtpDeploy implements DeployProvider {
     client.ftp.verbose = false;
     // FTPS 默认校验证书，避免会话被中间人劫持窃取凭据；自签名证书可显式设置 insecure
     const insecure = this.config.insecure === '1' || this.config.insecure === 1 || this.config.insecure === true;
+    if (insecure && process.env.DNSMGR_ALLOW_INSECURE_DEPLOY !== '1') {
+      throw new Error('已禁止关闭证书校验：如确需连接自签名 FTP，请设置 DNSMGR_ALLOW_INSECURE_DEPLOY=1 后重启服务');
+    }
+    // 未显式配置时默认使用 FTPS：明文 FTP 会把账号密码暴露在网络上
+    const secure =
+      this.config.secure === undefined ||
+      this.config.secure === '' ||
+      this.config.secure === '1' ||
+      this.config.secure === 1 ||
+      this.config.secure === true;
+    await assertNotMetadataHost(String(this.config.host || ''));
     try {
       await client.access({
         host: this.config.host,
         port: Number(this.config.port || 21),
         user: this.config.username,
         password: this.config.password,
-        secure: this.config.secure === '1' || this.config.secure === 1,
+        secure,
         secureOptions: { rejectUnauthorized: !insecure },
       });
       return client;

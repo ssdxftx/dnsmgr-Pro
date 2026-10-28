@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { query, queryOne, table } from '../db.js';
+import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
@@ -112,10 +112,15 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     );
     if (exists) return { code: -1, msg: '当前定时切换策略已存在' };
 
-    await query(
-      `INSERT INTO ${table('sctask')} (did, rr, recordid, type, cycle, switchtype, switchdate, switchtime, value, line, remark, recordinfo, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [val.did, val.rr, val.recordid, val.type, val.cycle, val.switchtype, val.switchdate, val.switchtime, val.value, val.line, val.remark, val.recordinfo, Math.floor(Date.now() / 1000), 1, Number(req.user.uid)]
-    );
+    try {
+      await query(
+        `INSERT INTO ${table('sctask')} (did, rr, recordid, type, cycle, switchtype, switchdate, switchtime, value, line, remark, recordinfo, addtime, active, owner_uid) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [val.did, val.rr, val.recordid, val.type, val.cycle, val.switchtype, val.switchdate, val.switchtime, val.value, val.line, val.remark, val.recordinfo, Math.floor(Date.now() / 1000), 1, Number(req.user.uid)]
+      );
+    } catch (e: any) {
+      if (isDuplicateError(e)) return { code: -1, msg: '当前定时切换策略已存在' };
+      throw e;
+    }
     const idRow = await queryOne(`SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ? ORDER BY id DESC LIMIT 1`, [val.recordid, val.switchtype, val.switchtime]);
     if (idRow) {
       const row = await queryOne(`SELECT * FROM ${table('sctask')} WHERE id = ?`, [idRow.id]);

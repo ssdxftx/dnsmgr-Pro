@@ -360,9 +360,32 @@ async function ensureUniqueIndex(tableName: string, column: string, indexName: s
   }
 }
 
+// 复合唯一索引：消除「先查后插」在并发/双击下的重复数据；已有重复数据时记录并继续
+async function ensureCompositeUniqueIndex(tableName: string, columns: string[], indexName: string): Promise<void> {
+  try {
+    const cols = columns.map((c) => `\`${c}\``).join(', ');
+    if (getDbType() === 'sqlite') {
+      const actualName = sqliteIndexName(table(tableName), indexName);
+      await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} (${cols})`);
+    } else {
+      await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${cols})`);
+    }
+  } catch (e: any) {
+    console.log(`[migrate] 为 ${tableName}(${columns.join(',')}) 添加唯一索引失败（可能存在重复数据）：${e?.message || e}`);
+  }
+}
+
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {
-  if (!(await columnExists(table(tableName), column))) {
+  if (await columnExists(table(tableName), column)) return;
+  try {
     await query(`ALTER TABLE ${table(tableName)} ADD COLUMN ${column} ${definition}`);
+  } catch (e: any) {
+    const msg = String(e?.message || e);
+    // 多副本同时启动时另一个实例可能已加列：视为成功
+    if (/duplicate column|already exists/i.test(msg)) return;
+    // 其余失败必须向上抛出：继续执行后续迁移会让 token_version / owner_uid / rate_limit
+    // 等关键列缺失，实例带病对外服务并持续 500，比启动失败更难排查。
+    throw new Error(`迁移失败：${tableName}.${column} — ${msg}`);
   }
 }
 
@@ -459,4 +482,23 @@ async function migrateBackupAndVault(): Promise<void> {
     await ensureColumn(t, 'visibility', "varchar(10) NOT NULL DEFAULT 'shared'");
     await ensureIndex(t, 'idx_owner', '(`owner_uid`, `visibility`)');
   }
+
+  // 同一账户下域名/加速域名唯一：并发提交会绕过应用层「先查后插」创建重复记录
+  await ensureCompositeUniqueIndex('domain', ['aid', 'name'], 'uniq_aid_name');
+  await ensureCompositeUniqueIndex('cdn_domain', ['aid', 'name'], 'uniq_cdn_aid_name');
+  // 任务去重：与创建接口的「先查后插」判重条件保持一致，避免并发双击产生重复任务
+  await ensureCompositeUniqueIndex('dmtask', ['recordid'], 'uniq_recordid');
+  await ensureCompositeUniqueIndex('sctask', ['recordid', 'switchtype', 'switchtime'], 'uniq_record_switch');
+
+  // 单会话令牌吊销：登出后 jti 落库，令牌在过期前立即失效
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('token_revocation')} (
+      jti varchar(64) NOT NULL,
+      uid int(11) unsigned NOT NULL DEFAULT '0',
+      expire_at datetime NOT NULL,
+      addtime datetime DEFAULT NULL,
+      PRIMARY KEY (jti),
+      KEY idx_expire (expire_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 }

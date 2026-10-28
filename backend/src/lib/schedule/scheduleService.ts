@@ -10,6 +10,9 @@ function getDnsType(value: string): string {
   return 'CNAME';
 }
 
+/** 配置类错误：重试多少次都不会成功，必须停用任务而不是每分钟打上游接口 */
+class PermanentTaskError extends Error {}
+
 import { decryptConfig } from '../secret.js';
 import { loadAccountConfig } from '../accounts/taskConfig.js';
 
@@ -30,6 +33,16 @@ async function addLog(domain: string, action: string, data: string) {
 
 export async function executeAll(): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
+  // 启动补偿：认领时会把 nexttime 置 0，若进程在 updateNexttime 前退出，
+  // 任务会永久不再被选中。这里把「已认领但长时间未推进」的周期任务重新排期。
+  const stale: any[] = await query(
+    `SELECT * FROM ${table('sctask')} WHERE nexttime = 0 AND active = 1 AND type = 1
+       AND (updatetime IS NULL OR updatetime < ?)`,
+    [now - 600]
+  );
+  for (const row of stale) {
+    await updateNexttime(row).catch(() => undefined);
+  }
   const list = await query(
     `SELECT * FROM ${table('sctask')} WHERE nexttime > 0 AND nexttime <= ? AND active = 1`,
     [now]
@@ -48,8 +61,14 @@ export async function executeAll(): Promise<boolean> {
       console.log('定时切换任务' + row.id + '执行成功');
     } catch (e: any) {
       console.log('定时切换任务' + row.id + '执行失败,' + e.message);
-      // 失败后恢复为立即到期，下一轮重试
-      await query(`UPDATE ${table('sctask')} SET nexttime = ? WHERE id = ?`, [now, row.id]).catch(() => undefined);
+      if (e instanceof PermanentTaskError) {
+        // 配置错误重试无意义：停用任务，避免每分钟重试形成日志与上游接口风暴
+        await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
+        console.log('定时切换任务' + row.id + ' 因配置错误已自动停用：' + e.message);
+      } else {
+        // 瞬时失败：延后 60 秒重试，避免失败任务在一分钟内反复冲击上游
+        await query(`UPDATE ${table('sctask')} SET nexttime = ? WHERE id = ?`, [now + 60, row.id]).catch(() => undefined);
+      }
     }
   }
   await configSet('schedule_time', fmtDateTime());
@@ -61,7 +80,7 @@ export async function executeOne(row: any): Promise<void> {
     `SELECT A.*, B.type AS account_type, B.config AS account_config, B.owner_uid AS account_owner FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
     [row.did]
   );
-  if (!drow) throw new Error('域名不存在');
+  if (!drow) throw new PermanentTaskError('域名不存在');
 
   await query(`UPDATE ${table('sctask')} SET updatetime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
 
@@ -99,7 +118,7 @@ export async function executeOne(row: any): Promise<void> {
   } else {
     const recordinfo = safeJson(row.recordinfo);
     if (!recordinfo.Line || !recordinfo.TTL) {
-      throw new Error('解析记录信息不完整，无法执行切换');
+      throw new PermanentTaskError('解析记录信息不完整，无法执行切换');
     }
     if (drow.account_type === 'cloudflare' && !isNullOrEmpty(row.line)) {
       recordinfo.Line = row.line;
@@ -141,6 +160,10 @@ export async function executeOne(row: any): Promise<void> {
     addtime: nowStr(),
   });
 
+  // DNS 操作返回失败时不能静默推进到下一次：单次任务会被直接标记完成而实际未执行。
+  // 抛出普通错误让调度器延后重试，并在日志中保留失败原因。
+  if (!opOk) throw new Error(opErr || 'DNS 操作失败');
+
   await updateNexttime(row);
 }
 
@@ -153,7 +176,7 @@ export async function updateNexttime(row: any): Promise<void> {
     const today = new Date();
     if (row.cycle === 2) {
       const date = parseInt(row.switchdate);
-      if (isNaN(date)) throw new Error('每月日期配置错误');
+      if (isNaN(date)) throw new PermanentTaskError('每月日期配置错误');
       const daysIn = (y: number, mIdx: number) => new Date(y, mIdx + 1, 0).getDate();
       const y = today.getFullYear();
       let d = new Date(y, today.getMonth(), Math.min(date, daysIn(y, today.getMonth())), 0, 0, 0);

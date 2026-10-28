@@ -3,6 +3,18 @@ import type { DbDriver, QueryFn } from './db/types.js';
 import { createMysqlDriver } from './db/mysql.js';
 
 let currentPrefix = 'dnsmgr_';
+
+/**
+ * 表前缀会直接拼进 SQL 标识符，必须限制字符集：
+ * 配置文件被篡改时，任意字符可能成为标识符注入面。
+ */
+function safePrefix(raw: string): string {
+  const p = String(raw || '');
+  if (!/^[A-Za-z0-9_]{0,32}$/.test(p)) {
+    throw new Error('DB_PREFIX 仅允许字母、数字与下划线（最长 32 位）：' + p);
+  }
+  return p || 'dnsmgr_';
+}
 let driver: DbDriver;
 
 async function buildDriver(cfg: DbConfig): Promise<DbDriver> {
@@ -20,7 +32,7 @@ async function buildDriver(cfg: DbConfig): Promise<DbDriver> {
 // 启动时用当前配置初始化驱动
 const initialConfig = loadDbConfig();
 driver = await buildDriver(initialConfig);
-currentPrefix = initialConfig.db_prefix || 'dnsmgr_';
+currentPrefix = safePrefix(initialConfig.db_prefix);
 
 export function table(name: string): string {
   return currentPrefix + name;
@@ -42,7 +54,7 @@ export function getDriver(): DbDriver {
 export async function reinitPool(cfg: DbConfig): Promise<void> {
   const old = driver;
   const next = await buildDriver(cfg);
-  currentPrefix = cfg.db_prefix || 'dnsmgr_';
+  currentPrefix = safePrefix(cfg.db_prefix);
   driver = next;
   if (old) await old.close();
 }
@@ -97,4 +109,15 @@ export async function indexExists(tableName: string, indexName: string): Promise
 
 export async function uniqueIndexExists(tableName: string, column: string): Promise<boolean> {
   return driver.uniqueIndexExists(tableName, column);
+}
+
+/**
+ * 判定唯一键冲突，兼容 MySQL 与 SQLite。
+ * SQLite 驱动已在 runStatement 中把 UNIQUE 错误归一为 ER_DUP_ENTRY，
+ * 这里再兜底匹配错误文本，避免其他驱动/版本差异让判重逻辑失效。
+ */
+export function isDuplicateError(e: any): boolean {
+  const code = String(e?.code || '');
+  if (code === 'ER_DUP_ENTRY' || code === 'SQLITE_CONSTRAINT_UNIQUE' || code === 'SQLITE_CONSTRAINT') return true;
+  return /duplicate entry|unique constraint failed|primary key must be unique/i.test(String(e?.message || ''));
 }

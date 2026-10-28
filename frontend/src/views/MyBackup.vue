@@ -178,10 +178,11 @@ async function doImport(dryRun: boolean, confirmed = false) {
   importing.value = true;
   try {
     const fd = new FormData();
-    fd.append('file', file.value);
+    // 字段先于文件追加：否则大文件/网络抖动时 mode、passphrase 可能读不到而退化为默认行为
     fd.append('mode', 'merge');
     fd.append('dry_run', dryRun ? 'true' : 'false');
     if (importPass.value) fd.append('passphrase', importPass.value);
+    fd.append('file', file.value);
     const res = await fetch('/api/backup/import', {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + getToken() },

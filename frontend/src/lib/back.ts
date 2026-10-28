@@ -1,3 +1,4 @@
+import { onUnmounted } from 'vue';
 import { useRouter } from 'vue-router';
 
 /**
@@ -6,10 +7,18 @@ import { useRouter } from 'vue-router';
  */
 export function useBack(fallback: string) {
   const router = useRouter();
+  let disposed = false;
+  let timer: number | undefined;
+  // 组件卸载后不再执行延迟跳转，避免对已销毁页面触发导航
+  onUnmounted(() => {
+    disposed = true;
+    if (timer) window.clearTimeout(timer);
+  });
   return () => {
     const before = router.currentRoute.value.fullPath;
     router.back();
-    window.setTimeout(() => {
+    timer = window.setTimeout(() => {
+      if (disposed) return;
       // 300ms 内路由未变化说明没有可返回的历史，回退到父级页面
       if (router.currentRoute.value.fullPath === before) router.push(fallback);
     }, 300);

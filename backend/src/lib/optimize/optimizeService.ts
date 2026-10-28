@@ -5,6 +5,7 @@ import { fmtDateTime } from '../util.js';
 
 // 通用线路代码 -> 各 DNS 服务商线路值
 import { fetchWithProxy } from '../http.js';
+import { assertUrlAllowed } from '../netGuard.js';
 const LINE_NAME: Record<string, Record<string, string>> = {
   aliyun: { DEF: 'default', CT: 'telecom', CU: 'unicom', CM: 'mobile', AB: 'oversea' },
   dnspod: { DEF: '0', CT: '10=0', CU: '10=1', CM: '10=3', AB: '3=0' },
@@ -75,6 +76,8 @@ async function getIpAddressXingpingcn(ipType: string): Promise<Record<string, an
   } else {
     url = 'https://raw.githubusercontent.com/xingpingcn/enhanced-FaaS-in-China/refs/heads/main/Cf.json';
   }
+  // 代理地址可由管理员配置为任意 URL：必须走 SSRF 校验，避免被用作内网探测通道
+  await assertUrlAllowed(url);
   const res = await fetchWithProxy(url, { signal: AbortSignal.timeout(20000) });
   const text = await res.text();
   let arr: any;
@@ -109,9 +112,10 @@ async function getIpAddress(cdnType: number, ipType: string): Promise<Record<str
     else if (cdnType === 4) url += 'get_edgeone_ip';
   }
   const params: Record<string, any> = { type: ipType };
-  // 仅 wetest.vip 接口需要密钥；未配置时沿用原项目内置的默认密钥，保证老库升级后任务不中断
+  // 仅 wetest.vip 接口需要密钥。不再内置第三方默认 key：
+  // 公共 key 会把所有部署的配额与风控绑定到同一凭据，且无法按站点撤销。
   if (api !== 1) {
-    const key = String((await configGet('optimize_ip_key', 'o1zrmHAF')) || '').trim();
+    const key = String((await configGet('optimize_ip_key', '')) || '').trim();
     if (key) params.key = key;
   }
   const res = await fetchWithProxy(url, {

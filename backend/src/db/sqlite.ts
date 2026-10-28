@@ -12,6 +12,30 @@ import { expandParams, translateSql } from './sqlite-dialect.js';
 const READ_RE = /^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i;
 const DDL_RE = /^\s*(CREATE|ALTER|DROP|VACUUM|REINDEX|ANALYZE)\b/i;
 
+/**
+ * node:sqlite 的原始错误 code 是 ERR_SQLITE_ERROR，业务层普遍按 MySQL 的
+ * ER_DUP_ENTRY 判断唯一键冲突，导致 SQLite 部署下注册/建号/导入直接 500。
+ * 这里把常见约束错误映射成 MySQL 兼容错误码，调用方无需感知数据库类型。
+ */
+function normalizeSqliteError(e: any): any {
+  const msg = String(e?.message || e || '');
+  if (/UNIQUE constraint failed|PRIMARY KEY must be unique/i.test(msg)) {
+    const err: any = new Error(msg);
+    err.code = 'ER_DUP_ENTRY';
+    err.errno = 1062;
+    err.cause = e;
+    return err;
+  }
+  if (/FOREIGN KEY constraint failed/i.test(msg)) {
+    const err: any = new Error(msg);
+    err.code = 'ER_NO_REFERENCED_ROW_2';
+    err.errno = 1452;
+    err.cause = e;
+    return err;
+  }
+  return e;
+}
+
 class AsyncMutex {
   private tail: Promise<void> = Promise.resolve();
 
@@ -198,20 +222,24 @@ function runStatement(db: DatabaseSync, sql: string, params: any[] = []): any {
   const expanded = expandParams(sql, params);
   const translated = translateSql(expanded.sql);
 
-  if (DDL_RE.test(translated)) {
-    db.exec(translated);
-    return { insertId: 0, affectedRows: 0 } satisfies WriteResult;
-  }
+  try {
+    if (DDL_RE.test(translated)) {
+      db.exec(translated);
+      return { insertId: 0, affectedRows: 0 } satisfies WriteResult;
+    }
 
-  const statement = db.prepare(translated);
-  if (READ_RE.test(translated)) {
-    return statement.all(...expanded.params).map(normalizeRow);
+    const statement = db.prepare(translated);
+    if (READ_RE.test(translated)) {
+      return statement.all(...expanded.params).map(normalizeRow);
+    }
+    const result = statement.run(...expanded.params);
+    return {
+      insertId: Number(result.lastInsertRowid || 0),
+      affectedRows: Number(result.changes || 0),
+    } satisfies WriteResult;
+  } catch (e: any) {
+    throw normalizeSqliteError(e);
   }
-  const result = statement.run(...expanded.params);
-  return {
-    insertId: Number(result.lastInsertRowid || 0),
-    affectedRows: Number(result.changes || 0),
-  } satisfies WriteResult;
 }
 
 export function createSqliteDriver(cfg: DbConfig): DbDriver {

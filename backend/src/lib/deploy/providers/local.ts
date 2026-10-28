@@ -1,5 +1,5 @@
 import { exec } from 'node:child_process';
-import { existsSync, writeFileSync, chmodSync, realpathSync } from 'node:fs';
+import { existsSync, writeFileSync, chmodSync, realpathSync, lstatSync } from 'node:fs';
 import { dirname, normalize, sep, basename, join, win32 } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
@@ -75,20 +75,66 @@ function safeTargetPath(p: any): string {
   }
 
   const normalized = normalize(raw);
-  // 解析符号链接：目标已存在则解析完整真实路径（含末段软链），否则解析父目录，避免经软链绕过位置限制
+  // 解析符号链接：目标已存在则解析完整真实路径；悬空软链必须直接拒绝，
+  // 否则 existsSync=false 只解析父目录，白名单校验通过后 writeFileSync 会跟随软链写到任意位置。
   let resolved = normalized;
   try {
-    resolved = existsSync(normalized) ? realpathSync(normalized) : join(realpathSync(dirname(normalized)), basename(normalized));
-  } catch {
-    resolved = normalized;
+    const lst = lstatSync(normalized);
+    if (lst.isSymbolicLink()) throw new Error('目标文件为符号链接，禁止写入：' + raw);
+    resolved = realpathSync(normalized);
+  } catch (e: any) {
+    const msg = String(e?.message || '');
+    if (msg.includes('符号链接')) throw e;
+    // 目标尚不存在：解析父目录真实路径后再拼回文件名
+    try {
+      const parentReal = realpathSync(dirname(normalized));
+      const candidate = join(parentReal, basename(normalized));
+      try {
+        if (lstatSync(candidate).isSymbolicLink()) {
+          throw new Error('目标文件为符号链接，禁止写入：' + raw);
+        }
+      } catch (e2: any) {
+        if (String(e2?.message || '').includes('符号链接')) throw e2;
+      }
+      resolved = candidate;
+    } catch (e2: any) {
+      if (String(e2?.message || '').includes('符号链接')) throw e2;
+      resolved = normalized;
+    }
   }
   if (allowDirs.length) {
     const ok = allowDirs.some((d) => resolved === d || resolved.startsWith(d.endsWith(sep) ? d : d + sep));
     if (!ok) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
   }
+  // 数据目录本身是默认允许目录，但其中的数据库/配置/备份属于应用自身状态，
+  // 允许写入会让「部署证书」变成破坏站点数据或覆盖配置的通道。
+  if (isProtectedDataPath(resolved)) {
+    throw new Error('目标文件路径位于应用数据目录内的受保护文件，禁止写入：' + raw);
+  }
   const low = resolved.toLowerCase();
   if (isDeniedPosix(low)) throw new Error('目标文件路径指向受保护的系统位置，禁止写入：' + raw);
   return resolved;
+}
+
+// 数据目录内不可被部署写入的路径：数据库文件、配置、备份与临时目录
+function isProtectedDataPath(resolved: string): boolean {
+  const dataDir = normalize(process.env.DNSMGR_DATA_DIR || '/app/data');
+  const base = basename(resolved).toLowerCase();
+  if (
+    base === 'dnsmgr.sqlite' ||
+    base === 'dnsmgr.sqlite-wal' ||
+    base === 'dnsmgr.sqlite-shm' ||
+    base === 'config.json' ||
+    base === '.env' ||
+    base.startsWith('.env.')
+  ) {
+    return true;
+  }
+  const prefix = dataDir.endsWith(sep) ? dataDir : dataDir + sep;
+  if (!resolved.startsWith(prefix)) return false;
+  const rel = resolved.slice(prefix.length);
+  const first = rel.split(/[\\/]/)[0]?.toLowerCase() || '';
+  return first === 'backups' || first === 'tmp';
 }
 
 export class LocalDeploy implements DeployProvider {
@@ -130,11 +176,11 @@ export class LocalDeploy implements DeployProvider {
       throw new Error('未知的证书格式：' + String(config.format || '(空)'));
     }
     if (config.cmd) {
-      assertCommandAllowed();
       const cmds = String(config.cmd).split('\n');
       for (const raw of cmds) {
         const cmd = raw.trim();
         if (!cmd) continue;
+        assertCommandAllowed(cmd);
         this.log('执行命令：' + cmd);
         await this.execAsync(cmd);
         this.log('执行命令成功');

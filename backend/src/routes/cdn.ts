@@ -37,7 +37,7 @@ import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../l
 import { checkLevel, getUserPermissions, isRecordInScope, matchPermission } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
 import { canAccessCertOrder, canAccessDomainAccount, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
-import { findAnyVaultDekForUser } from '../lib/vault/service.js';
+import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { ESA_RULE_KINDS, esaRuleFields, isEsaRuleKind } from '../lib/cdn/ruleSchema.js';
@@ -98,7 +98,8 @@ function safeJson(s: any): Record<string, any> {
 /** 账户配置读取：私有账户需用保险库 DEK 解密，未解锁时明确报错而非静默当成空配置 */
 async function accountConfigOf(acct: any): Promise<Record<string, any>> {
   if (acct?.visibility === 'private') {
-    const dek = await findAnyVaultDekForUser(Number(acct.owner_uid));
+    // 必须绑定当前会话：没有本会话解锁记录时按「已锁定」处理
+    const dek = await findVaultDekForRequest(Number(acct.owner_uid));
     const { config, state } = readAccountConfig(acct.config, dek);
     if (state === 'locked') throw new ConfigDecryptError('保险库已锁定，请先解锁');
     if (state === 'error') throw new ConfigDecryptError('私有账户凭证无法解密，请重新填写');
@@ -1615,8 +1616,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const r = await removeLinkedDnsRecord(row, req.user);
       dnsMsg = r.message;
     }
-    await query(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
+    await withTransaction(async (q) => {
+      await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('cdn_domain')} WHERE id = ?`, [id]);
+    });
     let msg = deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）';
     if (linked.orders) msg += `；已吊销并删除联动证书 ${linked.orders} 个、自动部署任务 ${linked.deployTasks} 个`;
     if (deleteDns) msg += `；${dnsMsg}`;

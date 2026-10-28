@@ -20,6 +20,8 @@ export type BackupTable = (typeof TABLES)[number];
 /** 永不写入归档的列（config 的 sys_key/maintenance 在 export.ts 中按行过滤） */
 export const EXCLUDE_COLUMNS: Record<string, string[]> = {
   user: ['login_fail', 'login_locked_until', 'totp_fail', 'totp_locked_until'],
+  // 保险库锁定状态属于运行态：随备份恢复会把锁定带回，构造归档还可设置远期 locked_until
+  user_vault: ['fail_count', 'locked_until'],
 };
 
 /** 不参与导出的表（可再生产物 / 运行态日志 / 备份自身记录） */

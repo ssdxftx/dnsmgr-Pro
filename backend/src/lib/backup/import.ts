@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { query, table, withTransaction, listColumns } from '../../db.js';
+import { query, table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
 import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS, KDF_PARAMS_JSON, unwrapDek, wrapDek } from '../vault/keys.js';
@@ -64,7 +64,12 @@ const REPLACE_EXTRA_TABLES = ['log', 'cdn_stat_data', 'reg_verify', 'totp_replay
 
 function sanitizePlainConfig(raw: any, allowed: Set<string>): any {
   if (raw && typeof raw === 'object') {
-    if ('__encv1' in raw && typeof raw.__encv1 === 'string') return sanitizePlainConfig(raw.__encv1, allowed);
+    if ('__encv1' in raw && typeof raw.__encv1 === 'string') {
+      const inner = sanitizePlainConfig(raw.__encv1, allowed);
+      // 原值是整列 enc:v1 密文（导出时解包为 __encv1 标记）。脱敏后必须重新包回标记，
+      // 让 decodeStoredValue 用目标 sys_key 重新加密；直接返回对象会退化为明文落库。
+      return { __encv1: typeof inner === 'string' ? inner : JSON.stringify(inner) };
+    }
     if ('__b64' in raw) return raw;
     const out: Record<string, any> = {};
     for (const [k, v] of Object.entries(raw)) if (allowed.has(k)) out[k] = v;
@@ -768,7 +773,8 @@ async function mapUser(
       const exists = await q(`SELECT id FROM ${table('user')} WHERE id = ? LIMIT 1`, [origId]);
       if (exists.length) return origId;
     } catch (e: any) {
-      if (e?.code !== 'ER_DUP_ENTRY') throw e;
+      // SQLite 下唯一键错误 code 与 MySQL 不同，必须统一判定，否则站点合并导入会整批回滚
+      if (!isDuplicateError(e)) throw e;
     }
   }
   return insertRow(q, 'user', data, ctx.cols);

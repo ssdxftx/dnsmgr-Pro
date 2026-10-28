@@ -28,6 +28,9 @@ export function getUser(): any {
 }
 export function setUser(u: any) {
   localStorage.setItem(USER_KEY, JSON.stringify(u));
+  // 通知 Pinia store 同步更新：否则 403/401 触发的用户刷新只改 localStorage，
+  // 菜单与统计入口仍按旧身份渲染
+  window.dispatchEvent(new CustomEvent('dnsmgr:user-updated', { detail: u }));
 }
 
 export interface ApiOptions {

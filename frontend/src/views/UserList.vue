@@ -143,6 +143,8 @@ const kw = ref('');
 const showEdit = ref(false);
 const editBusy = ref(false);
 const editingId = ref<number | null>(null);
+// 请求序号：慢网下先后打开两个用户时，旧响应不得覆盖新弹窗表单
+let editSeq = 0;
 const saveBusy = ref(false);
 const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [] });
 const domainOptions = ref<any[]>([]);
@@ -347,10 +349,13 @@ function openAdd() {
 
 async function openEdit(row: any) {
   editingId.value = row.id;
+  const seq = ++editSeq;
   showEdit.value = true; // 先开弹窗，立即给出视觉响应
   editBusy.value = true;
   try {
     const res = await api<any>('GET', `/users/${row.id}`);
+    // 用户已切换到另一个编辑对象，丢弃本次响应，避免把 A 的资料写到 B
+    if (seq !== editSeq) return;
     if (res.code === 0) {
       form.username = res.data.username;
       form.repwd = '';
@@ -386,13 +391,20 @@ async function save() {
   } else {
     body.password = form.password;
   }
-  const res = editingId.value ? await api('PUT', `/users/${editingId.value}`, body) : await api('POST', '/users', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    loadUsers();
-  } else message.error(res.msg);
+  try {
+    const id = editingId.value;
+    const res = id ? await api('PUT', `/users/${id}`, body) : await api('POST', '/users', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      loadUsers();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    // 网络异常时必须复位按钮，否则弹窗保存键永久 loading
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 // 状态与统计缓存开关：互斥由 useAction 的 busy 键保证，按钮同时展示转圈与禁用

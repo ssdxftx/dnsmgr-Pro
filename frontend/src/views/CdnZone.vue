@@ -222,12 +222,13 @@ function openSetting(row: any) {
 }
 
 async function loadProviders() {
-  const res = await api<any>('GET', '/cdn/providers');
+  // 单个接口失败不能阻断首屏其余数据加载
+  const res = await api<any>('GET', '/cdn/providers').catch(() => ({ code: -1 } as any));
   providers.value = res.code === 0 ? res.data || {} : {};
 }
 
 async function loadAccounts() {
-  const res = await api<any>('GET', '/cdn/accounts');
+  const res = await api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1 } as any));
   accounts.value = res.code === 0 ? res.data || [] : [];
 }
 
