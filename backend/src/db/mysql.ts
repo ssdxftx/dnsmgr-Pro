@@ -2,6 +2,15 @@ import mysql from 'mysql2/promise';
 import type { DbConfig } from '../config-loader.js';
 import type { ColumnInfo, DbDriver, LockOutcome, QueryFn } from './types.js';
 
+/** MySQL/MariaDB 的隔离级别变量用连字符（REPEATABLE-READ），SQL 语法用空格 */
+function normalizeIsolation(raw: string): string {
+  const v = String(raw || '').toUpperCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (v === 'REPEATABLE READ' || v === 'READ COMMITTED' || v === 'READ UNCOMMITTED' || v === 'SERIALIZABLE') {
+    return v;
+  }
+  return 'REPEATABLE READ';
+}
+
 export function createMysqlDriver(cfg: DbConfig): DbDriver {
   const pool = mysql.createPool({
     host: cfg.db_host,
@@ -67,7 +76,13 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
       const [rows] = await conn.query('SELECT @@session.transaction_isolation AS iso');
       prevIsolation = String((rows as any[])[0]?.iso || '');
     } catch {
-      // 旧版本 MySQL 无该变量，退化为固定还原
+      // MariaDB 10.x 使用 tx_isolation；两处都取不到时回退到 MySQL 默认级别
+      try {
+        const [rows] = await conn.query('SELECT @@session.tx_isolation AS iso');
+        prevIsolation = String((rows as any[])[0]?.iso || '');
+      } catch {
+        // 保留默认值
+      }
     }
     try {
       await conn.query('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -83,9 +98,7 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
       await conn.query('ROLLBACK').catch(() => undefined);
       throw e;
     } finally {
-      const restore = /SERIALIZABLE|READ COMMITTED|READ UNCOMMITTED/i.test(prevIsolation)
-        ? prevIsolation.toUpperCase()
-        : 'READ COMMITTED';
+      const restore = normalizeIsolation(prevIsolation);
       await conn.query(`SET SESSION TRANSACTION ISOLATION LEVEL ${restore}`).catch(() => undefined);
       conn.release();
     }

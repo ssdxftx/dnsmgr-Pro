@@ -11,10 +11,12 @@ const lineDef: Record<string, string> = {
   spaceship: 'default', aliyunesa: '0', tencenteo: 'Default', dnsmgr: 'default', goedge: 'default', aws: 'default',
 };
 
-import { decryptConfig } from './secret.js';
+import { loadAccountConfig } from './accounts/taskConfig.js';
 
-function safeJson(s: string): Record<string, any> {
-  return decryptConfig(s) || {};
+// 私有账户配置存于保险库（U1 密文），必须通过 loadAccountConfig 解包；
+// 只调用 decryptConfig 会得到空对象，导致证书 DNS 验证用空凭据调用厂商。
+async function accountConfig(drow: any): Promise<Record<string, any>> {
+  return loadAccountConfig({ config: drow.config, owner_uid: drow.owner_uid });
 }
 
 // 归一化记录名（小写、去首尾空白与结尾点），用于精确比对，避免上游模糊匹配误伤同名相似记录
@@ -26,17 +28,17 @@ type DnsList = Record<string, DnsRecord[]>;
 
 async function getDnsModel(mainDomain: string): Promise<{ provider: any; type: string } | null> {
   let drow: any = await queryOne(
-    `SELECT A.name, A.thirdid, A.aid, B.type, B.config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`,
+    `SELECT A.name, A.thirdid, A.aid, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`,
     [mainDomain],
   );
   if (!drow && /^xn--/.test(mainDomain)) {
     drow = await queryOne(
-      `SELECT A.name, A.thirdid, A.aid, B.type, B.config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`,
+      `SELECT A.name, A.thirdid, A.aid, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`,
       [mainDomain],
     );
   }
   if (!drow) return null;
-  const provider = getDnsProvider(drow.type, safeJson(drow.config), drow.name, drow.thirdid);
+  const provider = getDnsProvider(drow.type, await accountConfig(drow), drow.name, drow.thirdid);
   if (!provider) return null;
   return { provider, type: drow.type };
 }
@@ -61,9 +63,9 @@ function getHuaweiDnsRecords(list: DnsRecord[]): DnsRecord[] {
 export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname = false): Promise<void> {
   const cnameDomainList: DnsList = {};
   for (const [mainDomain, list] of Object.entries(dnsList)) {
-    let drow = await queryOne(`SELECT A.*, B.type, B.config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
+    let drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
     if (!drow && /^xn--/.test(mainDomain)) {
-      drow = await queryOne(`SELECT A.*, B.type, B.config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
+      drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
     }
     if (!drow) {
       if (cname) {
@@ -87,9 +89,10 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
         throw new Error('域名' + mainDomain + '未在本系统添加');
       }
     }
+    if (!drow) continue;
     if (!list.length) continue;
 
-    const provider = getDnsProvider(drow.type, safeJson(drow.config), drow.name, drow.thirdid);
+    const provider = getDnsProvider(drow.type, await accountConfig(drow), drow.name, drow.thirdid);
     if (!provider) throw new Error('DNS模块不存在');
 
     let records = list.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -150,9 +153,9 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
 export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname = false): Promise<void> {
   const cnameDomainList: DnsList = {};
   for (const [mainDomain, list] of Object.entries(dnsList)) {
-    let drow = await queryOne(`SELECT A.*, B.type, B.config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
+    let drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
     if (!drow && /^xn--/.test(mainDomain)) {
-      drow = await queryOne(`SELECT A.*, B.type, B.config FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
+      drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
     }
     if (!drow) {
       if (cname) {
@@ -174,9 +177,10 @@ export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname
         continue;
       }
     }
+    if (!drow) continue;
     if (!list.length) continue;
 
-    const provider = getDnsProvider(drow.type, safeJson(drow.config), drow.name, drow.thirdid);
+    const provider = getDnsProvider(drow.type, await accountConfig(drow), drow.name, drow.thirdid);
     if (!provider) continue;
 
     let records = list.slice().sort((a, b) => a.name.localeCompare(b.name));

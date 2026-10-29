@@ -460,13 +460,18 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     if (!order.keytype || !order.keysize) return { code: -1, msg: '必填参数不能为空' };
 
-    const id = await query(`INSERT INTO ${table('cert_order')} SET ?`, [order]).then((r: any) => r.insertId || 0);
-    if (domList.length) {
-      // 多值 INSERT 替代逐条插入
-      const values = domList.map(() => '(?, ?, ?)').join(', ');
-      const params = domList.flatMap((domain, idx) => [id, domainToASCII(domain), idx + 1]);
-      await query(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES ${values}`, params);
-    }
+    // 订单与绑定域名必须同时成功：否则会留下无域名的待处理订单，调度器反复失败
+    let id = 0;
+    await withTransaction(async (q) => {
+      const ins: any = await q(`INSERT INTO ${table('cert_order')} SET ?`, [order]);
+      id = Number(ins?.insertId || 0);
+      if (domList.length) {
+        // 多值 INSERT 替代逐条插入
+        const values = domList.map(() => '(?, ?, ?)').join(', ');
+        const params = domList.flatMap((domain, idx) => [id, domainToASCII(domain), idx + 1]);
+        await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES ${values}`, params);
+      }
+    });
     // 待处理订单立即在后台开始申请，无需用户手动点「处理」
     if (Number(order.status) === 0) kickOrderProcessing(id);
     audit(req, {

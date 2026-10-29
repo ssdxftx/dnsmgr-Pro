@@ -711,17 +711,23 @@ function cloudSourceType(s: string): 'success' | 'info' | 'default' | 'warning' 
 async function fetchCertStatus(): Promise<any | null> {
   if (!certMgrTarget.value) return null;
   certMgrCloudLoadBusy.value = true;
-  const res = await api<any>('GET', `/cdn/domains/${certMgrTarget.value.id}/cert_status`);
-  certMgrCloudLoadBusy.value = false;
-  if (res.code !== 0) {
-    message.error(res.msg || t('common.loadFailed'));
+  try {
+    const res = await api<any>('GET', `/cdn/domains/${certMgrTarget.value.id}/cert_status`);
+    if (res.code !== 0) {
+      message.error(res.msg || t('common.loadFailed'));
+      return null;
+    }
+    const data = res.data || {};
+    certMgrCloud.value = data.cloud || null;
+    const inferred = inferModeFromCloud(data, certMgrTarget.value);
+    certMgrMismatch.value = !!(data.cert_mode && inferred && data.cert_mode !== inferred);
+    return data;
+  } catch (e: any) {
+    message.error(e?.message || t('common.loadFailed'));
     return null;
+  } finally {
+    certMgrCloudLoadBusy.value = false;
   }
-  const data = res.data || {};
-  certMgrCloud.value = data.cloud || null;
-  const inferred = inferModeFromCloud(data, certMgrTarget.value);
-  certMgrMismatch.value = !!(data.cert_mode && inferred && data.cert_mode !== inferred);
-  return data;
 }
 
 async function refreshCertStatus() {
@@ -1266,21 +1272,26 @@ async function submitAdd() {
   };
   if (form.cert_mode === 'certlink') Object.assign(payload, choiceExtra(form.cert_choice));
   saveBusy.value = true;
-  const res = await api<any>('POST', '/cdn/domains', payload);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showAdd.value = false;
-    loadDomains();
-    // 应用加速场景（不阻断域名创建结果）
-    await applySceneTemplate();
-    // 由本项目管理：新签发证书需要时间，打开证书管理实时查看执行阶段
-    const cert = res.data?.cert;
-    const domainId = Number(res.data?.id || 0);
-    if (domainId && form.cert_mode === 'certlink' && cert?.status !== 'applied') {
-      openCertMgr({ id: domainId, name: form.name, can_certlink: 1, cert_mode: 'certlink' });
-    }
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/cdn/domains', payload);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showAdd.value = false;
+      loadDomains();
+      // 应用加速场景（不阻断域名创建结果）
+      await applySceneTemplate();
+      // 由本项目管理：新签发证书需要时间，打开证书管理实时查看执行阶段
+      const cert = res.data?.cert;
+      const domainId = Number(res.data?.id || 0);
+      if (domainId && form.cert_mode === 'certlink' && cert?.status !== 'applied') {
+        openCertMgr({ id: domainId, name: form.name, can_certlink: 1, cert_mode: 'certlink' });
+      }
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || String(e));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 // 证书候选：精确匹配证书 / 可用提供商 / 默认 Let's Encrypt
@@ -1384,13 +1395,18 @@ function openCertLink(ids: number[]) {
 async function runCert(ids: number[], checkOnly: boolean) {
   certRunBusy.value = true;
   const base = certMode.value === 'link' ? '/cdn/domains/cert' : '/cdn/domains/freecert';
-  const res = await api<any>('POST', checkOnly ? base + '/check' : base, { ids });
-  certRunBusy.value = false;
-  if (res.code === 0) {
-    certResults.value = res.data || [];
-    certSummary.value = res.msg || '';
-    loadDomains();
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', checkOnly ? base + '/check' : base, { ids });
+    if (res.code === 0) {
+      certResults.value = res.data || [];
+      certSummary.value = res.msg || '';
+      loadDomains();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || String(e));
+  } finally {
+    certRunBusy.value = false;
+  }
 }
 
 async function checkPending() {

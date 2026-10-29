@@ -544,14 +544,20 @@ async function saveFields(fields: string[]): Promise<boolean> {
     body.password = password;
   }
   saveBusy.value = true;
-  const res = await api('POST', '/system/settings', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(t('systemSet.saveSuccess'));
-    return true;
+  try {
+    const res = await api('POST', '/system/settings', body);
+    if (res.code === 0) {
+      message.success(t('systemSet.saveSuccess'));
+      return true;
+    }
+    message.error(res.msg);
+    return false;
+  } catch (e: any) {
+    message.error(e?.message || String(e));
+    return false;
+  } finally {
+    saveBusy.value = false;
   }
-  message.error(res.msg);
-  return false;
 }
 
 async function saveMail() {

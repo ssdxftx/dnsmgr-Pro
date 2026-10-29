@@ -286,10 +286,13 @@ function formatTxtTargetCandidate(row: any, recordName: string, currentDomainId:
   };
 }
 
-async function findTxtRecordTargetDomains(currentDomain: any, hostname: string): Promise<any[]> {
+async function findTxtRecordTargetDomains(currentDomain: any, hostname: string, userUid: number): Promise<any[]> {
+  // 与其他列表接口保持一致：私有账户只对其所有者可见，管理员也不能读取他人私有账户信息
   const rows: any[] = await query(
     `SELECT D.id, D.aid, D.name, A.type AS account_type, A.name AS account_name, A.remark AS account_remark
-     FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id`,
+     FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+     WHERE (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`,
+    [Number(userUid) || 0],
   );
 
   const candidates: any[] = [];
@@ -658,7 +661,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         code: 0,
         data: {
           hostname,
-          candidates: await findTxtRecordTargetDomains(ctx.domain, hostname),
+          candidates: await findTxtRecordTargetDomains(ctx.domain, hostname, Number(req.user.uid)),
         },
       };
     } catch (e: any) {

@@ -1,3 +1,4 @@
+import { Readable } from 'node:stream';
 import { Client } from 'basic-ftp';
 import { buildPfx } from '../../cert/utils.js';
 import { assertNotMetadataHost } from '../../netGuard.js';
@@ -57,13 +58,13 @@ export class FtpDeploy implements DeployProvider {
     const client = await this.connect();
     try {
       if (config.format === 'pem') {
-        await client.uploadFrom(Buffer.from(fullchain), config.pem_cert_file);
+        await client.uploadFrom(Readable.from(Buffer.from(fullchain)), config.pem_cert_file);
         this.log('证书已上传到：' + config.pem_cert_file);
-        await client.uploadFrom(Buffer.from(privatekey), config.pem_key_file);
+        await client.uploadFrom(Readable.from(Buffer.from(privatekey)), config.pem_key_file);
         this.log('私钥已上传到：' + config.pem_key_file);
       } else if (config.format === 'pfx') {
         const pfx = await buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
-        await client.uploadFrom(pfx, config.pfx_file);
+        await client.uploadFrom(Readable.from(pfx), config.pfx_file);
         this.log('PFX证书已上传到：' + config.pfx_file);
       } else {
         throw new Error('未知的证书格式：' + String(config.format || '(空)'));

@@ -157,6 +157,8 @@ export default async function backupRoutes(app: FastifyInstance) {
   let importRunning = false;
   app.post('/api/backup/import', auth, async (req: any, reply: any) => {
     if (importRunning) return reply.code(409).send({ code: -1, msg: '已有导入任务正在执行，请稍后再试' });
+    // /api/backup 整体绕过维护模式 503，但导入会写业务表，恢复期间必须拒绝
+    if (isMaintenance()) return reply.code(503).send({ code: -1, msg: '系统维护中，暂不可导入备份' });
     // 限流必须在落盘前执行，否则攻击者可反复上传 200MB 文件占满数据卷
     if (!hitRateLimit(`backup:import:${req.user.uid}`, 3, 10 * 60_000)) {
       return reply.code(429).send({ code: -1, msg: '备份导入过于频繁，请稍后再试' });
@@ -235,7 +237,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         report = restored.report;
       } else {
         // 合并导入同样需要跨副本互斥，避免两个实例同时写同一批表
-        const outcome = await withDistributedLockResult('dnsmgr:backup:import', () =>
+        const outcome = await withDistributedLockResult('dnsmgr:backup:mutate', () =>
           importArchive(tmp, importOpts as any),
         );
         if (!outcome.locked) return reply.code(409).send({ code: -1, msg: '其他实例正在执行导入，请稍后再试' });
@@ -267,6 +269,15 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     const b = req.body || {};
     if (String(b.confirm || '') !== 'RESTORE') return { code: -1, msg: '请输入 RESTORE 确认恢复' };
+    const restoreMode = b.mode === 'merge' ? 'merge' : 'replace';
+    // 整站替换与导入的 replace 同级危险：必须超管 + 重输登录密码，否则 level 2 管理员可借恢复接管站点
+    if (restoreMode === 'replace') {
+      if (Number(req.user.is_super || 0) !== 1) {
+        return reply.code(403).send({ code: -1, msg: '整站替换仅允许超级管理员执行' });
+      }
+      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password);
+      if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
+    }
     const now = Date.now();
     while (restoreHits.length && now - restoreHits[0] > 5 * 60_000) restoreHits.shift();
     if (restoreHits.length >= 3) return reply.code(429).send({ code: -1, msg: '恢复操作过于频繁，请稍后再试' });
@@ -286,10 +297,18 @@ export default async function backupRoutes(app: FastifyInstance) {
       if (!dest) return { code: -1, msg: '备份目的地不存在' };
       await ensureDataDirs();
       localFromRemote = resolveArchivePath(remoteName);
+      // 下载失败只清理本次创建的临时产物；本地同名可用备份必须保留
+      let localExisted = false;
+      try {
+        await stat(localFromRemote);
+        localExisted = true;
+      } catch {
+        // 本地不存在
+      }
       try {
         await downloadRemote(destId, remoteName, localFromRemote);
       } catch (e: any) {
-        await unlink(localFromRemote).catch(() => undefined);
+        if (!localExisted) await unlink(localFromRemote).catch(() => undefined);
         return { code: -1, msg: `云端备份下载失败：${publicError(e, '下载失败')}` };
       }
       let header: any;
@@ -330,7 +349,7 @@ export default async function backupRoutes(app: FastifyInstance) {
     try {
       const r = await restoreBackup({
         fileName: String(job.file_name),
-        mode: b.mode === 'merge' ? 'merge' : 'replace',
+        mode: restoreMode,
         actor: { uid: Number(req.user.uid), username: String(req.user.username || '') },
       });
       audit(req, { module: 'backup', action: 'backup.restore', summary: `在线恢复：${job.file_name}` });
@@ -554,6 +573,13 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (name !== rawName || !name.endsWith('.dnsmgrbk')) return { code: -1, msg: '文件名不合法' };
     await ensureDataDirs();
     const local = path.join(backupsDir(), path.basename(name));
+    let localExisted = false;
+    try {
+      await stat(local);
+      localExisted = true;
+    } catch {
+      // 本地不存在
+    }
     try {
       await downloadRemote(Number(req.params.destId), name, local);
       const st = await stat(local);
@@ -566,7 +592,7 @@ export default async function backupRoutes(app: FastifyInstance) {
       );
       return { code: 0, msg: '已拉回本地', data: { id: r.insertId, file: path.basename(name), size: st.size } };
     } catch (e: any) {
-      await unlink(local).catch(() => undefined);
+      if (!localExisted) await unlink(local).catch(() => undefined);
       return { code: -1, msg: publicError(e) };
     }
   });

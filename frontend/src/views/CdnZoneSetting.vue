@@ -1307,8 +1307,11 @@ async function loadByTab(name: string, force = false) {
 async function reloadAll() {
   loadedTabs.clear();
   loadBusy.value = true;
-  await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadSiteProperties()]);
-  loadBusy.value = false;
+  try {
+    await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadSiteProperties()]);
+  } finally {
+    loadBusy.value = false;
+  }
   await loadByTab(tab.value, true);
 }
 watch(tab, (v) => loadByTab(v));
@@ -1316,10 +1319,13 @@ watch(tab, (v) => loadByTab(v));
 onMounted(async () => {
   if (!aid || !zoneId) return;
   loadBusy.value = true;
-  // 先确定账户类型（ESA 属性接口只在 ESA 站点上调用），其余请求再并行
-  await loadProviders();
-  await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema(), loadSiteProperties()]);
-  loadBusy.value = false;
+  try {
+    // 先确定账户类型（ESA 属性接口只在 ESA 站点上调用），其余请求再并行
+    await loadProviders();
+    await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadRuleSchema(), loadSiteProperties()]);
+  } finally {
+    loadBusy.value = false;
+  }
 });
 </script>
 

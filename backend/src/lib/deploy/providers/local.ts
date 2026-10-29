@@ -49,17 +49,19 @@ function safeTargetPath(p: any): string {
   if (!isPosixAbs && !isWinAbs) throw new Error('目标文件路径必须为绝对路径：' + raw);
   if (raw.split(/[\\/]/).includes('..')) throw new Error('目标文件路径不合法，禁止包含 .. ：' + raw);
 
-  const allowDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
+  const configuredDirs = (process.env.DNSMGR_DEPLOY_LOCAL_DIRS || '')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean)
     .map((d) => normalize(d));
+  const allowDirs = configuredDirs.slice();
   // 未显式配置时默认只允许写入数据目录，避免证书部署覆盖 /app 下的程序文件
   if (!allowDirs.length) allowDirs.push(normalize(process.env.DNSMGR_DATA_DIR || '/app/data'));
 
   if (isWinAbs && !isPosixAbs) {
-    // 配置了允许目录白名单时，Windows 风格路径无法落在其中，直接拒绝
-    if (allowDirs.length) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
+    // 仅当显式配置了 POSIX 允许目录时才拒绝 Windows 路径；
+    // 默认数据目录不能作为拒绝 Windows 部署的依据，否则该分支永远不可达。
+    if (configuredDirs.length) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
     // Windows 路径：按 win32 语义规范化后做系统位置拒绝
     const wn = win32.normalize(raw).toLowerCase();
     const denied =
@@ -124,6 +126,9 @@ function isProtectedDataPath(resolved: string): boolean {
     base === 'dnsmgr.sqlite' ||
     base === 'dnsmgr.sqlite-wal' ||
     base === 'dnsmgr.sqlite-shm' ||
+    base === 'dnsmgr.sqlite.lock' ||
+    base === 'audit-spool.ndjson' ||
+    base.endsWith('.ndjson') ||
     base === 'config.json' ||
     base === '.env' ||
     base.startsWith('.env.')

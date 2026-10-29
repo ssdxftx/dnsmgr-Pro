@@ -28,10 +28,13 @@ export function isPrivateIp(ip: string): boolean {
     return false;
   }
   if (net.isIPv6(ip)) {
-    const low = ip.toLowerCase();
-    if (low === '::1' || low === '::') return true;
-    if (low.startsWith('fc') || low.startsWith('fd')) return true; // 唯一本地地址
-    if (low.startsWith('fe80')) return true; // 链路本地
+    const g = expandV6(ip);
+    if (!g) return true;
+    if (g.every((n) => n === 0)) return true; // ::
+    if (g.slice(0, 7).every((n) => n === 0) && g[7] === 1) return true; // ::1
+    if ((g[0] & 0xfe00) === 0xfc00) return true; // 唯一本地地址 fc00::/7
+    if ((g[0] & 0xffc0) === 0xfe80) return true; // 链路本地 fe80::/10
+    if ((g[0] & 0xff00) === 0xff00) return true; // 组播
     return false;
   }
   return true;
@@ -115,7 +118,12 @@ export function isMetadataIp(ip: string): boolean {
   const embedded = embeddedV4(v);
   if (embedded && embedded !== v && isMetadataIp(embedded)) return true;
   if (net.isIPv4(v)) return v.startsWith('169.254.') || v === '100.100.100.200';
-  if (net.isIPv6(v)) return v.startsWith('fe80') || v === 'fd00:ec2::254';
+  if (net.isIPv6(v)) {
+    // 先转成 8 组十六进制再比较，避免 fd00:ec2:0:0:0:0:0:254 之类非压缩写法绕过
+    const g = expandV6(v);
+    const meta = expandV6('fd00:ec2::254');
+    return !!g && !!meta && g.every((n, i) => n === meta[i]);
+  }
   return false;
 }
 

@@ -99,6 +99,8 @@ export async function purgePrivateAssets(
   await delByIds(q, 'cdn_account', 'id', cdnAccountIds);
   await delByIds(q, 'cert_account', 'id', certAccountIds);
   await q(`DELETE FROM ${table('backup_job')} WHERE owner_uid = ?`, [uid]);
+  // 刷新/预热历史不属于业务资产，但保存了用户站点 URL，删除用户时必须一并清理
+  await q(`DELETE FROM ${table('cdn_cache_task')} WHERE owner_uid = ?`, [uid]);
   await q(`DELETE FROM ${table('user_vault')} WHERE uid = ?`, [uid]);
   return (backupFiles as any[]).map((r) => String(r.file_name || '')).filter(Boolean);
 }

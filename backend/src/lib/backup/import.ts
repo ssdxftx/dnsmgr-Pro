@@ -421,6 +421,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 row.deploy = 0;
               }
               const origAid = Number(row.id);
+              delete row.id;
               if (selfImport) {
                 row.visibility = 'private';
                 row.owner_uid = actorUid;
@@ -465,6 +466,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             }
             case 'domain': {
               const orig = Number(row.id);
+              delete row.id;
               const origAid = Number(row.aid);
               row.aid = aidMap.get(origAid) ?? 0;
               if (origAid && !row.aid) {
@@ -491,7 +493,6 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               continue;
             }
             case 'domain_alias':
-            case 'cdn_cache_rule':
             case 'cert_cname':
             case 'cert_link_log':
             case 'dns_check_task':
@@ -532,6 +533,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             }
             case 'cdn_domain': {
               const orig = Number(row.id);
+              delete row.id;
               row.aid = caidMap.get(Number(row.aid)) ?? 0;
               row.did = didMap.get(Number(row.did)) ?? 0;
               const hit = await q(`SELECT id, aid FROM ${table('cdn_domain')} WHERE name = ? LIMIT 1`, [row.name]);
@@ -548,6 +550,19 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               const id = await insertRow(q, name, row, columns);
               cdidMap.set(orig, id);
+              rep.inserted++;
+              continue;
+            }
+            case 'cdn_cache_rule': {
+              // did 指向 cdn_domain.id，必须用 CDN 域名映射而不是普通域名映射
+              const did = cdidMap.get(Number(row.did));
+              if (!did) {
+                rep.skipped++;
+                continue;
+              }
+              row.did = did;
+              delete row.id;
+              await insertRow(q, name, row, columns);
               rep.inserted++;
               continue;
             }

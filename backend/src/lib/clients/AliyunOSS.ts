@@ -75,9 +75,14 @@ export class AliyunOSS {
       headers,
       body: body || undefined,
       signal: AbortSignal.timeout(15000),
+      // 禁止自动跟随重定向：重定向目标不会经过 pinned dispatcher，可能被指向云元数据地址
+      redirect: 'manual',
       ...(dispatcher ? { dispatcher } : {}),
     } as any);
     const text = await res.text();
+    if (res.status >= 300 && res.status < 400) {
+      throw new Error('OSS 返回重定向，已拒绝跟随: HTTP ' + res.status);
+    }
 
     if (res.status >= 200 && res.status < 300) {
       if (!text) return true;

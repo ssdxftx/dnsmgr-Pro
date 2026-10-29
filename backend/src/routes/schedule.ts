@@ -131,6 +131,10 @@ export default async function scheduleRoutes(app: FastifyInstance) {
 
   app.put('/api/schedule/tasks/:id', auth, async (req: any) => {
     const id = Number(req.params.id);
+    // 必须先校验任务原有的域名归属，否则可通过自增 id 覆盖他人的私有账户任务
+    const current: any = await queryOne(`SELECT did FROM ${table('sctask')} WHERE id = ?`, [id]);
+    if (!current) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(current.did, req.user))) return { code: -1, msg: '无权限操作该任务的域名账户' };
     const b = req.body || {};
     const val = buildTask(b);
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };

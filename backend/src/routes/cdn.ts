@@ -1710,6 +1710,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const { rules } = req.body || {};
     const ruleList = Array.isArray(rules) ? rules : [];
+    if (ruleList.length > 200) return { code: -1, msg: '缓存规则最多 200 条' };
+    // 预先校验，避免厂商已接受规则后本地 INSERT 因超长/非法值回滚，造成云端与库内不一致
+    const normalized: Array<{ path: string; ttl: number }> = [];
+    for (const r of ruleList) {
+      const path = String(r?.path ?? '').trim();
+      if (!path) continue;
+      if (path.length > 255) return { code: -1, msg: '缓存规则路径不能超过 255 个字符：' + path.slice(0, 50) };
+      const ttl = Number(r?.ttl ?? 0);
+      if (!Number.isFinite(ttl) || ttl < 0 || ttl > 31536000) return { code: -1, msg: '缓存规则 TTL 不合法' };
+      normalized.push({ path, ttl });
+    }
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const provider = await cdnForRow(row);
@@ -1717,10 +1728,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!(await provider.setCacheRules(row.name, ruleList))) return { code: -1, msg: '缓存规则更新失败，' + provider.getError() };
     await withTransaction(async (q) => {
       await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
-      for (const r of ruleList) {
-        const path = (r.path || '').trim();
-        if (!path) continue;
-        await q(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, path, Number(r.ttl || 0)]);
+      for (const r of normalized) {
+        await q(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, r.path, r.ttl]);
       }
     });
     audit(req, {
@@ -2772,7 +2781,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         for (const u of g.urls) failed.push({ url: u, msg: '该厂商暂不支持此操作' });
         continue;
       }
-      const taskId = op === 'purge' ? await fn(g.urls, type) : await fn(g.urls);
+      const taskId = op === 'purge' ? await g.provider[op](g.urls, type) : await g.provider[op](g.urls);
       const status = taskId === false ? 1 : 0;
       const errMsg = taskId === false ? g.provider.getError?.() || '提交失败' : null;
       const taskType = type === 'dir' ? 'dir' : op === 'preheat' ? 'preheat' : 'url';
@@ -2964,10 +2973,13 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
 
     let belongDomain: any = null;
     let recordName = '@';
-    for (const dnsName of Object.keys(dnsMap)) {
+    // 按名称长度降序匹配，确保 a.example.com 优先于 example.com，结果不依赖数据库返回顺序
+    const dnsNames = Object.keys(dnsMap).sort((a, b) => b.length - a.length);
+    for (const dnsName of dnsNames) {
       const d = dnsMap[dnsName];
       if (name === dnsName) {
         belongDomain = d;
+        recordName = '@';
         break;
       }
       const suffix = '.' + dnsName;

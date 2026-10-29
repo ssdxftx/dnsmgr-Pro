@@ -396,13 +396,18 @@ async function doImport() {
 async function doAddCategory() {
   if (!categoryName.value) return message.warning(t('domain.categoryNameRequired'));
   saveBusy.value = true;
-  const res = await api('POST', '/domains/categories', { name: categoryName.value });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(t('domain.addCategorySuccess'));
-    showCategory.value = false;
-    categoryName.value = '';
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', '/domains/categories', { name: categoryName.value });
+    if (res.code === 0) {
+      message.success(t('domain.addCategorySuccess'));
+      showCategory.value = false;
+      categoryName.value = '';
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || String(e));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function gotoRecords(row: any) {
@@ -453,12 +458,17 @@ async function batchNotice(isNotice: number) {
 
 async function updateDate(row: any) {
   message.loading(t('domain.queryingWhois'));
-  const res = await api('POST', `/domains/${row.id}/update-date`);
-  message.destroyAll();
-  if (res.code === 0) {
-    message.success(t('domain.refreshSuccess'));
-    loadDomains();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/domains/${row.id}/update-date`);
+    message.destroyAll();
+    if (res.code === 0) {
+      message.success(t('domain.refreshSuccess'));
+      loadDomains();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.destroyAll();
+    message.error(e?.message || String(e));
+  }
 }
 
 async function loadCategories() {
@@ -504,14 +514,20 @@ async function doEdit() {
     category_name: categories.value.find((c: any) => Number(c.id) === Number(payload.cid))?.name || '',
   });
   saveBusy.value = true;
-  const res = await api('PUT', `/domains/${row.id}`, payload);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(t('domain.editSuccess'));
-    showEdit.value = false;
-  } else {
+  try {
+    const res = await api('PUT', `/domains/${row.id}`, payload);
+    if (res.code === 0) {
+      message.success(t('domain.editSuccess'));
+      showEdit.value = false;
+    } else {
+      Object.assign(row, prev);
+      message.error(res.msg);
+    }
+  } catch (e: any) {
     Object.assign(row, prev);
-    message.error(res.msg);
+    message.error(e?.message || String(e));
+  } finally {
+    saveBusy.value = false;
   }
 }
 

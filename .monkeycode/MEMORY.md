@@ -35,8 +35,8 @@ Entries discovered by the Agent during task execution should follow this format:
 - Date: 2026-09-30
 - Context: 用户要求将代码推送到仓库时指定 Git 身份，并要求长期沿用
 - Instructions:
-  - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（已写入本仓库本地配置）
-  - 禁止在提交信息中添加 `Co-authored-by` 尾注（原 coauthor 配置与 prepare-commit-msg 钩子已移除）
+  - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（已同时写入本仓库本地配置与全局配置）
+  - 禁止在提交信息中添加 `Co-authored-by` 尾注（`coauthor.*` 配置项已删除，`prepare-commit-msg` 钩子已移除）
   - 远端仓库：`https://github.com/ssdxftx/dnsmgr-Pro`，主分支 `main`
 
 [Project Knowledge Summary]
@@ -118,3 +118,13 @@ Entries discovered by the Agent during task execution should follow this format:
   - 安装向导 `POST /api/setup/check` 与 `POST /api/setup/install` 需传 `db_type`（`sqlite` 或 `mysql`）；SQLite 配置在 `config.json` 中以相对数据目录的路径保存
   - 新增自检命令：`cd backend && npm run check:sqlite`；MySQL 冒烟需设置 `DB_HOST`/`DB_USER`/`DB_NAME` 后执行 `npm run check:mysql`；跨库备份（SQLite → MySQL → SQLite）需 MySQL 环境后执行 `npm run check:cross`；前后端类型检查、`npm run check:i18n`、`npm run build` 保持不变
   - SQLite 单实例由数据库文件旁的 `dnsmgr.sqlite.lock` 强制保证；同主机 PID 已退出的遗留锁会自动清理，其他主机或活跃 PID 会拒绝启动；网络文件系统按 `DB_FILE` 所在目录检测，非持久化目录启动时输出警告
+
+[Project Knowledge Summary]
+- Date: 2026-10-29
+- Context: Discovered by Agent while 验证后端缺陷与修复
+- Category: Testing Methods / Environment Configuration
+- Instructions:
+  - 仓库默认不含 `node_modules`：后端 `cd backend && npm install`、前端 `cd frontend && npm install` 后才能执行 `npx tsc --noEmit` / `npx vue-tsc --noEmit`
+  - 本环境无预装 MySQL；可用 `DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server` 后 `service mariadb start`，root 走 unix socket `/run/mysqld/mysqld.sock`，TCP 连接需另建用户
+  - 备份/安装类改动至少执行 `cd backend && npm run check:backup && npm run check:sqlite`；前端改动执行 `cd frontend && npx vue-tsc --noEmit && npm run check:format && npm run check:i18n`
+  - 临时验证脚本放在 `/tmp/opencode`，并在该目录放 `{"type":"module"}` 的 `package.json`，用 `npx tsx` 执行，避免被当作 CJS 编译

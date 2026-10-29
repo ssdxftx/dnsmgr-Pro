@@ -58,6 +58,10 @@ export async function executeAll(): Promise<boolean> {
     if (!claim || !claim.affectedRows) continue;
     try {
       await executeOne(row);
+      // 单次任务执行完即停用，避免 UI 长期显示“启用中”且不可再次调度
+      if (Number(row.type) !== 1) {
+        await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
+      }
       console.log('定时切换任务' + row.id + '执行成功');
     } catch (e: any) {
       console.log('定时切换任务' + row.id + '执行失败,' + e.message);

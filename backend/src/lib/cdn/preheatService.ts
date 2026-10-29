@@ -81,7 +81,8 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
       }
       continue;
     }
-    const taskId = op === 'purge' ? await fn(g.urls, type) : await fn(g.urls);
+    // 必须保留 receiver：provider 的 purge/preheat 是使用 this 的原型方法
+    const taskId = op === 'purge' ? await g.provider[op](g.urls, type) : await g.provider[op](g.urls);
     const errMsg = taskId === false ? g.provider.getError?.() || '提交失败' : null;
     for (const u of g.urls) {
       if (taskId === false) {

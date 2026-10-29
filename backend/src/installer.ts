@@ -6,6 +6,7 @@ import mysql from 'mysql2/promise';
 import bcrypt from 'bcryptjs';
 import {
   saveDbConfig,
+  loadDbConfig,
   hasDbConfigFile,
   hasEnvDbConfig,
   isSqliteFileInsideDataDir,
@@ -159,7 +160,7 @@ export function consumeInstallToken(token: string, identity: string): boolean {
   return true;
 }
 
-async function sqliteInstall(cfg: DbConfig, prefix: string, existed: boolean, adminUsername: string, adminPassword: string): Promise<void> {
+async function sqliteInstall(cfg: DbConfig, prefix: string, existed: boolean, adminUsername: string, adminPassword: string, needAdmin: boolean): Promise<void> {
   const { DatabaseSync } = await import('node:sqlite');
   const file = resolveSqliteFile(cfg);
   if (file !== ':memory:') fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -187,12 +188,6 @@ async function sqliteInstall(cfg: DbConfig, prefix: string, existed: boolean, ad
         const insertConfig = db.prepare(`INSERT INTO \`${prefix}config\` (\`key\`, value) VALUES (?, ?)`);
         for (const [key, value] of initConfigs) insertConfig.run(key, value);
         insertConfig.run('sys_key', randomBytes(24).toString('hex'));
-
-        const hash = bcrypt.hashSync(adminPassword, 10);
-        db.prepare(
-          `INSERT INTO \`${prefix}user\` (id, username, password, is_api, apikey, level, regtime, lasttime, status, is_super)
-           VALUES (1000, ?, ?, 0, '', 2, datetime('now','localtime'), datetime('now','localtime'), 1, 1)`,
-        ).run(adminUsername, hash);
       } else {
         const row = db
           .prepare(`SELECT \`key\` FROM \`${prefix}config\` WHERE \`key\` = 'sys_key' LIMIT 1`)
@@ -202,6 +197,21 @@ async function sqliteInstall(cfg: DbConfig, prefix: string, existed: boolean, ad
             'sys_key',
             randomBytes(24).toString('hex'),
           );
+        }
+      }
+      // 已初始化的库若缺少管理员（例如上次安装中途失败），仍需补建管理员，避免无法登录
+      if (needAdmin) {
+        const hash = bcrypt.hashSync(adminPassword, 10);
+        if (existed) {
+          db.prepare(
+            `INSERT INTO \`${prefix}user\` (username, password, is_api, apikey, level, regtime, lasttime, status, is_super)
+             VALUES (?, ?, 0, '', 2, datetime('now','localtime'), datetime('now','localtime'), 1, 1)`,
+          ).run(adminUsername, hash);
+        } else {
+          db.prepare(
+            `INSERT INTO \`${prefix}user\` (id, username, password, is_api, apikey, level, regtime, lasttime, status, is_super)
+             VALUES (1000, ?, ?, 0, '', 2, datetime('now','localtime'), datetime('now','localtime'), 1, 1)`,
+          ).run(adminUsername, hash);
         }
       }
       db.exec('COMMIT');
@@ -219,7 +229,7 @@ async function sqliteInstall(cfg: DbConfig, prefix: string, existed: boolean, ad
   }
 }
 
-async function mysqlInstall(cfg: DbConfig, prefix: string, existed: boolean, adminUsername: string, adminPassword: string): Promise<void> {
+async function mysqlInstall(cfg: DbConfig, prefix: string, existed: boolean, adminUsername: string, adminPassword: string, needAdmin: boolean): Promise<void> {
   let conn: mysql.Connection;
   try {
     conn = await createConnection(cfg);
@@ -236,7 +246,7 @@ async function mysqlInstall(cfg: DbConfig, prefix: string, existed: boolean, adm
     }
 
     if (!existed) {
-      // 全新安装：写入初始配置 + sys_key + 管理员
+      // 全新安装：写入初始配置
       const initConfigs: Array<[string, string]> = [
         ['version', '1.0.0'],
         ['notice_mail', '0'],
@@ -247,20 +257,38 @@ async function mysqlInstall(cfg: DbConfig, prefix: string, existed: boolean, adm
       for (const [k, v] of initConfigs) {
         await conn.query(`INSERT INTO \`${prefix}config\` (\`key\`, value) VALUES (?, ?)`, [k, v]);
       }
+    }
+    // sys_key 无论新建还是绑定现库都要确保存在
+    const [keyRows] = await conn.query(`SELECT \`key\` FROM \`${prefix}config\` WHERE \`key\` = 'sys_key'`, []);
+    if ((keyRows as any[]).length === 0) {
       await conn.query(`INSERT INTO \`${prefix}config\` (\`key\`, value) VALUES (?, ?)`, ['sys_key', randomBytes(24).toString('hex')]);
-
+    }
+    // 半成品库（config 已在但无管理员）必须补建管理员，否则会永久无法登录
+    if (needAdmin) {
       const hash = await bcrypt.hash(adminPassword, 10);
       await conn.query(
         `INSERT INTO \`${prefix}user\` (username, password, is_api, apikey, level, regtime, lasttime, status, is_super) VALUES (?, ?, 0, '', 2, NOW(), NOW(), 1, 1)`,
         [adminUsername, hash],
       );
-    } else {
-      // 绑定现有库（彩虹 DNS 数据）：仅补齐 sys_key，不新增管理员、不覆盖数据
-      const [rows] = await conn.query(`SELECT \`key\` FROM \`${prefix}config\` WHERE \`key\` = 'sys_key'`, []);
-      if ((rows as any[]).length === 0) {
-        await conn.query(`INSERT INTO \`${prefix}config\` (\`key\`, value) VALUES (?, ?)`, ['sys_key', randomBytes(24).toString('hex')]);
-      }
     }
+  } finally {
+    await conn.end().catch(() => undefined);
+  }
+}
+
+/** 已有库是否至少存在一个管理员；查询失败时按“有管理员”处理，避免瞬时故障触发重复建号 */
+async function dbHasAdmin(cfg: DbConfig, prefix: string): Promise<boolean> {
+  let conn: mysql.Connection;
+  try {
+    conn = await createConnection(cfg);
+  } catch {
+    return true;
+  }
+  try {
+    const [rows] = await conn.query(`SELECT 1 FROM \`${prefix}user\` WHERE level >= 2 LIMIT 1`);
+    return (rows as any[]).length > 0;
+  } catch {
+    return true;
   } finally {
     await conn.end().catch(() => undefined);
   }
@@ -280,27 +308,36 @@ export async function performInstall(cfg: DbConfig, adminUsername: string, admin
   if (!test.ok) return { ok: false, bound: false, message: test.message };
 
   const existed = test.initialized;
-  if (!existed && (!adminUsername || !adminPassword)) {
-    return { ok: false, bound: false, message: '全新安装需要设置管理员账号和密码' };
+  const username = String(adminUsername || '').trim();
+  // 已初始化但缺少管理员的“半成品库”同样需要补建管理员
+  const needAdmin = !existed || !(await dbHasAdmin(cfg, prefix));
+  if (needAdmin && (!username || !adminPassword)) {
+    return { ok: false, bound: false, message: '需要设置管理员账号和密码' };
   }
-  if (!existed && adminPassword.length < 8) {
+  if (needAdmin && username.length > 64) {
+    return { ok: false, bound: false, message: '管理员账号长度不能超过 64 个字符' };
+  }
+  if (needAdmin && adminPassword.length < 8) {
     return { ok: false, bound: false, message: '管理员密码长度至少为 8 位' };
   }
 
   try {
     if (cfg.db_type === 'sqlite') {
-      await sqliteInstall(cfg, prefix, existed, adminUsername, adminPassword);
+      await sqliteInstall(cfg, prefix, existed, username, adminPassword, needAdmin);
     } else {
-      await mysqlInstall(cfg, prefix, existed, adminUsername, adminPassword);
+      await mysqlInstall(cfg, prefix, existed, username, adminPassword, needAdmin);
     }
   } catch (e: any) {
     return { ok: false, bound: false, message: '初始化失败：' + (e?.message || String(e)) };
   }
 
+  // 先验证新驱动可用，再持久化配置：否则配置已指向不可用的库，重启后会崩溃循环
+  const prevCfg = loadDbConfig();
   try {
-    saveDbConfig(cfg);
     await reinitPool(cfg);
+    saveDbConfig(cfg);
   } catch (e: any) {
+    await reinitPool(prevCfg).catch(() => undefined);
     return { ok: false, bound: existed, message: '保存数据库配置失败：' + (e?.message || String(e)) };
   }
   markInstalled();
@@ -314,7 +351,11 @@ export async function performInstall(cfg: DbConfig, adminUsername: string, admin
   return {
     ok: true,
     bound: existed,
-    message: existed ? '已绑定现有数据库，可直接用原管理员账号登录' : '安装完成',
+    message: needAdmin && existed
+      ? '已为现有数据库补建管理员账号，请使用新账号登录'
+      : existed
+        ? '已绑定现有数据库，可直接用原管理员账号登录'
+        : '安装完成',
     installToken: issueInstallToken(dbIdentity(cfg)),
   };
 }
@@ -346,8 +387,13 @@ export async function getInstallState(): Promise<InstallState> {
   try {
     const one = await queryOne(`SELECT 1 FROM ${table('config')} LIMIT 1`);
     if (one) {
-      installedFlag = true;
-      return 'installed';
+      // config 存在但没有任何管理员，说明上次安装中途失败：不能视为已安装，否则永远无法登录
+      const admin = await queryOne(`SELECT 1 FROM ${table('user')} WHERE level >= 2 LIMIT 1`);
+      if (admin) {
+        installedFlag = true;
+        return 'installed';
+      }
+      return 'not_installed';
     }
     return 'not_installed';
   } catch (e: any) {

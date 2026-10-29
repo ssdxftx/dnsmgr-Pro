@@ -24,7 +24,13 @@ export function assertCommandAllowed(cmd?: string): void {
   if (!list.length) return;
   const c = String(cmd || '').trim();
   if (!c) return;
-  if (!list.some((p) => c === p || c.startsWith(p))) {
+  // 白名单只允许“单条命令 + 普通参数”：出现 shell 控制符即拒绝，
+  // 否则 `systemctl reload nginx; curl ...` 之类可直接绕过前缀匹配。
+  if (/[;&|`$(){}<>\r\n\\]/.test(c)) {
+    throw new Error('命令包含不允许的 shell 控制字符：' + c.slice(0, 120));
+  }
+  // 前缀必须按完整命令名匹配：允许 "p" 或 "p 参数"，禁止 "pXxx"
+  if (!list.some((p) => c === p || c.startsWith(p + ' '))) {
     throw new Error('命令不在允许列表内（DNSMGR_DEPLOY_CMD_ALLOWLIST）：' + c.slice(0, 120));
   }
 }

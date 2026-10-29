@@ -176,6 +176,9 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 编辑任务
   app.put('/api/optimize/tasks/:id', auth, async (req: any) => {
     const id = Number(req.params.id);
+    const current: any = await queryOne(`SELECT did FROM ${table('optimizeip')} WHERE id = ?`, [id]);
+    if (!current) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(current.did, req.user))) return { code: -1, msg: '无权限操作该任务的域名账户' };
     const b = req.body || {};
     const task = {
       did: Number(b.did),

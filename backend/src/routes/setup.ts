@@ -168,23 +168,12 @@ export default async function setupRoutes(app: FastifyInstance) {
       } else {
         key = await keyForArchive(tmp, pass ? String(pass) : undefined);
       }
-      const tempAdmin: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 ORDER BY id LIMIT 1`);
       const report = await importArchive(tmp, { key, mode: 'install', trusted: true });
       // 旧归档可能带 maintenance=1，安装完成后必须归零
       await setMaintenance(false);
 
-      if (tempAdmin?.id) {
-        const admins = await query(
-          `SELECT id FROM ${table('user')} WHERE level >= 2 AND id <> ? ORDER BY id`,
-          [tempAdmin.id],
-        );
-        if ((admins as any[]).length) {
-          await query(`DELETE FROM ${table('user')} WHERE id = ?`, [tempAdmin.id]);
-          await query(`UPDATE ${table('user')} SET is_super = 0`);
-          await query(`UPDATE ${table('user')} SET is_super = 1 WHERE id = ?`, [(admins as any[])[0].id]);
-        }
-      }
-
+      // 导入过程已在事务内处理临时管理员：归档含管理员时会删除临时超管。
+      // 这里只负责补齐超管标记，不能按导入前捕获的 id 删除用户，否则会误删刚恢复的原管理员。
       // 保证恰好一个超级管理员（归档用户的 is_super 可能为 0）
       const superRow: any = await queryOne(`SELECT id FROM ${table('user')} WHERE is_super = 1 LIMIT 1`);
       if (!superRow) {

@@ -599,6 +599,8 @@ export async function openArchive(file: string, key: Buffer): Promise<OpenedArch
   await ensureDataDirs();
   await cleanStaleImportFiles();
   const tmp = path.join(tmpDir(), `import-${randomBytes(6).toString('hex')}.json`);
+  // 登记为使用中，避免 1 小时清理任务在导入过程中删掉解压后的明文 JSON
+  markTempActive(tmp);
   const hash = createHash('sha256');
   const rs = createReadStream(file, { start: headerEnd, end: fileSize - TAG_LEN - 1 });
   // 摘要必须对「解密后的 gzip 字节」计算，与写入端 gz 输出一致；
@@ -628,11 +630,13 @@ export async function openArchive(file: string, key: Buffer): Promise<OpenedArch
   try {
     await pipeline(rs, dec, tap, gunzip, limiter, ws);
   } catch (e: any) {
+    markTempDone(tmp);
     await unlink(tmp).catch(() => undefined);
     throw new Error('文件校验失败：' + (e?.message || '解密失败'));
   }
   const checksum = hash.digest('hex');
   if (header.checksum && checksum !== header.checksum) {
+    markTempDone(tmp);
     await unlink(tmp).catch(() => undefined);
     throw new Error('文件校验失败：内容摘要不一致');
   }
@@ -641,11 +645,13 @@ export async function openArchive(file: string, key: Buffer): Promise<OpenedArch
   try {
     index = await buildTableIndex(tmp);
   } catch (e) {
+    markTempDone(tmp);
     await unlink(tmp).catch(() => undefined);
     throw e;
   }
   const { ranges, names } = index;
   if (!names.length) {
+    markTempDone(tmp);
     await unlink(tmp).catch(() => undefined);
     throw new Error('备份内容缺少数据表');
   }
@@ -655,6 +661,7 @@ export async function openArchive(file: string, key: Buffer): Promise<OpenedArch
     tableNames: names,
     readTable: (name: string) => (names.includes(name) ? readTableRows(tmp, ranges.get(name)) : null),
     dispose: async () => {
+      markTempDone(tmp);
       await unlink(tmp).catch(() => undefined);
     },
   };

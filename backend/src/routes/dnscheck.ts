@@ -122,6 +122,8 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const row: any = await queryOne(`SELECT * FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
     if (!checkLevel(req.user, 2) && Number(row.uid) !== req.user.uid) return { code: -1, msg: '无权限' };
+    // 管理员也必须校验任务原域名的可见性，避免改写他人私有账户下的检测任务
+    if (!(await canAccessDomain(req.user, Number(row.did)))) return { code: -1, msg: '无权限检测该域名' };
     const b = req.body || {};
     const did = Number(b.did) || 0;
     if (!did) return { code: -1, msg: '请选择域名' };

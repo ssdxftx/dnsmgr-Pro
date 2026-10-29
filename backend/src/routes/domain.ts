@@ -228,10 +228,13 @@ async function getDomainWithAccount(domainId: number, user?: any) {
 }
 
 /** 域名被删除/重新接入时清理同名权限，避免旧授权在新域名上继续生效 */
-async function clearDomainPermissions(names: string[]): Promise<void> {
+async function clearDomainPermissions(
+  names: string[],
+  run: (sql: string, params?: any[]) => Promise<any> = query,
+): Promise<void> {
   const list = [...new Set(names.map((n) => String(n || '').trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))];
   if (!list.length) return;
-  await query(`DELETE FROM ${table('permission')} WHERE LOWER(domain) IN (${list.map(() => '?').join(',')})`, list);
+  await run(`DELETE FROM ${table('permission')} WHERE LOWER(domain) IN (${list.map(() => '?').join(',')})`, list);
 }
 
 export default async function domainRoutes(app: FastifyInstance) {
@@ -391,11 +394,14 @@ export default async function domainRoutes(app: FastifyInstance) {
       return !a || a.visibility !== 'private' || Number(a.owner_uid) === Number(req.user.uid);
     });
     const LIMIT = 200;
+    // 单次搜索最多扫描的域名数：避免一个不匹配关键词把全部域名的记录全量拉一遍
+    const MAX_SCAN_DOMAINS = 100;
+    const scanTargets = visibleTargets.slice(0, MAX_SCAN_DOMAINS);
     const out: any[] = [];
     let cursor = 0;
     const worker = async () => {
-      while (cursor < visibleTargets.length && out.length < LIMIT) {
-        const d = visibleTargets[cursor++];
+      while (cursor < scanTargets.length && out.length < LIMIT) {
+        const d = scanTargets[cursor++];
         if (out.length >= LIMIT) return;
         try {
           const list = (await fetchAllRecords(d, acctMap.get(Number(d.aid)))).list;
@@ -420,10 +426,10 @@ export default async function domainRoutes(app: FastifyInstance) {
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(5, targets.length) }, worker));
+    await Promise.all(Array.from({ length: Math.min(5, scanTargets.length) }, worker));
     // 并发早停会让「先跑到上限」的 worker 决定结果集，且可能丢弃后续匹配；
     // 明确返回 truncated 让前端提示「结果过多，请细化关键词」，避免用户误以为结果完整
-    const truncated = out.length >= LIMIT;
+    const truncated = out.length >= LIMIT || visibleTargets.length > scanTargets.length;
     return { code: 0, data: out.slice(0, LIMIT), truncated };
   });
 
@@ -487,16 +493,19 @@ export default async function domainRoutes(app: FastifyInstance) {
     const info = await getDomainWithAccount(Number(id), req.user);
     if (!info) return { code: -1, msg: '域名不存在' };
     const row = info.domain;
-    // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名
-    await clearDomainPermissions([row?.name || '']);
-    await query(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
-    await query(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('cert_cname')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('cert_link_log')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('dmtask')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
-    await query(`DELETE FROM ${table('dns_check_task')} WHERE did = ?`, [id]);
+    // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名。
+    // 权限清理与多表删除必须在同一事务内，否则中途失败会丢失权限或留下孤儿数据。
+    await withTransaction(async (q) => {
+      await clearDomainPermissions([row?.name || ''], q);
+      await q(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
+      await q(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('cert_cname')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('cert_link_log')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('dmtask')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('dns_check_task')} WHERE did = ?`, [id]);
+    });
     audit(req, {
       targetType: 'domain',
       targetId: id,
@@ -559,10 +568,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     const allowedIds = new Set((allowed as any[]).map((r) => Number(r.id)));
     if (ids.some((id) => !allowedIds.has(id))) return { code: -1, msg: '无权操作部分私有账户域名' };
     const names = await query(`SELECT name FROM ${table('domain')} WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
-    await clearDomainPermissions((names as any[]).map((r) => r.name));
     const ph = ids.map(() => '?').join(',');
     // 多表级联删除必须原子执行：中途失败会留下「域名已删但任务/别名残留」的孤儿数据
     await withTransaction(async (q) => {
+      await clearDomainPermissions((names as any[]).map((r) => r.name), q);
       await q(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
       await q(`DELETE FROM ${table('cert_cname')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('cert_link_log')} WHERE did IN (${ph})`, ids);

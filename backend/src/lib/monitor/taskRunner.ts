@@ -61,23 +61,26 @@ async function handle(row: any): Promise<void> {
     } else if (row.checktype === 1) {
       result = await checkTcp(row.main_value, row.checkurl, row.tcpport, row.timeout);
     } else {
-      result = await checkPing(row.main_value, row.checkurl);
+      result = await checkPing(row.main_value, row.checkurl, row.timeout);
     }
 
     action = 0;
+    // 先计入本次结果再比较，否则 cycle=2 实际要连续 3 次失败才切换
+    const confirmCount = Number(row.errcount || 0) + 1;
+    const needConfirm = Number(row.cycle || 1);
     if (result.status && row.status === 1) {
-      if (row.cycle <= 1 || row.errcount >= row.cycle) {
+      if (needConfirm <= 1 || confirmCount >= needConfirm) {
         await query(`UPDATE ${table('dmtask')} SET status = 0, errcount = 0, switchtime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
         action = 2;
       } else {
-        await query(`UPDATE ${table('dmtask')} SET errcount = errcount + 1 WHERE id = ?`, [row.id]);
+        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ?`, [confirmCount, row.id]);
       }
     } else if (!result.status && row.status === 0) {
-      if (row.cycle <= 1 || row.errcount >= row.cycle) {
+      if (needConfirm <= 1 || confirmCount >= needConfirm) {
         await query(`UPDATE ${table('dmtask')} SET status = 1, errcount = 0, switchtime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
         action = 1;
       } else {
-        await query(`UPDATE ${table('dmtask')} SET errcount = errcount + 1 WHERE id = ?`, [row.id]);
+        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ?`, [confirmCount, row.id]);
       }
     } else if (row.errcount > 0) {
       await query(`UPDATE ${table('dmtask')} SET errcount = 0 WHERE id = ?`, [row.id]);

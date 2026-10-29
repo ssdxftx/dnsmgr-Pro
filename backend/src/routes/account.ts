@@ -192,7 +192,7 @@ export default async function accountRoutes(app: FastifyInstance) {
       [
         type,
         name,
-        encryptAccountConfig(config, isPrivate, dek),
+        encryptAccountConfig(safeConfig, isPrivate, dek),
         remark || '',
         isPrivate ? req.user.uid : 0,
         isPrivate ? 'private' : 'shared',

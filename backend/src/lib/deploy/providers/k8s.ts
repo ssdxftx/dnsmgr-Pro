@@ -7,6 +7,7 @@ export class K8sDeploy implements DeployProvider {
   private server = '';
   private bearerToken: string | null = null;
   private tls: { cert: Buffer | null; key: Buffer | null } = { cert: null, key: null };
+  private ca: Buffer | null = null;
   private insecure = false;
   private logger: ((txt: string) => void) | null = null;
 
@@ -72,6 +73,15 @@ export class K8sDeploy implements DeployProvider {
     if (!server) throw new Error('Kubeconfig中找不到cluster.server');
     this.server = server.replace(/\/+$/, '');
 
+    // 私有 CA 集群（kubeadm/k3s/kind 等）必须使用 kubeconfig 内联的 CA，
+    // 否则校验会走系统信任库并直接失败。
+    const caData = cluster.cluster && cluster.cluster['certificate-authority-data'];
+    if (caData) {
+      this.ca = Buffer.from(String(caData), 'base64');
+    } else if (cluster.cluster && cluster.cluster['certificate-authority']) {
+      throw new Error('出于安全考虑，不支持 kubeconfig 中的 certificate-authority 文件路径，请改用内联的 certificate-authority-data');
+    }
+
     this.bearerToken =
       (user.user && user.user.token) ||
       (user.user && user.user['auth-provider'] && user.user['auth-provider'].config && user.user['auth-provider'].config['access-token']) ||
@@ -90,14 +100,14 @@ export class K8sDeploy implements DeployProvider {
     this.tls = { cert: clientCert, key: clientKey };
   }
 
-  private async k8sRequest(method: string, path: string, body?: string): Promise<{ code: number; body: string; err: string }> {
+  private async k8sRequest(method: string, path: string, body?: string, contentType = 'application/json'): Promise<{ code: number; body: string; err: string }> {
     const url = new URL(this.server + path);
     // node 原生 https 无 undici dispatcher，改用自定义 lookup 把校验通过的 IP 固定，避免 DNS 重绑定
     const lookup = await pinnedLookupFor(url.hostname);
     return new Promise((resolve) => {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (this.bearerToken) headers['Authorization'] = 'Bearer ' + this.bearerToken;
-      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      if (body !== undefined) headers['Content-Type'] = contentType;
       const req = httpRequest(
         url,
         {
@@ -107,6 +117,7 @@ export class K8sDeploy implements DeployProvider {
           rejectUnauthorized: !this.insecure,
           cert: this.tls.cert || undefined,
           key: this.tls.key || undefined,
+          ca: this.ca || undefined,
           ...(lookup ? { lookup } : {}),
         },
         (res) => {
@@ -169,7 +180,7 @@ export class K8sDeploy implements DeployProvider {
     } else if (s.code >= 200 && s.code < 300) {
       this.log('Secret:' + safeSecretName + ' 已存在，正在更新...');
       const patch = { data: secretPayload.data, type: 'kubernetes.io/tls' };
-      const p = await this.k8sRequest('PATCH', secretUrl, JSON.stringify(patch));
+      const p = await this.k8sRequest('PATCH', secretUrl, JSON.stringify(patch), 'application/merge-patch+json');
       if (p.code < 200 || p.code >= 300) throw new Error('更新Secret失败 (HTTP ' + p.code + '): ' + p.body + ' | ' + p.err);
       this.log('Secret:' + safeSecretName + ' 更新成功');
     } else {
@@ -208,7 +219,7 @@ export class K8sDeploy implements DeployProvider {
         }
 
         const patch = { spec: { tls } };
-        const i = await this.k8sRequest('PATCH', ingressUrl + '/' + ingName, JSON.stringify(patch));
+        const i = await this.k8sRequest('PATCH', ingressUrl + '/' + ingName, JSON.stringify(patch), 'application/merge-patch+json');
         if (i.code < 200 || i.code >= 300) throw new Error("更新Ingress '" + ingName + "' 失败 (HTTP " + i.code + '): ' + i.body + ' | ' + i.err);
         this.log("Ingress '" + ingName + "' 更新TLS成功");
       }

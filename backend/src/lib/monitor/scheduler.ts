@@ -60,15 +60,21 @@ async function tick(): Promise<void> {
       const idx = cursor++;
       if (idx >= rows.length) return;
       const row = rows[idx];
-      await runMonitorTask(row);
-      // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期
-      const doneAt = Math.floor(Date.now() / 1000);
-      await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
-        doneAt,
-        doneAt + (row.frequency || 60),
-        row.id,
-      ]);
-      count++;
+      // 单个任务失败不能中断整轮：否则 Promise.all 提前结束、其他 worker 继续执行，
+      // running 被清零后下一轮会与旧 worker 并发处理同一批任务。
+      try {
+        await runMonitorTask(row);
+        // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期
+        const doneAt = Math.floor(Date.now() / 1000);
+        await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
+          doneAt,
+          doneAt + (row.frequency || 60),
+          row.id,
+        ]);
+        count++;
+      } catch (e: any) {
+        console.error('[dmtask] task ' + row.id + ' 调度失败:', e?.message || e);
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));

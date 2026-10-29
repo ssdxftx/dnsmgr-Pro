@@ -3,7 +3,7 @@ import { query, table } from '../../db.js';
 import { loadConfig } from '../../config.js';
 import { exportBackup } from './export.js';
 import { importArchive } from './import.js';
-import { getBackupKey } from './key.js';
+import { keyForArchive } from './key.js';
 import { applyBackupRetention } from './retention.js';
 import { getRestoreStatus, setMaintenance, setRestoreStatus } from './maintenance.js';
 import { readArchiveHeader, resolveArchivePath } from './archive.js';
@@ -52,8 +52,8 @@ export async function restoreFromArchive(opts: {
 
 async function runLocked(opts: RunOptions): Promise<any> {
   let result: any;
-  // 分布式锁：多副本下同一时刻只允许一个恢复/替换任务，避免维护标志与导入互斥只在单进程生效
-  const locked = await withDistributedLock('dnsmgr:backup:restore', async () => {
+  // 分布式锁：与 /api/backup/import 共用同一把锁，避免恢复期间并发导入写同一批表
+  const locked = await withDistributedLock('dnsmgr:backup:mutate', async () => {
     result = await runRestore(opts);
   });
   if (!locked) throw new Error('未获取到恢复锁（可能已有任务执行，或数据库不可用）');
@@ -74,7 +74,8 @@ async function runRestore(opts: RunOptions): Promise<any> {
     const snapshot = await exportBackup({ scope: 'site', kind: 'pre_restore', includeLogs: true });
     setRestoreStatus({ stage: 'import', message: `快照 ${snapshot.file} 已生成，正在导入` });
 
-    const key = opts.key ?? (await getBackupKey());
+    // 使用归档头匹配当前/历史密钥，避免轮换后旧备份无法在线恢复并卡在维护模式
+    const key = opts.key ?? (await keyForArchive(archivePath));
     if (!key) throw new Error('未设置备份密钥，无法恢复');
     const report = await importArchive(archivePath, { key, mode: opts.mode, actor: opts.actor, actorIsAdmin: true, trusted: true });
     if (opts.mode === 'replace') {

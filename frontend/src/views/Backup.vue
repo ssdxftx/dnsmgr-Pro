@@ -486,9 +486,15 @@ function openRestore(row: any) {
 
 async function doRestore() {
   if (!restoreTarget.value) return;
+  const body: any = { mode: restoreForm.mode, confirm: restoreForm.confirm };
+  // 整站替换与导入的 replace 同级危险：后端要求重新输入登录密码
+  if (restoreForm.mode === 'replace') {
+    const password = await askPassword(t('backup.restoreTitle'), t('vault.loginPass'));
+    if (password === null) return;
+    body.password = password;
+  }
   restoring.value = true;
   try {
-    const body: any = { mode: restoreForm.mode, confirm: restoreForm.confirm };
     if (restoreTarget.value.remote) {
       body.destId = restoreTarget.value.destId;
       body.fileName = restoreTarget.value.file_name;

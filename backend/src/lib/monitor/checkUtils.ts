@@ -138,7 +138,7 @@ export async function checkTcp(target: string, ip: string | null, port: number, 
   return { status, errmsg: status ? null : '连接失败', usetime };
 }
 
-export async function checkPing(target: string, ip: string | null): Promise<CheckResult> {
+export async function checkPing(target: string, ip: string | null, timeoutMs = 1000): Promise<CheckResult> {
   let host = target;
   if (ip && isIp(ip)) host = ip;
   if (host.endsWith('.')) host = host.slice(0, -1);
@@ -156,18 +156,25 @@ export async function checkPing(target: string, ip: string | null): Promise<Chec
   }
 
   const isV6 = host.includes(':');
-  const args = isV6 ? ['-6', '-c', '1', '-w', '1', host] : ['-c', '1', '-w', '1', host];
+  const waitSec = Math.max(1, Math.ceil((Number(timeoutMs) || 1000) / 1000));
+  const args = isV6 ? ['-6', '-c', '1', '-w', String(waitSec), host] : ['-c', '1', '-w', String(waitSec), host];
   const start = Date.now();
   try {
     await new Promise<void>((resolve, reject) => {
-      execFile('ping', args, { timeout: 3000 }, (err) => {
+      execFile('ping', args, { timeout: waitSec * 1000 + 2000 }, (err) => {
         if (err) reject(err);
         else resolve();
       });
     });
     const usetime = Math.round(Date.now() - start);
     return { status: true, errmsg: null, usetime };
-  } catch {
-    return { status: false, errmsg: 'ping timeout', usetime: 1000 };
+  } catch (e: any) {
+    // ping 缺失或无权限（容器缺少 NET_RAW）属于“无法探测”，必须抛出交给调度器忽略，
+    // 若当成主机故障会在 cycle 轮后误切备用地址。
+    const code = String(e?.code || '');
+    if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM') {
+      throw new Error('ICMP 探测不可用（' + (code === 'ENOENT' ? '未安装 ping' : '缺少原始套接字权限') + '）');
+    }
+    return { status: false, errmsg: 'ping timeout', usetime: Math.max(1, Math.round(Date.now() - start)) };
   }
 }
