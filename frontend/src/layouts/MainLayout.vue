@@ -32,20 +32,22 @@
       </div>
 
       <div class="app-sidebar__foot">
-        <n-tooltip :disabled="!collapsed" placement="right">
-          <template #trigger>
-            <button class="foot-btn" @click="toggleTheme">
-              <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
-              <span v-if="!collapsed">{{ isDark ? t('common.lightMode') : t('common.darkMode') }}</span>
-            </button>
-          </template>
-          {{ isDark ? t('common.lightMode') : t('common.darkMode') }}
-        </n-tooltip>
         <button class="foot-btn" @click="collapsed = !collapsed">
           <n-icon size="18" :component="collapsed ? ChevronForwardOutline : ChevronBackOutline" />
           <span v-if="!collapsed">{{ t('common.collapse') }}</span>
         </button>
-        <div v-if="!collapsed" class="foot-version">v{{ version }}</div>
+        <div class="foot-bottom">
+          <n-tooltip :disabled="!collapsed" placement="right">
+            <template #trigger>
+              <button class="foot-btn" @click="toggleTheme">
+                <n-icon size="18" :component="isDark ? SunnyOutline : MoonOutline" />
+                <span v-if="!collapsed">{{ isDark ? t('common.lightMode') : t('common.darkMode') }}</span>
+              </button>
+            </template>
+            {{ isDark ? t('common.lightMode') : t('common.darkMode') }}
+          </n-tooltip>
+          <div v-if="!collapsed" class="foot-version">v{{ version }}</div>
+        </div>
       </div>
     </aside>
 
@@ -91,9 +93,6 @@
         <div class="app-header__right">
           <span v-if="!isMobile" ref="clockEl" class="hdr-clock font-mono"></span>
           <StatusBadge v-if="!isMobile" class="hdr-online" tone="success" variant="pill" size="sm" pulse :label="t('layout.online')" />
-          <n-button v-if="!isMobile" quaternary circle @click="toggleTheme">
-            <template #icon><n-icon :component="isDark ? SunnyOutline : MoonOutline" /></template>
-          </n-button>
           <n-dropdown :options="userOptions" trigger="click" @select="onUserSelect">
             <button class="user-chip">
               <n-avatar round :size="30" class="user-chip__avatar">{{ avatarText }}</n-avatar>
@@ -509,8 +508,19 @@ function onUserSelect(key: string) {
   justify-content: center;
   padding: 0;
 }
+.foot-bottom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.foot-bottom .foot-btn {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
 .foot-version {
-  padding: 4px 12px 0;
+  padding: 0;
+  flex-shrink: 0;
   font-size: 12px;
   color: var(--app-text-3);
 }
