@@ -21,7 +21,7 @@
           </n-input-group>
           <n-input v-model:value="code" :placeholder="t('totp.codePlaceholder')" maxlength="6" style="max-width: 380px" @keyup.enter="bind" />
           <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.passwordPlaceholder')" style="max-width: 380px" />
-          <n-space>
+          <n-space justify="start" style="width: 100%">
             <n-button @click="step = ''">{{ t('common.cancel') }}</n-button>
             <n-button type="primary" :loading="loadBusy" @click="bind">{{ t('totp.confirmBind') }}</n-button>
           </n-space>
@@ -124,6 +124,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+:deep(.n-result__footer) {
+  text-align: left;
+}
 .qr-box {
   width: 220px;
   height: 220px;

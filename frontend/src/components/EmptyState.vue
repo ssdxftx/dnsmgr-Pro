@@ -32,6 +32,7 @@ withDefaults(
 
 <style scoped>
 .empty-state__action {
+  align-self: flex-start;
   margin-top: 6px;
 }
 </style>
