@@ -122,40 +122,53 @@ export async function updateDomainDate(id: number, domain: string) {
   }
 }
 
-export async function refreshDomainList(): Promise<number> {
-  const rows: any[] = await query(`SELECT id, name FROM ${table('domain')} WHERE checkstatus = 0`);
-  let done = 0;
+// 单轮最多查询的域名数：whois 逐条查询且限速，批量过大会挤占本轮调度时间
+const REFRESH_BATCH = 10;
+// 同一域名的自动刷新间隔：续费后最迟 1 小时即可反映到域名列表
+const REFRESH_STALE_HOURS = 1;
+// 近到期域名的刷新范围（天）：与提醒天数解耦，避免提醒配置过小时漏刷
+const REFRESH_HORIZON_DAYS = 30;
+
+async function refreshRows(rows: any[]): Promise<number> {
   let success = 0;
-  for (const row of rows) {
+  for (let i = 0; i < rows.length && i < REFRESH_BATCH; i++) {
+    const row = rows[i];
     const res = await updateDomainDate(row.id, row.name);
     if (res.code === 0) {
       success++;
       console.log(`[expire] 域名: ${row.name} 注册时间: ${res.regTime ?? '-'} 到期时间: ${res.expireTime}`);
     } else console.log(`[expire] 域名: ${row.name} 更新失败，${res.msg}`);
-    done++;
-    if (done >= 5) break;
-    await sleep(1000);
+    if (i + 1 < rows.length && i + 1 < REFRESH_BATCH) await sleep(1000);
   }
   return success;
 }
 
-export async function refreshExpiringDomainList(maxDay: number): Promise<number> {
+export async function refreshDomainList(): Promise<number> {
+  // 未查询过（0）与查询失败（2）的域名都要重试：
+  // 失败状态若永久排除，whois 偶发超时会让该域名一直停留在旧到期时间。
   const rows: any[] = await query(
-    `SELECT id, name FROM ${table('domain')} WHERE expiretime >= (NOW() - INTERVAL 5 DAY) AND expiretime <= (NOW() + INTERVAL ${maxDay} DAY) AND checktime <= (NOW() - INTERVAL 1 DAY)`,
+    `SELECT id, name FROM ${table('domain')}
+      WHERE checkstatus = 0
+         OR (checkstatus = 2 AND (checktime IS NULL OR checktime <= NOW() - INTERVAL ${REFRESH_STALE_HOURS} HOUR))
+      ORDER BY (checktime IS NULL) DESC, checktime ASC, id ASC
+      LIMIT ${REFRESH_BATCH}`,
   );
-  let done = 0;
-  let success = 0;
-  for (const row of rows) {
-    const res = await updateDomainDate(row.id, row.name);
-    if (res.code === 0) {
-      success++;
-      console.log(`[expire] 域名: ${row.name} 注册时间: ${res.regTime ?? '-'} 到期时间: ${res.expireTime}`);
-    } else console.log(`[expire] 域名: ${row.name} 更新失败，${res.msg}`);
-    done++;
-    if (done >= 5) break;
-    await sleep(1000);
-  }
-  return success;
+  return refreshRows(rows);
+}
+
+export async function refreshExpiringDomainList(maxDay: number): Promise<number> {
+  // 不再限制“已过期 5 天内”：域名过期后过一段时间才续费的情况同样需要刷新到期时间。
+  // 按 checktime 轮转，避免 LIMIT 固定命中同一批域名导致其余域名长期得不到刷新。
+  const horizon = Math.max(maxDay, REFRESH_HORIZON_DAYS);
+  const rows: any[] = await query(
+    `SELECT id, name FROM ${table('domain')}
+      WHERE expiretime IS NOT NULL
+        AND expiretime <= NOW() + INTERVAL ${horizon} DAY
+        AND (checktime IS NULL OR checktime <= NOW() - INTERVAL ${REFRESH_STALE_HOURS} HOUR)
+      ORDER BY (checktime IS NULL) DESC, checktime ASC, id ASC
+      LIMIT ${REFRESH_BATCH}`,
+  );
+  return refreshRows(rows);
 }
 
 async function noticeExpiringDomainList(maxDay: number, days: number[]): Promise<void> {
@@ -198,7 +211,7 @@ export async function expireNoticeTask(): Promise<void> {
     maxDay = (days.length ? Math.max(...days) : 30) + 1;
   }
 
-  // whois 刷新与到期通知解耦：刷新有单次配额（最多 5 条），
+  // whois 刷新与到期通知解耦：刷新有单轮批量上限，
   // 但不得据此跳过通知——否则只要存在待刷新域名，到期提醒会长期不发。
   // 刷新失败的域名在下一轮重试，不影响本轮已就绪域名的通知。
   await refreshDomainList();

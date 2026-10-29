@@ -136,7 +136,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref } from 'vue';
+import { computed, h, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
@@ -306,6 +306,9 @@ const columns = computed(() => {
 });
 
 // 参数快速切换时中止上一次请求，避免旧响应覆盖新结果
+// 记录最近一次成功加载时间：用于从后台标签页返回时按需刷新到期时间
+let lastLoadedAt = 0;
+
 let loadAbort: AbortController | null = null;
 async function loadDomains() {
   loadAbort?.abort();
@@ -326,6 +329,7 @@ async function loadDomains() {
       showRecords.value = false;
     }
     domains.value = list;
+    lastLoadedAt = Date.now();
   } catch (e: any) {
     if (e?.name !== 'AbortError') loadError.value = true;
   } finally {
@@ -577,8 +581,21 @@ function delDomain(row: any) {
   });
 }
 
+// 从注册商页面续费后切回本站时，静默重新拉取一次列表，
+// 让页面直接显示最新到期时间；60 秒内重复切回不重复请求。
+function onVisibilityChange() {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - lastLoadedAt < 60_000) return;
+  loadDomains();
+}
+
 onMounted(() => {
   loadDomains();
+  document.addEventListener('visibilitychange', onVisibilityChange);
+});
+
+onUnmounted(() => {
+  document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
 

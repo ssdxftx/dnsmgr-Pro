@@ -445,7 +445,11 @@ try {
     setInterval(distributed('schedule', runScheduleAll, '[schedule] 定时切换解析异常:'), 60 * 1000);
     console.log('[dnsmgr-backend] 优选IP调度器已启动');
     console.log('[dnsmgr-backend] 定时切换解析调度器已启动');
-    setInterval(distributed('expire', expireNoticeTask, '[expire] 到期提醒调度异常:'), 60 * 60 * 1000);
+    const runExpireTask = distributed('expire', expireNoticeTask, '[expire] 到期提醒调度异常:');
+    setInterval(runExpireTask, 15 * 60 * 1000);
+    // 进程启动后立即补跑一轮：否则首次刷新要等到 15 分钟后，
+    // 重启/升级后域名列表会长时间停留在旧到期时间
+    setTimeout(runExpireTask, 15_000);
     console.log('[dnsmgr-backend] 域名到期提醒调度器已启动');
     setInterval(distributed('preheat', executePreheatTasks, '[preheat] 自动预热调度异常:'), 60 * 1000);
     console.log('[dnsmgr-backend] CDN 自动预热调度器已启动');
