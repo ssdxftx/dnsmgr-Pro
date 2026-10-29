@@ -158,10 +158,6 @@ export const ESA_WAF_SCAN_TYPES: EsaWafOption[] = [
   },
 ];
 
-export function esaWafActionMeta(value: string): EsaWafActionMeta | undefined {
-  return ESA_WAF_ACTIONS.find((a) => a.value === value);
-}
-
 export function esaWafActionsForPhase(phase: EsaWafPhase): EsaWafActionMeta[] {
   if (phase === 'http_anti_scan') return ESA_WAF_SCAN_ACTIONS;
   if (phase === 'http_whitelist' || phase === 'http_managed' || phase === 'http_security_level_rule') return [];

@@ -13,10 +13,6 @@ const fetchers: Record<string, Fetcher> = {
   aliyun_esa: fetchAliyunEsaDetail,
 };
 
-export function hasDetailFetcher(route: string): boolean {
-  return typeof fetchers[route] === 'function';
-}
-
 export function fetchDetail(catalog: ProviderCatalog, ctx: DetailContext): Promise<DetailPart> {
   const fetcher = fetchers[catalog.route];
   if (!fetcher) {

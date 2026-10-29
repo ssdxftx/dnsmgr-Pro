@@ -47,7 +47,7 @@ import { CodeSlashOutline, GlobeOutline, ListOutline, ShieldCheckmarkOutline } f
 import TelemetryCard from '../TelemetryCard.vue';
 import DetailGrid from '../DetailGrid.vue';
 
-const props = defineProps<{
+defineProps<{
   accountName: string;
   planName: string;
   instanceId: string;

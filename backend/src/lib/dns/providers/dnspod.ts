@@ -18,7 +18,7 @@ export class Dnspod implements DnsProvider {
   private error = '';
   private domain: string;
 
-  constructor(private config: Record<string, any>) {
+  constructor(config: Record<string, any>) {
     this.client = new TencentCloud(
       config.SecretId,
       config.SecretKey,

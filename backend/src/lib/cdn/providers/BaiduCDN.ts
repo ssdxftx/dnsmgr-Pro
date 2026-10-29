@@ -38,18 +38,6 @@ export class BaiduCDN implements CdnProvider {
     return (await this.call('GET', '/v2/domain')) !== false;
   }
 
-  private buildPeers(origin: string, scheme: 'http' | 'https', port: number, weight: number): any[] {
-    return origin
-      .split(';')
-      .map((v) => v.trim())
-      .filter((v) => v !== '')
-      .map((v) => {
-        const host = v.replace(/^https?:\/\//, '').split(':')[0];
-        const p = v.includes(':') ? v.split(':').pop() : String(port);
-        return { peer: `${scheme}://${host}:${p}`, backup: false, weight };
-      });
-  }
-
   async createDomain(domain: string, origin: string, originType: string, serviceArea: string): Promise<string | false> {
     const origins = origin
       .split(';')

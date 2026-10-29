@@ -3,7 +3,7 @@ import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders, ADMIN_ONLY_DNS_TYPES } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList, pickCdnConfig } from '../lib/cdn/factory.js';
-import { ConfigDecryptError, decryptConfig, encryptAccountConfig, encryptConfig, isEncryptedConfig, isSecretKey, maskConfig, mergeMaskedConfig, readAccountConfig, SECRET_MASK } from '../lib/secret.js';
+import { encryptAccountConfig, isSecretKey, maskConfig, mergeMaskedConfig, readAccountConfig, SECRET_MASK } from '../lib/secret.js';
 import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { getDekForWrite } from '../lib/vault/service.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
@@ -287,16 +287,6 @@ function secretChanged(before: Record<string, any>, after: Record<string, any>):
     if (isSecretKey(k) && String(before?.[k] ?? '') !== String(after?.[k] ?? '')) return true;
   }
   return false;
-}
-
-function safeJson(s: any): Record<string, any> {
-  if (s && typeof s === 'object') return s as Record<string, any>;
-  const cfg = decryptConfig(s);
-  if (cfg) return cfg;
-  if (isEncryptedConfig(s)) {
-    throw new ConfigDecryptError('账户配置无法解密（系统密钥可能已变更），请重新填写账户凭证');
-  }
-  return {};
 }
 
 /** 必填敏感字段校验：缺失或仍是掩码时拒绝保存，避免写入残缺配置 */

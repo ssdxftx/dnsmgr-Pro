@@ -49,7 +49,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
 import { NTag } from 'naive-ui';
@@ -61,7 +61,6 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 
 const route = useRoute();
-const router = useRouter();
 const message = useMessage();
 const { t } = useI18n();
 

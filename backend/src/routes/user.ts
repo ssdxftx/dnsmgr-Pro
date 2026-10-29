@@ -14,10 +14,6 @@ function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';
 }
 
-function insertAndGetId(sql: string, params: any[]): Promise<number> {
-  return query(sql, params).then((r: any) => r.insertId || 0);
-}
-
 interface PermItem {
   domain: string;
   sub: string | null;

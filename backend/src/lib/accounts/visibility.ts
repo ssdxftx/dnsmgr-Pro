@@ -57,8 +57,3 @@ export function maskAccountLabel(row: any, viewer: any): string {
   if (row.visibility === 'private' && Number(row.owner_uid) !== Number(viewer?.uid)) return '个人账户';
   return String(row.name || '—');
 }
-
-/** 内部反查（服务端从 domain.aid 等推导）：不做可见性校验，权限由域名授权决定 */
-export async function loadAccountById(t: AccountTable, aid: number): Promise<any | null> {
-  return (await queryOne(`SELECT * FROM ${table(t)} WHERE id = ?`, [aid])) || null;
-}

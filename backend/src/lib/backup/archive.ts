@@ -272,12 +272,10 @@ class ByteCursor {
   private nextRead = 0;
   private eof = false;
   private fh: FileHandle;
-  private start: number;
   private end: number;
 
   constructor(fh: FileHandle, start: number, end: number) {
     this.fh = fh;
-    this.start = start;
     this.end = end;
     this.bufStart = start;
     this.nextRead = start;

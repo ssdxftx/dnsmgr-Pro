@@ -38,10 +38,6 @@ export function table(name: string): string {
   return currentPrefix + name;
 }
 
-export function currentPrefixValue(): string {
-  return currentPrefix;
-}
-
 export function getDbType(): 'mysql' | 'sqlite' {
   return driver.type;
 }

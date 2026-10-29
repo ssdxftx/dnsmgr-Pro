@@ -2,8 +2,6 @@
 // 字段与官方 SDK（teo v20220901）RuleEngineAction 各 <Name>Parameters 结构一一对应，
 // 中文名取自官方控制台「规则引擎」编辑页。前端据此为每个操作渲染与官方一致的专用表单。
 // 数据来源：tencentcloud-sdk-nodejs-teo teo_models.d.ts（CreateL7AccRules/DescribeL7AccRules）。
-import type { EoLocale } from './eoRuleMeta';
-
 export interface Bi {
   zh: string;
   en: string;
@@ -713,12 +711,4 @@ export function eoActionFields(name: string): EoField[] {
 /** 操作名 → 参数键（默认 `${name}Parameters`） */
 export function eoParamKey(name: string): string {
   return eoActionSchema(name)?.paramKey || name + 'Parameters';
-}
-
-export function eoFieldLabel(f: EoField, locale: EoLocale): string {
-  return locale === 'zh' ? f.label.zh : f.label.en;
-}
-
-export function eoOptionLabel(o: EoFieldOption, locale: EoLocale): string {
-  return locale === 'zh' ? o.label.zh : o.label.en;
 }

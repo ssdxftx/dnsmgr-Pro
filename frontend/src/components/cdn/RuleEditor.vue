@@ -269,7 +269,6 @@ import {
 } from 'naive-ui';
 import { CloseOutline } from '@vicons/ionicons5';
 import EsaCardSelect from './EsaCardSelect.vue';
-import RuleFieldControl from './RuleFieldControl.vue';
 import EoParamFields from './EoParamFields.vue';
 import ActionPicker from './ActionPicker.vue';
 import ConditionPicker from './ConditionPicker.vue';
@@ -301,7 +300,7 @@ const emit = defineEmits<{
   (e: 'cancel'): void;
 }>();
 
-const { t, te, locale } = useI18n();
+const { t, locale } = useI18n();
 const message = useMessage();
 const { isMobile } = useResponsive();
 const isEsa = computed(() => props.vendor === 'esa');
@@ -344,14 +343,6 @@ const form = reactive<any>({
   eoBranches: [newBranch('if')] as EoBranch[],
 });
 const esaCondMode = ref<'all' | 'custom'>('custom');
-
-// ---------- 标签 ----------
-function labelOf(f: any): string {
-  const key = `cdnRules.f.${f.name}`;
-  if (te(key)) return t(key);
-  if (f.label && isZh.value) return f.label;
-  return f.name;
-}
 
 // ---------- ESA ----------
 const esaFields = computed<any[]>(() => {

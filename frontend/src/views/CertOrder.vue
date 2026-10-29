@@ -299,18 +299,6 @@ function openAdd() {
   showEdit.value = true;
 }
 
-function openEdit(row: any) {
-  editingId.value = row.id;
-  form.aid = row.aid;
-  form.keytype = row.keytype;
-  form.keysize = row.keysize;
-  form.domains = [...(row.domains || [])];
-  form.fullchain = '';
-  form.privatekey = '';
-  tab.value = row.aid === 0 ? 'import' : 'apply';
-  showEdit.value = true;
-}
-
 async function save() {
   let body: any;
   if (tab.value === 'import') {

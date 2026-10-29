@@ -40,10 +40,6 @@ export function getEsaApi(action: string): EsaApiAction | null {
   return ESA_API_CATALOG.actions[String(action || '').trim()] || null;
 }
 
-export function isEsaApiAction(action: string): boolean {
-  return !!getEsaApi(action);
-}
-
 export function getEsaCatalog(): EsaApiCatalog {
   return ESA_API_CATALOG;
 }

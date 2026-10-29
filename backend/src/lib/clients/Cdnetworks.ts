@@ -2,8 +2,6 @@ import { createHash, createHmac } from 'node:crypto';
 import { fetch as undiciFetch } from 'undici';
 import { pinnedDispatcherFor, isMetadataIp } from '../netGuard.js';
 
-export class CdnetworksError extends Error {}
-
 function sha256Hex(s: string): string {
   return createHash('sha256').update(s).digest('hex');
 }

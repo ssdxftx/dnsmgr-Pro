@@ -300,14 +300,6 @@ export function esaKindsOfCategory(category: string): EsaRuleKindMeta[] {
   return ESA_RULE_KIND_META.filter((k) => k.category === category);
 }
 
-export function esaFieldByValue(value: string): EsaMatchField | undefined {
-  return ESA_MATCH_FIELDS.find((f) => f.value === value);
-}
-
-export function esaOperatorByValue(value: string): EsaOperator | undefined {
-  return ESA_OPERATORS.find((o) => o.value === value);
-}
-
 export function esaGateLabel(gate: EsaPlanGate, locale: EsaLocale): string {
   if (gate === 'free') return '';
   const zh: Record<string, string> = { pro: '需 Pro', premium: '需 Premium', enterprise: '需 Enterprise', unsupported: '不支持' };

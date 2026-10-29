@@ -27,7 +27,6 @@ export class CloudpanelDeploy implements DeployProvider {
   private url: string;
   private username: string;
   private password: string;
-  private proxy: boolean;
   private cookie = '';
   private logger: ((txt: string) => void) | null = null;
 
@@ -35,7 +34,6 @@ export class CloudpanelDeploy implements DeployProvider {
     this.url = String(config.url || '').trim().replace(/\/+$/, '');
     this.username = String(config.username || '').trim();
     this.password = config.password || '';
-    this.proxy = String(config.proxy ?? '') === '1';
   }
 
   private log(txt: string) {

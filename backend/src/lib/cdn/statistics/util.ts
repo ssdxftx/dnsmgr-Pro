@@ -109,10 +109,6 @@ export function emptyStatus(len: number): HttpCodeStatusStatistics {
   };
 }
 
-export function emptyResult(labels: string[]): CdnStatisticsResult {
-  return { labels };
-}
-
 /** 合并同一类型的两份结果（多账户 / 多批次聚合） */
 export function mergeResult(base: CdnStatisticsResult, add: CdnStatisticsResult): CdnStatisticsResult {
   const len = base.labels.length;

@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { readFile, rename, stat, unlink } from 'node:fs/promises';
-import path from 'node:path';
+import { rename, stat, unlink } from 'node:fs/promises';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { queryOne, table } from '../../db.js';
@@ -294,18 +293,4 @@ export async function deleteRemote(destId: number, name: string): Promise<void> 
   } catch {
     // 远端删除失败不应阻断本地清理
   }
-}
-
-export async function readLocal(file: string): Promise<Buffer> {
-  return readFile(file);
-}
-
-export async function removeLocal(file: string): Promise<void> {
-  await unlink(file).catch(() => undefined);
-}
-
-export function localBackupPath(fileName: string): string {
-  const base = path.basename(String(fileName || ''));
-  if (!base || base !== fileName) throw new Error('非法的备份文件名');
-  return path.join(process.env.DNSMGR_DATA_DIR || path.resolve(process.cwd(), 'data'), 'backups', base);
 }

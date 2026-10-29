@@ -147,7 +147,6 @@ import { NButton, NForm, NFormItem, NInput, NInputNumber, NRadioButton, NRadioGr
 import EsaCardSelect, { type EsaCardOption } from './EsaCardSelect.vue';
 import EsaConditionBuilder from './EsaConditionBuilder.vue';
 import {
-  ESA_WAF_ACTIONS,
   ESA_WAF_BYPASS_TAGS,
   ESA_WAF_RATE_INTERVALS,
   ESA_WAF_RATE_KEYS,

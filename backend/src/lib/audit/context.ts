@@ -6,8 +6,3 @@ export function audit(req: any, patch: AuditCtx): AuditCtx {
   Object.assign(cur, patch);
   return cur;
 }
-
-/** 需要跳过记录的请求（例如内部探测、批量中的子请求） */
-export function skipAudit(req: any): void {
-  (req.audit ||= {}).skip = true;
-}

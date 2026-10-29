@@ -104,7 +104,6 @@ export class Kingsoft {
         .join('&');
     }
 
-    const headers: Record<string, string> = { host: this.endpoint, 'x-amz-date': ts, 'content-type': contentType };
     const signedHeaders = ['content-type', 'host', 'x-amz-date'].join(';');
     const canonicalHeaders = ['content-type:' + contentType, 'host:' + this.endpoint, 'x-amz-date:' + ts].join('\n') + '\n';
     const canonicalRequest = 'POST\n' + encodePath(path) + '\n\n' + canonicalHeaders + '\n' + signedHeaders + '\n' + sha256Hex(payload);

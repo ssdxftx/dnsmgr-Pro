@@ -2,8 +2,6 @@ import { AcmeCertBase } from '../acmeBase.js';
 
 import { fetchWithProxy } from '../../http.js';
 export class ZerosslCert extends AcmeCertBase {
-  private directory = 'https://acme.zerossl.com/v2/DV90';
-
   constructor(config: Record<string, any>, ext: any = null) {
     super(config, 'https://acme.zerossl.com/v2/DV90', ext);
   }

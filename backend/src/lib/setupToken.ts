@@ -14,10 +14,6 @@ export function initSetupToken(): void {
   console.warn('');
 }
 
-export function setupTokenRequired(): boolean {
-  return current !== '';
-}
-
 export function verifySetupToken(input: any): boolean {
   const got = Buffer.from(String(input || ''), 'utf8');
   const want = Buffer.from(current, 'utf8');

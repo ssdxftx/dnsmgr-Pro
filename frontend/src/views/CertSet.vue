@@ -78,7 +78,6 @@ import { useI18n } from 'vue-i18n';
 const goBack = useBack('/cert-orders');
 const { t } = useI18n();
 import { useMessage } from 'naive-ui';
-import { ArrowBackOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 

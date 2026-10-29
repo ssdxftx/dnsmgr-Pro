@@ -30,7 +30,6 @@ export class CloudflareEnhanceService {
   private apiKey: string;
   private auth: number;
   private proxy: boolean;
-  private accountId: string;
   private baseUrl = 'https://api.cloudflare.com/client/v4';
 
   constructor(config: Record<string, any> = {}) {
@@ -38,7 +37,6 @@ export class CloudflareEnhanceService {
     this.apiKey = String(config.apikey ?? '').trim().replace(/\s+/g, '');
     this.auth = config.auth !== undefined ? Number(config.auth) : /^[0-9a-f]+$/i.test(this.apiKey) ? 0 : 1;
     this.proxy = String(config.proxy ?? '') === '1';
-    this.accountId = String(config.account_id ?? '').trim();
     // 允许通过环境变量覆盖 API 基址（用于本地/联调环境，默认官方地址）
     if (process.env.DNSMGR_CF_API_BASE) this.baseUrl = process.env.DNSMGR_CF_API_BASE.replace(/\/+$/, '');
   }

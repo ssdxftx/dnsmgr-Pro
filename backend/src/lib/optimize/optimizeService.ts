@@ -29,12 +29,7 @@ const LINE_NAME: Record<string, Record<string, string>> = {
   goedge: { DEF: 'default' },
 };
 
-import { decryptConfig } from '../secret.js';
 import { loadAccountConfig } from '../accounts/taskConfig.js';
-
-function safeJson(s: string): Record<string, any> {
-  return decryptConfig(s) || {};
-}
 
 export async function getLicense(api: number, key: string): Promise<string> {
   if (api === 2) throw new Error('xingpingcn.top 接口免费使用，无需密钥，无积分限制');

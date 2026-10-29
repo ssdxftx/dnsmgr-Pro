@@ -1,4 +1,4 @@
-import { createHash, createHmac, createPrivateKey, createSign, KeyObject } from 'node:crypto';
+import { createHash, createPrivateKey, createSign, KeyObject } from 'node:crypto';
 import { fetch as undiciFetch } from 'undici';
 import { assertUrlAllowed, pinnedDispatcherFor } from '../netGuard.js';
 
@@ -18,10 +18,6 @@ export class ACMEException extends Error {
 
 function b64u(data: Buffer | string): string {
   return Buffer.from(data).toString('base64url');
-}
-
-function b64uDecode(data: string): Buffer {
-  return Buffer.from(data, 'base64url');
 }
 
 type Logger = boolean | ((txt: string) => void);
@@ -244,7 +240,6 @@ export class ACMEv2 {
     url = this.proxiedURL(url);
 
     const method = data === false ? 'HEAD' : data === null ? 'GET' : 'POST';
-    const userAgent = 'ACMECert v3.4.0 (+https://github.com/skoerfgen/ACMECert)';
     const headers: Record<string, string> = {};
     if (data !== null && data !== false) headers['Content-Type'] = 'application/jose+json';
 

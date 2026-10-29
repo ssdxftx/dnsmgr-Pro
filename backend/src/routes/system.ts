@@ -1,6 +1,5 @@
 import type { FastifyInstance } from 'fastify';
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
-import { query, table } from '../db.js';
 import { configGet, configSet, loadConfig } from '../config.js';
 import { ProxyAgent, fetch as undiciFetch } from 'undici';
 import { sendMail, sendTelegram, sendWebhook, sendCustomWebhook, sendQqbot } from '../lib/monitor/msgNotice.js';

@@ -386,7 +386,3 @@ export function getDnsProvider(
   const merged = { ...config, domain, domainid: domainid || '' };
   return new Ctor(merged);
 }
-
-export function getProviderList() {
-  return dnsProviders;
-}

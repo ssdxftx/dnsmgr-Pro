@@ -65,17 +65,9 @@ export interface CdnStatisticsResult {
   status?: HttpCodeStatusStatistics;
 }
 
-export type StatisticsType = 'Resource' | 'Visits' | 'HttpCodeStatus' | 'All';
-
 export interface StatisticsDomain {
   name: string;
   route: string;
   zoneId?: string | null;
   serviceArea?: string | null;
-}
-
-export interface StatisticsQuery {
-  type: StatisticsType;
-  start: Date;
-  end: Date;
 }

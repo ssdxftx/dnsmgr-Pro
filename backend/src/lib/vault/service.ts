@@ -4,7 +4,6 @@ import { getSysKey } from '../../config.js';
 import {
   deriveKek,
   deriveSysKek,
-  isUserEncrypted,
   KDF_PARAMS_JSON,
   newDek,
   newSalt,
@@ -49,7 +48,6 @@ interface VaultRow {
 }
 
 const MAX_FAIL = 5;
-const LOCK_MS = 15 * 60_000;
 
 function buf(v: any): Buffer | null {
   if (v === null || v === undefined) return null;
@@ -375,8 +373,4 @@ export async function findVaultDekForRequest(uid: number, jti?: string): Promise
   const sessionJti = jti || currentRequestContext()?.jti || '';
   if (!sessionJti) return null;
   return getVaultDek(uid, sessionJti);
-}
-
-export function isVaultCipher(v: unknown): boolean {
-  return isUserEncrypted(v);
 }

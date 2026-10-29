@@ -20,7 +20,7 @@
 import { computed, h, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute } from 'vue-router';
-import { NButton, NSpace, useDialog, useMessage } from 'naive-ui';
+import { NButton, useDialog, useMessage } from 'naive-ui';
 import { api } from '../api';
 import { ListOutline, LayersOutline, LinkOutline } from '@vicons/ionicons5';
 import PageHeader from '../components/PageHeader.vue';

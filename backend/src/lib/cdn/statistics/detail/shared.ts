@@ -205,18 +205,6 @@ export function makeSeries(
   };
 }
 
-export function mergeSeries(base: MetricSeries, add: MetricSeries): MetricSeries {
-  const len = base.values.length;
-  return {
-    ...base,
-    values: combineSeries([base.values, add.values], base.agg, len),
-    summary:
-      base.agg === 'rate'
-        ? base.summary
-        : aggregate(combineSeries([base.values, add.values], base.agg, len), base.agg),
-  };
-}
-
 /**
  * 合并两条百分比序列：汇总值按各账户权重加权，曲线优先保留已有值。
  * 权重由 provider 在生成命中率时写入 MetricSeries.weight。

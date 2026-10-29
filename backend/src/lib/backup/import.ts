@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { query, table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
+import { table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
 import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS, KDF_PARAMS_JSON, unwrapDek, wrapDek } from '../vault/keys.js';

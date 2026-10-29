@@ -6,7 +6,7 @@ export class AliyunDns implements DnsProvider {
   private error = '';
   private domain: string;
 
-  constructor(private config: Record<string, any>) {
+  constructor(config: Record<string, any>) {
     this.client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, 'alidns.aliyuncs.com', '2015-01-09');
     this.domain = config.domain || '';
   }

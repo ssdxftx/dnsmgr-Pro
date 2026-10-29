@@ -70,32 +70,3 @@ export function msAxisFormatter(digits: number): (value: number) => string {
   return (value: number) =>
     Math.abs(value) >= 1000 ? `${(value / 1000).toFixed(2)} s` : `${value.toFixed(digits)} ms`;
 }
-
-/** 图表 y 轴用同一套换算，避免卡片与图表单位不一致 */
-export function axisFormatter(unit: MetricUnit): (value: number) => string {
-  return (value: number) => {
-    switch (unit) {
-      case 'byte':
-        return formatBytes(value);
-      case 'bps':
-        return formatBitRate(value);
-      case 'count':
-        return formatCount(value);
-      case 'percent':
-        return `${Math.round(value)}%`;
-      case 'ms':
-        return formatMs(value);
-      case 'qps':
-        return formatQps(value);
-    }
-  };
-}
-
-/** 带宽/流量图表按单位缩放到更易读的量级，返回缩放系数与轴名 */
-export function chartScale(unit: MetricUnit): { divisor: number; label: string } {
-  if (unit === 'byte') return { divisor: 1024 * 1024, label: 'MB' };
-  if (unit === 'bps') return { divisor: 1024 * 1024, label: 'Mbps' };
-  if (unit === 'ms') return { divisor: 1, label: 'ms' };
-  if (unit === 'percent') return { divisor: 1, label: '%' };
-  return { divisor: 1, label: '' };
-}

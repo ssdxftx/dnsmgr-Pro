@@ -533,13 +533,6 @@ const STAT_KEYS: Record<string, string[]> = {
   aliyun_esa: ['flux', 'req_flux', 'req', 'pv'],
 };
 
-const STAT_GROUPS: Record<string, string[]> = {
-  tencent_edgeone: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status', 'performance', 'top'],
-  tencent_cdn: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status'],
-  aliyun_cdn: ['overview', 'traffic', 'bandwidth', 'request', 'cache', 'origin', 'status', 'top'],
-  aliyun_esa: ['overview', 'traffic', 'request'],
-};
-
 const STAT_GROUP_OF: Record<string, string> = {
   flux: 'traffic', flux_out: 'traffic', flux_in: 'traffic',
   bw: 'bandwidth', bw_out: 'bandwidth', bw_in: 'bandwidth',
@@ -881,7 +874,6 @@ const mockRoutineRoutes: any[] = [
   },
 ];
 
-let mockRoutineSeq = 1;
 const mockUserRoutines: any[] = [
   { Name: 'demo-fn', Description: '演示边缘函数', HasAssets: false, ModifiedTime: '2026-10-20T08:00:00Z' },
 ];
@@ -947,7 +939,6 @@ const mockGlobalWafRulesets: any[] = [
   },
 ];
 
-let mockDeliverySeq = 1;
 const mockUserDeliveryTasks: any[] = [
   { TaskName: 'access-to-sls', BusinessType: 'dcdn_log_access_l1', DeliveryType: 'sls', FieldName: 'requests,bytes', Status: 'online', DiscardRate: 0, Details: {} },
 ];

@@ -8,7 +8,6 @@ export class DnsmgrDns implements DnsProvider {
   private key: string;
   private baseUrl: string;
   private error = '';
-  private domain: string;
   private domainid: string;
   private domainInfo: any = null;
 
@@ -16,7 +15,6 @@ export class DnsmgrDns implements DnsProvider {
     this.uid = config.uid || '';
     this.key = config.key || '';
     this.baseUrl = String(config.base_url || '').replace(/\/+$/, '');
-    this.domain = config.domain || '';
     this.domainid = config.domainid || '';
   }
 

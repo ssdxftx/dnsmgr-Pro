@@ -12,7 +12,7 @@ import {
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ACMEException, ACMEv2 } from './ACMEv2.js';
+import { ACMEv2 } from './ACMEv2.js';
 
 function b64u(data: Buffer | string): string {
   return Buffer.from(data).toString('base64url');

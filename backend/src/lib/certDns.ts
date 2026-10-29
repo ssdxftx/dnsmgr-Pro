@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import { query, queryOne, table } from '../db.js';
+import { queryOne, table } from '../db.js';
 import { getDnsProvider } from './dns/factory.js';
 import { getDnsRecords, queryDnsDoh } from './dnsQuery.js';
 import type { DnsRecord } from './cert/types.js';
@@ -25,23 +25,6 @@ function normName(s: any): string {
 }
 
 type DnsList = Record<string, DnsRecord[]>;
-
-async function getDnsModel(mainDomain: string): Promise<{ provider: any; type: string } | null> {
-  let drow: any = await queryOne(
-    `SELECT A.name, A.thirdid, A.aid, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`,
-    [mainDomain],
-  );
-  if (!drow && /^xn--/.test(mainDomain)) {
-    drow = await queryOne(
-      `SELECT A.name, A.thirdid, A.aid, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`,
-      [mainDomain],
-    );
-  }
-  if (!drow) return null;
-  const provider = getDnsProvider(drow.type, await accountConfig(drow), drow.name, drow.thirdid);
-  if (!provider) return null;
-  return { provider, type: drow.type };
-}
 
 function getHuaweiDnsRecords(list: DnsRecord[]): DnsRecord[] {
   const txtRecords: Record<string, string[]> = {};

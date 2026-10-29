@@ -7,7 +7,6 @@ export class TechnitiumDns implements DnsProvider {
   private token: string;
   private error = '';
   private domain: string;
-  private domainid: string;
   private recordsCache: any[] = [];
   private recordsLoaded = false;
 
@@ -15,7 +14,6 @@ export class TechnitiumDns implements DnsProvider {
     this.url = String(config.url || '').replace(/\/+$/, '') + '/api';
     this.token = config.token || '';
     this.domain = config.domain || '';
-    this.domainid = config.domainid || '';
   }
 
   getError() {

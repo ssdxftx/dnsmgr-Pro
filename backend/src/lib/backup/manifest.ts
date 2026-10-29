@@ -24,9 +24,6 @@ export const EXCLUDE_COLUMNS: Record<string, string[]> = {
   user_vault: ['fail_count', 'locked_until'],
 };
 
-/** 不参与导出的表（可再生产物 / 运行态日志 / 备份自身记录） */
-export const SKIP_TABLES = ['backup_job', 'log', 'reg_verify', 'cdn_stat_data', 'user_vault_tmp'];
-
 export const ENC_V1_PREFIX = 'enc:v1:';
 
 /** 归档中 Buffer 的传输形态：base64 包装，避免 JSON.stringify 变成 {type:'Buffer'} */

@@ -15,10 +15,6 @@ const MAX_VERIFY_ATTEMPTS = 5; // 单个验证码允许的最大校验失败次�
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
-function isNullOrEmpty(v: any): boolean {
-  return v === null || v === undefined || v === '';
-}
-
 function genDigitCode(len = 6): string {
   const start = 10 ** (len - 1);
   const end = 10 ** len - 1;

@@ -259,10 +259,6 @@ function clearSearch() {
   loadTasks();
 }
 
-function onCheckedRowKeys(keys: number[]) {
-  checkedRowKeys.value = keys;
-}
-
 const batchOptions = computed(() => [
   { label: t('dm.batchOpen'), key: 'open' },
   { label: t('dm.batchClose'), key: 'close' },

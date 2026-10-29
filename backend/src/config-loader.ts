@@ -23,10 +23,6 @@ function resolveConfPath(): string {
 
 const CONF_PATH = resolveConfPath();
 
-export function confPath(): string {
-  return CONF_PATH;
-}
-
 function envDbType(): DbType | null {
   const value = String(process.env.DB_TYPE || '').trim().toLowerCase();
   if (value === 'sqlite') return 'sqlite';

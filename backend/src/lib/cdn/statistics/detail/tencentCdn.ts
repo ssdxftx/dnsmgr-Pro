@@ -1,5 +1,5 @@
 import { TencentCloud } from '../../../clients/TencentCloud.js';
-import type { MetricGroup, ProviderCatalog } from '../catalog/types.js';
+import type { ProviderCatalog } from '../catalog/types.js';
 import type { BreakdownItem, MetricSeries } from '../catalog/result.js';
 import {
   aggregate,
@@ -54,7 +54,6 @@ export async function fetchTencentCdnDetail(
   const len = timeline.labels.length;
 
   const defs = catalog.metrics.filter((m) => isBasicWanted(ctx.groups, m) && m.api);
-  const need = (key: string) => defs.some((m) => m.key === key);
 
   const collected = new Map<string, (number | null)[]>();
   const rateLists = new Map<string, (number | null)[][]>();

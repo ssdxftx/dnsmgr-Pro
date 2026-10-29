@@ -233,10 +233,6 @@ function clearSearch() {
   page.value = 1;
   loadTasks();
 }
-function onCheckedRowKeys(keys: number[]) {
-  checkedRowKeys.value = keys;
-}
-
 function batch(act: string) {
   const ids = checkedRowKeys.value;
   if (!ids.length) return message.warning(t('schedule.noSelection'));

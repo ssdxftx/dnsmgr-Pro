@@ -120,7 +120,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useMessage, NAlert, NButton, NDescriptions, NDescriptionsItem, NForm, NFormItem, NInput, NModal, NSpace } from 'naive-ui';
+import { useMessage, NAlert, NButton, NForm, NFormItem, NInput, NModal, NSpace } from 'naive-ui';
 import { api } from '../../api';
 import OverviewStats from '../OverviewStats.vue';
 import EsaCardSelect from './EsaCardSelect.vue';

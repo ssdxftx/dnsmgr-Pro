@@ -250,25 +250,6 @@ function openAdd() {
   showEdit.value = true;
 }
 
-function openEdit(row: any) {
-  editingId.value = row.id;
-  form.aid = row.aid;
-  form.oid = row.oid;
-  form.remark = row.remark || '';
-  form.config = row.config && typeof row.config === 'object' ? { ...row.config } : safeJson(row.config) || {};
-  const acct = accounts.value.find((a: any) => a.id === row.aid);
-  currentProvider.value = providers.value[acct?.type || row.type] || null;
-  showEdit.value = true;
-}
-
-function safeJson(s: string) {
-  try {
-    return JSON.parse(s);
-  } catch {
-    return {};
-  }
-}
-
 async function save() {
   if (!form.aid || !form.oid) return message.warning(t('deployTask.fillWarning'));
   saveBusy.value = true;

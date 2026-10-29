@@ -2,7 +2,6 @@ import { createI18n } from 'vue-i18n';
 
 export type AppLocale = 'zh-CN' | 'en-US';
 
-export const SUPPORTED_LOCALES: AppLocale[] = ['zh-CN', 'en-US'];
 export const LOCALE_STORAGE_KEY = 'dnsmgr_lang';
 export const FALLBACK_LOCALE: AppLocale = 'en-US';
 
@@ -14,10 +13,6 @@ const loaders: Record<AppLocale, () => Promise<{ default: Record<string, unknown
 
 const loadedLocales = new Set<AppLocale>();
 const inflight = new Map<AppLocale, Promise<void>>();
-
-export function isLocaleLoaded(lang: AppLocale): boolean {
-  return loadedLocales.has(lang);
-}
 
 export function ensureLocale(lang: AppLocale): Promise<void> {
   if (loadedLocales.has(lang)) return Promise.resolve();

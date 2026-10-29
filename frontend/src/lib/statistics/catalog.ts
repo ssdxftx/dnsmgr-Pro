@@ -69,8 +69,6 @@ export const PROVIDERS: Record<string, ProviderMeta> = {
   },
 };
 
-export const PROVIDER_LIST = Object.values(PROVIDERS);
-
 export const GROUP_CHARTS: Record<string, Record<string, ChartConfig[]>> = {
   tencent_edgeone: {
     // flux_out 非基础项，overview 组不会返回它；用 flux（访问流量）保证概览图有两条线
@@ -133,7 +131,3 @@ export const GROUP_BREAKDOWNS: Record<string, Record<string, string[]>> = {
   },
   aliyun_esa: {},
 };
-
-export function metricLabelKey(key: string): string {
-  return `statistics.metric.${key}`;
-}

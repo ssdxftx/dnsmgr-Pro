@@ -20,7 +20,3 @@ export function getCatalog(route: string): ProviderCatalog | undefined {
 export function listCatalogs(): ProviderCatalog[] {
   return CATALOGS;
 }
-
-export function findMetric(route: string, key: string) {
-  return getCatalog(route)?.metrics.find((m) => m.key === key);
-}
