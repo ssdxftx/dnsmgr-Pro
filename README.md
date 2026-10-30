@@ -83,7 +83,7 @@
 
 - **多用户体系**：超级管理员、管理员、普通用户；支持自助注册（邮箱验证码或注册码，可配置开关与方式）、TOTP 两步验证、密码重置、账号启停、域名与子域名授权、只读权限、统计查看权限。
 - **通知通道**：邮件（SMTP、SendCloud、阿里云邮件推送）、WxPusher、Telegram、QQ 机器人、钉钉、企业微信、飞书/Lark、自定义 Webhook。
-- **接口与集成**：`/api` 下提供 RESTful JSON API，使用 Bearer 会话令牌；支持 CORS 来源白名单与 cron 触发地址。
+- **接口与集成**：`/api` 下提供 RESTful JSON API，使用 Bearer 会话令牌或 `X-API-Key` 请求头；支持 CORS 来源白名单与 cron 触发地址。
 - **系统设置**：站点配置、注册策略、通知配置、全局 HTTP/HTTPS/SOCKS 代理、统计缓存、审计保留天数、cron 密钥与测试发送。
 - **体验**：简体中文与 English 双语、浅色/深色主题、桌面/平板/移动端响应式布局、列表页缓存、图表统计与快捷操作仪表盘。
 
@@ -100,6 +100,16 @@ docker run -d \
   -v dnsmgr-pro-data:/app/data \
   --restart always \
   ssdxftx/dnsmgr-pro:latest
+```
+
+镜像默认以非 root 用户 `node`（UID/GID 1000）运行。新建命名卷会自动继承镜像内 `/app/data` 的权限；从旧版 root 镜像升级或使用宿主机目录挂载时，请先把数据目录所有者改为 1000:1000：
+
+```bash
+# 命名卷升级
+docker run --rm -v dnsmgr-pro-data:/app/data alpine chown -R 1000:1000 /app/data
+
+# 宿主机目录
+sudo chown -R 1000:1000 /path/to/dnsmgr-data
 ```
 
 启动后访问 `http://主机:8082`，首次打开会自动进入**系统安装页**：
@@ -227,7 +237,7 @@ kubectl -n dnsmgr-pro port-forward svc/dnsmgr-pro 8082:8082
 - 登录、TOTP、注册、发验证码、安装等接口按 IP 限流：登录 20 次/分钟、注册 10 次/分钟、验证码 5 次/分钟、安装 15 次/分钟，超限返回 `429` 与 `Retry-After`。
 - `/api/setup/check` 仅在未安装时可用，已部署实例不会成为数据库连接探测入口。
 - 监控探活、Webhook、部署目标与备份远端存储均经过内网/回环/云元数据地址校验，降低 SSRF 风险。
-- 部署命令经过命令白名单与危险参数校验，SSH 主机密钥支持校验与记录。
+- 部署命令默认禁用；开启 `DNSMGR_ALLOW_DEPLOY_CMD=1` 时必须同时配置 `DNSMGR_DEPLOY_CMD_ALLOWLIST`，命令不经过 shell，SSH 主机密钥支持校验与记录。
 
 ### 前端分包
 
@@ -244,6 +254,9 @@ Vue 运行时与 ECharts 拆为独立 chunk，升级业务代码时依赖 chunk 
 | `DNSMGR_TRUST_PROXY` | 位于 Nginx/CDN 之后时设为 `true` 或具体 IP/CIDR，使日志与限流使用真实客户端 IP | 关闭 |
 | `DNSMGR_ALLOWED_ORIGINS` | 允许跨域调用 API 的来源，逗号分隔；不设置则仅同源 | 同源 |
 | `DNSMGR_RATE_LIMIT` | 设为 `0` 关闭敏感接口限流 | 开启 |
+| `DNSMGR_ALLOW_DEPLOY_CMD` | 设为 `1` 允许部署自定义命令，必须同时配置白名单 | 关闭 |
+| `DNSMGR_DEPLOY_CMD_ALLOWLIST` | 允许的部署命令前缀，逗号分隔 | 空 |
+| `DNSMGR_PROXY_ALLOW_UNRESOLVED` | 设为 `1` 允许系统代理解析本地无法解析的域名 | 关闭 |
 | `DNSMGR_HSTS` | 设为 `0` 关闭 HSTS 响应头 | 开启 |
 | `DNSMGR_CDN_CACHE` | 设为 `0` 关闭分层缓存，回退为浏览器与 CDN 同值 | 开启 |
 | `DNSMGR_BODY_LIMIT` | 请求体大小上限（字节） | `2097152` |

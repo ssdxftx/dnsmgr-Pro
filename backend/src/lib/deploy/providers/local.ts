@@ -1,8 +1,8 @@
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { existsSync, writeFileSync, chmodSync, realpathSync, lstatSync } from 'node:fs';
 import { dirname, normalize, sep, basename, join, win32 } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
-import { assertCommandAllowed } from '../commandGuard.js';
+import { commandArgv } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
 
 // 本地部署目标路径安全约束：必须为规范化的绝对路径；
@@ -185,7 +185,6 @@ export class LocalDeploy implements DeployProvider {
       for (const raw of cmds) {
         const cmd = raw.trim();
         if (!cmd) continue;
-        assertCommandAllowed(cmd);
         this.log('执行命令：' + cmd);
         await this.execAsync(cmd);
         this.log('执行命令成功');
@@ -199,7 +198,14 @@ export class LocalDeploy implements DeployProvider {
 
   private execAsync(cmd: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      exec(cmd, { timeout: 120000 }, (err, stdout, stderr) => {
+      let argv: string[];
+      try {
+        argv = commandArgv(cmd);
+      } catch (e: any) {
+        reject(e);
+        return;
+      }
+      execFile(argv[0], argv.slice(1), { timeout: 120000 }, (err, stdout, stderr) => {
         if (err) reject(new Error('执行命令失败：' + (stderr || err.message)));
         else resolve(stdout);
       });

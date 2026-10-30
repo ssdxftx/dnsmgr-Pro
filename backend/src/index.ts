@@ -10,7 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { configGet, getSysKey } from './config.js';
 import { isInstalled, getInstallState } from './installer.js';
 import { initSetupToken } from './lib/setupToken.js';
-import { findUserById } from './auth.js';
+import { findUserByApiKey, findUserById } from './auth.js';
 import { ConfigDecryptError, setSecretKey } from './lib/secret.js';
 import { migrate } from './migrate.js';
 import authRoutes from './routes/auth.js';
@@ -138,7 +138,17 @@ await app.register(compress, {
 });
 
 // 备份导入：单文件上限 200MB，流式落盘，避免大文件进内存
-await app.register(multipart, { limits: { fileSize: 200 * 1024 * 1024, files: 1 } });
+await app.register(multipart, {
+  limits: {
+    fileSize: 200 * 1024 * 1024,
+    files: 1,
+    fields: 32,
+    fieldSize: 8 * 1024,
+    fieldNameSize: 100,
+    parts: 40,
+    headerPairs: 2000,
+  },
+});
 
 // 在线恢复期间只放行读请求与备份接口，写请求统一 503
 app.addHook('onRequest', async (req: any, reply: any) => {
@@ -241,6 +251,29 @@ const authUserCache = new Map<number, { user: any; at: number }>();
 const AUTH_USER_CACHE_MS = 2000;
 
 (app as any).decorate('authenticate', async function (req: any, reply: any) {
+  // 用户级 API Key：仅接受请求头，避免被日志/Referer 泄露；仍按用户等级执行全部权限校验
+  const apiKey = typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'].trim() : '';
+  if (apiKey) {
+    if (apiKey.length > 256) return reply.code(401).send({ code: -1, msg: 'API Key 无效' });
+    const dbUser = await findUserByApiKey(apiKey);
+    if (!dbUser || Number(dbUser.status) === 0) return reply.code(401).send({ code: -1, msg: 'API Key 无效' });
+    const uid = Number(dbUser.id);
+    req.user = {
+      uid,
+      username: dbUser.username,
+      level: Number(dbUser.level),
+      totp_open: Number(dbUser.totp_open),
+      stat_cache: Number(dbUser.stat_cache || 0),
+      email: String(dbUser.email || ''),
+      is_super: Number(dbUser.is_super || 0),
+      token_version: Number(dbUser.token_version || 0),
+      type: 'session',
+      // 独立命名空间，避免 API Key 登出时清掉该用户全部浏览器保险库会话
+      jti: `api:${uid}`,
+    };
+    enterRequestContext({ uid, jti: String(req.user.jti) });
+    return undefined;
+  }
   try {
     await req.jwtVerify();
   } catch (e) {

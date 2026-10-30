@@ -1,5 +1,5 @@
 import { query, queryOne, table } from '../../db.js';
-import { checkLevel } from '../../auth.js';
+import { checkLevel, getUserPermissions, type SubPermission } from '../../auth.js';
 
 export type AccountTable = 'account' | 'cdn_account' | 'cert_account';
 
@@ -17,6 +17,30 @@ export async function getVisibleAccount(t: AccountTable, aid: number, user: any)
     return Number(row.owner_uid) === Number(user?.uid) ? row : null;
   }
   return checkLevel(user, 2) ? row : null;
+}
+
+/**
+ * 普通用户的有效权限 = 显式子域名授权 + 自己私有 DNS 账户下的域名（隐式整域名可写）。
+ * 私有账户既然允许普通用户创建，所有者就应能完成域名接入、记录写入、到期更新和检测任务。
+ */
+export async function getEffectivePermissions(user: any): Promise<SubPermission[]> {
+  if (!user?.uid) return [];
+  const perms = await getUserPermissions(Number(user.uid));
+  if (checkLevel(user, 2)) return perms;
+  const owned: any[] = await query(
+    `SELECT D.name FROM ${table('domain')} D
+       JOIN ${table('account')} A ON D.aid = A.id
+      WHERE A.visibility = 'private' AND A.owner_uid = ?`,
+    [Number(user.uid)],
+  );
+  const seen = new Set(perms.map((p) => String(p.domain || '').trim().toLowerCase().replace(/\.$/, '')));
+  for (const r of owned) {
+    const name = String(r.name || '').trim().toLowerCase().replace(/\.$/, '');
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    perms.push({ domain: name, sub: null, readonly: 0, expiretime: null });
+  }
+  return perms;
 }
 
 /** 证书订单越权守卫：订单归属账户对当前用户不可见时按不存在处理 */

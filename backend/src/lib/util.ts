@@ -16,6 +16,20 @@ export function hasOwn(obj: Record<string, any>, key: any): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
+/** 请求体标量归一化：对象/数组不再原样传给 SQL，统一转成字符串并限制长度 */
+export function asText(v: any, max = 255): string {
+  return String(v ?? '').trim().slice(0, max);
+}
+
+/** 下载文件名只保留 ASCII 兜底，并同时提供 RFC 5987 UTF-8 文件名，避免 CR/LF/引号注入响应头 */
+export function contentDisposition(filename: string): string {
+  const raw = String(filename || 'download');
+  const ascii = raw.replace(/[^\x20-\x7e]/g, '_').replace(/["\\\r\n]/g, '_').slice(0, 200) || 'download';
+  const encoded = encodeURIComponent(raw)
+    .replace(/['()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`;
+}
+
 // 转义 LIKE 通配符，配合 SQL 中的 ESCAPE '!' 使用，避免用户输入的 % / _ / ! 改变匹配语义
 export function escapeLike(s: string): string {
   return String(s).replace(/[!%_]/g, (m) => '!' + m);

@@ -7,6 +7,7 @@ import { checkLevel } from '../auth.js';
 import { sendMail } from '../lib/monitor/msgNotice.js';
 import { audit } from '../lib/audit/context.js';
 import { clampLimit, clampOffset } from '../lib/util.js';
+import { hitRateLimit } from '../lib/rateLimit.js';
 
 const SITENAME = '聚合DNS管理系统';
 const CODE_TTL_SECONDS = 10 * 60; // 验证码有效期 10 分钟
@@ -49,7 +50,10 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (!(await registerEnabled())) return { code: -1, msg: '注册功能未开放' };
     if ((await registerMode()) !== 'email') return { code: -1, msg: '当前注册方式不支持邮箱验证' };
     const email = String((req.body?.email) ?? '').trim().toLowerCase();
-    if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
+    if (email.length > 254 || !isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
+    if (!hitRateLimit(`register:send-code:${req.ip}`, 10, 60_000)) {
+      return { code: -1, msg: '请求过于频繁，请稍后再试' };
+    }
 
     // 防账号枚举：无论邮箱是否已注册、是否触发频率限制、邮件是否发送成功，
     // 对外都返回同一句提示，避免用错误分支判断邮箱是否存在。

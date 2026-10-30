@@ -80,11 +80,13 @@ export class CloudflareDns implements DnsProvider {
     if (row.type === 'SRV' && row.priority !== undefined && row.priority !== null) {
       value = row.priority + ' ' + value;
     }
+    const type = row.type === 'URI' ? 'REDIRECT_URL' : row.type;
+    if (row.type === 'URI') value = String(row.data?.target ?? row.content ?? '');
     return {
       RecordId: row.id,
       Domain: this.domain,
       Name: name,
-      Type: row.type,
+      Type: type,
       Value: value,
       Line: row.proxied ? '1' : '0',
       TTL: row.ttl,
@@ -107,7 +109,7 @@ export class CloudflareDns implements DnsProvider {
     const name = Name === '@' ? ascii : Name + '.' + ascii;
     const body: Record<string, any> = { name, type: this.convertType(Type), content: Value, proxied: Line === '1', ttl: Number(TTL), comment: Remark ?? null };
     if (Type === 'MX') body.priority = Number(MX);
-    if (Type === 'CAA' || Type === 'SRV') {
+    if (Type === 'CAA' || Type === 'SRV' || this.isUrlType(Type)) {
       delete body.content;
       body.data = this.convertValue(Value, Type);
     }
@@ -120,7 +122,7 @@ export class CloudflareDns implements DnsProvider {
     const name = Name === '@' ? ascii : Name + '.' + ascii;
     const body: Record<string, any> = { name, type: this.convertType(Type), content: Value, proxied: Line === '1', ttl: Number(TTL), comment: Remark ?? null };
     if (Type === 'MX') body.priority = Number(MX);
-    if (Type === 'CAA' || Type === 'SRV') {
+    if (Type === 'CAA' || Type === 'SRV' || this.isUrlType(Type)) {
       delete body.content;
       body.data = this.convertValue(Value, Type);
     }
@@ -158,7 +160,19 @@ export class CloudflareDns implements DnsProvider {
     return dict[type] || type;
   }
 
+  private isUrlType(type: string): boolean {
+    return type === 'REDIRECT_URL' || type === 'FORWARD_URL';
+  }
+
   private convertValue(value: string, type: string): Record<string, any> {
+    if (this.isUrlType(type)) {
+      // Cloudflare URI 记录要求 data.target；允许用户填写「优先级 权重 目标」，
+      // 仅填写目标时使用 Cloudflare 的默认优先级和权重。
+      const m = value.trim().match(/^(\d+)\s+(\d+)\s+(.+)$/s);
+      return m
+        ? { priority: Number(m[1]), weight: Number(m[2]), target: m[3].trim() }
+        : { priority: 10, weight: 1, target: value.trim() };
+    }
     const arr = value.split(' ');
     if (type === 'SRV') {
       if (arr.length > 3) {

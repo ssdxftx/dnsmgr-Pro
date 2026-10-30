@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { checkLevel, getUserPermissions, matchPermission } from '../auth.js';
-import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
+import { checkLevel, matchPermission } from '../auth.js';
+import { canAccessDomainAccount, getEffectivePermissions } from '../lib/accounts/visibility.js';
 import { configGet, configSet } from '../config.js';
 import { updateDomainDate } from '../lib/expire/expireNoticeService.js';
 import { audit } from '../lib/audit/context.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -30,6 +31,7 @@ export default async function expireRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/domains/:id/update-date', auth, async (req: any) => {
+    if (!(await hitRateLimitDistributed(`expire:update:${req.user.uid}`, 10, 60_000))) return { code: -1, msg: '更新过于频繁，请稍后再试' };
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT id, name FROM ${table('domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '域名不存在' };
@@ -37,7 +39,7 @@ export default async function expireRoutes(app: FastifyInstance) {
     if (!(await canAccessDomainAccount(id, req.user))) return { code: -1, msg: '域名不存在或无权限' };
     // 普通用户仅能更新其有权限访问、且可写的域名到期时间（只读/受限子域名均拒绝）
     if (!checkLevel(req.user, 2)) {
-      const perms = await getUserPermissions(req.user.uid);
+      const perms = await getEffectivePermissions(req.user);
       const m = matchPermission(perms, row.name, '@');
       if (m < 0) return { code: -1, msg: '无权限' };
       if (m === 1) return { code: -1, msg: '该域名仅查看，禁止修改' };

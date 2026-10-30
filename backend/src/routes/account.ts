@@ -9,6 +9,8 @@ import { getDekForWrite } from '../lib/vault/service.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
+import { asText } from '../lib/util.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -51,8 +53,16 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/dns/accounts', auth, async (req: any) => {
-    const { type, name, config, remark } = req.body || {};
+    const b = req.body || {};
+    const type = asText(b.type, 64);
+    const name = asText(b.name, 128);
+    const config = b.config;
+    const remark = asText(b.remark, 255);
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) return { code: -1, msg: '账户配置格式不正确' };
+    if (!(await hitRateLimitDistributed(`cloud:account-check:${req.user.uid}`, 20, 60_000))) {
+      return { code: -1, msg: '账户校验过于频繁，请稍后再试' };
+    }
     const isPrivate = !isAdmin(req.user);
     const typeBlocked = privateDnsTypeBlocked(req.user, String(type));
     if (typeBlocked) return { code: -1, msg: typeBlocked };
@@ -93,8 +103,16 @@ export default async function accountRoutes(app: FastifyInstance) {
 
   app.put('/api/dns/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
-    const { type, name, config, remark } = req.body || {};
+    const b = req.body || {};
+    const type = asText(b.type, 64);
+    const name = asText(b.name, 128);
+    const config = b.config;
+    const remark = asText(b.remark, 255);
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) return { code: -1, msg: '账户配置格式不正确' };
+    if (!(await hitRateLimitDistributed(`cloud:account-check:${req.user.uid}`, 20, 60_000))) {
+      return { code: -1, msg: '账户校验过于频繁，请稍后再试' };
+    }
     const row: any = await getVisibleAccount('account', Number(id), req.user);
     if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
     const isPrivate = row.visibility === 'private';
@@ -172,8 +190,16 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/cdn/accounts', auth, async (req: any) => {
-    const { type, name, config, remark } = req.body || {};
+    const b = req.body || {};
+    const type = asText(b.type, 64);
+    const name = asText(b.name, 128);
+    const config = b.config;
+    const remark = asText(b.remark, 255);
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) return { code: -1, msg: '账户配置格式不正确' };
+    if (!(await hitRateLimitDistributed(`cloud:cdn-account-check:${req.user.uid}`, 20, 60_000))) {
+      return { code: -1, msg: 'CDN 账户校验过于频繁，请稍后再试' };
+    }
     const isPrivate = !isAdmin(req.user);
     const dek = isPrivate ? await getDekForWrite(Number(req.user.uid), String(req.user.jti || '')) : null;
     if (isPrivate && !dek) return { code: -1, msg: '保险库已锁定，请先解锁' };
@@ -212,8 +238,16 @@ export default async function accountRoutes(app: FastifyInstance) {
 
   app.put('/api/cdn/accounts/:id', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
-    const { type, name, config, remark } = req.body || {};
+    const b = req.body || {};
+    const type = asText(b.type, 64);
+    const name = asText(b.name, 128);
+    const config = b.config;
+    const remark = asText(b.remark, 255);
     if (!type || !name || !config) return { code: -1, msg: '必填参数不能为空' };
+    if (typeof config !== 'object' || config === null || Array.isArray(config)) return { code: -1, msg: '账户配置格式不正确' };
+    if (!(await hitRateLimitDistributed(`cloud:cdn-account-check:${req.user.uid}`, 20, 60_000))) {
+      return { code: -1, msg: 'CDN 账户校验过于频繁，请稍后再试' };
+    }
     const row: any = await getVisibleAccount('cdn_account', Number(id), req.user);
     if (!row) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
     const isPrivate = row.visibility === 'private';

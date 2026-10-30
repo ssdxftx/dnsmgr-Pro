@@ -247,6 +247,8 @@ export class TencentDeploy implements DeployProvider {
       throw new Error('获取云函数自定义域名失败：' + e.message);
     }
 
+    if (!data) throw new Error('获取云函数自定义域名失败：返回为空');
+    data.CertConfig = data.CertConfig || {};
     if (data.CertConfig && data.CertConfig.CertificateId === certId) {
       this.log('云函数自定义域名 ' + config.domain + ' 已部署证书，无需重复部署');
       return;

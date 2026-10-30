@@ -5,9 +5,8 @@ export function commandExecAllowed(): boolean {
 }
 
 /**
- * 可选命令前缀白名单（DNSMGR_DEPLOY_CMD_ALLOWLIST，逗号分隔）。
- * 仅打开总开关而不限制命令内容时，任何能创建部署任务的管理员都能在主机/远端执行任意 shell；
- * 配置白名单后只允许以指定前缀开头的命令。
+ * 命令前缀白名单（DNSMGR_DEPLOY_CMD_ALLOWLIST，逗号分隔）。
+ * 打开总开关时必须配置白名单，只允许以指定前缀开头且不含 shell 控制符的单条命令。
  */
 export function commandAllowlist(): string[] {
   return (process.env.DNSMGR_DEPLOY_CMD_ALLOWLIST || '')
@@ -16,14 +15,17 @@ export function commandAllowlist(): string[] {
     .filter(Boolean);
 }
 
-export function assertCommandAllowed(cmd?: string): void {
+function assertCommandAllowedInner(cmd?: string): string {
   if (!commandExecAllowed()) {
     throw new Error('出于安全考虑已禁用部署自定义命令（cmd）。如确需执行，请设置环境变量 DNSMGR_ALLOW_DEPLOY_CMD=1 后重启服务');
   }
   const list = commandAllowlist();
-  if (!list.length) return;
+  // 打开总开关但未配置白名单时拒绝执行，避免等同于任意命令执行。
+  if (!list.length) {
+    throw new Error('已开启部署自定义命令，但未配置 DNSMGR_DEPLOY_CMD_ALLOWLIST；请配置允许的命令前缀后重启服务');
+  }
   const c = String(cmd || '').trim();
-  if (!c) return;
+  if (!c) throw new Error('部署命令不能为空');
   // 白名单只允许“单条命令 + 普通参数”：出现 shell 控制符即拒绝，
   // 否则 `systemctl reload nginx; curl ...` 之类可直接绕过前缀匹配。
   if (/[;&|`$(){}<>\r\n\\]/.test(c)) {
@@ -33,4 +35,36 @@ export function assertCommandAllowed(cmd?: string): void {
   if (!list.some((p) => c === p || c.startsWith(p + ' '))) {
     throw new Error('命令不在允许列表内（DNSMGR_DEPLOY_CMD_ALLOWLIST）：' + c.slice(0, 120));
   }
+  return c;
+}
+
+export function assertCommandAllowed(cmd?: string): void {
+  assertCommandAllowedInner(cmd);
+}
+
+/** 将已通过白名单校验的命令拆成 argv，供 execFile 使用，避免再经过 shell */
+export function commandArgv(cmd?: string): string[] {
+  const c = assertCommandAllowedInner(cmd);
+  const argv: string[] = [];
+  let current = '';
+  let quote = '';
+  for (const ch of c) {
+    if (quote) {
+      if (ch === quote) quote = '';
+      else current += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (current) {
+        argv.push(current);
+        current = '';
+      }
+    } else {
+      current += ch;
+    }
+  }
+  if (quote) throw new Error('部署命令引号未闭合：' + c.slice(0, 120));
+  if (current) argv.push(current);
+  if (!argv.length) throw new Error('部署命令不能为空');
+  return argv;
 }

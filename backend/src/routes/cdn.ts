@@ -26,6 +26,7 @@ import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
+import { asText } from '../lib/util.js';
 import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS, EO_DATA_DELAY_MS } from '../lib/cdn/statistics/cacheService.js';
 import { getCatalog, listCatalogs } from '../lib/cdn/statistics/catalog/index.js';
 import type { DetailResponse, MetricSeries, ProviderCard, BreakdownItem } from '../lib/cdn/statistics/catalog/result.js';
@@ -1657,18 +1658,24 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // 回源
   app.post('/api/cdn/domains/:id/origin', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
-    const { origin, origin_type, origin_host, origin_protocol, http_port, https_port } = req.body || {};
+    const b = req.body || {};
+    const origin = asText(b.origin, 255);
+    const originType = asText(b.origin_type, 32) || 'ipaddr';
+    const originHost = asText(b.origin_host, 255);
+    const originProtocol = ['http', 'https', 'follow'].includes(String(b.origin_protocol)) ? String(b.origin_protocol) : 'follow';
+    const httpPort = Math.min(65535, Math.max(1, Math.floor(Number(b.http_port)) || 80));
+    const httpsPort = Math.min(65535, Math.max(1, Math.floor(Number(b.https_port)) || 443));
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
     if (!origin) return { code: -1, msg: '源站不能为空' };
     const provider = await cdnForRow(row);
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
-    if (!(await provider.updateOrigin(row.name, origin, origin_type || 'ipaddr', origin_host || '', origin_protocol || 'follow', Number(http_port || 80), Number(https_port || 443)))) {
+    if (!(await provider.updateOrigin(row.name, origin, originType, originHost, originProtocol, httpPort, httpsPort))) {
       return { code: -1, msg: '回源配置更新失败，' + provider.getError() };
     }
     await query(
       `UPDATE ${table('cdn_domain')} SET origin = ?, origin_type = ?, origin_host = ?, origin_protocol = ?, http_port = ?, https_port = ? WHERE id = ?`,
-      [origin, origin_type || 'ipaddr', origin_host || '', origin_protocol || 'follow', Number(http_port || 80), Number(https_port || 443), id],
+      [origin, originType, originHost, originProtocol, httpPort, httpsPort, id],
     );
     audit(req, {
       targetType: 'cdn_domain',
@@ -1686,11 +1693,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
         },
         {
           origin,
-          origin_type: origin_type || 'ipaddr',
-          origin_host: origin_host || '',
-          origin_protocol: origin_protocol || 'follow',
-          http_port: Number(http_port || 80),
-          https_port: Number(https_port || 443),
+          origin_type: originType,
+          origin_host: originHost,
+          origin_protocol: originProtocol,
+          http_port: httpPort,
+          https_port: httpsPort,
         },
         {
           origin: '源站',

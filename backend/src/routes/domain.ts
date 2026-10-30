@@ -2,15 +2,15 @@ import type { FastifyInstance } from 'fastify';
 import net from 'node:net';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
-import { getUserPermissions, matchPermission, isRecordInScope, checkLevel, sameDomain, type SubPermission } from '../auth.js';
+import { matchPermission, isRecordInScope, checkLevel, sameDomain, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
 import { detectCloudflareProxy } from '../lib/dns/cloudflare.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig } from '../lib/secret.js';
 import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
-import { getVisibleAccount } from '../lib/accounts/visibility.js';
-import { clampLimit } from '../lib/util.js';
+import { getEffectivePermissions, getVisibleAccount } from '../lib/accounts/visibility.js';
+import { asText, clampLimit } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
@@ -72,9 +72,30 @@ function evictOldest<K, V extends { at: number }>(map: Map<K, V>, max: number): 
   for (let i = 0; i < drop && i < entries.length; i++) map.delete(entries[i][0]);
 }
 
-const allRecordsCache = new Map<string, { at: number; list: any[] }>();
+const allRecordsCache = new Map<string, { at: number; list: any[]; bytes: number }>();
 const RECORDS_TTL = 60_000;
 const RECORDS_CACHE_MAX = 300;
+// 缓存同时限制条目数与总字节数，避免大量域名/大记录集把进程内存顶满
+const RECORDS_CACHE_MAX_BYTES = 8 * 1024 * 1024;
+const RECORDS_SINGLE_MAX_BYTES = 2 * 1024 * 1024;
+let allRecordsCacheBytes = 0;
+
+function evictRecordsCache(incomingBytes: number): void {
+  while (allRecordsCache.size && (allRecordsCache.size >= RECORDS_CACHE_MAX || allRecordsCacheBytes + incomingBytes > RECORDS_CACHE_MAX_BYTES)) {
+    let oldestKey: string | undefined;
+    let oldestAt = Number.POSITIVE_INFINITY;
+    for (const [k, v] of allRecordsCache) {
+      if (v.at < oldestAt) {
+        oldestAt = v.at;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey === undefined) break;
+    const old = allRecordsCache.get(oldestKey);
+    allRecordsCacheBytes -= Number(old?.bytes || 0);
+    allRecordsCache.delete(oldestKey);
+  }
+}
 
 /** 域名名称不是唯一键（不同账户可接入同名域名），缓存必须按域名 ID 隔离，避免跨租户命中他人记录。 */
 function domainCacheKey(d: any): string {
@@ -97,11 +118,15 @@ async function fetchAccountMap(aids: number[]): Promise<Map<number, any>> {
  *  返回 ok 以区分「记录为空」与「云端拉取失败」：失败时不写缓存，由调用方在行上标记，避免把失败伪装成 0 条。 */
 async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: boolean }> {
   const cacheKey = domainCacheKey(d);
-  const cached = allRecordsCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < RECORDS_TTL) return { list: cached.list, ok: true };
+  const acctRow = acct !== undefined ? acct : await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
+  // 私有账户记录依赖当前会话解锁，不能进入跨会话进程缓存，否则锁定后仍可能读到记录内容
+  const cacheable = !!acctRow && acctRow.visibility !== 'private';
+  if (cacheable) {
+    const cached = allRecordsCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < RECORDS_TTL) return { list: cached.list, ok: true };
+  }
   let list: any[] = [];
   let ok = false;
-  const acctRow = acct !== undefined ? acct : await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
   if (acctRow) {
     const provider = getDnsProvider(acctRow.type, await accountConfigOf(acctRow), d.name, d.thirdid);
     if (provider) {
@@ -122,9 +147,18 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
       }
     }
   }
-  if (ok) {
-    evictOldest(allRecordsCache, RECORDS_CACHE_MAX);
-    allRecordsCache.set(cacheKey, { at: Date.now(), list });
+  if (ok && cacheable) {
+    const bytes = Buffer.byteLength(JSON.stringify(list));
+    if (bytes <= RECORDS_SINGLE_MAX_BYTES) {
+      evictRecordsCache(bytes);
+      const prev = allRecordsCache.get(cacheKey);
+      if (prev) {
+        allRecordsCacheBytes -= Number(prev.bytes || 0);
+        allRecordsCache.delete(cacheKey);
+      }
+      allRecordsCache.set(cacheKey, { at: Date.now(), list, bytes });
+      allRecordsCacheBytes += bytes;
+    }
   }
   return { list, ok };
 }
@@ -169,7 +203,7 @@ async function fetchRecordTotal(d: any, acct?: any): Promise<number> {
 
 async function getUserPerms(req: any): Promise<{ admin: boolean; perms: SubPermission[] }> {
   if (Number(req.user?.level ?? 0) >= 2) return { admin: true, perms: [] };
-  return { admin: false, perms: await getUserPermissions(req.user.uid) };
+  return { admin: false, perms: await getEffectivePermissions(req.user) };
 }
 
 /** 写操作权限校验，返回错误信息；为空表示允许 */
@@ -335,6 +369,7 @@ export default async function domainRoutes(app: FastifyInstance) {
           _key: `${d.id}:${p.sub || ''}`,
           _sub: p.sub || '',
           _readonly: Number(p.readonly || 0),
+          _owner: d.account_visibility === 'private' && Number(d.account_owner) === Number(req.user.uid),
           _base_name: d.name,
           name: p.sub ? `${p.sub}.${d.name}` : d.name,
         });
@@ -433,24 +468,24 @@ export default async function domainRoutes(app: FastifyInstance) {
     return { code: 0, data: out.slice(0, LIMIT), truncated };
   });
 
-  app.get('/api/domains/categories', auth, async (req: any) => {
-    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+  app.get('/api/domains/categories', auth, async () => {
     const rows = await query(`SELECT * FROM ${table('domain_category')} ORDER BY sort ASC, id ASC`);
     return { code: 0, data: rows };
   });
 
   app.post('/api/domains/categories', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
-    const { name, remark } = req.body || {};
+    const b = req.body || {};
+    const name = asText(b.name, 64);
+    const remark = asText(b.remark, 255);
     if (!name) return { code: -1, msg: '分类名不能为空' };
-    await query(`INSERT INTO ${table('domain_category')} (name, remark, sort, addtime) VALUES (?, ?, 0, NOW())`, [name, remark || '']);
-    audit(req, { targetType: 'domain', targetName: String(name), summary: `新建域名分组 ${name}` });
+    await query(`INSERT INTO ${table('domain_category')} (name, remark, sort, addtime) VALUES (?, ?, 0, NOW())`, [name, remark]);
+    audit(req, { targetType: 'domain', targetName: name, summary: `新建域名分组 ${name}` });
     return { code: 0, msg: '添加分类成功' };
   });
 
   // 从 DNS 账户拉取云端域名列表（用于添加）
   app.get('/api/dns/accounts/:aid/pull', auth, async (req: any) => {
-    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { aid } = req.params as any;
     const acct = await getVisibleAccount('account', Number(aid), req.user);
     if (!acct) return { code: -1, msg: '账户不存在' };
@@ -463,18 +498,20 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   // 导入域名
   app.post('/api/domains', auth, async (req: any) => {
-    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
-    const { aid, domain, thirdid, recordcount } = req.body || {};
-    const domainName = String(domain ?? '').trim().toLowerCase().replace(/\.$/, '');
-    if (!aid || !domainName) return { code: -1, msg: '参数不完整' };
+    const b = req.body || {};
+    const aid = Number(b.aid);
+    const domainName = asText(b.domain, 253).toLowerCase().replace(/\.$/, '');
+    const thirdid = asText(b.thirdid, 255);
+    const recordcount = Math.max(0, Math.min(Number(b.recordcount) || 0, 1_000_000));
+    if (!Number.isInteger(aid) || aid <= 0 || !domainName) return { code: -1, msg: '参数不完整' };
     const exists = await queryOne(`SELECT id FROM ${table('domain')} WHERE name = ?`, [domainName]);
     if (exists) return { code: -1, msg: '域名已存在' };
-    const acct = await getVisibleAccount('account', Number(aid), req.user);
+    const acct = await getVisibleAccount('account', aid, req.user);
     if (!acct) return { code: -1, msg: '账户不存在' };
     // 历史数据可能残留同名域名的权限行；重新接入前清掉，避免旧用户自动获得新域名权限
     await clearDomainPermissions([domainName]);
     const id = await query(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      aid, domainName, String(thirdid || ''), Number(recordcount) || 0,
+      aid, domainName, thirdid, recordcount,
     ]).then((r: any) => r.insertId || 0);
     audit(req, {
       targetType: 'domain',
@@ -488,10 +525,11 @@ export default async function domainRoutes(app: FastifyInstance) {
   });
 
   app.delete('/api/domains/:id', auth, async (req: any) => {
-    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const { id } = req.params as any;
     const info = await getDomainWithAccount(Number(id), req.user);
     if (!info) return { code: -1, msg: '域名不存在' };
+    const privateOwner = info.account.visibility === 'private' && Number(info.account.owner_uid) === Number(req.user.uid);
+    if (!checkLevel(req.user, 2) && !privateOwner) return { code: -1, msg: '无权限' };
     const row = info.domain;
     // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名。
     // 权限清理与多表删除必须在同一事务内，否则中途失败会丢失权限或留下孤儿数据。
@@ -517,20 +555,21 @@ export default async function domainRoutes(app: FastifyInstance) {
 
   // 编辑域名属性（备注/分类/隐藏/单点登录/到期提醒/到期时间）
   app.put('/api/domains/:id', auth, async (req: any) => {
-    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number((req.params as any).id);
     const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名不存在' };
+    const privateOwner = info.account.visibility === 'private' && Number(info.account.owner_uid) === Number(req.user.uid);
+    if (!checkLevel(req.user, 2) && !privateOwner) return { code: -1, msg: '无权限' };
     const row: any = info.domain;
     const b = req.body || {};
     const upd: Record<string, any> = {};
     const boolField = (k: string) => (Number(b[k]) ? 1 : 0);
-    if ('remark' in b) upd.remark = String(b.remark ?? '');
+    if ('remark' in b) upd.remark = asText(b.remark, 255);
     if ('cid' in b) upd.cid = Number(b.cid || 0);
     if ('is_hide' in b) upd.is_hide = boolField('is_hide');
     if ('is_sso' in b) upd.is_sso = boolField('is_sso');
     if ('is_notice' in b) upd.is_notice = boolField('is_notice');
-    if ('expiretime' in b) upd.expiretime = b.expiretime ? String(b.expiretime) : null;
+    if ('expiretime' in b) upd.expiretime = b.expiretime ? asText(b.expiretime, 32) : null;
     const cols = Object.keys(upd);
     if (!cols.length) return { code: 0, msg: '无改动' };
     const fields = cols.map((k) => `${k} = ?`).join(', ');

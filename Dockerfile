@@ -28,13 +28,15 @@ ENV NODE_ENV=production \
 
 # 后端依赖（含 tsx，用于运行 TypeScript 源码）
 COPY backend/package.json backend/package-lock.json ./
-RUN npm ci --no-audit --no-fund
-COPY backend/ ./
+RUN npm ci --omit=dev --no-audit --no-fund
+COPY --chown=node:node backend/ ./
 
 # 前端构建产物
-COPY --from=web /build/dist /app/web
+COPY --from=web --chown=node:node /build/dist /app/web
 
-RUN mkdir -p /app/data
+RUN mkdir -p /app/data && chown -R node:node /app
+
+USER node
 
 EXPOSE 8082
 

@@ -9,6 +9,19 @@ const serviceAreaMap: Record<string, string> = {
   global: 'global',
 };
 
+function isPlainObject(value: any): boolean {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function mergeConfig(base: any, patch: any): any {
+  if (!isPlainObject(base) || !isPlainObject(patch)) return patch;
+  const out: Record<string, any> = { ...base };
+  for (const [key, value] of Object.entries(patch)) {
+    out[key] = isPlainObject(base[key]) && isPlainObject(value) ? mergeConfig(base[key], value) : value;
+  }
+  return out;
+}
+
 function ttlToUnit(seconds: number): { ttl: number; ttl_unit: string } {
   const s = Math.max(0, Math.floor(seconds) || 0);
   if (s <= 0) return { ttl: 0, ttl_unit: 's' };
@@ -59,8 +72,19 @@ export class HuaweiCDN implements CdnProvider {
     return this.call('GET', `/v1.0/cdn/configuration/domains/${domain}`);
   }
 
+  // UpdateDomainFullConfig 是全量更新接口；只提交局部 configs 会把未传入的
+  // HSTS/TLS/缓存/防盗链等配置重置。先读取完整配置，再合并本次修改。
+  private async getFullConfig(domain: string): Promise<Record<string, any> | null> {
+    const data = await this.call('GET', `/v1.1/cdn/configuration/domains/${domain}/configs`);
+    if (!data) return null;
+    const configs = data.configs || data.Configs;
+    return isPlainObject(configs) ? configs : null;
+  }
+
   private async updateDomainConfigs(domain: string, configs: Record<string, any>): Promise<boolean> {
-    return (await this.call('PUT', `/v1.1/cdn/configuration/domains/${domain}/configs`, null, { configs })) !== false;
+    const current = await this.getFullConfig(domain);
+    if (!current) return false;
+    return (await this.call('PUT', `/v1.1/cdn/configuration/domains/${domain}/configs`, null, { configs: mergeConfig(current, configs) })) !== false;
   }
 
   async createDomain(domain: string, origin: string, originType: string, serviceArea: string): Promise<string | false> {

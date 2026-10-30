@@ -92,6 +92,7 @@ export class AliyunCDN implements CdnProvider {
           if (!port && s.port) port = Number(s.port);
         }
         let forceRedirect = false;
+        const httpsEnabled = String(detail.ServerCertificateStatus || '').toLowerCase() === 'on';
         const cfg = await this.call({ Action: 'DescribeCdnDomainConfigs', DomainName: d.DomainName, FunctionNames: 'https_force' });
         if (cfg) {
           for (const c of cfg.DomainConfigs?.DomainConfig || []) {
@@ -112,7 +113,7 @@ export class AliyunCDN implements CdnProvider {
           origin_protocol: 'follow',
           http_port: port || Number(detail.SourcePort || 80),
           https_port: 443,
-          https_enabled: forceRedirect,
+          https_enabled: httpsEnabled || forceRedirect,
           force_redirect: forceRedirect,
         };
       });

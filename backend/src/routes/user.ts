@@ -152,10 +152,13 @@ export default async function userRoutes(app: FastifyInstance) {
     const permission = Array.isArray(b.permission) ? b.permission : [];
 
     if (!username || !password) return { code: -1, msg: '用户名或密码不能为空' };
+    if (username.length > 64) return { code: -1, msg: '用户名长度不能超过 64 位' };
     if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
     if (!Number.isFinite(level) || level < 1) return { code: -1, msg: '用户等级不合法' };
     if (level >= 2 && !isSuper(req)) return { code: -1, msg: '仅超级管理员可创建管理员账号' };
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
+    if (apikey.length > 256) return { code: -1, msg: 'API密钥长度不能超过 256 位' };
+    if (isApi === 1 && await queryOne(`SELECT id FROM ${table('user')} WHERE apikey = ? LIMIT 1`, [apikey])) return { code: -1, msg: 'API密钥已被使用' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ?`, [username]);
     if (exists) return { code: -1, msg: '用户名已存在' };
 
@@ -210,6 +213,7 @@ export default async function userRoutes(app: FastifyInstance) {
     const permission = permissionProvided ? b.permission : [];
 
     if (!username) return { code: -1, msg: '用户名不能为空' };
+    if (username.length > 64) return { code: -1, msg: '用户名长度不能超过 64 位' };
     if (!Number.isFinite(level) || level < 1) return { code: -1, msg: '用户等级不合法' };
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? AND id <> ?`, [username, id]);
     if (exists) return { code: -1, msg: '用户名已存在' };
@@ -229,6 +233,8 @@ export default async function userRoutes(app: FastifyInstance) {
       apikey = String(curKey?.apikey ?? '');
     }
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
+    if (apikey.length > 256) return { code: -1, msg: 'API密钥长度不能超过 256 位' };
+    if (isApi === 1 && await queryOne(`SELECT id FROM ${table('user')} WHERE apikey = ? AND id <> ? LIMIT 1`, [apikey, id])) return { code: -1, msg: 'API密钥已被使用' };
     const sets: string[] = ['username = ?', 'is_api = ?', 'apikey = ?', 'level = ?'];
     const params: any[] = [username, isApi, apikey, level];
     if (b.check_whole !== undefined) {

@@ -2,16 +2,16 @@
   <div class="app-stack">
     <PageHeader :title="t('domain.title')" :subtitle="t('domain.subtitle')">
       <template #actions>
-        <n-space v-if="isAdmin">
-          <n-button v-if="checked.length" size="small" type="success" :loading="!!actionBusy['noticeOn']" :disabled="!!actionBusy['noticeOn'] || !!actionBusy['noticeOff']" @click="runAction('noticeOn', () => batchNotice(1))">{{ t('domain.batchNoticeOn') }}</n-button>
-          <n-button v-if="checked.length" size="small" :loading="!!actionBusy['noticeOff']" :disabled="!!actionBusy['noticeOff'] || !!actionBusy['noticeOn']" @click="runAction('noticeOff', () => batchNotice(0))">{{ t('domain.batchNoticeOff') }}</n-button>
-          <n-button v-if="checked.length" size="small" type="error" secondary @click="batchDelete">{{ t('domain.batchDelete') }}</n-button>
-          <n-button @click="router.push('/expire-notice')">{{ t('domain.expireNotice') }}</n-button>
+        <n-space>
+          <n-button v-if="isAdmin && checked.length" size="small" type="success" :loading="!!actionBusy['noticeOn']" :disabled="!!actionBusy['noticeOn'] || !!actionBusy['noticeOff']" @click="runAction('noticeOn', () => batchNotice(1))">{{ t('domain.batchNoticeOn') }}</n-button>
+          <n-button v-if="isAdmin && checked.length" size="small" :loading="!!actionBusy['noticeOff']" :disabled="!!actionBusy['noticeOff'] || !!actionBusy['noticeOn']" @click="runAction('noticeOff', () => batchNotice(0))">{{ t('domain.batchNoticeOff') }}</n-button>
+          <n-button v-if="isAdmin && checked.length" size="small" type="error" secondary @click="batchDelete">{{ t('domain.batchDelete') }}</n-button>
+          <n-button v-if="isAdmin" @click="router.push('/expire-notice')">{{ t('domain.expireNotice') }}</n-button>
           <n-button type="primary" @click="openImport">
             <template #icon><n-icon :component="CloudDownloadOutline" /></template>
             {{ t('domain.importDomains') }}
           </n-button>
-          <n-button @click="openCategory">{{ t('domain.addCategory') }}</n-button>
+          <n-button v-if="isAdmin" @click="openCategory">{{ t('domain.addCategory') }}</n-button>
         </n-space>
       </template>
     </PageHeader>
@@ -276,8 +276,8 @@ const columns = computed(() => {
           size: isMobile.value ? 'small' : 'tiny',
           quaternary: true,
           type: row.is_notice == 1 ? 'success' : 'default',
-          disabled: !isAdmin.value,
-          onClick: isAdmin.value ? () => toggleNotice(row) : undefined,
+          disabled: !isAdmin.value && !row._owner,
+          onClick: isAdmin.value || row._owner ? () => toggleNotice(row) : undefined,
         },
         { default: () => (row.is_notice == 1 ? t('domain.noticeOn') : t('domain.noticeOff')) },
       ),
@@ -295,7 +295,7 @@ const columns = computed(() => {
     width: isAdmin.value ? 150 : 120,
     render(row: any) {
       const btns: any[] = [h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => gotoRecords(row) }, { default: () => t('domain.records') })];
-      if (isAdmin.value) {
+      if (isAdmin.value || row._owner) {
         btns.push(h(NButton, { size: 'tiny', quaternary: true, onClick: () => openEdit(row) }, { default: () => t('common.edit') }));
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delDomain(row) }, { default: () => t('common.delete') }));
       }
@@ -428,7 +428,9 @@ async function toggleNotice(row: any) {
   const target = prev === 1 ? 0 : 1;
   row.is_notice = target; // 乐观更新：立即反馈，避免等待整表重拉
   try {
-    const res = await api('POST', '/domains/batch-notice', { ids: [row.id], is_notice: target });
+    const res = !isAdmin.value && row._owner
+      ? await api('PUT', `/domains/${row.id}`, { is_notice: target })
+      : await api('POST', '/domains/batch-notice', { ids: [row.id], is_notice: target });
     if (res.code === 0) message.success(res.msg);
     else {
       row.is_notice = prev; // 失败回滚

@@ -253,7 +253,7 @@ async function resolveForPin(host: string, blocked: (ip: string) => boolean, blo
 
 // 供非 safeFetch 路径复用：优先使用系统代理；未配置代理时 pin 到已解析 IP。
 // 代理模式下仍尽量校验目标解析结果，防止通过可控域名访问内网/云元数据地址；
-// 若本地无法解析（代理端可解析），则交给代理完成解析。
+// 若本地无法解析（代理端可解析），默认拒绝，除非显式设置 DNSMGR_PROXY_ALLOW_UNRESOLVED=1。
 export async function pinnedDispatcherFor(host: string, blocked: (ip: string) => boolean = isPrivateIp, blockMsg = '禁止访问内网地址'): Promise<Agent | ProxyAgent | undefined> {
   const proxy = await getConfiguredProxyAgent();
   if (privateFetchAllowed()) return proxy;
@@ -268,6 +268,11 @@ export async function pinnedDispatcherFor(host: string, blocked: (ip: string) =>
       await resolveForPin(h, blocked, blockMsg);
     } catch (e: any) {
       if (!String(e?.message || '').includes('域名解析失败')) throw e;
+      // 本地无法解析时，代理侧仍可能解析到内网地址；默认拒绝，避免把 DNS 校验交给不可信出口。
+      // 仅在使用可信代理且明确接受该风险时设置 DNSMGR_PROXY_ALLOW_UNRESOLVED=1。
+      if (process.env.DNSMGR_PROXY_ALLOW_UNRESOLVED !== '1') {
+        throw new Error('域名在本地无法解析，已拒绝经代理访问；如代理可信可设置 DNSMGR_PROXY_ALLOW_UNRESOLVED=1');
+      }
     }
     return proxy;
   }

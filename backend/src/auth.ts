@@ -14,6 +14,12 @@ export async function findUserById(id: number): Promise<any> {
   return queryOne(`SELECT * FROM ${table('user')} WHERE id = ? LIMIT 1`, [id]);
 }
 
+export async function findUserByApiKey(apikey: string): Promise<any> {
+  const key = String(apikey || '').trim();
+  if (!key) return null;
+  return queryOne(`SELECT * FROM ${table('user')} WHERE apikey = ? AND is_api = 1 LIMIT 1`, [key]);
+}
+
 export async function verifyPassword(hash: string, password: string): Promise<boolean> {
   return bcrypt.compare(password, hash);
 }

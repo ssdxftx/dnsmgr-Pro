@@ -3,10 +3,10 @@ import { query, queryOne, table } from '../../db.js';
 /**
  * 单会话令牌吊销表。
  * - 登出时写入当前 jti，未过期的令牌立即失效；
- * - 记录 5 秒缓存，避免每个请求都查库；
+ * - 记录 1 秒负缓存，避免每个请求都查库，同时把跨实例登出窗口压到最小；
  * - 过期记录在写入新吊销项时顺带清理。
  */
-const CACHE_TTL_MS = 5000;
+const CACHE_TTL_MS = 1000;
 const cache = new Map<string, { revoked: boolean; at: number }>();
 
 function prune(): void {
@@ -23,7 +23,8 @@ function prune(): void {
 export async function revokeToken(jti: string, uid: number, expireAt?: Date): Promise<void> {
   const id = String(jti || '').trim();
   if (!id) return;
-  const exp = expireAt && expireAt.getTime() > Date.now() ? expireAt : new Date(Date.now() + 7 * 86400_000);
+  // 调用方应传入令牌实际 exp；兜底保留 30 天，避免自定义长 TTL 令牌的吊销记录提前被清理
+  const exp = expireAt && expireAt.getTime() > Date.now() ? expireAt : new Date(Date.now() + 30 * 86400_000);
   await query(
     `INSERT INTO ${table('token_revocation')} (jti, uid, expire_at, addtime) VALUES (?, ?, ?, NOW())
      ON DUPLICATE KEY UPDATE expire_at = VALUES(expire_at)`,

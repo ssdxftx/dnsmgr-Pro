@@ -7,7 +7,8 @@ import type { DeployProvider } from '../types.js';
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function esc(str: string): string {
-  return encodeURIComponent(str).replace(/%2B/g, '%20').replace(/%2A/g, '%2A').replace(/%7E/g, '~');
+  // 与 clients/Volcengine.ts 保持一致：按 RFC3986 编码，空格为 %20，+ 保持 %2B，* 编码为 %2A。
+  return encodeURIComponent(str).replace(/[!'()*]/g, (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase());
 }
 
 function canonicalQueryString(parameters: Record<string, any>): string {

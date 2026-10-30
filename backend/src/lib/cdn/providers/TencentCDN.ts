@@ -61,6 +61,20 @@ export class TencentCDN implements CdnProvider {
     return false;
   }
 
+  // 读取完整域名配置。UpdateDomainConfig 对复杂对象采用「全量」语义，
+  // 直接提交局部对象会把未传入的 HSTS/TLS/缓存等配置重置为默认值，
+  // 因此更新前先取回当前配置，在完整对象上合并本次修改。
+  private async getDomainConfig(domain: string): Promise<Record<string, any> | null> {
+    let data = await this.send('DescribeDomainsConfig', { Domain: domain });
+    if (!data) {
+      data = await this.send('DescribeDomainsConfig', { Filters: [{ Name: 'domain', Value: [domain] }] });
+    }
+    if (!data) return null;
+    const rows = data.Domains || (data.DomainConfig ? [data.DomainConfig] : []);
+    const row = rows.find((d: any) => !d.Domain || d.Domain === domain);
+    return row || null;
+  }
+
   async listDomains(): Promise<CdnDomainItem[] | false> {
     const list: CdnDomainItem[] = [];
     let offset = 0;
@@ -119,7 +133,9 @@ export class TencentCDN implements CdnProvider {
       .map((v) => v.trim())
       .filter((v) => v !== '')
       .map((v) => (v.includes(':') ? v : v + ':' + port));
-    const Origin: Record<string, any> = { Origins: origins, OriginType: originType === 'domain' ? 'domain' : 'ipaddr', OriginPullProtocol: originProtocol || 'follow' };
+    const current = await this.getDomainConfig(domain);
+    if (!current) return false;
+    const Origin: Record<string, any> = { ...(current.Origin || {}), Origins: origins, OriginType: originType === 'domain' ? 'domain' : 'ipaddr', OriginPullProtocol: originProtocol || 'follow' };
     if (originHost) Origin.ServerName = originHost;
     return (await this.send('UpdateDomainConfig', { Domain: domain, Origin })) !== false;
   }
@@ -151,12 +167,20 @@ export class TencentCDN implements CdnProvider {
       })
       .filter(Boolean)
       .reverse();
-    return (await this.send('UpdateDomainConfig', { Domain: domain, Cache: { RuleCache: ruleCache } })) !== false;
+    const current = await this.getDomainConfig(domain);
+    if (!current) return false;
+    return (await this.send('UpdateDomainConfig', { Domain: domain, Cache: { ...(current.Cache || {}), RuleCache: ruleCache } })) !== false;
   }
 
   async setHttps(domain: string, enabled: boolean, forceRedirect: boolean) {
-    const https: Record<string, any> = { Switch: enabled ? 'on' : 'off' };
-    if (forceRedirect) https.ForceRedirect = { Switch: 'on', RedirectType: 'https' };
+    const current = await this.getDomainConfig(domain);
+    if (!current) return false;
+    const https: Record<string, any> = { ...(current.Https || {}), Switch: enabled ? 'on' : 'off' };
+    if (forceRedirect) {
+      https.ForceRedirect = { ...(https.ForceRedirect || {}), Switch: 'on', RedirectType: 'https' };
+    } else if (https.ForceRedirect) {
+      https.ForceRedirect = { ...https.ForceRedirect, Switch: 'off' };
+    }
     return (await this.send('UpdateDomainConfig', { Domain: domain, Https: https })) !== false;
   }
 
@@ -176,7 +200,10 @@ export class TencentCDN implements CdnProvider {
   }
 
   async setAccess(domain: string, config: Record<string, any>): Promise<boolean> {
+    const current = await this.getDomainConfig(domain);
+    if (!current) return false;
     const updates: Record<string, any> = this.buildAccessConfig(config);
+    for (const key of Object.keys(updates)) updates[key] = { ...(current[key] || {}), ...updates[key] };
     return (await this.send('UpdateDomainConfig', { Domain: domain, ...updates })) !== false;
   }
 

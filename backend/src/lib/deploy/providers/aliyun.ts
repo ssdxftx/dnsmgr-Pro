@@ -41,6 +41,21 @@ export class AliyunDeploy implements DeployProvider {
     return new Aliyun(this.AccessKeyId, this.AccessKeySecret, assertSafeHostname(endpoint, '接口地址'), version);
   }
 
+  // 阿里云证书部署使用的证书 ID 通常为「证书 ID-地域 ID」。
+  // 不能固定为 cn-hangzhou，否则国际站或非杭州地域会引用不到证书。
+  private certRegion(config: Record<string, any>): string {
+    const explicit = String(config.region || config.regionid || '').trim();
+    if (/^[a-z0-9-]+$/.test(explicit)) return explicit;
+    // OSS 产品只配置 Endpoint，没有独立的 region 字段，从 Endpoint 推断证书地域。
+    const endpoint = String(config.oss_endpoint || '').trim();
+    const m = endpoint.match(/^oss-([a-z0-9-]+?)(?:-internal)?\.aliyuncs\.com$/i);
+    return m ? m[1] : 'cn-hangzhou';
+  }
+
+  private certIdentifier(certId: string, config: Record<string, any>): string {
+    return certId + '-' + this.certRegion(config);
+  }
+
   async check(): Promise<void> {
     if (!this.AccessKeyId || !this.AccessKeySecret) throw new Error('必填参数不能为空');
     const client = this.makeClient('cas.aliyuncs.com', '2020-04-07');
@@ -346,7 +361,7 @@ export class AliyunDeploy implements DeployProvider {
     const client = new AliyunOSS(this.AccessKeyId, this.AccessKeySecret, config.oss_endpoint);
     for (const domain of String(config.domain).split(',')) {
       if (!domain) continue;
-      await client.addBucketCnameCert(config.oss_bucket, domain, certId + '-cn-hangzhou');
+      await client.addBucketCnameCert(config.oss_bucket, domain, this.certIdentifier(certId, config));
       this.log('OSS域名 ' + domain + ' 部署证书成功！');
     }
   }
@@ -354,12 +369,7 @@ export class AliyunDeploy implements DeployProvider {
   private async deployWaf(certId: string, config: Record<string, any>): Promise<void> {
     if (!config.domain) throw new Error('WAF绑定域名不能为空');
 
-    let fullCertId = certId;
-    if (config.region === 'ap-southeast-1') {
-      fullCertId += '-ap-southeast-1';
-    } else {
-      fullCertId += '-cn-hangzhou';
-    }
+    let fullCertId = this.certIdentifier(certId, config);
 
     const endpoint = 'wafopenapi.' + config.region + '.aliyuncs.com';
     const client = this.makeClient(endpoint, '2021-10-01');
@@ -428,12 +438,7 @@ export class AliyunDeploy implements DeployProvider {
     if (!config.waf_resource_id) throw new Error('云产品防护对象ID不能为空');
     const deployType = config.deploy_type ? parseInt(config.deploy_type) : 0;
 
-    let fullCertId = certId;
-    if (config.region === 'ap-southeast-1') {
-      fullCertId += '-ap-southeast-1';
-    } else {
-      fullCertId += '-cn-hangzhou';
-    }
+    let fullCertId = this.certIdentifier(certId, config);
 
     const endpoint = 'wafopenapi.' + config.region + '.aliyuncs.com';
     const client = this.makeClient(endpoint, '2021-10-01');
@@ -744,7 +749,7 @@ export class AliyunDeploy implements DeployProvider {
   private async deployAlb(certId: string, config: Record<string, any>): Promise<void> {
     if (!config.alb_listener_id) throw new Error('负载均衡监听ID不能为空');
     const client = this.makeClient('alb.' + config.regionid + '.aliyuncs.com', '2020-06-16');
-    const fullCertId = certId + '-cn-hangzhou';
+    const fullCertId = this.certIdentifier(certId, config);
     const deployType = config.deploy_type ? parseInt(config.deploy_type) : 0;
 
     if (deployType === 1) {
@@ -779,7 +784,7 @@ export class AliyunDeploy implements DeployProvider {
   private async deployNlb(certId: string, config: Record<string, any>): Promise<void> {
     if (!config.nlb_listener_id) throw new Error('负载均衡监听ID不能为空');
     const client = this.makeClient('nlb.' + config.regionid + '.aliyuncs.com', '2022-04-30');
-    const fullCertId = certId + '-cn-hangzhou';
+    const fullCertId = this.certIdentifier(certId, config);
     const deployType = config.deploy_type ? parseInt(config.deploy_type) : 0;
 
     if (deployType === 1) {
@@ -815,6 +820,9 @@ export class AliyunDeploy implements DeployProvider {
     if (!config.ga_id) throw new Error('全球加速实例ID不能为空');
     if (!config.ga_listener_id) throw new Error('全球加速监听ID不能为空');
 
+    // GA 是全局服务，官方只提供 ga.cn-hangzhou.aliyuncs.com 接入点；
+    // 证书 ID 也使用全局证书所在的 cn-hangzhou 后缀。
+    const region = 'cn-hangzhou';
     const client = this.makeClient('ga.cn-hangzhou.aliyuncs.com', '2019-11-20');
     const fullCertId = certId + '-cn-hangzhou';
     const deployType = config.deploy_type ? parseInt(config.deploy_type) : 0;
@@ -823,7 +831,7 @@ export class AliyunDeploy implements DeployProvider {
       if (!config.clb_domain) throw new Error('扩展域名不能为空');
       let data: any;
       try {
-        data = await client.request({ Action: 'ListListenerCertificates', RegionId: 'cn-hangzhou', AcceleratorId: config.ga_id, ListenerId: config.ga_listener_id });
+        data = await client.request({ Action: 'ListListenerCertificates', RegionId: region, AcceleratorId: config.ga_id, ListenerId: config.ga_listener_id });
       } catch (e: any) {
         throw new Error('扩展域名列表查询失败：' + e.message);
       }
@@ -844,7 +852,7 @@ export class AliyunDeploy implements DeployProvider {
           }
           await client.request({
             Action: 'UpdateAdditionalCertificateWithListener',
-            RegionId: 'cn-hangzhou',
+            RegionId: region,
             AcceleratorId: config.ga_id,
             ListenerId: config.ga_listener_id,
             Domain: domain,
@@ -858,7 +866,7 @@ export class AliyunDeploy implements DeployProvider {
       if (needAdd.length > 0) {
         const param: Record<string, any> = {
           Action: 'AssociateAdditionalCertificatesWithListener',
-          RegionId: 'cn-hangzhou',
+          RegionId: region,
           AcceleratorId: config.ga_id,
           ListenerId: config.ga_listener_id,
         };
@@ -872,7 +880,7 @@ export class AliyunDeploy implements DeployProvider {
     } else {
       await client.request({
         Action: 'UpdateListener',
-        RegionId: 'cn-hangzhou',
+        RegionId: region,
         AcceleratorId: config.ga_id,
         ListenerId: config.ga_listener_id,
         'Certificates.1.Id': fullCertId,

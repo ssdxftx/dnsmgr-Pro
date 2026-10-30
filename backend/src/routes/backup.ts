@@ -28,6 +28,7 @@ import {
   uploadToDestination,
 } from '../lib/backup/destinations.js';
 import { saveUpload, releaseTemp } from '../lib/backup/upload.js';
+import { contentDisposition } from '../lib/util.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { publicError } from '../lib/util.js';
@@ -135,7 +136,7 @@ export default async function backupRoutes(app: FastifyInstance) {
       return reply.code(404).send({ code: -1, msg: '备份文件不存在' });
     }
     reply.header('Content-Type', 'application/octet-stream');
-    reply.header('Content-Disposition', `attachment; filename="${path.basename(file)}"`);
+    reply.header('Content-Disposition', contentDisposition(path.basename(file)));
     return reply.send(createReadStream(file));
   });
 

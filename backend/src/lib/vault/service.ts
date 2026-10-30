@@ -13,7 +13,6 @@ import {
 import { purgePrivateAssets, removeBackupFiles } from '../users/purge.js';
 import {
   clearVaultSession,
-  findVaultDekByUid,
   getVaultDek,
   setVaultSession,
   vaultSessionExpiry,
@@ -353,12 +352,16 @@ export async function getDekForWrite(uid: number, jti?: string): Promise<Buffer 
   return getVaultDek(uid, jti);
 }
 
-/** 后台任务取 DEK：便捷模式可解，口令模式只认活跃会话 */
+/**
+ * 后台任务取 DEK：只允许便捷模式（由系统密钥解包）。
+ * 口令模式没有请求 jti，不能借用该用户任意活跃会话的 DEK，否则等同于绕过“当前会话必须解锁”。
+ * 需要后台任务访问私有凭证时，应由用户显式切换到便捷模式，或等后续实现独立的 service key。
+ */
 export async function findAnyVaultDekForUser(uid: number): Promise<Buffer | null> {
   const row = await getVaultRow(uid);
   if (!row) return null;
   if (row.mode === 'none') return sysDek(row);
-  return findVaultDekByUid(uid);
+  return null;
 }
 
 /**

@@ -57,7 +57,7 @@ export class AliyunCert implements CertProvider {
       KeyAlgorithm: keyAlgorithm,
       AutoReissue: 'disable',
       'ContactIdList.1': contactId,
-      ValidateType: 'DNS',
+      ValidationMethod: 'DNS',
     });
 
     await this.request({ Action: 'ApplyCertificate', InstanceId: instanceId });

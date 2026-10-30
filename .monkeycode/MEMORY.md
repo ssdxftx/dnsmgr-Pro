@@ -32,12 +32,19 @@ Entries discovered by the Agent during task execution should follow this format:
 ## Entries
 
 [User Instruction Summary]
-- Date: 2026-09-30
-- Context: 用户要求将代码推送到仓库时指定 Git 身份，并要求长期沿用
+- Date: 2026-10-29
+- Context: 用户要求删除 monkeycode-ai 署名相关内容，并固定使用 ssdxftx 身份推送（此前 2026-09-30 已提出同一要求）
 - Instructions:
-  - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（已同时写入本仓库本地配置与全局配置）
-  - 禁止在提交信息中添加 `Co-authored-by` 尾注（`coauthor.*` 配置项已删除，`prepare-commit-msg` 钩子已移除）
+  - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（同时写入本仓库本地配置与全局配置）
+  - 禁止在提交信息中添加 `Co-authored-by` 尾注：删除 `.git/config` 中的 `coauthor.*` 配置项，并移除 `.git/hooks/prepare-commit-msg` 钩子
   - 远端仓库：`https://github.com/ssdxftx/dnsmgr-Pro`，主分支 `main`
+
+[Project Knowledge Summary]
+- Date: 2026-10-29
+- Context: Discovered by Agent while 清理提交署名
+- Category: Environment Configuration
+- Instructions:
+  - 本环境新建或重置仓库时会自动生成 `.git/hooks/prepare-commit-msg`（读取 `coauthor.N.name/email` 追加 `Co-authored-by`）并注入 `coauthor.0` 配置；每次开始推送前可用 `git config --get-regexp coauthor` 与 `ls .git/hooks/prepare-commit-msg` 检查，发现后删除
 
 [Project Knowledge Summary]
 - Date: 2026-09-30

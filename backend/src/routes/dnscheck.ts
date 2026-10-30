@@ -1,10 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { checkLevel, getUserPermissions, matchPermission, sameDomain } from '../auth.js';
+import { checkLevel, matchPermission, sameDomain } from '../auth.js';
 import { checkDomainRecords, calcNextRun, listSubDomains } from '../lib/dns/checkService.js';
 import { fmtDateTime, escapeLike } from '../lib/util.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
 import { withDistributedLock } from '../lib/scheduler/distLock.js';
+import { getEffectivePermissions } from '../lib/accounts/visibility.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -62,7 +63,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
       );
       return { code: 0, data: rows };
     }
-    const perms = await getUserPermissions(req.user.uid);
+    const perms = await getEffectivePermissions(req.user);
     const names = [...new Set(perms.map((p: any) => p.domain))];
     if (!names.length) return { code: 0, data: [] };
     const rows: any[] = await query(
@@ -86,7 +87,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
       const subs = await listSubDomains(did);
       return { code: 0, data: subs };
     }
-    const perms = await getUserPermissions(req.user.uid);
+    const perms = await getEffectivePermissions(req.user);
     const subs = perms
       .filter((p: any) => sameDomain(p.domain, d.name) && p.sub)
       .map((p: any) => String(p.sub).toLowerCase().replace(/\.+$/, ''));
@@ -196,7 +197,7 @@ async function canAccessDomain(user: any, did: number): Promise<boolean> {
   if (!d) return false;
   if (d.visibility === 'private' && Number(d.owner_uid) !== Number(user.uid)) return false;
   if (checkLevel(user, 2)) return true;
-  const perms = await getUserPermissions(user.uid);
+  const perms = await getEffectivePermissions(user);
   // 只读授权不能创建/修改检测任务（会周期发起外部解析并发送邮件）
   return perms.some((p: any) => sameDomain(p.domain, d.name) && Number(p.readonly) !== 1);
 }
@@ -210,6 +211,6 @@ async function canAccessSub(user: any, did: number, sub: string): Promise<boolea
   if (!d) return false;
   if (d.visibility === 'private' && Number(d.owner_uid) !== Number(user.uid)) return false;
   if (checkLevel(user, 2)) return true;
-  const perms = await getUserPermissions(user.uid);
+  const perms = await getEffectivePermissions(user);
   return matchPermission(perms, d.name, sub.trim().replace(/\.+$/, '')) === 0;
 }

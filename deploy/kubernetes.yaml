@@ -32,10 +32,24 @@ spec:
       labels:
         app: dnsmgr-pro
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: dnsmgr-pro
           image: ssdxftx/dnsmgr-pro:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           ports:
             - containerPort: 8082
               name: http
@@ -94,10 +108,14 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/data
+            - name: tmp
+              mountPath: /tmp
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: dnsmgr-pro-data
+        - name: tmp
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

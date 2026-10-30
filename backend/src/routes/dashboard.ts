@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { queryOne, table } from '../db.js';
-import { checkLevel, getUserPermissions } from '../auth.js';
+import { checkLevel } from '../auth.js';
+import { getEffectivePermissions } from '../lib/accounts/visibility.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -42,7 +43,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       };
     }
 
-    const perms = await getUserPermissions(req.user.uid);
+    const perms = await getEffectivePermissions(req.user);
     const names = [...new Set(perms.map((p: any) => domainKey(p.domain)).filter(Boolean))];
     let domains = 0;
     // 分批 IN，避免授权域名很多时拼出超长 SQL
