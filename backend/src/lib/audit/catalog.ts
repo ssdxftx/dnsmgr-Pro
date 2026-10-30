@@ -14,6 +14,13 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/auth/totp': { module: 'auth', action: 'auth.login', targetType: 'user' },
   'POST /api/auth/lang': { module: 'auth', action: 'auth.lang', targetType: 'user' },
   'POST /api/auth/totp-config': { module: 'auth', action: 'auth.totpConfig', targetType: 'user' },
+  'POST /api/auth/reauth': { module: 'auth', action: 'auth.reauth', targetType: 'user' },
+  'POST /api/api-keys': { module: 'apikeys', action: 'apikey.create', targetType: 'api_key' },
+  'PATCH /api/api-keys/:id': { module: 'apikeys', action: 'apikey.update', targetType: 'api_key' },
+  'POST /api/api-keys/:id/rotate': { module: 'apikeys', action: 'apikey.rotate', targetType: 'api_key' },
+  'DELETE /api/api-keys/:id': { module: 'apikeys', action: 'apikey.revoke', targetType: 'api_key' },
+  'POST /api/api-keys/revoke-all': { module: 'apikeys', action: 'apikey.revokeAll', targetType: 'api_key' },
+  'DELETE /api/api-keys/legacy': { module: 'apikeys', action: 'apikey.revoke', targetType: 'api_key' },
 
   // 解析记录
   'POST /api/domains/:id/records': { module: 'record', action: 'record.create', targetType: 'record' },
@@ -31,12 +38,16 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'DELETE /api/domains/:id': { module: 'domain', action: 'domain.delete', targetType: 'domain' },
   'POST /api/domains/batch-del': { module: 'domain', action: 'domain.batchDelete', targetType: 'domain' },
   'POST /api/domains/categories': { module: 'domain', action: 'domain.categoryCreate' },
+  'PUT /api/domains/categories/:id': { module: 'domain', action: 'domain.categoryUpdate' },
+  'DELETE /api/domains/categories/:id': { module: 'domain', action: 'domain.categoryDelete' },
   'POST /api/domains/:id/aliases': { module: 'domain', action: 'domain.aliasCreate', targetType: 'domain' },
+  'PUT /api/domains/:id/aliases/:aliasId': { module: 'domain', action: 'domain.aliasUpdate', targetType: 'domain' },
   'DELETE /api/domains/:id/aliases/:aliasId': { module: 'domain', action: 'domain.aliasDelete', targetType: 'domain' },
   'POST /api/domains/:id/weight': { module: 'domain', action: 'domain.weight', targetType: 'domain' },
   'POST /api/domains/:id/update-date': { module: 'domain', action: 'domain.updateDate', targetType: 'domain' },
   'POST /api/domains/batch-notice': { module: 'expire', action: 'expire.notice.batch', targetType: 'domain' },
   'POST /api/expire/settings': { module: 'expire', action: 'expire.settings.update' },
+  'POST /api/expire/scan': { module: 'expire', action: 'expire.scan', targetType: 'job' },
 
   // 账户
   'POST /api/dns/accounts': { module: 'account', action: 'account.dns.create' },
@@ -61,6 +72,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'DELETE /api/backup/schedules/:id': { module: 'backup', action: 'backup.schedule.delete' },
   'POST /api/backup/schedules/:id/run': { module: 'backup', action: 'backup.schedule.run' },
   'POST /api/backup/remote/:destId/pull': { module: 'backup', action: 'backup.remote.pull' },
+  'DELETE /api/backup/remote/:destId': { module: 'backup', action: 'backup.remote.delete' },
 
   // 个人凭证保险库
   'POST /api/vault/init': { module: 'vault', action: 'vault.init' },
@@ -116,6 +128,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/cdn/domains/cert/check': { module: 'cdn', action: 'cdn.domain.certCheck', targetType: 'cdn_domain' },
   'POST /api/cdn/zones/setting': { module: 'cdn', action: 'cdn.zone.update', targetType: 'cdn_zone' },
   'POST /api/cdn/purge': { module: 'cdn', action: 'cdn.purge', targetType: 'cdn_domain' },
+  'POST /api/cdn/cache-tasks/:id/retry': { module: 'cdn', action: 'cdn.cacheTask.retry', targetType: 'cdn_cache_task' },
   'POST /api/cdn/preheat': { module: 'cdn', action: 'cdn.preheat', targetType: 'cdn_domain' },
   'POST /api/cdn/sync': { module: 'cdn', action: 'cdn.sync' },
 
@@ -164,6 +177,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'PUT /api/cert/orders/:id': { module: 'cert', action: 'cert.order.update', targetType: 'cert_order' },
   'DELETE /api/cert/orders/:id': { module: 'cert', action: 'cert.order.delete', targetType: 'cert_order' },
   'POST /api/cert/orders/:id/process': { module: 'cert', action: 'cert.order.process', targetType: 'cert_order' },
+  'POST /api/cert/orders/batch/process': { module: 'cert', action: 'cert.order.batch', targetType: 'job' },
   'POST /api/cert/orders/:id/reset': { module: 'cert', action: 'cert.order.reset', targetType: 'cert_order' },
   'POST /api/cert/orders/:id/revoke': { module: 'cert', action: 'cert.order.revoke', targetType: 'cert_order' },
   'POST /api/cert/orders/:id/setauto': { module: 'cert', action: 'cert.order.setAuto', targetType: 'cert_order' },
@@ -178,6 +192,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'PUT /api/deploy/tasks/:id': { module: 'cert', action: 'cert.deploy.update', targetType: 'deploy_task' },
   'DELETE /api/deploy/tasks/:id': { module: 'cert', action: 'cert.deploy.delete', targetType: 'deploy_task' },
   'POST /api/deploy/tasks/:id/process': { module: 'cert', action: 'cert.deploy.run', targetType: 'deploy_task' },
+  'POST /api/deploy/tasks/batch/process': { module: 'cert', action: 'cert.deploy.batch', targetType: 'job' },
   'POST /api/deploy/tasks/:id/reset': { module: 'cert', action: 'cert.deploy.reset', targetType: 'deploy_task' },
   'POST /api/deploy/tasks/:id/setactive': { module: 'cert', action: 'cert.deploy.setActive', targetType: 'deploy_task' },
 
@@ -185,6 +200,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/dmonitor/tasks': { module: 'monitor', action: 'monitor.task.create', targetType: 'monitor_task' },
   'PUT /api/dmonitor/tasks/:id': { module: 'monitor', action: 'monitor.task.update', targetType: 'monitor_task' },
   'POST /api/dmonitor/tasks/:id/active': { module: 'monitor', action: 'monitor.task.toggle', targetType: 'monitor_task' },
+  'POST /api/dmonitor/tasks/:id/run': { module: 'monitor', action: 'monitor.task.run', targetType: 'monitor_task' },
   'DELETE /api/dmonitor/tasks/:id': { module: 'monitor', action: 'monitor.task.delete', targetType: 'monitor_task' },
   'POST /api/dmonitor/tasks/batch': { module: 'monitor', action: 'monitor.task.batch', targetType: 'monitor_task' },
   'POST /api/dmonitor/clean': { module: 'monitor', action: 'monitor.record.clean' },
@@ -198,6 +214,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/schedule/tasks': { module: 'schedule', action: 'schedule.task.create', targetType: 'schedule_task' },
   'PUT /api/schedule/tasks/:id': { module: 'schedule', action: 'schedule.task.update', targetType: 'schedule_task' },
   'POST /api/schedule/tasks/:id/active': { module: 'schedule', action: 'schedule.task.toggle', targetType: 'schedule_task' },
+  'POST /api/schedule/tasks/:id/run': { module: 'schedule', action: 'schedule.task.run', targetType: 'schedule_task' },
   'DELETE /api/schedule/tasks/:id': { module: 'schedule', action: 'schedule.task.delete', targetType: 'schedule_task' },
   'POST /api/schedule/tasks/batch': { module: 'schedule', action: 'schedule.task.batch', targetType: 'schedule_task' },
   'POST /api/dns-check/tasks': { module: 'dnscheck', action: 'dnscheck.task.create', targetType: 'dnscheck_task' },
@@ -258,6 +275,12 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'PUT /api/cf-rules/rules/:ruleId': { module: 'cloudflare', action: 'cloudflare.rule.update' },
   'DELETE /api/cf-rules/rules/:ruleId': { module: 'cloudflare', action: 'cloudflare.rule.delete' },
 
+  // 事件回调
+  'POST /api/events/subscriptions': { module: 'events', action: 'event.subscription.create', targetType: 'event_subscription' },
+  'PUT /api/events/subscriptions/:id': { module: 'events', action: 'event.subscription.update', targetType: 'event_subscription' },
+  'DELETE /api/events/subscriptions/:id': { module: 'events', action: 'event.subscription.delete', targetType: 'event_subscription' },
+  'POST /api/events/subscriptions/:id/test': { module: 'events', action: 'event.subscription.test', targetType: 'event_subscription' },
+
   // 注册
   'POST /api/register': { module: 'auth', action: 'auth.register' },
   'POST /api/register/send-code': { module: 'auth', action: 'auth.sendCode' },
@@ -281,6 +304,9 @@ const MODULE_BY_SEGMENT: Record<string, string> = {
   deploy: 'cert',
   cloudflare: 'cloudflare',
   'cf-rules': 'cloudflare',
+  'api-keys': 'apikeys',
+  jobs: 'jobs',
+  events: 'events',
   schedule: 'schedule',
   dmonitor: 'monitor',
   dnscheck: 'dnscheck',

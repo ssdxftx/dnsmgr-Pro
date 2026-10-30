@@ -3,7 +3,8 @@ import { query, queryOne, table } from '../db.js';
 import { checkLevel, matchPermission } from '../auth.js';
 import { canAccessDomainAccount, getEffectivePermissions } from '../lib/accounts/visibility.js';
 import { configGet, configSet } from '../config.js';
-import { updateDomainDate } from '../lib/expire/expireNoticeService.js';
+import { expireNoticeTask, updateDomainDate } from '../lib/expire/expireNoticeService.js';
+import { createJob, runJobInBackground } from '../lib/jobs.js';
 import { audit } from '../lib/audit/context.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
@@ -28,6 +29,19 @@ export default async function expireRoutes(app: FastifyInstance) {
     for (const k of keys) await configSet(k, String(body[k] ?? ''));
     if (keys.length) audit(req, { summary: `保存到期提醒设置：${keys.join('、')}`, detail: { keys } });
     return { code: 0, msg: '设置保存成功' };
+  });
+
+  app.post('/api/expire/scan', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    if (!(await hitRateLimitDistributed(`expire:scan:${req.user.uid}`, 2, 10 * 60_000))) return { code: -1, msg: '扫描过于频繁，请稍后再试' };
+    const jobId = await createJob(Number(req.user.uid), 'expire.scan', 1, { action: 'expire.scan' });
+    runJobInBackground(jobId, async (progress) => {
+      await expireNoticeTask();
+      await progress(1, 0, { done: true });
+      return { done: true };
+    });
+    audit(req, { targetType: 'job', targetId: jobId, summary: '触发域名到期扫描' });
+    return { code: 0, msg: '扫描任务已启动', data: { job_id: jobId } };
   });
 
   app.post('/api/domains/:id/update-date', auth, async (req: any) => {

@@ -73,12 +73,15 @@ export function enqueueAudit(row: AuditRow): void {
 
 async function insertBatch(batch: AuditRow[]): Promise<void> {
   const cols =
-    '(uid, username, module, action, method, path, route, target_type, target_id, target_name, ' +
+    '(uid, username, auth_type, api_key_id, api_key_name, module, action, method, path, route, target_type, target_id, target_name, ' +
     'summary, detail, changes, result, errmsg, status, ip, ua, cost_ms, addtime)';
   await query(`INSERT INTO ${table('audit_log')} ${cols} VALUES ?`, [
     batch.map((r) => [
       r.uid,
       r.username,
+      r.auth_type || 'session',
+      Number(r.api_key_id || 0),
+      r.api_key_name || '',
       r.module,
       r.action,
       r.method,

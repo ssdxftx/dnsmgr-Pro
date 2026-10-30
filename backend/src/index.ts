@@ -44,7 +44,7 @@ import { certTaskRun } from './lib/cert/certTaskService.js';
 import { withDistributedLock } from './lib/scheduler/distLock.js';
 import { refreshAllStatCache, getStatCacheIntervalMs, isStatCacheEnabled } from './lib/cdn/statistics/cacheService.js';
 import { applySecurityHeaders, createRateLimit } from './security.js';
-import { query, table, getDbType, getDriver } from './db.js';
+import { query, queryOne, table, getDbType, getDriver } from './db.js';
 import { registerAuditHooks } from './lib/audit/hooks.js';
 import { shutdownAudit } from './lib/audit/store.js';
 import auditRoutes from './routes/audit.js';
@@ -56,6 +56,14 @@ import { initMaintenance, isMaintenance, refreshMaintenance } from './lib/backup
 import { enterRequestContext } from './lib/requestContext.js';
 import { isTokenRevoked } from './lib/auth/revocation.js';
 import { refreshGlobalProxyDispatcher } from './lib/proxy.js';
+import { hashApiKey, ipAllowed, parseScopes, scopeAllows } from './lib/apiKeys.js';
+import { beginIdempotent, completeIdempotent } from './lib/idempotency.js';
+import { hitRateLimit } from './lib/rateLimit.js';
+import { registerOpenApi } from './lib/openapi.js';
+import apiKeyRoutes from './routes/apiKeys.js';
+import jobRoutes from './routes/jobs.js';
+import eventRoutes from './routes/events.js';
+import observabilityRoutes from './routes/observability.js';
 
 process.on('unhandledRejection', (reason: any) => {
   console.error('[backend] 未捕获的异步异常:', reason?.message || reason);
@@ -103,9 +111,17 @@ const app = Fastify({
   connectionTimeout: Number(process.env.DNSMGR_CONNECTION_TIMEOUT_MS || 120_000),
   requestTimeout: Number(process.env.DNSMGR_REQUEST_TIMEOUT_MS || 300_000),
   keepAliveTimeout: Number(process.env.DNSMGR_KEEPALIVE_TIMEOUT_MS || 72_000),
+  rewriteUrl: (req: any) => {
+    const raw = String(req.url || '');
+    if (raw === '/api/v1' || raw.startsWith('/api/v1/') || raw.startsWith('/api/v1?')) {
+      return '/api' + raw.slice('/api/v1'.length);
+    }
+    return raw;
+  },
 });
 
 applySecurityHeaders(app);
+registerOpenApi(app);
 
 // 审计旁路：挂全局钩子，必须早于所有业务路由注册
 registerAuditHooks(app);
@@ -115,17 +131,18 @@ app.addHook('onClose', async () => {
 });
 
 // 账户配置无法解密时返回可操作的中文提示，避免被云端「Authentication error」掩盖
-app.setErrorHandler((err: any, _req: any, reply: any) => {
+app.setErrorHandler((err: any, req: any, reply: any) => {
+  const requestId = String(req?.id || '');
   if (err instanceof ConfigDecryptError) {
-    return reply.send({ code: -1, msg: err.message });
+    return reply.send({ code: -1, msg: err.message, requestId });
   }
   const status = Number(err?.statusCode || err?.status || 500);
   // 5xx 不回传原始 message：SQL 片段、表名、约束名、内部路径都可能被客户端拿到
   console.error('[backend] 未处理异常:', err?.message || err);
   if (status >= 400 && status < 500) {
-    return reply.code(status).send({ code: -1, msg: String(err?.message || '请求处理失败').slice(0, 200) });
+    return reply.code(status).send({ code: -1, msg: String(err?.message || '请求处理失败').slice(0, 200), requestId });
   }
-  return reply.code(500).send({ code: -1, msg: '服务器内部错误' });
+  return reply.code(500).send({ code: -1, msg: '服务器内部错误', requestId });
 });
 
 // 响应压缩：统计数据集、证书详情（含 base64 PFX）等大 JSON 明文传输体积降 60–80%
@@ -148,6 +165,34 @@ await app.register(multipart, {
     parts: 40,
     headerPairs: 2000,
   },
+});
+
+app.addHook('onRequest', async (req: any, reply: any) => {
+  const headerId = String(req.headers?.['x-request-id'] || '').trim();
+  if (/^[A-Za-z0-9._:-]{8,128}$/.test(headerId)) req.id = headerId;
+  reply.header('X-Request-Id', String(req.id || ''));
+  reply.header('X-API-Version', '1');
+
+  const apiKey = typeof req.headers?.['x-api-key'] === 'string' ? req.headers['x-api-key'].trim() : '';
+  if (apiKey) {
+    const max = Math.max(10, Number(process.env.DNSMGR_API_KEY_RATE_LIMIT || 600));
+    if (!hitRateLimit(`api-key:${hashApiKey(apiKey)}`, max, 60_000)) {
+      reply.header('Retry-After', '60');
+      return reply.code(429).send({ code: -1, msg: 'API Key 请求过于频繁，请稍后再试' });
+    }
+  }
+});
+
+app.addHook('preSerialization', async (req: any, _reply: any, payload: any) => {
+  if (payload && typeof payload === 'object' && !Buffer.isBuffer(payload) && typeof (payload as any).code === 'number') {
+    if (!(payload as any).requestId) (payload as any).requestId = String(req.id || '');
+  }
+  return payload;
+});
+
+app.addHook('onSend', async (req: any, reply: any, payload: any) => {
+  await completeIdempotent(req, reply, payload);
+  return payload;
 });
 
 // 在线恢复期间只放行读请求与备份接口，写请求统一 503
@@ -185,6 +230,8 @@ if (allowedOrigins.length) {
   await app.register(cors, {
     origin: allowedOrigins,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'X-API-Version', 'X-Idempotency-Replayed', 'Retry-After'],
     maxAge: 86400,
   });
 }
@@ -250,13 +297,57 @@ await app.register(jwt, {
 const authUserCache = new Map<number, { user: any; at: number }>();
 const AUTH_USER_CACHE_MS = 2000;
 
+const apiKeyLastTouch = new Map<number, number>();
+
 (app as any).decorate('authenticate', async function (req: any, reply: any) {
   // 用户级 API Key：仅接受请求头，避免被日志/Referer 泄露；仍按用户等级执行全部权限校验
   const apiKey = typeof req.headers['x-api-key'] === 'string' ? req.headers['x-api-key'].trim() : '';
   if (apiKey) {
     if (apiKey.length > 256) return reply.code(401).send({ code: -1, msg: 'API Key 无效' });
-    const dbUser = await findUserByApiKey(apiKey);
+    const keyHash = hashApiKey(apiKey);
+    let keyRow: any = null;
+    let dbUser: any = null;
+    let scopes: string[] = ['*'];
+    let apiKeyId = 0;
+    let apiKeyName = 'legacy';
+    try {
+      keyRow = await queryOne(
+        `SELECT * FROM ${table('api_key')} WHERE key_hash = ? AND active = 1 AND revoked_at IS NULL LIMIT 1`,
+        [keyHash],
+      );
+    } catch {
+      keyRow = null;
+    }
+    if (keyRow) {
+      if (keyRow.expires_at) {
+        const exp = new Date(String(keyRow.expires_at).replace(' ', 'T')).getTime();
+        if (Number.isFinite(exp) && exp <= Date.now()) {
+          return reply.code(401).send({ code: -1, msg: 'API Key 已过期' });
+        }
+      }
+      let allowlist: string[] = [];
+      try {
+        const parsed = typeof keyRow.ip_allowlist === 'string' ? JSON.parse(keyRow.ip_allowlist) : keyRow.ip_allowlist;
+        allowlist = Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        allowlist = [];
+      }
+      if (!ipAllowed(String(req.ip || ''), allowlist)) {
+        return reply.code(403).send({ code: -1, msg: 'API Key 不允许从当前 IP 使用' });
+      }
+      dbUser = await findUserById(Number(keyRow.uid));
+      scopes = parseScopes(keyRow.scopes);
+      apiKeyId = Number(keyRow.id || 0);
+      apiKeyName = String(keyRow.name || '');
+    } else {
+      dbUser = await findUserByApiKey(apiKey);
+    }
     if (!dbUser || Number(dbUser.status) === 0) return reply.code(401).send({ code: -1, msg: 'API Key 无效' });
+    const path = String(req.url || req.raw?.url || '').split('?')[0];
+    const exempt = path === '/api/auth/me' || path === '/api/auth/reauth' || path === '/api/auth/logout';
+    if (!exempt && !scopeAllows(scopes, String(req.method || 'GET'), path)) {
+      return reply.code(403).send({ code: -1, msg: 'API Key 缺少该接口所需的作用域' });
+    }
     const uid = Number(dbUser.id);
     req.user = {
       uid,
@@ -268,11 +359,24 @@ const AUTH_USER_CACHE_MS = 2000;
       is_super: Number(dbUser.is_super || 0),
       token_version: Number(dbUser.token_version || 0),
       type: 'session',
-      // 独立命名空间，避免 API Key 登出时清掉该用户全部浏览器保险库会话
-      jti: `api:${uid}`,
+      jti: `api:${uid}:${apiKeyId}`,
+      auth_type: 'api_key',
+      api_key_id: apiKeyId,
+      api_key_name: apiKeyName,
+      api_key_scopes: scopes,
     };
     enterRequestContext({ uid, jti: String(req.user.jti) });
-    return undefined;
+    if (keyRow) {
+      const last = apiKeyLastTouch.get(apiKeyId) || 0;
+      if (Date.now() - last > 60_000) {
+        apiKeyLastTouch.set(apiKeyId, Date.now());
+        query(
+          `UPDATE ${table('api_key')} SET last_used_at = NOW(), last_used_ip = ? WHERE id = ?`,
+          [String(req.ip || '').slice(0, 64), apiKeyId],
+        ).catch(() => undefined);
+      }
+    }
+    return beginIdempotent(req, reply);
   }
   try {
     await req.jwtVerify();
@@ -313,6 +417,9 @@ const AUTH_USER_CACHE_MS = 2000;
   req.user.stat_cache = Number(dbUser.stat_cache || 0);
   req.user.email = String(dbUser.email || '');
   req.user.is_super = Number(dbUser.is_super || 0);
+  req.user.auth_type = 'session';
+  req.user.api_key_id = 0;
+  req.user.api_key_name = '';
   // 令牌版本校验：改密 / 变更 2FA 后自增，使旧令牌立即失效
   if (Number(req.user.token_version || 0) !== Number(dbUser.token_version || 0)) {
     authUserCache.delete(uid);
@@ -325,13 +432,14 @@ const AUTH_USER_CACHE_MS = 2000;
   }
   // 保险库会话绑定 jti：下游私有凭证解密通过请求上下文取当前会话密钥
   enterRequestContext({ uid, jti });
-  return undefined;
+  return beginIdempotent(req, reply);
 });
 
 app.get('/api/health', async () => ({ code: 0, data: 'ok' }));
 
 // 安装向导路由始终注册
 await app.register(setupRoutes);
+await app.register(observabilityRoutes);
 
 // 检测安装状态：已安装才加载业务路由与迁移、调度器
 const installed = await isInstalled();
@@ -372,6 +480,9 @@ if (installed) {
   await app.register(auditRoutes);
   await app.register(backupRoutes);
   await app.register(vaultRoutes);
+  await app.register(apiKeyRoutes);
+  await app.register(jobRoutes);
+  await app.register(eventRoutes);
 }
 
 // 静态资源与 SPA 回退（容器内 serve 前端构建产物；本地未构建则不注册）

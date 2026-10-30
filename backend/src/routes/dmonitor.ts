@@ -3,6 +3,7 @@ import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
+import { runMonitorTask } from '../lib/monitor/taskRunner.js';
 import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 
 // 容灾监控接口仅管理员可用
@@ -220,6 +221,16 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
       [task.did, task.rr, task.recordid, task.type, task.main_value, task.backup_value, task.checktype, task.checkurl, task.tcpport, task.frequency, task.cycle, task.timeout, task.proxy, task.cdn, task.remark, task.recordinfo, id]
     );
     return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/dmonitor/tasks/:id/run', auth, async (req: any) => {
+    const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT * FROM ${table('dmtask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '任务不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    await runMonitorTask(task);
+    const last: any = await queryOne(`SELECT * FROM ${table('dmlog')} WHERE taskid = ? ORDER BY id DESC LIMIT 1`, [id]);
+    return { code: 0, msg: '已执行一次检测', data: last || null };
   });
 
   app.post('/api/dmonitor/tasks/:id/active', auth, async (req: any) => {

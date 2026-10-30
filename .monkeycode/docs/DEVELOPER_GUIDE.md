@@ -63,6 +63,7 @@ npm install
 | `DNSMGR_ALLOWED_ORIGINS` | 跨域 API 时 | 逗号分隔 Origin | `https://dns.example.com` |
 | `DNSMGR_HSTS` | 否 | `0` 关闭 HSTS | `0` |
 | `DNSMGR_RATE_LIMIT` | 否 | `0` 关闭敏感接口限流 | `0` |
+| `DNSMGR_API_KEY_RATE_LIMIT` | 否 | 每个 API Key 每分钟请求上限 | `600` |
 | `DNSMGR_BODY_LIMIT` | 否 | 请求体字节上限 | `2097152` |
 | `DNSMGR_SETUP_TOKEN` | 否 | 安装令牌；未设置时首次启动生成并打印到日志 | 自动生成 |
 | `DNSMGR_ALLOW_LEGACY_BACKUP` | 否 | `1` 才允许导入无头签名的旧备份 | 关闭 |

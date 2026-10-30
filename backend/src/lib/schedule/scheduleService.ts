@@ -141,6 +141,9 @@ export async function executeOne(row: any): Promise<void> {
   enqueueAudit({
     uid: 0,
     username: 'system',
+    auth_type: 'system',
+    api_key_id: 0,
+    api_key_name: '',
     module: 'schedule',
     action: 'schedule.record.switch',
     method: 'SYSTEM',

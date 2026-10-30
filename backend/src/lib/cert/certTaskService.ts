@@ -4,6 +4,7 @@ import { CertOrderService } from '../certService.js';
 import { CertDeployService } from '../deployService.js';
 import { certOrderSend, certDeploySend } from '../monitor/msgNotice.js';
 import { processOrderLink, logDeployResult, logOrderFailure } from '../cdn/certLink.js';
+import { emitEvent } from '../events.js';
 
 // 处理失败后再次尝试的冷却时间（分钟）
 const FAIL_RETRY_COOLDOWN_MIN = 5;
@@ -106,9 +107,11 @@ async function processOrder(id: number): Promise<void> {
   if (Number(row.status) === 3) {
     // 每个处理周期只通知一次（续签重置时会把 issend 清 0）
     certOrderSend(id, true).catch(() => undefined);
+    void emitEvent('cert.order.issued', { order_id: id });
     console.log(`[cert] 订单 ${id} 自动续签成功`);
   } else if (Number(row.status) < 0) {
     certOrderSend(id, false).catch(() => undefined);
+    void emitEvent('cert.order.failed', { order_id: id, error: error?.message || row.error || '未知错误' });
     logOrderFailure(id, error?.message || row.error || '未知错误').catch(() => undefined);
     console.log(`[cert] 订单 ${id} 处理失败: ${error?.message || '未知错误'}`);
   } else if (error) {
@@ -132,10 +135,12 @@ async function processDeployTask(id: number): Promise<void> {
   }
   if (Number(row.status) === 1) {
     certDeploySend(id, true).catch(() => undefined);
+    void emitEvent('cert.deploy.success', { task_id: id });
     logDeployResult(id, 1).catch(() => undefined);
     console.log(`[cert] 部署任务 ${id} 自动部署成功`);
   } else if (Number(row.status) < 0) {
     certDeploySend(id, false).catch(() => undefined);
+    void emitEvent('cert.deploy.failed', { task_id: id, error: error?.message || '未知错误' });
     logDeployResult(id, -1, error?.message || '未知错误').catch(() => undefined);
     console.log(`[cert] 部署任务 ${id} 部署失败: ${error?.message || '未知错误'}`);
   } else if (error) {

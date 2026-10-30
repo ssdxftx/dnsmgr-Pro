@@ -5,6 +5,7 @@ import { fmtDateTime } from '../util.js';
 import { enqueueAudit, nowStr } from '../audit/store.js';
 import { checkPing, checkTcp, checkCurl, type CheckResult } from './checkUtils.js';
 import { sendNotice } from './msgNotice.js';
+import { emitEvent } from '../events.js';
 
 function getDnsType(value: string): string {
   if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(value)) return 'A';
@@ -175,6 +176,9 @@ async function handle(row: any): Promise<void> {
     enqueueAudit({
       uid: 0,
       username: 'system',
+      auth_type: 'system',
+      api_key_id: 0,
+      api_key_name: '',
       module: 'monitor',
       action: 'monitor.record.switch',
       method: 'SYSTEM',
@@ -198,5 +202,13 @@ async function handle(row: any): Promise<void> {
 
   if (row.type !== 3) {
     await sendNotice(action, row, { status: result.status, errmsg: result.errmsg });
+  }
+  if (action > 0 && drow) {
+    void emitEvent('monitor.record.switched', {
+      task_id: row.id,
+      domain: `${row.rr || '@'}.${drow.name}`,
+      action: action === 1 ? 'backup' : 'main',
+      value: action === 1 ? row.backup_value : row.main_value,
+    });
   }
 }

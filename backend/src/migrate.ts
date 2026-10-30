@@ -36,6 +36,7 @@ export async function migrate(): Promise<void> {
   await ensureUniqueIndex('user', 'email', 'uniq_email');
 
   await migrateBackupAndVault();
+  await migrateApiGovernance();
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('totp_replay')} (
@@ -275,6 +276,9 @@ export async function migrate(): Promise<void> {
       KEY idx_target (target_type, target_name)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   );
+  await ensureColumn('audit_log', 'auth_type', "varchar(16) NOT NULL DEFAULT 'session'");
+  await ensureColumn('audit_log', 'api_key_id', "int(11) unsigned NOT NULL DEFAULT '0'");
+  await ensureColumn('audit_log', 'api_key_name', "varchar(64) NOT NULL DEFAULT ''");
 
   // 高频点查/关联索引：消除按 aid / 域名 / (did,domain) 关联时的全表扫描
   await ensureIndex('cdn_domain', 'idx_aid', '(`aid`)');
@@ -387,6 +391,118 @@ async function ensureColumn(tableName: string, column: string, definition: strin
     // 等关键列缺失，实例带病对外服务并持续 500，比启动失败更难排查。
     throw new Error(`迁移失败：${tableName}.${column} — ${msg}`);
   }
+}
+
+// API 机器身份、幂等请求、统一异步任务与事件回调（幂等）
+async function migrateApiGovernance(): Promise<void> {
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('api_key')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      uid int(11) unsigned NOT NULL,
+      name varchar(64) NOT NULL DEFAULT '',
+      key_prefix varchar(16) NOT NULL DEFAULT '',
+      key_hash char(64) NOT NULL,
+      scopes text NOT NULL,
+      ip_allowlist text DEFAULT NULL,
+      active tinyint(1) NOT NULL DEFAULT '1',
+      expires_at datetime DEFAULT NULL,
+      last_used_at datetime DEFAULT NULL,
+      last_used_ip varchar(64) DEFAULT NULL,
+      created_at datetime NOT NULL,
+      revoked_at datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_key_hash (key_hash),
+      KEY idx_uid (uid),
+      KEY idx_expires (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('idempotency_key')} (
+      id bigint unsigned NOT NULL AUTO_INCREMENT,
+      uid int(11) unsigned NOT NULL,
+      key_hash char(64) NOT NULL,
+      method varchar(8) NOT NULL,
+      path varchar(255) NOT NULL,
+      status varchar(16) NOT NULL DEFAULT 'processing',
+      http_status smallint NOT NULL DEFAULT '0',
+      response mediumtext DEFAULT NULL,
+      created_at datetime NOT NULL,
+      expires_at datetime NOT NULL,
+      PRIMARY KEY (id),
+      UNIQUE KEY uniq_uid_key (uid, key_hash),
+      KEY idx_expire (expires_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('async_job')} (
+      id bigint unsigned NOT NULL AUTO_INCREMENT,
+      uid int(11) unsigned NOT NULL,
+      type varchar(48) NOT NULL,
+      status varchar(16) NOT NULL DEFAULT 'pending',
+      total int(11) NOT NULL DEFAULT '0',
+      done int(11) NOT NULL DEFAULT '0',
+      failed int(11) NOT NULL DEFAULT '0',
+      detail text DEFAULT NULL,
+      result mediumtext DEFAULT NULL,
+      error varchar(500) DEFAULT NULL,
+      created_at datetime NOT NULL,
+      started_at datetime DEFAULT NULL,
+      finished_at datetime DEFAULT NULL,
+      PRIMARY KEY (id),
+      KEY idx_uid_time (uid, created_at),
+      KEY idx_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('event_subscription')} (
+      id int(11) unsigned NOT NULL AUTO_INCREMENT,
+      name varchar(100) NOT NULL,
+      url varchar(500) NOT NULL,
+      secret varchar(128) NOT NULL,
+      events text NOT NULL,
+      active tinyint(1) NOT NULL DEFAULT '1',
+      last_status tinyint(1) DEFAULT NULL,
+      last_error varchar(300) DEFAULT NULL,
+      last_sent_at datetime DEFAULT NULL,
+      created_at datetime NOT NULL,
+      updated_at datetime DEFAULT NULL,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('notification_log')} (
+      id bigint unsigned NOT NULL AUTO_INCREMENT,
+      module varchar(32) NOT NULL,
+      event varchar(64) NOT NULL,
+      status tinyint(1) NOT NULL DEFAULT '1',
+      message varchar(500) DEFAULT NULL,
+      detail text DEFAULT NULL,
+      created_at datetime NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_time (created_at),
+      KEY idx_module (module)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('event_delivery')} (
+      id bigint unsigned NOT NULL AUTO_INCREMENT,
+      sub_id int(11) unsigned NOT NULL,
+      event varchar(96) NOT NULL,
+      status varchar(16) NOT NULL,
+      http_status smallint NOT NULL DEFAULT '0',
+      error varchar(500) DEFAULT NULL,
+      duration_ms int(11) NOT NULL DEFAULT '0',
+      created_at datetime NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_sub_time (sub_id, created_at),
+      KEY idx_event_time (event, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 }
 
 // 备份与个人凭证保险库：表结构 + 账户归属字段（幂等）

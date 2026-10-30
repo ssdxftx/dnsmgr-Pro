@@ -21,6 +21,7 @@ import { restoreBackup, restoreFromArchive } from '../lib/backup/restore.js';
 import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
 import {
   deleteRemote,
+  deleteRemoteStrict,
   downloadRemote,
   getDestination,
   listRemote,
@@ -32,6 +33,7 @@ import { contentDisposition } from '../lib/util.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { publicError } from '../lib/util.js';
+import { emitEvent } from '../lib/events.js';
 
 function isAdmin(user: any): boolean {
   return checkLevel(user, 2);
@@ -109,6 +111,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         keepDays: Number(process.env.DNSMGR_BACKUP_KEEP_DAYS || 30),
       }).catch(() => undefined);
       audit(req, { module: 'backup', action: 'backup.export', targetType: 'backup', targetId: r.jobId, summary: `导出${scope === 'site' ? '整站' : '个人'}备份` });
+      void emitEvent('backup.completed', { job_id: r.jobId, scope, file: r.file });
       return { code: 0, msg: '备份完成', data: r };
     } catch (e: any) {
       return reply.send({ code: -1, msg: publicError(e) });
@@ -185,7 +188,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         if (String(fields.confirm || '') !== 'REPLACE') {
           return reply.code(400).send({ code: -1, msg: '请输入 REPLACE 确认整站替换' });
         }
-        const pwErr = await requireLoginPassword(Number(req.user.uid), fields.password);
+        const pwErr = await requireLoginPassword(Number(req.user.uid), fields.password, req);
         if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
       }
       const key = await keyForArchive(tmp, fields.passphrase ? String(fields.passphrase) : undefined);
@@ -276,7 +279,7 @@ export default async function backupRoutes(app: FastifyInstance) {
       if (Number(req.user.is_super || 0) !== 1) {
         return reply.code(403).send({ code: -1, msg: '整站替换仅允许超级管理员执行' });
       }
-      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password);
+      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req);
       if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     }
     const now = Date.now();
@@ -387,7 +390,7 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.post('/api/backup/key', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
-    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password);
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req);
     if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const existed = await hasBackupKey();
     // 轮换影响整站所有历史备份的可恢复性，仅超级管理员可执行；首次生成仍允许任意管理员
@@ -545,6 +548,7 @@ export default async function backupRoutes(app: FastifyInstance) {
         row.id,
       ]);
       await applyScheduleRetention(row);
+      void emitEvent('backup.completed', { job_id: r.jobId, scope: 'site', file: r.file, schedule_id: Number(row.id) });
       return { code: 0, msg: '备份完成', data: r };
     } catch (e: any) {
       await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ? WHERE id = ?`, [
@@ -563,6 +567,26 @@ export default async function backupRoutes(app: FastifyInstance) {
       return { code: 0, data: items.map((it) => ({ ...it, ...archiveMeta(it.name) })) };
     } catch (e: any) {
       return { code: -1, msg: publicError(e) };
+    }
+  });
+
+  app.delete('/api/backup/remote/:destId', auth, async (req: any, reply: any) => {
+    if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const rawName = String(req.query?.name || req.body?.name || '');
+    const name = path.basename(rawName);
+    if (name !== rawName || !name.endsWith('.dnsmgrbk')) return { code: -1, msg: '文件名不合法' };
+    try {
+      await deleteRemoteStrict(Number(req.params.destId), name);
+      audit(req, {
+        module: 'backup',
+        action: 'backup.remote.delete',
+        targetType: 'backup',
+        targetName: name,
+        summary: `删除远端备份 ${name}`,
+      });
+      return { code: 0, msg: '远端备份已删除' };
+    } catch (e: any) {
+      return { code: -1, msg: publicError(e, '远端删除失败') };
     }
   });
 

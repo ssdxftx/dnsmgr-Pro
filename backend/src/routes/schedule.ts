@@ -3,7 +3,7 @@ import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
-import { updateNexttime } from '../lib/schedule/scheduleService.js';
+import { executeOne, updateNexttime } from '../lib/schedule/scheduleService.js';
 
 // 定时切换解析接口仅管理员可用
 const authenticate = (app: FastifyInstance) => ({
@@ -152,6 +152,20 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const row = await queryOne(`SELECT * FROM ${table('sctask')} WHERE id = ?`, [id]);
     if (row) await updateNexttime(row);
     return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/schedule/tasks/:id/run', auth, async (req: any) => {
+    const id = Number(req.params.id);
+    const task: any = await queryOne(`SELECT * FROM ${table('sctask')} WHERE id = ?`, [id]);
+    if (!task) return { code: -1, msg: '切换策略不存在' };
+    if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    try {
+      await executeOne(task);
+      await updateNexttime(task);
+      return { code: 0, msg: '已执行一次定时切换' };
+    } catch (e: any) {
+      return { code: -1, msg: e?.message || '执行失败' };
+    }
   });
 
   app.post('/api/schedule/tasks/:id/active', auth, async (req: any) => {

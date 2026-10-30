@@ -484,6 +484,46 @@ export default async function domainRoutes(app: FastifyInstance) {
     return { code: 0, msg: '添加分类成功' };
   });
 
+  app.put('/api/domains/categories/:id', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number(req.params.id);
+    const row: any = await queryOne(`SELECT * FROM ${table('domain_category')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '分类不存在' };
+    const b = req.body || {};
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (b.name !== undefined) {
+      const name = asText(b.name, 64);
+      if (!name) return { code: -1, msg: '分类名不能为空' };
+      sets.push('name = ?');
+      params.push(name);
+    }
+    if (b.remark !== undefined) {
+      sets.push('remark = ?');
+      params.push(asText(b.remark, 255));
+    }
+    if (b.sort !== undefined) {
+      sets.push('sort = ?');
+      params.push(Math.trunc(Number(b.sort) || 0));
+    }
+    if (!sets.length) return { code: -1, msg: '没有可更新的字段' };
+    params.push(id);
+    await query(`UPDATE ${table('domain_category')} SET ${sets.join(', ')} WHERE id = ?`, params);
+    audit(req, { targetType: 'domain', targetName: String(b.name || row.name || ''), summary: `更新域名分类 #${id}` });
+    return { code: 0, msg: '修改分类成功' };
+  });
+
+  app.delete('/api/domains/categories/:id', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number(req.params.id);
+    const row: any = await queryOne(`SELECT * FROM ${table('domain_category')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '分类不存在' };
+    await query(`UPDATE ${table('domain')} SET cid = 0 WHERE cid = ?`, [id]);
+    await query(`DELETE FROM ${table('domain_category')} WHERE id = ?`, [id]);
+    audit(req, { targetType: 'domain', targetName: String(row.name || ''), summary: `删除域名分类 #${id}` });
+    return { code: 0, msg: '删除分类成功' };
+  });
+
   // 从 DNS 账户拉取云端域名列表（用于添加）
   app.get('/api/dns/accounts/:aid/pull', auth, async (req: any) => {
     const { aid } = req.params as any;
@@ -493,6 +533,22 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const res = await provider.getDomainList(null, 1, 100);
     if (res === false) return { code: -1, msg: provider.getError() };
+    if (String(req.query?.diff || '') === '1') {
+      const cloud = Array.isArray(res.list) ? res.list : [];
+      const local: any[] = await query(`SELECT name FROM ${table('domain')} WHERE aid = ?`, [Number(aid)]);
+      const key = (v: any) => String(v || '').trim().toLowerCase().replace(/\.$/, '');
+      const cloudMap = new Map(cloud.map((row: any) => [key(row.name || row.Domain || row.domain), row]));
+      const localSet = new Set(local.map((row: any) => key(row.name)));
+      return {
+        code: 0,
+        data: {
+          cloud,
+          existing: [...cloudMap.keys()].filter((name) => localSet.has(name)),
+          missing: [...cloudMap.keys()].filter((name) => !localSet.has(name)),
+          localOnly: [...localSet].filter((name) => !cloudMap.has(name)),
+        },
+      };
+    }
     return { code: 0, data: res.list };
   });
 
@@ -1199,6 +1255,34 @@ export default async function domainRoutes(app: FastifyInstance) {
       return { code: 0, msg: '添加域名别名成功' };
     }
     return { code: -1, msg: '添加域名别名失败，' + provider.getError() };
+  });
+
+  app.put('/api/domains/:id/aliases/:aliasId', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const { id, aliasId } = req.params as any;
+    const alias = String((req.body || {}).alias || '').trim();
+    if (!alias) return { code: -1, msg: '参数不能为空' };
+    const info = await getDomainWithAccount(Number(id), req.user);
+    if (!info) return { code: -1, msg: '域名或账户不存在' };
+    const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
+    if (!provider || typeof provider.addDomainAlias !== 'function' || typeof provider.deleteDomainAlias !== 'function') {
+      return { code: -1, msg: '该DNS类型不支持域名别名更新（仅DNSPod）' };
+    }
+    const added = await provider.addDomainAlias(alias);
+    if (!added) return { code: -1, msg: '修改域名别名失败，' + provider.getError() };
+    const removed = await provider.deleteDomainAlias(String(aliasId));
+    if (!removed) {
+      const list = await provider.domainAliasList().catch?.(() => false);
+      const created = Array.isArray(list)
+        ? list.find((row: any) => String(row.DomainAlias || row.Alias || row.alias || '') === alias)
+        : null;
+      if (created && typeof provider.deleteDomainAlias === 'function') {
+        await provider.deleteDomainAlias(String(created.DomainAliasId || created.AliasId || created.id || '')).catch?.(() => undefined);
+      }
+      return { code: -1, msg: '修改域名别名失败：旧别名删除失败，' + provider.getError() };
+    }
+    audit(req, { targetType: 'domain', targetId: id, targetName: alias, summary: `修改域名别名 ${aliasId} -> ${alias}` });
+    return { code: 0, msg: '修改域名别名成功' };
   });
 
   app.delete('/api/domains/:id/aliases/:aliasId', auth, async (req: any) => {

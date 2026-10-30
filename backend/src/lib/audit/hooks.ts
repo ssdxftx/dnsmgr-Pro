@@ -66,6 +66,9 @@ function collect(req: any, reply: any): void {
   const row: AuditRow = {
     uid,
     username: username.slice(0, 64),
+    auth_type: String(req.user?.auth_type || 'session').slice(0, 16),
+    api_key_id: Number(req.user?.api_key_id || 0),
+    api_key_name: String(req.user?.api_key_name || '').slice(0, 64),
     module: String(ctx.module || meta.module).slice(0, 32),
     action: String(ctx.action || meta.action).slice(0, 48),
     method: req.method,
@@ -117,6 +120,9 @@ const MODULE_LABEL: Record<string, string> = {
   expire: '到期提醒',
   backup: '备份',
   vault: '凭证保险库',
+  apikeys: 'API 密钥',
+  jobs: '异步任务',
+  events: '事件回调',
 };
 
 function defaultSummary(module: string, action: string): string {

@@ -294,3 +294,16 @@ export async function deleteRemote(destId: number, name: string): Promise<void> 
     // 远端删除失败不应阻断本地清理
   }
 }
+
+export async function deleteRemoteStrict(destId: number, name: string): Promise<void> {
+  const row = await getDestination(destId);
+  if (!row) throw new Error('备份目的地不存在');
+  if (row.type === 'webdav') {
+    const res = await webdavFetch(row.config, joinUrl(String(row.config.url), name), { method: 'DELETE' });
+    if (res.status !== 404 && !res.ok) throw new Error(`WebDAV 删除失败（HTTP ${res.status}）`);
+    return;
+  }
+  const client = await s3Client(row.config);
+  const { DeleteObjectCommand } = await s3Module();
+  await client.send(new DeleteObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
+}

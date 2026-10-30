@@ -316,6 +316,20 @@ export default async function authRoutes(app: FastifyInstance) {
     return { code: 0, msg: '已关闭 TOTP 二次验证' };
   });
 
+  app.post('/api/auth/reauth', { preHandler: (app as any).authenticate }, async (req: any) => {
+    const uid = Number(req.user.uid);
+    const passwordErr = await requireLoginPassword(uid, req.body?.password, req);
+    if (passwordErr) return { code: -1, msg: passwordErr };
+    const user = await findUserById(uid);
+    if (!user || Number(user.status) === 0) return { code: -1, msg: '用户不存在或已禁用' };
+    const token = (app as any).jwt.sign(
+      { uid, type: 'reauth', token_version: Number(user.token_version || 0) },
+      { expiresIn: '5m', jti: randomUUID() },
+    );
+    audit(req, { module: 'auth', action: 'auth.reauth', summary: '获取敏感操作二次确认令牌', scrubBody: true });
+    return { code: 0, data: { token, expires_in: 300 } };
+  });
+
   // 服务端登出：把当前 jti 写入吊销表，令牌在过期前立即失效，而不只是清 localStorage
   app.post('/api/auth/logout', { preHandler: (app as any).authenticate }, async (req: any) => {
     const uid = Number(req.user.uid);
@@ -329,7 +343,7 @@ export default async function authRoutes(app: FastifyInstance) {
   // 退出全部设备：自增 token_version 使所有已签发令牌失效；需重输密码确认
   app.post('/api/auth/logout-all', { preHandler: (app as any).authenticate }, async (req: any) => {
     const uid = Number(req.user.uid);
-    const passwordErr = await requireLoginPassword(uid, req.body?.password);
+    const passwordErr = await requireLoginPassword(uid, req.body?.password, req);
     if (passwordErr) return { code: -1, msg: passwordErr };
     await query(`UPDATE ${table('user')} SET token_version = token_version + 1 WHERE id = ?`, [uid]);
     // 当前会话立即失效（其他会话最迟在鉴权缓存 TTL 内失效）

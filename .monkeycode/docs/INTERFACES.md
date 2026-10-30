@@ -67,6 +67,73 @@ HTTP 状态例外：
 | `/api/register` | 60s | 10 |
 | `/api/register/send-code` | 60s | 5 |
 
+### API Key、幂等与二次确认
+
+远程集成推荐使用 `/api/v1` 前缀，`/api` 仍作为兼容别名。认证方式：
+
+| 方式 | 请求头 | 说明 |
+|------|--------|------|
+| 会话令牌 | `Authorization: Bearer <token>` | 登录或 TOTP 后获得 |
+| API Key | `X-API-Key: <key>` | 用户级密钥，支持多把、作用域、过期时间、IP 白名单 |
+
+API Key 自助管理端点（需要登录会话或具备 `apikeys` 作用域的 Key）：
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/api-keys` | 当前用户的密钥列表，支持管理员用 `uid` 查看他人 |
+| GET | `/api/api-keys/scopes` | 可用作用域模块 |
+| POST | `/api/api-keys` | 创建密钥，明文只返回一次；默认 `*` |
+| PATCH | `/api/api-keys/:id` | 修改名称、作用域、有效期、IP 白名单、启停 |
+| POST | `/api/api-keys/:id/rotate` | 轮换密钥，旧密钥立即失效 |
+| DELETE | `/api/api-keys/:id` | 吊销密钥 |
+| POST | `/api/api-keys/revoke-all` | 吊销当前用户全部密钥 |
+| DELETE | `/api/api-keys/legacy` | 停用 `user.apikey` 旧版单密钥 |
+
+作用域格式为 `模块:read`、`模块:write`、`模块:*` 或 `*`，模块包括 `dns`、`cdn`、`cert`、`deploy`、`cloudflare`、`backup`、`monitor`、`schedule`、`optimize`、`dnscheck`、`expire`、`vault`、`users`、`system`、`audit`、`jobs`、`events`、`apikeys`、`general`。管理员等级校验仍会叠加执行。
+
+敏感操作（证书详情、系统密钥设置、备份替换、保险库销毁等）支持：
+
+1. `POST /api/auth/reauth`，用登录密码换取 5 分钟有效的二次确认令牌。
+2. 后续请求带 `X-Reauth-Token: <token>`，也兼容原来的 `X-Confirm-Password` 或请求体 `password`。
+
+写请求可带 `Idempotency-Key`（8-128 位）避免网络重试重复创建；相同 Key 重复提交会返回第一次的响应，处理中返回 409。响应头统一返回 `X-Request-Id` 与 `X-API-Version: 1`。
+
+### 统一任务、事件回调与可观测性
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/api/jobs` | 当前用户异步任务列表，管理员可看全部 |
+| GET | `/api/jobs/:id` | 任务详情、进度与结果 |
+| GET | `/api/events/subscriptions` | 事件回调订阅（管理员） |
+| POST/PUT/DELETE | `/api/events/subscriptions` / `/:id` | 订阅 CRUD，签名密钥只在创建时返回 |
+| POST | `/api/events/subscriptions/:id/test` | 发送测试事件 |
+| GET | `/api/events/deliveries` | 回调投递记录 |
+| GET | `/api/notifications/logs` | 通知渠道投递历史（管理员） |
+| GET | `/api/ready` | 就绪检查，数据库不可用或维护中返回 503 |
+| GET | `/api/metrics` | Prometheus 指标（管理员） |
+| GET | `/api/openapi.json` | OpenAPI 3.1 规范 |
+| GET | `/api/docs` | 内置接口列表页 |
+
+回调请求体为 `{event, timestamp, data}`，请求头带 `X-DNSMGR-Event` 与 `X-DNSMGR-Signature: sha256=<HMAC>`。已接入事件：`cert.order.issued`、`cert.order.failed`、`cert.deploy.success`、`cert.deploy.failed`、`monitor.record.switched`、`backup.completed`、`event.test`。
+
+### 补齐的运维端点
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| DELETE | `/api/backup/remote/:destId?name=...` | 删除远端备份归档 |
+| POST | `/api/dmonitor/tasks/:id/run` | 立即执行一次容灾检测 |
+| POST | `/api/schedule/tasks/:id/run` | 立即执行一次定时切换 |
+| POST | `/api/expire/scan` | 触发域名到期扫描与提醒，返回 `job_id` |
+| POST | `/api/cert/orders/batch/process` | 批量推进证书订单，返回 `job_id` |
+| POST | `/api/deploy/tasks/batch/process` | 批量执行部署任务，返回 `job_id` |
+| GET | `/api/deploy/tasks/:id/logs` | 读取部署任务日志 |
+| PUT/DELETE | `/api/domains/categories/:id` | 更新/删除域名分类 |
+| PUT | `/api/domains/:id/aliases/:aliasId` | 更新域名别名（DNSPod） |
+| GET | `/api/audit/logs/export` | 审计日志 JSON/CSV 导出 |
+| GET | `/api/dns/accounts/:aid/pull?diff=1` | 云端/本地域名差异预览 |
+| GET | `/api/cdn/cache-tasks/:id` | CDN 刷新/预热任务详情 |
+| POST | `/api/cdn/cache-tasks/:id/retry` | 重试 CDN 刷新/预热任务 |
+
 ## 安装
 
 实现：`backend/src/routes/setup.ts`、`backend/src/installer.ts`

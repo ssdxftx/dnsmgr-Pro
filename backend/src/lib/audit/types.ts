@@ -25,6 +25,9 @@ export interface AuditCtx {
 export interface AuditRow {
   uid: number;
   username: string;
+  auth_type: string;
+  api_key_id: number;
+  api_key_name: string;
   module: string;
   action: string;
   method: string;

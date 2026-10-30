@@ -66,7 +66,7 @@ export default async function systemRoutes(app: FastifyInstance) {
   app.post('/api/system/settings', auth, async (req: any) => {
     const b = req.body || {};
     if (Object.keys(b).some((key) => SENSITIVE_SETTING_RE.test(key))) {
-      const passwordErr = await requireLoginPassword(Number(req.user.uid), b.password);
+      const passwordErr = await requireLoginPassword(Number(req.user.uid), b.password, req);
       if (passwordErr) return { code: -1, msg: passwordErr };
     }
     delete b.password;

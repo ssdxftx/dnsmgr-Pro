@@ -3,8 +3,8 @@ import { U1_PREFIX } from '../vault/keys.js';
 
 /** 参与备份的表，顺序即导入顺序（父表先于子表） */
 export const TABLES = [
-  'config', 'announcement',
-  'user', 'user_vault', 'permission', 'domain_category',
+  'config', 'announcement', 'event_subscription',
+  'user', 'user_vault', 'api_key', 'permission', 'domain_category',
   'account', 'domain', 'domain_alias',
   'cdn_account', 'cdn_domain', 'cdn_cache_rule',
   'cert_account', 'cert_order', 'cert_domain', 'cert_cname', 'cert_deploy', 'cert_link_log',

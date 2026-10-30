@@ -22,6 +22,8 @@ import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime, safePr
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 import { localResolve } from '../lib/dns/localResolve.js';
 import { requireLoginPassword } from '../lib/reauth.js';
+import { createJob, runJobInBackground } from '../lib/jobs.js';
+import { emitEvent } from '../lib/events.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
@@ -598,6 +600,46 @@ export default async function certRoutes(app: FastifyInstance) {
     }
   });
 
+  app.post('/api/cert/orders/batch/process', auth, async (req: any, reply: any) => {
+    const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids: number[] = [...new Set<number>(raw.map((x: any) => Number(x)).filter((n: number) => Number.isInteger(n) && n > 0))].slice(0, 100);
+    if (!ids.length) return { code: -1, msg: '请选择证书订单' };
+    for (const id of ids) {
+      if (!(await canAccessCertOrder(id, req.user))) {
+        return reply.code(404).send({ code: -1, msg: `证书订单 #${id} 不存在` });
+      }
+    }
+    const jobId = await createJob(Number(req.user.uid), 'cert.orders.process', ids.length, { ids });
+    runJobInBackground(jobId, async (progress) => {
+      let done = 0;
+      let failed = 0;
+      const results: any[] = [];
+      for (const id of ids) {
+        try {
+          const code = await new CertOrderService(id).process(true);
+          if (code === 3) {
+            await processOrderLink(id).catch(() => undefined);
+            certOrderSend(id, true).catch(() => undefined);
+            await emitEvent('cert.order.issued', { order_id: id, domains: (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [id])).map((r: any) => r.domain) });
+          } else if (code < 0) {
+            failed += 1;
+            await emitEvent('cert.order.failed', { order_id: id, status: code });
+          }
+          results.push({ id, code, ok: code >= 0 });
+        } catch (e: any) {
+          failed += 1;
+          results.push({ id, ok: false, error: clientMessage(e, '处理失败') });
+          await emitEvent('cert.order.failed', { order_id: id, error: clientMessage(e, '处理失败') });
+        }
+        done += 1;
+        await progress(done, failed, results);
+      }
+      return results;
+    });
+    audit(req, { targetType: 'job', targetId: jobId, summary: `批量推进 ${ids.length} 个证书订单`, detail: { ids } });
+    return { code: 0, msg: '批量任务已启动', data: { job_id: jobId, total: ids.length } };
+  });
+
   app.post('/api/cert/orders/:id/reset', auth, async (req: any, reply: any) => {
     const { id } = req.params as any;
     if (!(await canAccessCertOrder(id, req.user))) {
@@ -648,7 +690,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessCertOrder(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
-    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.headers['x-confirm-password']);
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.headers['x-confirm-password'], req);
     if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
@@ -873,6 +915,65 @@ export default async function certRoutes(app: FastifyInstance) {
       certDeploySend(Number(id), false).catch(() => {});
       return { code: -1, msg: clientMessage(e, '证书部署失败') };
     }
+  });
+
+  app.post('/api/deploy/tasks/batch/process', auth, async (req: any, reply: any) => {
+    const raw = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    const ids: number[] = [...new Set<number>(raw.map((x: any) => Number(x)).filter((n: number) => Number.isInteger(n) && n > 0))].slice(0, 100);
+    if (!ids.length) return { code: -1, msg: '请选择部署任务' };
+    for (const id of ids) {
+      if (!(await canAccessDeployTask(id, req.user))) {
+        return reply.code(404).send({ code: -1, msg: `部署任务 #${id} 不存在` });
+      }
+    }
+    const jobId = await createJob(Number(req.user.uid), 'cert.deploy.process', ids.length, { ids });
+    runJobInBackground(jobId, async (progress) => {
+      let done = 0;
+      let failed = 0;
+      const results: any[] = [];
+      for (const id of ids) {
+        try {
+          await new CertDeployService(id).process(true);
+          const row: any = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
+          if (Number(row?.status) === 1) {
+            certDeploySend(id, true).catch(() => undefined);
+            await emitEvent('cert.deploy.success', { task_id: id });
+            results.push({ id, ok: true });
+          } else {
+            failed += 1;
+            certDeploySend(id, false).catch(() => undefined);
+            const error = String(row?.error || '部署未完成');
+            await emitEvent('cert.deploy.failed', { task_id: id, error });
+            results.push({ id, ok: false, error });
+          }
+        } catch (e: any) {
+          failed += 1;
+          const error = clientMessage(e, '部署失败');
+          certDeploySend(id, false).catch(() => undefined);
+          await emitEvent('cert.deploy.failed', { task_id: id, error });
+          results.push({ id, ok: false, error });
+        }
+        done += 1;
+        await progress(done, failed, results);
+      }
+      return results;
+    });
+    audit(req, { targetType: 'job', targetId: jobId, summary: `批量执行 ${ids.length} 个部署任务`, detail: { ids } });
+    return { code: 0, msg: '批量任务已启动', data: { job_id: jobId, total: ids.length } };
+  });
+
+  app.get('/api/deploy/tasks/:id/logs', auth, async (req: any, reply: any) => {
+    const { id } = req.params as any;
+    if (!(await canAccessDeployTask(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
+    }
+    const row: any = await queryOne(`SELECT processid FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
+    const processid = safeProcessId(row?.processid);
+    if (!processid) return { code: 0, data: '' };
+    const file = join(LOG_DIR, processid + '.log');
+    if (!existsSync(file)) return { code: 0, data: '' };
+    const text = readFileSync(file, 'utf8');
+    return { code: 0, data: text.length > 500_000 ? text.slice(-500_000) : text };
   });
 
   app.post('/api/deploy/tasks/:id/reset', auth, async (req: any, reply: any) => {

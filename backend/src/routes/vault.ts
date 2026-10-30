@@ -137,7 +137,7 @@ export default async function vaultRoutes(app: FastifyInstance) {
 
   app.post('/api/vault/recovery', auth, async (req: any, reply: any) => {
     try {
-      const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password);
+      const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req);
       if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
       const r = await setRecovery(Number(req.user.uid), jtiOf(req), String(req.body?.recovery || 'random'));
       audit(req, { module: 'vault', action: 'vault.recovery', summary: '设置保险库恢复码', scrubBody: true });
@@ -154,7 +154,7 @@ export default async function vaultRoutes(app: FastifyInstance) {
 
   app.post('/api/vault/destroy', auth, async (req: any, reply: any) => {
     try {
-      const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password);
+      const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req);
       if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
       await destroyVault(
         Number(req.user.uid),

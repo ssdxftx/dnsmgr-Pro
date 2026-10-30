@@ -53,6 +53,7 @@ const DELETE_SKIP = new Set(['config']);
 const USER_IMPORT_TABLES = new Set<string>([
   'user',
   'user_vault',
+  'api_key',
   'account',
   'cdn_account',
   'cert_account',

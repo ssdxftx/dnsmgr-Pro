@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
-import { escapeLike } from '../lib/util.js';
+import { escapeLike, contentDisposition } from '../lib/util.js';
 
 function parseJson(v: any): any {
   if (v == null) return null;
@@ -65,7 +65,7 @@ export default async function auditRoutes(app: FastifyInstance) {
 
     const totalRow = await queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('audit_log')}${where}`, params);
     const rows = await query(
-      `SELECT id, uid, username, module, action, method, path, target_type, target_id, target_name,
+      `SELECT id, uid, username, auth_type, api_key_id, api_key_name, module, action, method, path, target_type, target_id, target_name,
               summary, detail, changes, result, errmsg, status, ip, ua, cost_ms, addtime
        FROM ${table('audit_log')}${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
@@ -80,6 +80,57 @@ export default async function auditRoutes(app: FastifyInstance) {
         list: (rows as any[]).map((r) => ({ ...r, detail: parseJson(r.detail), changes: parseJson(r.changes) })),
       },
     };
+  });
+
+  app.get('/api/audit/logs/export', auth, async (req: any, reply: any) => {
+    const q = req.query || {};
+    const format = String(q.format || 'json').toLowerCase() === 'csv' ? 'csv' : 'json';
+    const limit = Math.min(10000, Math.max(1, Number(q.limit) || 5000));
+    const now = new Date();
+    const defStart = new Date(now.getTime() - 7 * 86400_000);
+    const startTime = TIME_RE.test(String(q.startTime || '')) ? String(q.startTime) : fmt(defStart);
+    const endTime = TIME_RE.test(String(q.endTime || '')) ? String(q.endTime) : fmt(now);
+    let where = ' WHERE addtime >= ? AND addtime <= ?';
+    const params: any[] = [startTime, endTime];
+    if (checkLevel(req.user, 2)) {
+      if (q.uid !== undefined && q.uid !== '') {
+        where += ' AND uid = ?';
+        params.push(Number(q.uid));
+      }
+    } else {
+      where += ' AND uid = ?';
+      params.push(Number(req.user.uid));
+    }
+    for (const [k, col] of [['module', 'module'], ['action', 'action']] as const) {
+      if (q[k]) {
+        where += ` AND ${col} = ?`;
+        params.push(String(q[k]));
+      }
+    }
+    if (q.result === '0' || q.result === '1' || q.result === 0 || q.result === 1) {
+      where += ' AND result = ?';
+      params.push(Number(q.result));
+    }
+    if (q.kw) {
+      const like = `%${escapeLike(String(q.kw))}%`;
+      where += " AND (summary LIKE ? ESCAPE '!' OR target_name LIKE ? ESCAPE '!' OR username LIKE ? ESCAPE '!')";
+      params.push(like, like, like);
+    }
+    const rows = await query(
+      `SELECT id, uid, username, auth_type, api_key_id, api_key_name, module, action, method, path,
+              target_type, target_id, target_name, summary, result, errmsg, status, ip, ua, cost_ms, addtime
+         FROM ${table('audit_log')}${where} ORDER BY id DESC LIMIT ?`,
+      [...params, limit],
+    );
+    if (format === 'json') return { code: 0, data: { total: rows.length, list: rows } };
+    const header = ['id', 'uid', 'username', 'auth_type', 'api_key_id', 'api_key_name', 'module', 'action', 'method', 'path', 'target_type', 'target_id', 'target_name', 'summary', 'result', 'errmsg', 'status', 'ip', 'ua', 'cost_ms', 'addtime'];
+    const lines = [header.join(',')];
+    for (const row of rows as any[]) {
+      lines.push(header.map((key) => csvCell(row[key])).join(','));
+    }
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', contentDisposition(`audit-${startTime.slice(0, 10)}.csv`));
+    return '\uFEFF' + lines.join('\r\n');
   });
 
   // 统计卡：今日 / 近 7 天失败 / 近 30 天活跃用户
@@ -108,4 +159,10 @@ export default async function auditRoutes(app: FastifyInstance) {
 function fmt(d: Date): string {
   const p = (n: number) => (n < 10 ? '0' + n : String(n));
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function csvCell(value: any): string {
+  if (value === null || value === undefined) return '';
+  const text = String(value);
+  return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }

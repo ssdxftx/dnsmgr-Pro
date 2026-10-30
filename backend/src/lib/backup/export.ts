@@ -51,6 +51,7 @@ const USER_SKIP_TABLES = new Set<string>([
   'cdn_preheat_task',
   'cdn_cache_task',
   'reg_code',
+  'event_subscription',
   'backup_destination',
   'backup_schedule',
 ]);
@@ -190,6 +191,7 @@ function siteFilter(name: string, ex: SiteExclusions) {
     if (!ex.users.size) return true;
     if (name === 'user') return !ex.users.has(Number(row.id));
     if (name === 'user_vault') return !ex.users.has(Number(row.uid));
+    if (name === 'api_key') return !ex.users.has(Number(row.uid));
     if (name === 'account') return !ex.accounts.has(Number(row.id));
     if (name === 'cdn_account') return !ex.cdnAccounts.has(Number(row.id));
     if (name === 'cert_account') return !ex.certAccounts.has(Number(row.id));
@@ -219,6 +221,8 @@ function userFilter(name: string, ctx: UserContext, includeLogs: boolean) {
       case 'user':
         return Number(row.id) === ctx.uid;
       case 'user_vault':
+        return Number(row.uid) === ctx.uid;
+      case 'api_key':
         return Number(row.uid) === ctx.uid;
       case 'permission':
         return Number(row.uid) === ctx.uid;

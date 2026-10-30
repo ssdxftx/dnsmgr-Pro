@@ -1,4 +1,5 @@
 import { configGet } from '../../config.js';
+import { logNotify } from '../notifyLog.js';
 import { query, table } from '../../db.js';
 import { Aliyun } from '../clients/Aliyun.js';
 import { fmtDateTime } from '../util.js';
@@ -352,6 +353,7 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
   if ((await configGet('notice_custom_webhook')) === '1') {
     await sendCustomWebhook(mailTitle, mailContent);
   }
+  logNotify('monitor', action === 1 ? 'monitor.alert' : 'monitor.recover', true, mailTitle, { domain: task.domain, action });
 }
 
 export async function sendExpireNotice(day: number, list: { name: string; expiretime: string }[]): Promise<number> {
@@ -404,6 +406,7 @@ export async function sendExpireNotice(day: number, list: { name: string; expire
     await attempt('custom_webhook', sendCustomWebhook(title, content));
   }
   if (failed.length) console.warn('[notice] 到期提醒部分渠道发送失败：' + failed.join('；'));
+  logNotify('expire', 'domain.expiring', ok > 0, title, { day, count: list.length, ok, failed });
   return ok;
 }
 
@@ -480,6 +483,7 @@ export async function certOrderSend(orderId: number, result: boolean): Promise<v
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
   const sent = await certSend(title, content, result);
+  logNotify('cert', result ? 'cert.order.issued' : 'cert.order.failed', sent, title, { order_id: orderId, domains });
   // 全部渠道成功才标记已发送，否则保留 issend=0 供下一轮重试
   if (sent) await query(`UPDATE ${table('cert_order')} SET issend = 1 WHERE id = ?`, [orderId]);
   else console.warn(`[notice] 证书订单 ${orderId} 通知未全部发送成功，保留待重试`);
@@ -506,6 +510,7 @@ export async function certDeploySend(deployId: number, result: boolean): Promise
   content += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
   const sent = await certSend(title, content, result);
+  logNotify('cert', result ? 'cert.deploy.success' : 'cert.deploy.failed', sent, title, { task_id: deployId, domains });
   if (sent) await query(`UPDATE ${table('cert_deploy')} SET issend = 1 WHERE id = ?`, [deployId]);
   else console.warn(`[notice] 证书部署 ${deployId} 通知未全部发送成功，保留待重试`);
 }

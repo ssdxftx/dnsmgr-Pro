@@ -2856,6 +2856,21 @@ const MAX_CACHE_OP_URLS = 100;
     return { code: 0, data: rows };
   });
 
+  app.get('/api/cdn/cache-tasks/:id', adminAuth, async (req: any) => {
+    const row = await queryOne(`SELECT * FROM ${table('cdn_cache_task')} WHERE id = ?`, [Number(req.params.id)]);
+    if (!row) return { code: -1, msg: '任务记录不存在' };
+    return { code: 0, data: row };
+  });
+
+  app.post('/api/cdn/cache-tasks/:id/retry', adminAuth, async (req: any) => {
+    const row: any = await queryOne(`SELECT * FROM ${table('cdn_cache_task')} WHERE id = ?`, [Number(req.params.id)]);
+    if (!row) return { code: -1, msg: '任务记录不存在' };
+    const op = String(row.type) === 'preheat' ? 'preheat' : 'purge';
+    const result = await dispatchCacheOp(op, String(row.type || (op === 'preheat' ? 'preheat' : 'url')), [String(row.url)], req.user);
+    audit(req, { targetType: 'cdn_cache_task', targetId: row.id, summary: `重试 CDN ${op}：${row.url}` });
+    return { code: 0, ...result };
+  });
+
   // 访问控制 - 查询
   app.get('/api/cdn/domains/:id/access', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
