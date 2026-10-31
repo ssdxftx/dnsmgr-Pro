@@ -10,7 +10,7 @@ import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig
 import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
-import { getEffectivePermissions, getVisibleAccount } from '../lib/accounts/visibility.js';
+import { getEffectivePermissions, getVisibleAccount, isLegacyDomainSessionFor } from '../lib/accounts/visibility.js';
 import { asText, clampLimit, fmtDateTime } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { getSysKey } from '../config.js';
@@ -18,6 +18,24 @@ import { legacyApiAuth } from '../lib/legacyApi.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 const LEGACY_ALIAS_TYPES = new Set(['aliyun', 'henet', 'powerdns', 'spaceship']);
+
+/** 旧版 /d 参数：缺省用默认值，非法值按 0 处理；保留 MX 优先级 0 的合法语义 */
+function legacyNumber(value: any, fallback: number): number {
+  if (value === undefined || value === null || value === '') return fallback;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** 与旧版 recordTypeSupported 一致：仅 ALIAS 需要额外校验服务商支持 */
+function legacyTypeError(accountType: string, type: string): string | null {
+  if (String(type || '').trim().toUpperCase() !== 'ALIAS') return null;
+  return LEGACY_ALIAS_TYPES.has(String(accountType)) ? null : '当前DNS提供商不支持ALIAS记录';
+}
+
+/** 旧版筛选使用 PHP empty() 语义：字符串 "0" 与空值一样视为未填写 */
+function legacyEmpty(value: any): boolean {
+  return value === undefined || value === null || value === '' || value === '0' || value === 0;
+}
 
 function domainKey(v: any): string {
   return String(v ?? '').trim().toLowerCase().replace(/\.$/, '');
@@ -260,8 +278,16 @@ async function getDomainWithAccount(domainId: number, user?: any) {
   if (!d) return null;
   const acct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
   if (!acct) return null;
-  // 私有账户仅所有者可见；管理员和获得子域名授权的用户都不能借域名 ID 使用他人云凭据
-  if (user && acct.visibility === 'private' && Number(acct.owner_uid) !== Number(user.uid)) return null;
+  // 私有账户仅所有者可见；管理员和获得子域名授权的用户都不能借域名 ID 使用他人云凭据。
+  // 旧版快捷登录是一次性域名授权，可直接访问签名指定的域名（含其私有账户）。
+  if (
+    user &&
+    acct.visibility === 'private' &&
+    Number(acct.owner_uid) !== Number(user.uid) &&
+    !isLegacyDomainSessionFor(user, d.id)
+  ) {
+    return null;
+  }
   return { domain: d, account: acct };
 }
 
@@ -298,7 +324,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     const visibleRows = (rows as any[]).filter(
-      (r) => r.account_visibility !== 'private' || Number(r.account_owner) === Number(req.user.uid),
+      (r) =>
+        r.account_visibility !== 'private' ||
+        Number(r.account_owner) === Number(req.user.uid) ||
+        isLegacyDomainSessionFor(req.user, r.id),
     );
     let data = visibleRows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
     if (acc.admin) {
@@ -1346,18 +1375,18 @@ export default async function domainRoutes(app: FastifyInstance) {
     const cid = asText(b.cid);
     const status = asText(b.status);
     const id = asText(b.id);
-    if (id) {
+    if (!legacyEmpty(id)) {
       where.push('A.id = ?');
       params.push(Number(id));
-    } else if (kw) {
+    } else if (!legacyEmpty(kw)) {
       where.push('(A.name LIKE ? OR A.remark LIKE ?)');
       params.push('%' + kw + '%', '%' + kw + '%');
     }
-    if (aid) {
+    if (!legacyEmpty(aid)) {
       where.push('A.aid = ?');
       params.push(Number(aid));
     }
-    if (type) {
+    if (!legacyEmpty(type)) {
       where.push('B.type LIKE ?');
       params.push('%' + type + '%');
     }
@@ -1512,10 +1541,12 @@ export default async function domainRoutes(app: FastifyInstance) {
     const type = asText(b.type);
     const value = asText(b.value, 4096);
     if (!name || !type || !value) return { code: -1, msg: '参数不能为空' };
+    const typeErr = legacyTypeError(ctx.info.account.type, type);
+    if (typeErr) return { code: -1, msg: typeErr };
     const err = writeErr(ctx.acc, ctx.info.domain.name, name);
     if (err) return { code: -1, msg: err };
     const rid = await ctx.provider.addDomainRecord(
-      name, type, value, asText(b.line) || 'default', Number(b.ttl || 600), Number(b.mx || 1),
+      name, type, value, asText(b.line) || 'default', legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
       b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
     );
     if (!rid) return { code: -1, msg: '添加解析记录失败，' + ctx.provider.getError() };
@@ -1536,6 +1567,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const type = asText(b.type);
     const value = asText(b.value, 4096);
     if (!recordid || !name || !type || !value) return { code: -1, msg: '参数不能为空' };
+    const typeErr = legacyTypeError(ctx.info.account.type, type);
+    if (typeErr) return { code: -1, msg: typeErr };
     let cur: any = null;
     if (!ctx.acc.admin) {
       cur = await ctx.provider.getDomainRecordInfo(recordid);
@@ -1546,7 +1579,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (e) return { code: -1, msg: '新记录超出授权子域名范围' };
     }
     const ok = await ctx.provider.updateDomainRecord(
-      recordid, name, type, value, asText(b.line) || 'default', Number(b.ttl || 600), Number(b.mx || 1),
+      recordid, name, type, value, asText(b.line) || 'default', legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
       b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
     );
     if (!ok) return { code: -1, msg: '修改解析记录失败，' + ctx.provider.getError() };

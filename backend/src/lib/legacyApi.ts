@@ -28,15 +28,11 @@ function parseForm(body: string): Record<string, any> {
 }
 
 export function legacyBody(req: any): Record<string, any> {
-  const out: Record<string, any> = {};
-  const merge = (source: any) => {
-    if (!source || typeof source !== 'object') return;
-    for (const [key, value] of Object.entries(source)) out[key] = value;
-  };
-  merge(req.query);
-  if (typeof req.body === 'string') merge(parseForm(req.body));
-  else merge(req.body);
-  return out;
+  // 与旧版 AuthApi 保持一致：签名参数只从 POST 请求体读取，不接收 query，
+  // 避免 uid/timestamp/sign 出现在访问日志或浏览器历史中。
+  if (typeof req.body === 'string') return parseForm(req.body);
+  if (req.body && typeof req.body === 'object') return { ...req.body };
+  return {};
 }
 
 function scalar(value: any): string {

@@ -3,6 +3,14 @@ import { checkLevel, getUserPermissions, type SubPermission } from '../../auth.j
 
 export type AccountTable = 'account' | 'cdn_account' | 'cert_account';
 
+/** 旧版域名快捷登录只允许访问签名指定的那一个域名，即使该域名属于他人的私有账户 */
+export function isLegacyDomainSessionFor(user: any, domainId: any): boolean {
+  const did = Number(domainId);
+  if (!Number.isInteger(did) || did <= 0) return false;
+  if (!user?.legacy_domain) return false;
+  return Number(user?.legacy_domain_id || 0) === did;
+}
+
 /**
  * 用户直传 aid 的入口必须走可见性校验：
  * - private：仅所有者可见
@@ -63,6 +71,7 @@ export async function canAccessDomainAccount(domainId: number, user: any): Promi
     [Number(domainId)],
   );
   if (!row) return false;
+  if (isLegacyDomainSessionFor(user, domainId)) return true;
   return row.visibility !== 'private' || Number(row.owner_uid) === Number(user?.uid);
 }
 
