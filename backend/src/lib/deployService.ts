@@ -1,13 +1,11 @@
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { query, queryOne, table } from '../db.js';
 import { getDeployProvider } from './deploy/factory.js';
 import type { DeployProvider } from './deploy/types.js';
 import { genSid } from './certService.js';
-import { appendLog, safeProcessId } from './util.js';
+import { appendLog, logDir, safeProcessId } from './util.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
+const LOG_DIR = logDir();
 
 import { ConfigDecryptError, decryptConfig, encryptConfig, decryptText } from './secret.js';
 import { assertDeployConfigAllowed } from './netGuard.js';

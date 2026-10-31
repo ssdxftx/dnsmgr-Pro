@@ -12,6 +12,20 @@
 
 ---
 
+## 使用文档
+
+完整使用手册位于 `docs-site/`，基于 Valaxy 与 `valaxy-theme-press` 构建，覆盖从部署初始化到 DNS、CDN、证书、容灾、备份、用户、通知与 API 集成的全部模块。
+
+```bash
+cd docs-site
+npm install
+npm run dev
+```
+
+默认访问 `http://localhost:4859`。构建静态站点使用 `npm run build`，产物输出到 `docs-site/dist`。
+
+---
+
 ## 与彩虹 DNS 的兼容与差异
 
 | 维度 | 彩虹 DNS | 彩虹 DNS Pro |
@@ -26,6 +40,8 @@
 | 数据兼容 | — | 可直接绑定彩虹 DNS 现有数据库，表结构一致 |
 
 保留并增强的能力包括多 DNS 平台解析管理、容灾切换、定时切换、Cloudflare 优选 IP、SSL 证书申请、证书自动部署与多通道通知。
+
+另提供默认关闭的旧版彩虹 DNS API 兼容层，可在“系统设置 → 旧版接口兼容”开启，用于迁移旧的表单签名客户端；新版 `/api/v1` 不受影响。
 
 ---
 

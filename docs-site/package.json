@@ -1,0 +1,33 @@
+{
+  "name": "dnsmgr-pro-docs",
+  "version": "1.32.0",
+  "private": true,
+  "type": "module",
+  "description": "彩虹 DNS Pro 使用文档",
+  "scripts": {
+    "dev": "valaxy",
+    "build": "valaxy build --ssg",
+    "preview": "vite preview --config preview.config.ts"
+  },
+  "dependencies": {
+    "@iconify-json/carbon": "^1.2.29",
+    "@iconify-json/ri": "^1.2.10",
+    "@unocss/reset": "^66.12.0",
+    "valaxy": "0.25.9",
+    "valaxy-addon-algolia": "^0.2.0",
+    "valaxy-theme-press": "0.25.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.2",
+    "vite": "^7.3.7",
+    "vitepress": "^1.1.4",
+    "vue": "^3.5.17"
+  },
+  "overrides": {
+    "vue-i18n": "^11.4.16",
+    "@intlify/shared": "^11.4.16",
+    "@intlify/message-compiler": "^11.4.16",
+    "@intlify/core-base": "^11.4.16"
+  }
+}

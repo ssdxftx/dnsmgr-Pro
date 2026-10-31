@@ -68,6 +68,23 @@ await config.configSet('check_key', 'two');
 assert((await config.configGet('check_key')) === 'two', '配置 upsert 生效');
 assert((await db.query<any>('SELECT COUNT(*) AS c FROM dnsmgr_config WHERE `key` = ?', ['check_key']))[0].c === 1, '配置 upsert 只保留一行');
 
+const { createHash } = await import('node:crypto');
+const { legacyApiAuth, legacyBody } = await import('../src/lib/legacyApi.js');
+const form = legacyBody({ query: {}, body: 'uid=1000&domains%5B%5D=a.example.com&domains%5B%5D=b.example.com' });
+assert(Array.isArray(form.domains) && form.domains.length === 2, '旧版表单数组字段解析正确');
+await db.query('UPDATE dnsmgr_user SET is_api = 1, apikey = ? WHERE id = 1000', ['legacy-check-key']);
+await config.configSet('legacy_api_enable', '0');
+const offAuth = await legacyApiAuth({ query: {}, body: { uid: 1000, timestamp: '1', sign: 'x' }, headers: {} });
+assert(!offAuth.ok && offAuth.status === 404, '旧版 API 兼容层默认关闭');
+await config.configSet('legacy_api_enable', '1');
+const timestamp = String(Math.floor(Date.now() / 1000));
+const sign = createHash('md5').update('1000' + timestamp + 'legacy-check-key').digest('hex');
+const legacyReq: any = { query: {}, body: { uid: '1000', timestamp, sign }, headers: {} };
+const okAuth = await legacyApiAuth(legacyReq);
+assert(okAuth.ok && legacyReq.user.uid === 1000 && legacyReq.user.auth_type === 'legacy_api', '旧版签名认证通过');
+const badAuth = await legacyApiAuth({ query: {}, body: { uid: 1000, timestamp, sign: 'bad' }, headers: {} });
+assert(!badAuth.ok && badAuth.status === 403, '旧版签名错误被拒绝');
+
 const setInsert: any = await db.query('INSERT INTO dnsmgr_cert_order SET ?', [
   { aid: 1, status: 0, isauto: true },
 ]);
@@ -82,6 +99,17 @@ const accountInsert: any = await db.query(
 assert(Number(accountInsert.insertId) > 0, 'INSERT 返回 insertId');
 await db.query('INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())', [accountInsert.insertId, 'example.com', 'x', 0]);
 await db.query('INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())', [accountInsert.insertId, 'example.net', 'y', 0]);
+
+const Fastify = (await import('fastify')).default;
+const legacyApp = Fastify({ logger: false });
+await legacyApp.register((await import('../src/routes/domain.js')).default);
+const legacyRes = await legacyApp.inject({
+  method: 'POST',
+  url: '/api/domain',
+  payload: { uid: 1000, timestamp, sign, offset: 0, limit: 10 },
+});
+assert(legacyRes.statusCode === 200 && JSON.parse(legacyRes.body).total === 2, '旧版域名列表接口可用');
+await legacyApp.close();
 
 const grouped = await db.query<any>("SELECT GROUP_CONCAT(name ORDER BY id ASC SEPARATOR ',') AS names FROM dnsmgr_domain");
 assert(grouped[0].names === 'example.com,example.net', 'GROUP_CONCAT + ORDER BY 翻译正确');

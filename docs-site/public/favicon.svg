@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="彩虹 DNS Pro">
+  <defs>
+    <linearGradient id="g" x1="8" y1="8" x2="56" y2="56" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2f7cf6"/>
+      <stop offset="1" stop-color="#18b5a4"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#g)"/>
+  <circle cx="32" cy="30" r="15" fill="none" stroke="#fff" stroke-width="3"/>
+  <path d="M17 30h30M32 15c6 5 6 25 0 30M32 15c-6 5-6 25 0 30" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+  <path d="M20 49h24" stroke="#fff" stroke-width="3" stroke-linecap="round"/>
+</svg>

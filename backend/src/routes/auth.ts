@@ -1,7 +1,7 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
-import { findUserByUsername, verifyPassword, findUserById, DUMMY_PASSWORD_HASH } from '../auth.js';
-import { query, table } from '../db.js';
+import { findUserByUsername, verifyPassword, findUserById, DUMMY_PASSWORD_HASH, md5 } from '../auth.js';
+import { query, queryOne, table } from '../db.js';
 import { generateSecret, provisioningUri, verifyTOTP } from '../lib/totp.js';
 import { decryptText, encryptText } from '../lib/secret.js';
 import { audit } from '../lib/audit/context.js';
@@ -10,6 +10,8 @@ import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { revokeToken } from '../lib/auth/revocation.js';
 import { clearVaultSession } from '../lib/vault/session.js';
 import { requireLoginPassword } from '../lib/reauth.js';
+import { getSysKey } from '../config.js';
+import { legacyApiEnabled } from '../lib/legacyApi.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 const MAX_AUTH_FAILURES = 5;
@@ -354,7 +356,58 @@ export default async function authRoutes(app: FastifyInstance) {
     return { code: 0, msg: '已退出全部设备，请重新登录' };
   });
 
+  app.get('/quicklogin', async (req: any, reply: any) => {
+    if (!(await legacyApiEnabled())) return reply.code(404).type('text/plain').send('404 Not Found');
+    const domain = String(req.query?.domain || '').trim();
+    const timestamp = String(req.query?.timestamp || '').trim();
+    const token = String(req.query?.token || '').trim();
+    const sign = String(req.query?.sign || '').trim();
+    if (!domain || !timestamp || !token || !sign) return reply.code(400).type('text/plain').send('参数错误');
+    const ts = Number(timestamp);
+    const now = Math.floor(Date.now() / 1000);
+    if (!Number.isFinite(ts) || ts < now - 300 || ts > now + 300) return reply.code(400).type('text/plain').send('时间戳无效');
+    const sysKey = await getSysKey();
+    const expected = md5(sysKey + domain + timestamp + token + sysKey);
+    const ha = createHash('sha256').update(expected).digest();
+    const hb = createHash('sha256').update(sign).digest();
+    if (!timingSafeEqual(ha, hb)) return reply.code(400).type('text/plain').send('签名错误');
+    const row: any = await queryOne(`SELECT id, name, is_sso FROM ${table('domain')} WHERE name = ? LIMIT 1`, [domain]);
+    if (!row) return reply.code(404).type('text/plain').send('该域名不存在');
+    if (Number(row.is_sso) !== 1) return reply.code(403).type('text/plain').send('该域名不支持快捷登录');
+    const jti = randomUUID();
+    const nonce = randomUUID();
+    const session = (app as any).jwt.sign(
+      { uid: -Number(row.id), did: Number(row.id), domain: row.name, type: 'legacy_domain', jti },
+      { expiresIn: '2h' },
+    );
+    const user = { id: 0, username: `domain:${row.name}`, level: 1, totp_open: 0, stat_cache: 0, is_super: 0, lang: '', legacy_domain: row.name };
+    const js = (value: any) => JSON.stringify(value).replace(/</g, '\\u003c');
+    const target = `/domains/${Number(row.id)}/records`;
+    audit(req, { uid: 0, username: `domain:${row.name}`, targetType: 'domain', targetId: Number(row.id), targetName: row.name, summary: `旧版域名快捷登录 ${row.name}` });
+    reply.header('Cache-Control', 'no-store');
+    reply.header(
+      'Content-Security-Policy',
+      `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'nonce-${nonce}'; connect-src 'self'; worker-src 'self' blob:`,
+    );
+    return reply.type('text/html; charset=utf-8').send(`<!doctype html><html><head><meta charset="utf-8"><title>正在登录</title></head><body><script nonce="${nonce}">localStorage.setItem('dnsmgr_token', ${js(session)});localStorage.setItem('dnsmgr_user', ${js(user)});location.replace(${js(target)});</script>正在登录…</body></html>`);
+  });
+
   app.get('/api/auth/me', { preHandler: (app as any).authenticate }, async (req: any) => {
+    if (req.user?.auth_type === 'legacy_domain') {
+      return {
+        code: 0,
+        data: {
+          id: 0,
+          username: String(req.user.username || ''),
+          level: 1,
+          totp_open: 0,
+          stat_cache: 0,
+          is_super: 0,
+          lang: '',
+          legacy_domain: String(req.user.legacy_domain || ''),
+        },
+      };
+    }
     const user = await findUserById(req.user.uid);
     if (!user) return { code: -1, msg: '用户不存在' };
     return { code: 0, data: publicUser(user) };

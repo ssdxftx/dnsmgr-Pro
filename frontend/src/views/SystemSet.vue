@@ -236,7 +236,30 @@
               <n-form-item :label="t('systemSet.cronTriggerUrl')">
                 <n-input :value="cronUrl" readonly />
               </n-form-item>
+              <n-form-item :label="t('systemSet.cronTriggerCommand')">
+                <n-input :value="cronCommand" readonly type="textarea" :rows="2" />
+              </n-form-item>
             </n-form>
+          </n-card>
+        </n-tab-pane>
+
+        <!-- 旧版 API 兼容 -->
+        <n-tab-pane name="legacy" :tab="t('systemSet.tabLegacyApi')">
+          <n-card :title="t('systemSet.legacyApiCardTitle')" :bordered="false" size="small" style="max-width:640px">
+            <n-alert type="warning" class="mb-16">
+              {{ t('systemSet.legacyApiAlert') }}
+            </n-alert>
+            <n-form label-placement="left" label-width="130">
+              <n-form-item :label="t('systemSet.legacyApiEnable')">
+                <n-switch :value="(cfg.legacy_api_enable || '0') === '1'" :disabled="saveBusy" @update:value="setLegacyApi" />
+              </n-form-item>
+              <n-form-item :label="t('systemSet.legacyApiEndpoints')">
+                <n-input value="/api/domain, /api/domain/:id, /api/record/*, /api/cert/order, /cron" readonly type="textarea" :rows="2" />
+              </n-form-item>
+            </n-form>
+            <n-alert type="info" :show-icon="false" style="margin-top:16px">
+              {{ t('systemSet.legacyApiHint') }}
+            </n-alert>
           </n-card>
         </n-tab-pane>
 
@@ -493,9 +516,10 @@ const proxyTypeOptions = [
 
 const customWebhookFields = ['custom_webhook_url', 'custom_webhook_method', 'custom_webhook_content_type', 'custom_webhook_headers', 'custom_webhook_body', 'custom_webhook_content_format'];
 
-const cronUrl = computed(() => {
+const cronUrl = computed(() => `${location.origin}/api/system/cron`);
+const cronCommand = computed(() => {
   if (!cronKey.value) return '';
-  return `${location.origin}/api/system/cron?key=${cronKey.value}`;
+  return `curl -H "X-Cron-Key: ${cronKey.value}" ${cronUrl.value}`;
 });
 
 async function loadSettings() {
@@ -503,7 +527,7 @@ async function loadSettings() {
   if (res.code === 0) Object.assign(cfg, res.data);
 }
 
-const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_)/;
+const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|legacy_|audit_retain_days$)/;
 
 function askPassword(): Promise<string | null> {
   return new Promise((resolve) => {
@@ -586,6 +610,11 @@ async function setCronType(v: boolean) {
   const prev = cfg.cron_type;
   cfg.cron_type = v ? '1' : '0';
   if (!(await saveFields(['cron_type']))) cfg.cron_type = prev;
+}
+async function setLegacyApi(v: boolean) {
+  const prev = cfg.legacy_api_enable;
+  cfg.legacy_api_enable = v ? '1' : '0';
+  if (!(await saveFields(['legacy_api_enable']))) cfg.legacy_api_enable = prev;
 }
 
 const statCacheInterval = computed<number>({

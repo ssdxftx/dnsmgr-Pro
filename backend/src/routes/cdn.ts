@@ -35,9 +35,9 @@ import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
 import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
-import { checkLevel, getUserPermissions, isRecordInScope, matchPermission } from '../auth.js';
+import { checkLevel, isRecordInScope, matchPermission } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
-import { canAccessCertOrder, canAccessDomainAccount, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
+import { canAccessCertOrder, canAccessDomainAccount, getEffectivePermissions, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
@@ -126,7 +126,7 @@ async function assertDnsDomainUsable(user: any, did: number, accelName: string):
   const base = String(d.name || '').toLowerCase();
   if (name !== base && !name.endsWith('.' + base)) return null;
   const recordName = name === base ? '@' : name.slice(0, name.length - base.length - 1);
-  const perms = await getUserPermissions(Number(user?.uid));
+  const perms = await getEffectivePermissions(user);
   // 权限表可能存小写域名，比较时统一大小写；只读授权不能写入
   const hit = perms.find(
     (p: any) =>
@@ -2938,7 +2938,7 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
 
   // 普通用户同步云端域名时，DNS 写入必须逐条校验其子域名授权；
   // 管理员/未传 user 的旧调用保持原有全量同步能力。
-  const perms = user && !checkLevel(user, 2) ? await getUserPermissions(Number(user.uid)) : null;
+  const perms = user && !checkLevel(user, 2) ? await getEffectivePermissions(user) : null;
 
   let added = 0;
   let skipped = 0;

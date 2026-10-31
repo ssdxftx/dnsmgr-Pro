@@ -283,6 +283,25 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const row: any = await getVisibleAccount('cdn_account', Number(id), req.user);
     if (!row) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
+    const cdnDomainRows: any[] = await query(`SELECT id FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
+    const cdnDomainIds = cdnDomainRows.map((r) => Number(r.id)).filter((n) => n > 0);
+    if (cdnDomainIds.length) {
+      // 证书订单的 link JSON 仍引用加速域名；直接删账户会让订单/部署任务成为孤儿并可能继续向已删除域名部署。
+      const linked = await query(
+        `SELECT id, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`,
+        ['%"cdnDomainId"%'],
+      );
+      const hasLinked = (linked as any[]).some((o) => {
+        try {
+          return cdnDomainIds.includes(Number(JSON.parse(String(o.link)).cdnDomainId));
+        } catch {
+          return false;
+        }
+      });
+      if (hasLinked) {
+        return { code: -1, msg: '该 CDN 账户下存在证书联动订单，请先在对应加速域名中解除证书联动后再删除账户' };
+      }
+    }
     const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('cdn_domain')} WHERE aid = ?`, [id]);
     // 级联清理关联数据并置于同一事务，避免遗留缓存规则/统计数据等孤儿记录
     await withTransaction(async (q) => {

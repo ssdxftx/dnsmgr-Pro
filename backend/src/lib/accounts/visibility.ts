@@ -24,6 +24,10 @@ export async function getVisibleAccount(t: AccountTable, aid: number, user: any)
  * 私有账户既然允许普通用户创建，所有者就应能完成域名接入、记录写入、到期更新和检测任务。
  */
 export async function getEffectivePermissions(user: any): Promise<SubPermission[]> {
+  // 旧版域名快捷登录：只授予该域名整域名权限，绝不回落到用户级授权
+  if (user?.legacy_domain) {
+    return [{ domain: String(user.legacy_domain), sub: null, readonly: 0, expiretime: null }];
+  }
   if (!user?.uid) return [];
   const perms = await getUserPermissions(Number(user.uid));
   if (checkLevel(user, 2)) return perms;

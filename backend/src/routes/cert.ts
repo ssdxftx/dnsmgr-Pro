@@ -2,8 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { createPrivateKey, X509Certificate } from 'node:crypto';
 import { domainToASCII } from 'node:url';
 import { readFileSync, existsSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { audit } from '../lib/audit/context.js';
@@ -18,15 +17,15 @@ import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider
 import { CertDeployService } from '../lib/deployService.js';
 import { certOrderSend, certDeploySend } from '../lib/monitor/msgNotice.js';
 import { configGet, configSet } from '../config.js';
-import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime, safeProcessId } from '../lib/util.js';
+import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime, logDir, safeProcessId } from '../lib/util.js';
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 import { localResolve } from '../lib/dns/localResolve.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { createJob, runJobInBackground } from '../lib/jobs.js';
 import { emitEvent } from '../lib/events.js';
+import { legacyApiAuth } from '../lib/legacyApi.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
+const LOG_DIR = logDir();
 
 // 密钥类型/长度白名单：防止超大 keysize 同步生成 RSA 密钥阻塞事件循环（DoS）
 const VALID_KEY_SIZES: Record<string, string[]> = { RSA: ['2048', '3072', '4096'], ECC: ['256', '384', '521'] };
@@ -1003,6 +1002,43 @@ export default async function certRoutes(app: FastifyInstance) {
       summary: `${active ? '启用' : '停用'}部署任务 #${id}`,
     });
     return { code: 0, msg: '操作成功' };
+  });
+
+  app.post('/api/cert/order', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) {
+      if (auth.status === 404) return reply.code(404).send(auth.msg);
+      return reply.code(auth.status).send({ code: -1, msg: auth.msg });
+    }
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number(auth.body.id);
+    if (!Number.isInteger(id) || id <= 0) return { code: -1, msg: '证书订单不存在' };
+    const row: any = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '证书订单不存在' };
+    const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
+    let pfx: string | null = null;
+    if (row.fullchain && privateKey) {
+      try {
+        // 旧版接口生成的 PFX 默认口令为 123456；仅在显式开启兼容层时保留该行为
+        pfx = (await buildPfx(row.fullchain, privateKey, '123456')).toString('base64');
+      } catch {
+        pfx = null;
+      }
+    }
+    const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
+    audit(req, { targetType: 'cert_order', targetId: id, targetName: domains.map((d: any) => d.domain).join(','), summary: `旧版API获取证书 #${id}` });
+    return {
+      code: 0,
+      data: {
+        id: row.id,
+        crt: row.fullchain,
+        key: privateKey,
+        pfx,
+        issuetime: row.issuetime,
+        expiretime: row.expiretime,
+        domains: domains.map((d: any) => d.domain),
+      },
+    };
   });
 
   const SETTINGS_KEYS = ['cert_renewdays', 'deploy_hour_start', 'deploy_hour_end', 'cdn_cert_aid', 'cert_notice_mail', 'cert_notice_wxtpl', 'cert_notice_tgbot', 'cert_notice_qqbot', 'cert_notice_webhook', 'cert_notice_custom_webhook'];

@@ -136,8 +136,12 @@ export function applySecurityHeaders(app: FastifyInstance): void {
     const isHtml = contentType.includes('text/html');
     const cacheableMethod = req.method === 'GET' || req.method === 'HEAD';
 
-    // 错误响应一律不可缓存：避免 4xx/5xx（含未命中静态资源回退）被 CDN/浏览器缓存
-    if (reply.statusCode >= 400) {
+    // 域名快捷登录页内含一次性会话令牌，禁止任何浏览器/CDN 缓存
+    if (apiUrl === '/quicklogin') {
+      setNoStore(reply);
+      reply.header('Pragma', 'no-cache');
+    } else if (reply.statusCode >= 400) {
+      // 错误响应一律不可缓存：避免 4xx/5xx（含未命中静态资源回退）被 CDN/浏览器缓存
       setNoStore(reply);
     } else if (apiUrl === '/api' || apiUrl.startsWith('/api/')) {
       const publicCache = cacheableMethod ? PUBLIC_API_CACHE[apiUrl] : undefined;
@@ -164,7 +168,7 @@ export function applySecurityHeaders(app: FastifyInstance): void {
       setCache(reply, SHORT_PUBLIC, CDN_SHORT_PUBLIC);
     }
 
-    if (isHtml) {
+    if (isHtml && !reply.hasHeader('Content-Security-Policy')) {
       reply.header('Content-Security-Policy', HTML_CSP);
     }
     return payload;

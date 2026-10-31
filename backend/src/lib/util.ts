@@ -1,5 +1,10 @@
 import { appendFile, mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+
+/** 任务日志目录：默认放在持久化数据卷内，兼容容器只读根文件系统。 */
+export function logDir(): string {
+  return process.env.DNSMGR_LOG_DIR || join(process.env.DNSMGR_DATA_DIR || resolve(process.cwd(), 'data'), 'logs');
+}
 
 export function fmtDateTime(d: Date = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0');

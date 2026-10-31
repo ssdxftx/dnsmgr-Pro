@@ -1,0 +1,10 @@
+category:
+  guide: 使用指南
+  deploy: 部署与升级
+  dns: 域名与解析
+  cdn: CDN 管理
+  cert: 证书与部署
+  ops: 运维与自动化
+  system: 系统管理
+  api: API 集成
+  faq: 常见问题

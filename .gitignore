@@ -39,3 +39,8 @@ Thumbs.db
 # 临时文件
 *.tar.gz
 dump.rdb
+
+# 文档站点
+docs-site/node_modules/
+docs-site/dist/
+docs-site/.valaxy/

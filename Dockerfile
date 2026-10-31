@@ -45,4 +45,4 @@ EXPOSE 8082
 CMD ["node", "--import", "tsx", "src/index.ts"]
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=20s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8082/api/health || exit 1
+  CMD wget -qO- http://127.0.0.1:8082/api/ready || exit 1

@@ -25,7 +25,7 @@ function safeEqual(a: string, b: string): boolean {
 // 需要重输登录密码才能修改的敏感项：除凭据/通道配置外，注册开关、定时任务密钥、
 // 审计保留期都可能被会话被盗者用来对抗取证或扩大攻击面，必须纳入二次确认。
 const SENSITIVE_SETTING_RE =
-  /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|audit_retain_days$)/;
+  /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|legacy_|audit_retain_days$)/;
 
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
@@ -45,7 +45,7 @@ const SETTINGS_KEYS = new Set([
   'custom_webhook_url', 'custom_webhook_method', 'custom_webhook_content_type', 'custom_webhook_headers', 'custom_webhook_body', 'custom_webhook_content_format',
   'vcode', 'register_enable', 'register_mode',
   'proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type',
-  'cron_type', 'cron_key',
+  'cron_type', 'cron_key', 'legacy_api_enable',
   'cdn_stats_cache', 'cdn_stats_cache_interval', 'audit_retain_days',
 ]);
 
@@ -217,21 +217,16 @@ export default async function systemRoutes(app: FastifyInstance) {
     return { code: -1, msg: lastErr };
   });
 
-  // 计划任务触发（兼容 PHP cron URL，key 校验）
-  app.get('/api/system/cron', async (req: any) => {
+  async function runCron(req: any): Promise<{ ok: boolean; msg?: string }> {
     // 维护/恢复期间禁止外部 cron 触发解析写入，避免与恢复事务并发
-    if (isMaintenance()) return { code: -1, msg: '系统正在恢复数据，请稍后再试' };
+    if (isMaintenance()) return { ok: false, msg: '系统正在恢复数据，请稍后再试' };
     // 优先从请求头读取，避免密钥出现在代理/CDN 访问日志与浏览器历史中；query 仅作兼容
     const authHeader = String(req.headers?.authorization || '').replace(/^Bearer\s+/i, '');
     const key = String(req.headers?.['x-cron-key'] || authHeader || req.query?.key || '');
     const cronType = await configGet('cron_type', '0');
     const cronKey = await configGet('cron_key');
-    if (cronType !== '1' || !cronKey) {
-      return { code: -1, msg: '未开启当前方式' };
-    }
-    if (!safeEqual(key, cronKey)) {
-      return { code: -1, msg: '访问密钥错误' };
-    }
+    if (cronType !== '1' || !cronKey) return { ok: false, msg: '未开启当前方式' };
+    if (!safeEqual(key, cronKey)) return { ok: false, msg: '访问密钥错误' };
     // 与内嵌调度器共用分布式锁，避免外部 cron 与进程内定时器同时执行同一任务
     await withDistributedLock('dnsmgr:schedule', runScheduleAll).catch((e: any) =>
       console.error('[schedule] 定时切换解析异常:', e?.message || e),
@@ -239,7 +234,20 @@ export default async function systemRoutes(app: FastifyInstance) {
     await withDistributedLock('dnsmgr:optimize', runOptimizeAll).catch((e: any) =>
       console.error('[optimize] 优选IP调度异常:', e?.message || e),
     );
-    return { code: 0, data: 'success!' };
+    return { ok: true };
+  }
+
+  // 计划任务触发（兼容 PHP cron URL，key 校验）
+  app.get('/api/system/cron', async (req: any) => {
+    const result = await runCron(req);
+    return result.ok ? { code: 0, data: 'success!' } : { code: -1, msg: result.msg };
+  });
+
+  // 旧版 /cron?key= 明文输出，仅在兼容层开启时注册可用
+  app.get('/cron', async (req: any, reply: any) => {
+    if ((await configGet('legacy_api_enable', '0')) !== '1') return reply.code(404).type('text/plain').send('404 Not Found');
+    const result = await runCron(req);
+    return reply.type('text/plain').send(result.ok ? 'success!' : result.msg || '执行失败');
   });
 
   // 生成/获取 cron key

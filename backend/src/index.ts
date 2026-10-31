@@ -7,7 +7,7 @@ import fastifyStatic from '@fastify/static';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomBytes } from 'node:crypto';
-import { configGet, getSysKey } from './config.js';
+import { configGet, encryptLegacyConfigSecrets, getSysKey } from './config.js';
 import { isInstalled, getInstallState } from './installer.js';
 import { initSetupToken } from './lib/setupToken.js';
 import { findUserByApiKey, findUserById } from './auth.js';
@@ -221,6 +221,23 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, b
   }
 });
 
+// 旧版彩虹 DNS API 使用 application/x-www-form-urlencoded；保留数组字段（如 domains[]）
+app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req: any, body: string, done: any) => {
+  if (!body) return done(null, {});
+  try {
+    const out: Record<string, any> = {};
+    for (const [rawKey, value] of new URLSearchParams(body)) {
+      const key = rawKey.endsWith('[]') ? rawKey.slice(0, -2) : rawKey;
+      if (!(key in out)) out[key] = value;
+      else if (Array.isArray(out[key])) out[key].push(value);
+      else out[key] = [out[key], value];
+    }
+    done(null, out);
+  } catch (err) {
+    done(err as Error, undefined);
+  }
+});
+
 // 同源部署下前端与后端同域，无需 CORS；如需跨域调用 API，用 DNSMGR_ALLOWED_ORIGINS 显式放行
 const allowedOrigins = (process.env.DNSMGR_ALLOWED_ORIGINS || '')
   .split(',')
@@ -230,7 +247,7 @@ if (allowedOrigins.length) {
   await app.register(cors, {
     origin: allowedOrigins,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Request-Id'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Request-Id', 'X-Cron-Key'],
     exposedHeaders: ['X-Request-Id', 'X-API-Version', 'X-Idempotency-Replayed', 'Retry-After'],
     maxAge: 86400,
   });
@@ -326,11 +343,15 @@ const apiKeyLastTouch = new Map<number, number>();
         }
       }
       let allowlist: string[] = [];
+      let allowlistInvalid = false;
       try {
         const parsed = typeof keyRow.ip_allowlist === 'string' ? JSON.parse(keyRow.ip_allowlist) : keyRow.ip_allowlist;
         allowlist = Array.isArray(parsed) ? parsed.map(String) : [];
       } catch {
-        allowlist = [];
+        allowlistInvalid = true;
+      }
+      if (allowlistInvalid) {
+        return reply.code(403).send({ code: -1, msg: 'API Key 的 IP 白名单配置无效' });
       }
       if (!ipAllowed(String(req.ip || ''), allowlist)) {
         return reply.code(403).send({ code: -1, msg: 'API Key 不允许从当前 IP 使用' });
@@ -382,6 +403,35 @@ const apiKeyLastTouch = new Map<number, number>();
     await req.jwtVerify();
   } catch (e) {
     return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
+  }
+  // 旧版域名快捷登录令牌：只允许访问单个域名，不查用户表、不继承用户级权限
+  if (req.user?.type === 'legacy_domain') {
+    if ((await configGet('legacy_api_enable', '0')) !== '1') return reply.code(401).send({ code: -1, msg: '旧版接口兼容已关闭' });
+    const did = Number(req.user.did || 0);
+    if (!Number.isInteger(did) || did <= 0) return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
+    const d: any = await queryOne(`SELECT id, name, is_sso FROM ${table('domain')} WHERE id = ?`, [did]);
+    if (!d || Number(d.is_sso) !== 1) return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
+    const jti = String(req.user.jti || '');
+    if (jti && (await isTokenRevoked(jti))) return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
+    req.user = {
+      uid: -did,
+      username: `domain:${d.name}`,
+      level: 1,
+      totp_open: 0,
+      stat_cache: 0,
+      email: '',
+      is_super: 0,
+      token_version: 0,
+      type: 'session',
+      auth_type: 'legacy_domain',
+      legacy_domain_id: did,
+      legacy_domain: String(d.name),
+      jti,
+      exp: Number(req.user.exp || 0),
+      api_key_id: 0,
+      api_key_name: '',
+    };
+    return beginIdempotent(req, reply);
   }
   // 仅接受正式会话令牌，拒绝 TOTP 预令牌等一次性令牌冒充登录态
   if (req.user?.type && req.user.type !== 'session') {
@@ -453,6 +503,10 @@ if (installed) {
     console.error('[dnsmgr-backend] 数据库迁移失败，终止启动：', e?.message || e);
     process.exit(1);
   }
+  // 历史版本的系统通道密钥为明文：在 sys_key 已就绪后统一迁移为密文。
+  await encryptLegacyConfigSecrets().catch((e: any) =>
+    console.error('[dnsmgr-backend] 加密历史系统密钥失败:', e?.message || e),
+  );
   // 系统代理配置在启动时应用到全局 fetch；保存设置时还会再次刷新
   await refreshGlobalProxyDispatcher().catch((e: any) =>
     console.error('[dnsmgr-backend] 应用系统代理失败:', e?.message || e),

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { checkLevel } from '../auth.js';
 import { query, queryOne, table } from '../db.js';
 import { isMaintenance } from '../lib/backup/maintenance.js';
+import { getInstallState } from '../installer.js';
 import { clampLimit, clampOffset } from '../lib/util.js';
 
 function line(name: string, value: number, labels?: Record<string, string>): string {
@@ -19,11 +20,18 @@ export default async function observabilityRoutes(app: FastifyInstance): Promise
     } catch {
       db = false;
     }
+    let installState = 'unknown';
+    try {
+      installState = await getInstallState();
+    } catch {
+      installState = 'unknown';
+    }
     const maintenance = isMaintenance();
-    const ok = db && !maintenance;
+    // 未安装时数据库尚未初始化，安装向导本身需要保持可访问；已安装后必须确认数据库可用。
+    const ok = !maintenance && (installState === 'not_installed' || db);
     return reply.code(ok ? 200 : 503).send({
       code: ok ? 0 : -1,
-      data: { ready: ok, db, maintenance, uptime: Math.floor(process.uptime()) },
+      data: { ready: ok, db, installState, maintenance, uptime: Math.floor(process.uptime()) },
     });
   });
 

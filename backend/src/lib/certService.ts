@@ -1,15 +1,13 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, unlinkSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { query, queryOne, table } from '../db.js';
 import { getCertProvider, certConfig } from './cert/factory.js';
 import { addDns, delDns, verifyDns } from './certDns.js';
-import { appendLog, fmtDateTime, safeProcessId } from './util.js';
+import { appendLog, fmtDateTime, logDir, safeProcessId } from './util.js';
 import type { CertProvider } from './cert/types.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const LOG_DIR = join(__dirname, '..', 'runtime', 'log');
+const LOG_DIR = logDir();
 export const STATUS_LABEL: Record<number, string> = {
   0: '待提交', 1: '待验证', 2: '正在验证', 3: '已签发', 4: '已吊销',
   [-1]: '购买证书失败', [-2]: '创建订单失败', [-3]: '添加DNS失败', [-4]: '验证DNS失败',

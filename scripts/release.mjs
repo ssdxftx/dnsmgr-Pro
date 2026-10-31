@@ -14,7 +14,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const VERSION_FILES = ['frontend/package.json', 'frontend/package-lock.json', 'backend/package.json', 'backend/package-lock.json'];
+const VERSION_FILES = ['frontend/package.json', 'frontend/package-lock.json', 'backend/package.json', 'backend/package-lock.json', 'docs-site/package.json', 'docs-site/package-lock.json'];
 
 function git(args, opts = {}) {
   const out = execFileSync('git', args, { cwd: root, encoding: 'utf8', ...opts });

@@ -1,8 +1,9 @@
 import type { FastifyInstance } from 'fastify';
 import net from 'node:net';
+import { randomUUID } from 'node:crypto';
 import { query, queryOne, table, withTransaction } from '../db.js';
-import { getDnsProvider } from '../lib/dns/factory.js';
-import { matchPermission, isRecordInScope, checkLevel, sameDomain, type SubPermission } from '../auth.js';
+import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
+import { matchPermission, isRecordInScope, checkLevel, sameDomain, md5, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
 import { detectCloudflareProxy } from '../lib/dns/cloudflare.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig } from '../lib/secret.js';
@@ -10,10 +11,13 @@ import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { getEffectivePermissions, getVisibleAccount } from '../lib/accounts/visibility.js';
-import { asText, clampLimit } from '../lib/util.js';
+import { asText, clampLimit, fmtDateTime } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
+import { getSysKey } from '../config.js';
+import { legacyApiAuth } from '../lib/legacyApi.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
+const LEGACY_ALIAS_TYPES = new Set(['aliyun', 'henet', 'powerdns', 'spaceship']);
 
 function domainKey(v: any): string {
   return String(v ?? '').trim().toLowerCase().replace(/\.$/, '');
@@ -1301,6 +1305,380 @@ export default async function domainRoutes(app: FastifyInstance) {
   });
 
   // ============ 解析操作日志（阿里云）============
+
+  // ============ 旧版彩虹 DNS API（默认关闭，兼容 application/x-www-form-urlencoded 签名调用） ============
+  function legacyReject(reply: any, result: { status: number; msg: string }) {
+    if (result.status === 404) return reply.code(404).send(result.msg);
+    return reply.code(result.status).send({ code: -1, msg: result.msg });
+  }
+
+  async function legacyReadable(req: any, domainName: string): Promise<string | null> {
+    const acc = await getUserPerms(req);
+    if (acc.admin) return null;
+    return acc.perms.some((p) => sameDomain(p.domain, domainName)) ? null : '无权限';
+  }
+
+  async function legacyProvider(id: number, req: any) {
+    const info = await getDomainWithAccount(id, req.user);
+    if (!info) return { error: '域名不存在' } as const;
+    const ee = await legacyReadable(req, info.domain.name);
+    if (ee) return { error: ee } as const;
+    let provider: any;
+    try {
+      provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
+    } catch (e: any) {
+      return { error: e?.message || '账户配置无法解密' } as const;
+    }
+    if (!provider) return { error: 'DNS账户类型不存在或已失效' } as const;
+    return { info, provider, acc: await getUserPerms(req) };
+  }
+
+  app.post('/api/domain', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const b = auth.body;
+    const acc = await getUserPerms(req);
+    const where: string[] = ['1=1'];
+    const params: any[] = [];
+    const kw = asText(b.kw);
+    const aid = asText(b.aid);
+    const type = asText(b.type);
+    const cid = asText(b.cid);
+    const status = asText(b.status);
+    const id = asText(b.id);
+    if (id) {
+      where.push('A.id = ?');
+      params.push(Number(id));
+    } else if (kw) {
+      where.push('(A.name LIKE ? OR A.remark LIKE ?)');
+      params.push('%' + kw + '%', '%' + kw + '%');
+    }
+    if (aid) {
+      where.push('A.aid = ?');
+      params.push(Number(aid));
+    }
+    if (type) {
+      where.push('B.type LIKE ?');
+      params.push('%' + type + '%');
+    }
+    if (cid !== '') {
+      where.push('A.cid = ?');
+      params.push(Number(cid));
+    }
+    if (status === '2') {
+      where.push('A.expiretime <= ?');
+      params.push(fmtDateTime(new Date()));
+    } else if (status === '1') {
+      where.push('A.expiretime <= ?');
+      where.push('A.expiretime > ?');
+      params.push(fmtDateTime(new Date(Date.now() + 30 * 86400000)), fmtDateTime(new Date()));
+    }
+    where.push("(B.visibility IS NULL OR B.visibility <> 'private' OR B.owner_uid = ?)");
+    params.push(Number(req.user.uid));
+    if (!acc.admin) {
+      const names = [...new Set(acc.perms.filter((p) => p.domain).map((p) => domainKey(p.domain)))];
+      if (!names.length) return { total: 0, rows: [] };
+      where.push('A.is_hide = 0');
+      where.push(`LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${names.map(() => '?').join(',')})`);
+      params.push(...names);
+    }
+    const sorts: Record<string, string> = {
+      id: 'A.id', name: 'A.name', recordcount: 'A.recordcount', addtime: 'A.addtime', regtime: 'A.regtime',
+      expiretime: 'A.expiretime', is_notice: 'A.is_notice', is_hide: 'A.is_hide', is_sso: 'A.is_sso',
+      typename: 'B.type', category_name: 'A.cid', remark: 'A.remark',
+    };
+    const sort = sorts[asText(b.sortName)];
+    const dir = asText(b.sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const order = sort ? `ORDER BY ${sort} ${dir}` : 'ORDER BY A.id DESC';
+    const offset = Math.max(0, Math.floor(Number(b.offset) || 0));
+    const limit = Math.max(0, Math.min(1000, Math.floor(Number(b.limit) || 10)));
+    const from = `FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id`;
+    const countRow: any = await queryOne(`SELECT COUNT(*) AS c ${from} WHERE ${where.join(' AND ')}`, params);
+    const rows: any[] = await query(
+      `SELECT A.*, B.type AS account_type, B.remark AS aremark, B.visibility AS account_visibility, B.owner_uid AS account_owner
+       ${from} WHERE ${where.join(' AND ')} ${order} LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+    const categories = await query(`SELECT id, name FROM ${table('domain_category')}`);
+    const catMap = Object.fromEntries(categories.map((c: any) => [Number(c.id), String(c.name || '')]));
+    const list = rows.map((r: any) => {
+      const meta = dnsProviders[String(r.account_type || '')];
+      const row: any = {
+        ...r,
+        type: r.account_type,
+        typename: meta?.name || r.account_type || '未知',
+        icon: meta?.icon || '',
+        category_name: catMap[Number(r.cid)] || '',
+      };
+      delete row.account_type;
+      delete row.account_visibility;
+      delete row.account_owner;
+      return row;
+    });
+    return { total: Number(countRow?.c || 0), rows: list };
+  });
+
+  app.post('/api/domain/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const meta: any = dnsProviders[String(ctx.info.account.type)] || {};
+    let recordLine: any[] = [];
+    let minTTL = 1;
+    try {
+      const lines = await ctx.provider.getRecordLine();
+      if (lines) recordLine = Object.entries(lines).map(([name, lineId]) => ({ id: String(lineId), name, parent: 0 }));
+    } catch {
+      recordLine = [];
+    }
+    if (typeof ctx.provider.getMinTTL === 'function') {
+      const t = await ctx.provider.getMinTTL().catch?.(() => false);
+      if (t && Number(t) > 0) minTTL = Number(t);
+    }
+    const config = { ...meta, type: ctx.info.account.type, alias: LEGACY_ALIAS_TYPES.has(String(ctx.info.account.type)) };
+    const data: any = { ...ctx.info.domain, config, recordLine, minTTL };
+    if (asText(auth.body.loginurl) === '1') {
+      const sysKey = await getSysKey();
+      const token = randomUUID();
+      const timestamp = Math.floor(Date.now() / 1000);
+      const sign = md5(sysKey + ctx.info.domain.name + timestamp + token + sysKey);
+      const proto = String(req.headers?.['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
+      const host = String(req.headers?.host || '');
+      const base = host ? `${proto}://${host}` : '';
+      data.loginurl = `${base}/quicklogin?domain=${encodeURIComponent(ctx.info.domain.name)}&timestamp=${timestamp}&token=${encodeURIComponent(token)}&sign=${sign}`;
+    }
+    return { code: 0, data };
+  });
+
+  app.post('/api/record/data/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { total: 0, rows: [] };
+    const b = auth.body;
+    const limit = Math.max(0, Math.min(1000, Math.floor(Number(b.limit) || 10)));
+    const offset = Math.max(0, Math.floor(Number(b.offset) || 0));
+    const page = limit > 0 ? Math.floor(offset / limit) + 1 : 1;
+    const res = await ctx.provider.getDomainRecords(
+      page,
+      limit > 0 ? limit : 10,
+      asText(b.keyword) || null,
+      asText(b.subdomain) || null,
+      asText(b.value) || null,
+      asText(b.type) || null,
+      asText(b.line) || null,
+      asText(b.status) || null,
+      asText(b.sortName) || null,
+      asText(b.sortOrder) || null,
+    );
+    if (res === false) return { total: 0, rows: [] };
+    let list = res.list || [];
+    if (!ctx.acc.admin) {
+      list = filterRecords(ctx.acc, ctx.info.domain.name, list);
+      const fullAccess = ctx.acc.perms.some((p) => sameDomain(p.domain, ctx.info.domain.name) && !p.sub);
+      if (!fullAccess) {
+        const visible = list.length;
+        res.total = visible >= limit ? page * limit + 1 : (page - 1) * limit + visible;
+      }
+    }
+    let lineMap: Record<string, string> = {};
+    if (list.length && typeof ctx.provider.getRecordLine === 'function') {
+      const lines = await ctx.provider.getRecordLine().catch(() => false as const);
+      if (lines) {
+        for (const [name, lineId] of Object.entries(lines)) lineMap[String(lineId)] = name;
+      }
+    }
+    const rows = list.map((r: any) => ({ ...r, LineName: lineMap[String(r.Line)] || r.Line }));
+    const noFilter = !asText(b.keyword) && !asText(b.subdomain) && !asText(b.value) && !asText(b.type) && !asText(b.line) && !asText(b.status);
+    if (ctx.acc.admin && noFilter && typeof res.total === 'number' && Number(ctx.info.domain.recordcount) !== Number(res.total)) {
+      await query(`UPDATE ${table('domain')} SET recordcount = ? WHERE id = ?`, [Number(res.total), id]);
+    }
+    const meta = dnsProviders[String(ctx.info.account.type)];
+    if (meta?.page) return rows;
+    return { total: res.total || 0, rows };
+  });
+
+  app.post('/api/record/add/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const b = auth.body;
+    const name = asText(b.name);
+    const type = asText(b.type);
+    const value = asText(b.value, 4096);
+    if (!name || !type || !value) return { code: -1, msg: '参数不能为空' };
+    const err = writeErr(ctx.acc, ctx.info.domain.name, name);
+    if (err) return { code: -1, msg: err };
+    const rid = await ctx.provider.addDomainRecord(
+      name, type, value, asText(b.line) || 'default', Number(b.ttl || 600), Number(b.mx || 1),
+      b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
+    );
+    if (!rid) return { code: -1, msg: '添加解析记录失败，' + ctx.provider.getError() };
+    await bumpRecordCount(id, 1);
+    audit(req, { targetType: 'record', targetId: String(rid), targetName: recFull(name, ctx.info.domain.name), summary: `旧版API添加解析 ${name} ${type} ${value}` });
+    return { code: 0, msg: '添加解析记录成功！' };
+  });
+
+  app.post('/api/record/update/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const b = auth.body;
+    const recordid = asText(b.recordid);
+    const name = asText(b.name);
+    const type = asText(b.type);
+    const value = asText(b.value, 4096);
+    if (!recordid || !name || !type || !value) return { code: -1, msg: '参数不能为空' };
+    let cur: any = null;
+    if (!ctx.acc.admin) {
+      cur = await ctx.provider.getDomainRecordInfo(recordid);
+      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      let e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
+      if (e) return { code: -1, msg: e };
+      e = writeErr(ctx.acc, ctx.info.domain.name, name);
+      if (e) return { code: -1, msg: '新记录超出授权子域名范围' };
+    }
+    const ok = await ctx.provider.updateDomainRecord(
+      recordid, name, type, value, asText(b.line) || 'default', Number(b.ttl || 600), Number(b.mx || 1),
+      b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
+    );
+    if (!ok) return { code: -1, msg: '修改解析记录失败，' + ctx.provider.getError() };
+    audit(req, { targetType: 'record', targetId: recordid, targetName: recFull(name, ctx.info.domain.name), summary: `旧版API修改解析 ${name} ${type} ${value}` });
+    return { code: 0, msg: '修改解析记录成功！' };
+  });
+
+  app.post('/api/record/delete/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const recordid = asText(auth.body.recordid);
+    if (!recordid) return { code: -1, msg: '参数不能为空' };
+    let cur: any = null;
+    if (!ctx.acc.admin) {
+      cur = await ctx.provider.getDomainRecordInfo(recordid);
+      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
+      if (e) return { code: -1, msg: e };
+    }
+    const ok = await ctx.provider.deleteDomainRecord(recordid);
+    if (!ok) return { code: -1, msg: '删除解析记录失败，' + ctx.provider.getError() };
+    await bumpRecordCount(id, -1);
+    audit(req, { targetType: 'record', targetId: recordid, targetName: ctx.info.domain.name, summary: `旧版API删除解析 ${cur?.Name || recordid}` });
+    return { code: 0, msg: '删除解析记录成功！' };
+  });
+
+  app.post('/api/record/status/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const b = auth.body;
+    const recordid = asText(b.recordid);
+    const status = asText(b.status);
+    if (!recordid) return { code: -1, msg: '参数不能为空' };
+    let cur: any = null;
+    if (!ctx.acc.admin) {
+      cur = await ctx.provider.getDomainRecordInfo(recordid);
+      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
+      if (e) return { code: -1, msg: e };
+    }
+    const ok = await ctx.provider.setDomainRecordStatus(recordid, status);
+    if (!ok) return { code: -1, msg: '操作失败，' + ctx.provider.getError() };
+    audit(req, { targetType: 'record', targetId: recordid, targetName: ctx.info.domain.name, summary: `旧版API${Number(status) ? '启用' : '暂停'}解析 ${cur?.Name || recordid}` });
+    return { code: 0, msg: '操作成功！' };
+  });
+
+  app.post('/api/record/remark/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const b = auth.body;
+    const recordid = asText(b.recordid);
+    if (!recordid) return { code: -1, msg: '参数不能为空' };
+    const remark = asText(b.remark) || null;
+    let cur: any = null;
+    if (!ctx.acc.admin) {
+      cur = await ctx.provider.getDomainRecordInfo(recordid);
+      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
+      if (e) return { code: -1, msg: e };
+    }
+    if (typeof ctx.provider.updateDomainRecordRemark !== 'function') return { code: -1, msg: '操作失败，该DNS类型不支持备注' };
+    const ok = await ctx.provider.updateDomainRecordRemark(recordid, remark);
+    if (!ok) return { code: -1, msg: '操作失败，' + ctx.provider.getError() };
+    audit(req, { targetType: 'record', targetId: recordid, targetName: ctx.info.domain.name, summary: `旧版API修改备注 ${recordid}` });
+    return { code: 0, msg: '操作成功！' };
+  });
+
+  app.post('/api/record/batch/:id', async (req: any, reply: any) => {
+    const auth = await legacyApiAuth(req);
+    if (!auth.ok) return legacyReject(reply, auth);
+    const id = Number((req.params as any).id);
+    const ctx = await legacyProvider(id, req);
+    if ('error' in ctx) return { code: -1, msg: ctx.error };
+    const b = auth.body;
+    const action = asText(b.action);
+    let records: any[] = [];
+    try {
+      const raw = b.recordinfo;
+      records = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch {
+      records = [];
+    }
+    if (!action || !Array.isArray(records) || !records.length) return { code: -1, msg: '参数不能为空' };
+    if (records.length > 500) return { code: -1, msg: '单次最多操作 500 条解析记录' };
+    if (!ctx.acc.admin) {
+      const map = await fetchProviderRecordMap(ctx.provider);
+      for (const r of records) {
+        const cur = map ? map.get(String(r.RecordId)) : await ctx.provider.getDomainRecordInfo(String(r.RecordId));
+        if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+        const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
+        if (e) return { code: -1, msg: e };
+      }
+    }
+    const provider = ctx.provider;
+    audit(req, { targetType: 'record', targetName: ctx.info.domain.name, summary: `旧版API批量${action} ${records.length} 条记录`, detail: { action, count: records.length } });
+    if (action === 'open' || action === 'pause') {
+      const st = action === 'open' ? '1' : '0';
+      const results = await runPool(records, 8, async (r: any) => !!(await provider.setDomainRecordStatus(String(r.RecordId), st)));
+      const success = results.filter(Boolean).length;
+      return { code: 0, msg: `成功${action === 'open' ? '启用' : '暂停'}${success}条解析记录` };
+    }
+    if (action === 'delete') {
+      const results = await runPool(records, 8, async (r: any) => !!(await provider.deleteDomainRecord(String(r.RecordId))));
+      const success = results.filter(Boolean).length;
+      if (success) await bumpRecordCount(id, -success);
+      return { code: 0, msg: `成功删除${success}条解析记录` };
+    }
+    if (action === 'remark') {
+      if (typeof provider.updateDomainRecordRemark !== 'function') return { code: -1, msg: '该DNS类型不支持备注' };
+      const remark = asText(b.remark) || null;
+      const results = await runPool(records, 8, async (r: any) => !!(await provider.updateDomainRecordRemark(String(r.RecordId), remark)));
+      const success = results.filter(Boolean).length;
+      return { code: 0, msg: `批量修改备注，成功${success}条，失败${results.length - success}条` };
+    }
+    if (action === 'group') {
+      if (typeof provider.changeRecordGroup !== 'function') return { code: -1, msg: '该DNS类型不支持分组' };
+      const ids = records.map((r: any) => String(r.RecordId));
+      const ok = await provider.changeRecordGroup(ids, asText(b.groupid));
+      return ok ? { code: 0, msg: `成功修改${ids.length}条记录的分组` } : { code: -1, msg: '修改分组失败，' + provider.getError() };
+    }
+    return { code: -1, msg: '不支持的操作' };
+  });
+
   app.get('/api/domains/:id/recordlog', auth, async (req: any) => {
     const id = Number((req.params as any).id);
     const info = await getDomainWithAccount(id, req.user);

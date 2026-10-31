@@ -60,16 +60,21 @@ export function scopesJson(scopes: string[]): string {
 }
 
 export function parseScopes(value: any): string[] {
-  if (Array.isArray(value)) return normalizeScopes(value);
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return normalizeScopes(parsed);
-    } catch {
-      return normalizeScopes(value);
+  try {
+    if (Array.isArray(value)) return normalizeScopes(value);
+    if (typeof value === 'string') {
+      try {
+        const parsed = JSON.parse(value);
+        return normalizeScopes(parsed);
+      } catch {
+        return normalizeScopes(value);
+      }
     }
+  } catch {
+    // 存储值损坏时 fail-closed，避免异常作用域退化为全权限。
+    return [];
   }
-  return ['*'];
+  return [];
 }
 
 export function moduleForPath(method: string, rawPath: string): string {
@@ -119,7 +124,9 @@ export function isReadMethod(method: string): boolean {
 }
 
 export function scopeAllows(scopes: string[], method: string, path: string): boolean {
-  const list = scopes.length ? scopes : ['*'];
+  // 空作用域按 fail-closed 处理：只有显式 '*' 才代表全权限。
+  const list = scopes;
+  if (!list.length) return false;
   if (list.includes('*')) return true;
   const write = !isReadMethod(method);
   if (list.includes(write ? 'write' : 'read')) return true;

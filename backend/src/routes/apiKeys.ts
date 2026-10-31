@@ -18,6 +18,10 @@ function isAdmin(user: any): boolean {
   return Number(user?.level || 0) >= 2;
 }
 
+function isSuper(user: any): boolean {
+  return Number(user?.is_super || 0) === 1;
+}
+
 function fmtDateOnly(value: any): string | null {
   if (value === undefined) return undefined as any;
   if (value === null || value === '') return null;
@@ -35,7 +39,22 @@ async function targetUid(req: any, input: any): Promise<number | null> {
   if (!requested || requested === self) return self;
   if (!isAdmin(req.user)) return null;
   const user = await findUserById(requested);
-  return user ? requested : null;
+  if (!user) return null;
+  // 二级管理员只能管理普通用户的 Key，不能把目标指向其他管理员或超级管理员，
+  // 否则可通过创建/轮换目标账号的 Key 继承对方权限。
+  if (!isSuper(req.user) && (Number(user.is_super || 0) === 1 || Number(user.level || 0) >= 2)) return null;
+  return requested;
+}
+
+/** 非超级管理员不得操作其他管理员/超级管理员的 Key，防止轮换后拿到更高权限的明文 Key。 */
+async function canManageKey(req: any, row: any): Promise<boolean> {
+  if (!row) return false;
+  if (Number(row.uid) === Number(req.user?.uid || 0)) return true;
+  if (!isAdmin(req.user)) return false;
+  if (isSuper(req.user)) return true;
+  const owner = await findUserById(Number(row.uid));
+  if (!owner) return false;
+  return Number(owner.is_super || 0) !== 1 && Number(owner.level || 0) < 2;
 }
 
 async function requireWriteReauth(req: any): Promise<string | null> {
@@ -128,7 +147,7 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
     if (!Number.isInteger(id) || id <= 0) return { code: -1, msg: '参数错误' };
     const row: any = await queryOne(`SELECT * FROM ${table('api_key')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: 'API Key 不存在' };
-    if (Number(row.uid) !== Number(req.user.uid) && !isAdmin(req.user)) return { code: -1, msg: '无权限' };
+    if (!(await canManageKey(req, row))) return { code: -1, msg: '无权限' };
     const pwErr = await requireWriteReauth(req);
     if (pwErr) return { code: -1, msg: pwErr };
     const sets: string[] = [];
@@ -179,7 +198,7 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT * FROM ${table('api_key')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: 'API Key 不存在' };
-    if (Number(row.uid) !== Number(req.user.uid) && !isAdmin(req.user)) return { code: -1, msg: '无权限' };
+    if (!(await canManageKey(req, row))) return { code: -1, msg: '无权限' };
     const pwErr = await requireWriteReauth(req);
     if (pwErr) return { code: -1, msg: pwErr };
     const key = generateApiKey();
@@ -241,7 +260,7 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT * FROM ${table('api_key')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: 'API Key 不存在' };
-    if (Number(row.uid) !== Number(req.user.uid) && !isAdmin(req.user)) return { code: -1, msg: '无权限' };
+    if (!(await canManageKey(req, row))) return { code: -1, msg: '无权限' };
     const pwErr = await requireWriteReauth(req);
     if (pwErr) return { code: -1, msg: pwErr };
     await query(`UPDATE ${table('api_key')} SET active = 0, revoked_at = NOW() WHERE id = ?`, [id]);

@@ -24,6 +24,13 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
 
   // 解析记录
   'POST /api/domains/:id/records': { module: 'record', action: 'record.create', targetType: 'record' },
+  'POST /api/record/add/:id': { module: 'record', action: 'record.create', targetType: 'record' },
+  'POST /api/record/update/:id': { module: 'record', action: 'record.update', targetType: 'record' },
+  'POST /api/record/delete/:id': { module: 'record', action: 'record.delete', targetType: 'record' },
+  'POST /api/record/status/:id': { module: 'record', action: 'record.status', targetType: 'record' },
+  'POST /api/record/remark/:id': { module: 'record', action: 'record.remark', targetType: 'record' },
+  'POST /api/record/batch/:id': { module: 'record', action: 'record.batch', targetType: 'record' },
+  'POST /api/record/data/:id': { module: 'record', action: 'record.list' },
   'PUT /api/domains/:id/records/:recordId': { module: 'record', action: 'record.update', targetType: 'record' },
   'DELETE /api/domains/:id/records/:recordId': { module: 'record', action: 'record.delete', targetType: 'record' },
   'POST /api/domains/:id/records/:recordId/status': { module: 'record', action: 'record.status', targetType: 'record' },
@@ -34,6 +41,8 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
 
   // 域名
   'POST /api/domains': { module: 'domain', action: 'domain.create', targetType: 'domain' },
+  'POST /api/domain': { module: 'domain', action: 'domain.legacyList' },
+  'POST /api/domain/:id': { module: 'domain', action: 'domain.legacyInfo', targetType: 'domain' },
   'PUT /api/domains/:id': { module: 'domain', action: 'domain.update', targetType: 'domain' },
   'DELETE /api/domains/:id': { module: 'domain', action: 'domain.delete', targetType: 'domain' },
   'POST /api/domains/batch-del': { module: 'domain', action: 'domain.batchDelete', targetType: 'domain' },
@@ -89,6 +98,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
 
   // 系统
   'POST /api/system/settings': { module: 'system', action: 'system.settings.update' },
+  'POST /api/cert/order': { module: 'cert', action: 'cert.order.legacyInfo', targetType: 'cert_order' },
   'POST /api/system/stat-cache-clear': { module: 'system', action: 'system.cache.clear' },
   'POST /api/system/stat-cache-refresh': { module: 'system', action: 'system.cache.refresh' },
   'POST /api/system/mailtest': { module: 'system', action: 'system.test.mail' },
