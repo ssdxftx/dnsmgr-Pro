@@ -10,6 +10,8 @@ export default {
     colType: 'Type',
     colRecords: 'Origins',
     colActions: 'Actions',
+    health: 'Health',
+    healthTitle: 'Origin health · {name}',
     name: 'Name',
     type: 'Type',
     records: 'Origins',

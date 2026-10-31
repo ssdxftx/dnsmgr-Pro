@@ -1,27 +1,12 @@
 name: Build and Push Docker Image
 
 # 触发策略：
-#   1) 推送到 main/master —— 自动比对「关于页版本号」（package.json 的 version）
-#      与仓库已有的 vX.Y.Z 标签：仅当版本号发生变更时才构建并推送镜像，
-#      标签与版本号一致；版本号未变则整条流水线跳过，不浪费构建资源。
-#   2) 推送 vX.Y.Z 标签 —— 立即构建，并校验标签与项目版本号一致。
-#   3) 手动触发 —— 可指定平台强制构建。
+#   仅推送版本标签 vX.Y.Z 时构建并推送镜像，并校验标签与项目版本号一致。
+#   main/master 分支推送不构建容器，避免日常提交消耗构建资源。
 on:
   push:
-    branches:
-      - main
-      - master
     tags:
       - 'v*'
-  workflow_dispatch:
-    inputs:
-      platforms:
-        description: '构建平台（默认仅 amd64；需要 arm64 时选择多架构）'
-        type: choice
-        default: linux/amd64
-        options:
-          - linux/amd64
-          - linux/amd64,linux/arm64
 
 env:
   IMAGE_NAME: dnsmgr-pro
@@ -44,9 +29,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-        with:
-          # 需要完整历史与标签，用于比对「版本号是否发生变化」
-          fetch-depth: 0
 
       # 解析项目版本号（= 关于页展示的版本号，来自 frontend/backend 的 package.json）
       - name: Resolve project version
@@ -63,72 +45,37 @@ jobs:
             exit 1
           fi
           echo "version=${PKG_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "short_sha=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           echo "项目版本号：${PKG_VERSION}"
 
-      # 判定本次是否需要构建：核心是「关于页版本号相比上一次提交是否发生变化」
-      # 判定依据为提交历史（上一提交的 package.json 版本号），不依赖标签到达顺序，
-      # 因此 release.mjs 同时推送分支与标签时，两条流水线的判定结果稳定一致。
-      - name: Decide whether to build
+      # 仅版本标签会进入构建；同时校验标签与项目版本号一致，防止误发错版本
+      - name: Validate release tag
         id: gate
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::版本号不合法，拒绝构建"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" ]]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::当前不是版本标签，跳过镜像构建"
+            exit 0
+          fi
+
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [[ ! "${TAG_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::标签 ${GITHUB_REF_NAME} 不是 x.y.z 版本号，拒绝构建"
+            exit 1
+          fi
+          if [[ "${TAG_VERSION}" != "${VERSION}" ]]; then
+            echo "::error::标签 ${GITHUB_REF_NAME} 与项目版本号 ${VERSION} 不一致，请使用 scripts/release.mjs 发布"
             exit 1
           fi
 
-          # 标签推送：直接构建，并校验标签与版本号一致
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG_VERSION="${GITHUB_REF_NAME#v}"
-            if [[ "${TAG_VERSION}" != "${VERSION}" ]]; then
-              echo "::error::标签 ${GITHUB_REF_NAME} 与项目版本号 ${VERSION} 不一致，请使用 scripts/release.mjs 发布"
-              exit 1
-            fi
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "原因：推送了发布标签 ${GITHUB_REF_NAME}，构建正式镜像"
-            exit 0
-          fi
-
-          # 手动触发：直接构建
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "原因：手动触发，强制构建"
-            exit 0
-          fi
-
-          # 分支推送：比对本次提交与上一提交的版本号，仅当版本号发生变化时才构建
-          PREV_VERSION=""
-          if git rev-parse -q --verify HEAD~1 >/dev/null; then
-            PREV_VERSION="$(git show HEAD~1:backend/package.json 2>/dev/null | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{console.log(JSON.parse(s).version||'')}catch{console.log('')}})")"
-          fi
-
-          if [[ "${PREV_VERSION}" == "${VERSION}" ]]; then
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            echo "原因：版本号仍为 ${VERSION}（上一提交为 ${PREV_VERSION:-无}），未发生变化，跳过镜像构建"
-            echo "::notice::关于页版本号未变更（${VERSION}），跳过镜像构建；仅当版本号变更时才构建推送"
-          else
-            echo "build=true" >> "$GITHUB_OUTPUT"
-            echo "is_release=true" >> "$GITHUB_OUTPUT"
-            echo "原因：版本号由 ${PREV_VERSION:-无} 变更为 ${VERSION}，开始构建对应版本镜像"
-          fi
+          echo "build=true" >> "$GITHUB_OUTPUT"
+          echo "原因：推送了版本标签 ${GITHUB_REF_NAME}，构建正式镜像"
 
       - name: Resolve build platforms
         id: platforms
         if: steps.gate.outputs.build == 'true'
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
-            echo "platforms=${{ inputs.platforms }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Set up QEMU
-        if: steps.gate.outputs.build == 'true' && contains(steps.platforms.outputs.platforms, 'arm64')
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        run: echo "platforms=${RELEASE_PLATFORMS}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         if: steps.gate.outputs.build == 'true'

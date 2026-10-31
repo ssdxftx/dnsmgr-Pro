@@ -10,6 +10,8 @@ export default {
     colType: '类型',
     colRecords: '源站记录',
     colActions: '操作',
+    health: '健康',
+    healthTitle: '源站健康状态 · {name}',
     name: '名称',
     type: '类型',
     records: '源站记录',

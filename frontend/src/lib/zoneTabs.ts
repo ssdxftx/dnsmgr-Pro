@@ -107,10 +107,16 @@ export const ESA_ZONE_TABS: ZoneTabDef[] = [
 
 export const EO_ZONE_TABS: ZoneTabDef[] = [
   { key: 'overview', labelKey: 'cdnZoneSetting.tabOverview' },
+  { key: 'billing', labelKey: 'cdnZoneSetting.tabBilling' },
   { key: 'domains', labelKey: 'cdnZoneSetting.tabDomains' },
   { key: 'origin', labelKey: 'cdnZoneSetting.tabOrigin' },
   { key: 'rules', labelKey: 'cdnZoneSetting.tabRules' },
   { key: 'security', labelKey: 'cdnZoneSetting.tabSecurity' },
+  { key: 'versions', labelKey: 'cdnZoneSetting.tabVersions' },
+  { key: 'edge', labelKey: 'cdnZoneSetting.tabEdge' },
+  { key: 'multipath', labelKey: 'cdnZoneSetting.tabMultiPath' },
+  { key: 'inference', labelKey: 'cdnZoneSetting.tabInference' },
+  { key: 'media', labelKey: 'cdnZoneSetting.tabMedia' },
   { key: 'l4', labelKey: 'cdnZoneSetting.tabL4' },
   { key: 'tasks', labelKey: 'cdnZoneSetting.tabTasks' },
   { key: 'global', labelKey: 'cdnZoneSetting.tabGlobal' },

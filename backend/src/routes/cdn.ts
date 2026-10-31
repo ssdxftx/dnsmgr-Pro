@@ -595,8 +595,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
         zone_name: z.zoneName || '',
         domain_count: loc ? Number(loc.domain_count) : 0,
         domains: loc ? String(loc.domains || '').split(',').filter(Boolean) : [],
+        type: z.type || '',
         status: z.status,
         area: z.area,
+        planId: z.planId || '',
+        planName: z.planName || '',
+        planExpireTime: z.planExpireTime || '',
         paused: z.paused === true,
         identificationStatus: z.identificationStatus,
         ownershipVerified: z.ownershipVerified === true || !!verifiedMap[`${aid}:${String(z.zoneId)}`],
@@ -781,6 +785,26 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: paused ? '站点已暂停' : '站点已启用' };
   });
 
+  // 为未绑定套餐的站点绑定套餐
+  app.post('/api/cdn/accounts/:aid/sites/bind-plan', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const planId = String(b.planId || '').trim();
+    if (!zoneId || !planId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.bindZoneToPlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐绑定' };
+    if (!(await provider.bindZoneToPlan(zoneId, planId))) return { code: -1, msg: '绑定套餐失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `站点绑定套餐 ${zoneId} -> ${planId}`,
+      detail: { aid, zoneId, planId },
+    });
+    return { code: 0, msg: '套餐绑定成功' };
+  });
+
   // 站点 NS 列表
   app.get('/api/cdn/accounts/:aid/sites/:zoneId/ns', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
@@ -811,6 +835,23 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider) return { code: -1, msg: '账户不存在' };
+    // EO ModifyZone：接入方式 / 区域 / 同名站点标识 / 自定义 NS
+    if (
+      typeof provider.modifyZone === 'function' &&
+      (b.type !== undefined || b.area !== undefined || b.aliasZoneName !== undefined || b.vanityNs !== undefined)
+    ) {
+      if (!(await provider.modifyZone(zoneId, { type: b.type, area: b.area, aliasZoneName: b.aliasZoneName, vanityNs: b.vanityNs }))) {
+        return { code: -1, msg: '站点属性更新失败，' + provider.getError() };
+      }
+      audit(req, {
+        targetType: 'cdn_zone',
+        targetId: zoneId,
+        targetName: zoneId,
+        summary: `修改站点属性 ${zoneId}`,
+        detail: { aid, zoneId, type: b.type, area: b.area, aliasZoneName: b.aliasZoneName, vanityNs: b.vanityNs },
+      });
+      return { code: 0, msg: '更新成功' };
+    }
     let changed = false;
     if (b.accessType && typeof provider.updateSiteAccessType === 'function') {
       if (!(await provider.updateSiteAccessType(zoneId, String(b.accessType)))) return { code: -1, msg: '接入类型更新失败，' + provider.getError() };
@@ -836,6 +877,1052 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
+  // 站点配置导出 / 导入 / 导入结果
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/config/export', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const types = String(req.query.types || '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.exportZoneConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持配置导出' };
+    const content = await provider.exportZoneConfig(zoneId, types);
+    if (content === false) return { code: -1, msg: '导出配置失败，' + provider.getError() };
+    return { code: 0, data: { content, types } };
+  });
+
+  app.post('/api/cdn/accounts/:aid/sites/:zoneId/config/import', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const content = String((req.body || {}).content || '');
+    if (!zoneId || !content.trim()) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.importZoneConfig !== 'function') return { code: -1, msg: '该 CDN 类型不支持配置导入' };
+    const taskId = await provider.importZoneConfig(zoneId, content);
+    if (taskId === false) return { code: -1, msg: '导入配置失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `导入站点配置 ${zoneId}`,
+      detail: { aid, zoneId, taskId, contentLength: content.length },
+    });
+    return { code: 0, msg: '导入任务已提交', data: { taskId } };
+  });
+
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/config/import/:taskId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const taskId = String((req.params as any).taskId || '').trim();
+    if (!zoneId || !taskId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getZoneConfigImportResult !== 'function') return { code: -1, msg: '该 CDN 类型不支持导入结果查询' };
+    const data = await provider.getZoneConfigImportResult(zoneId, taskId);
+    if (data === false) return { code: -1, msg: '获取导入结果失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  // 站点级自定义变量
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/custom-variables', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getZoneCustomVariables !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点自定义变量' };
+    const data = await provider.getZoneCustomVariables(zoneId);
+    if (data === false) return { code: -1, msg: '获取自定义变量失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/sites/:zoneId/custom-variables', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const b = req.body || {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setZoneCustomVariables !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点自定义变量' };
+    if (!(await provider.setZoneCustomVariables(zoneId, {
+      CustomVariables: Array.isArray(b.CustomVariables) ? b.CustomVariables : [],
+      CustomVariableOperations: Array.isArray(b.CustomVariableOperations) ? b.CustomVariableOperations : [],
+    }))) {
+      return { code: -1, msg: '保存自定义变量失败，' + provider.getError() };
+    }
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `修改站点自定义变量 ${zoneId}`,
+      detail: { aid, zoneId, variables: Array.isArray(b.CustomVariables) ? b.CustomVariables.length : 0 },
+    });
+    return { code: 0, msg: '保存成功' };
+  });
+
+  // ===== 边缘函数 =====
+  app.get('/api/cdn/accounts/:aid/functions', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listFunctions !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘函数' };
+    const data = await provider.listFunctions(zoneId);
+    if (data === false) return { code: -1, msg: '获取边缘函数失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/functions', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createFunction !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘函数' };
+    const functionId = await provider.createFunction(zoneId, params);
+    if (functionId === false) return { code: -1, msg: '创建边缘函数失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `创建边缘函数 ${params.Name || functionId}（${zoneId}）`, detail: { aid, zoneId, functionId } });
+    return { code: 0, msg: '创建成功', data: { functionId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/functions/:functionId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateFunction !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘函数' };
+    if (!(await provider.updateFunction(zoneId, functionId, params))) return { code: -1, msg: '修改边缘函数失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `修改边缘函数 ${functionId}（${zoneId}）`, detail: { aid, zoneId, functionId } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/functions/:functionId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteFunction !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘函数' };
+    if (!(await provider.deleteFunction(zoneId, functionId))) return { code: -1, msg: '删除边缘函数失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `删除边缘函数 ${functionId}（${zoneId}）`, detail: { aid, zoneId, functionId } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/functions/:functionId/runtime', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getFunctionRuntime !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数运行环境' };
+    const data = await provider.getFunctionRuntime(zoneId, functionId);
+    if (data === false) return { code: -1, msg: '获取函数运行环境失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/functions/:functionId/runtime', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.handleFunctionRuntime !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数运行环境' };
+    if (!(await provider.handleFunctionRuntime(zoneId, functionId, params))) return { code: -1, msg: '修改函数运行环境失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `修改函数运行环境 ${functionId}（${zoneId}）`, detail: { aid, zoneId, functionId, operation: params.Operation } });
+    return { code: 0, msg: '操作成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/functions/:functionId/replicas', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listFunctionReplicas !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数副本' };
+    const r = await provider.listFunctionReplicas(zoneId, functionId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取函数副本失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/functions/:functionId/replicas', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createFunctionReplica !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数副本' };
+    if (!(await provider.createFunctionReplica(zoneId, functionId, params))) return { code: -1, msg: '创建函数副本失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `创建函数副本 ${params.ReplicaName || ''}（${functionId}）`, detail: { aid, zoneId, functionId, replicaName: params.ReplicaName } });
+    return { code: 0, msg: '创建成功' };
+  });
+
+  app.put('/api/cdn/accounts/:aid/functions/:functionId/replicas/:replicaName', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const replicaName = decodeURIComponent(String((req.params as any).replicaName || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = { ...(b.params && typeof b.params === 'object' ? b.params : {}), ReplicaName: replicaName };
+    if (!zoneId || !functionId || !replicaName) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateFunctionReplica !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数副本' };
+    if (!(await provider.updateFunctionReplica(zoneId, functionId, params))) return { code: -1, msg: '修改函数副本失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `修改函数副本 ${replicaName}（${functionId}）`, detail: { aid, zoneId, functionId, replicaName } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/functions/:functionId/replicas', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const names = (Array.isArray(b.replicaNames) ? b.replicaNames : []).map((x: any) => String(x)).filter(Boolean);
+    if (!zoneId || !functionId || !names.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteFunctionReplicas !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数副本' };
+    if (!(await provider.deleteFunctionReplicas(zoneId, functionId, names))) return { code: -1, msg: '删除函数副本失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `删除函数副本 ${names.length} 个（${functionId}）`, detail: { aid, zoneId, functionId, names } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/functions/:functionId/bindings', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listFunctionBindings !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数组件绑定' };
+    const data = await provider.listFunctionBindings(zoneId, functionId);
+    if (data === false) return { code: -1, msg: '获取函数绑定失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/functions/:functionId/bindings', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const functionId = String((req.params as any).functionId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.modifyFunctionBindings !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数组件绑定' };
+    if (!(await provider.modifyFunctionBindings(zoneId, functionId, params))) return { code: -1, msg: '修改函数绑定失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: functionId, summary: `修改函数组件绑定 ${functionId}（${zoneId}）`, detail: { aid, zoneId, functionId, operation: params.Operation } });
+    return { code: 0, msg: '操作成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/function-rules', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listFunctionRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数触发规则' };
+    const data = await provider.listFunctionRules(zoneId);
+    if (data === false) return { code: -1, msg: '获取函数触发规则失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/function-rules', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createFunctionRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数触发规则' };
+    const ruleId = await provider.createFunctionRule(zoneId, params);
+    if (ruleId === false) return { code: -1, msg: '创建函数触发规则失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: ruleId, summary: `创建函数触发规则 ${ruleId}（${zoneId}）`, detail: { aid, zoneId, ruleId } });
+    return { code: 0, msg: '创建成功', data: { ruleId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/function-rules/:ruleId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const ruleId = String((req.params as any).ruleId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !ruleId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateFunctionRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数触发规则' };
+    if (!(await provider.updateFunctionRule(zoneId, ruleId, params))) return { code: -1, msg: '修改函数触发规则失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: ruleId, summary: `修改函数触发规则 ${ruleId}（${zoneId}）`, detail: { aid, zoneId, ruleId } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/function-rules', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const ruleIds = (Array.isArray(b.ruleIds) ? b.ruleIds : []).map((x: any) => String(x)).filter(Boolean);
+    if (!zoneId || !ruleIds.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteFunctionRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数触发规则' };
+    if (!(await provider.deleteFunctionRules(zoneId, ruleIds))) return { code: -1, msg: '删除函数触发规则失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: zoneId, summary: `删除函数触发规则 ${ruleIds.length} 条（${zoneId}）`, detail: { aid, zoneId, ruleIds } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== EdgeKV =====
+  app.get('/api/cdn/accounts/:aid/kv/namespaces', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listKvNamespaces !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    const r = await provider.listKvNamespaces(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取 KV 命名空间失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/kv/namespaces', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const namespace = String(b.namespace || '').trim();
+    if (!zoneId || !namespace) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createKvNamespace !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    if (!(await provider.createKvNamespace(zoneId, namespace, b.remark ? String(b.remark) : undefined))) return { code: -1, msg: '创建 KV 命名空间失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: namespace, summary: `创建 KV 命名空间 ${namespace}（${zoneId}）`, detail: { aid, zoneId, namespace } });
+    return { code: 0, msg: '创建成功' };
+  });
+
+  app.put('/api/cdn/accounts/:aid/kv/namespaces/:namespace', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const namespace = decodeURIComponent(String((req.params as any).namespace || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !namespace) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateKvNamespace !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    if (!(await provider.updateKvNamespace(zoneId, namespace, b.remark !== undefined ? String(b.remark) : undefined))) return { code: -1, msg: '修改 KV 命名空间失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: namespace, summary: `修改 KV 命名空间 ${namespace}（${zoneId}）`, detail: { aid, zoneId, namespace } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/kv/namespaces/:namespace', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const namespace = decodeURIComponent(String((req.params as any).namespace || ''));
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !namespace) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteKvNamespace !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    if (!(await provider.deleteKvNamespace(zoneId, namespace))) return { code: -1, msg: '删除 KV 命名空间失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: namespace, summary: `删除 KV 命名空间 ${namespace}（${zoneId}）`, detail: { aid, zoneId, namespace } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/kv/namespaces/:namespace/keys', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const namespace = decodeURIComponent(String((req.params as any).namespace || ''));
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !namespace) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.kvList !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    const r = await provider.kvList(zoneId, namespace, String(req.query.prefix || ''), String(req.query.cursor || ''), Number(req.query.limit || 100));
+    if (r === false) return { code: -1, msg: '获取 KV 键列表失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/kv/namespaces/:namespace/get', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const namespace = decodeURIComponent(String((req.params as any).namespace || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const keys = Array.isArray(b.keys) ? b.keys.map((x: any) => String(x)) : [];
+    if (!zoneId || !namespace || !keys.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.kvGet !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    const r = await provider.kvGet(zoneId, namespace, keys);
+    if (r === false) return { code: -1, msg: '读取 KV 失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/kv/namespaces/:namespace/put', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const namespace = decodeURIComponent(String((req.params as any).namespace || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !namespace || !b.key || b.value === undefined) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.kvPut !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    if (!(await provider.kvPut(zoneId, namespace, String(b.key), String(b.value), b.expiration ? Number(b.expiration) : undefined, b.ttl ? Number(b.ttl) : undefined))) return { code: -1, msg: '写入 KV 失败，' + provider.getError() };
+    return { code: 0, msg: '写入成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/kv/namespaces/:namespace/delete', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const namespace = decodeURIComponent(String((req.params as any).namespace || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const keys = Array.isArray(b.keys) ? b.keys.map((x: any) => String(x)) : [];
+    if (!zoneId || !namespace || !keys.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.kvDelete !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
+    if (!(await provider.kvDelete(zoneId, namespace, keys))) return { code: -1, msg: '删除 KV 失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: namespace, summary: `删除 KV 键 ${keys.length} 个（${namespace}）`, detail: { aid, zoneId, namespace, keys } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 版本管理 =====
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/environments', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listEnvironments !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
+    const data = await provider.listEnvironments(zoneId);
+    if (data === false) return { code: -1, msg: '获取环境信息失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/versions', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const groupId = String(req.query.groupId || '').trim();
+    if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listConfigGroupVersions !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
+    const r = await provider.listConfigGroupVersions(zoneId, groupId, Number(req.query.page || 1), Number(req.query.size || 50));
+    if (r === false) return { code: -1, msg: '获取版本列表失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/sites/:zoneId/versions', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const params = (req.body || {}).params && typeof (req.body || {}).params === 'object' ? req.body.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createConfigGroupVersion !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
+    const versionId = await provider.createConfigGroupVersion(zoneId, params);
+    if (versionId === false) return { code: -1, msg: '创建版本失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(params.GroupId || versionId),
+      summary: `创建配置组版本 ${versionId}（${zoneId}）`,
+      detail: { aid, zoneId, versionId, groupId: params.GroupId },
+    });
+    return { code: 0, msg: '创建成功', data: { versionId } };
+  });
+
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/versions/history', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const envId = String(req.query.envId || '').trim();
+    if (!zoneId || !envId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getDeployHistory !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
+    const r = await provider.getDeployHistory(zoneId, envId);
+    if (r === false) return { code: -1, msg: '获取发布历史失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/sites/:zoneId/versions/deploy', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const params = (req.body || {}).params && typeof (req.body || {}).params === 'object' ? req.body.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deployConfigGroupVersion !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
+    const recordId = await provider.deployConfigGroupVersion(zoneId, params);
+    if (recordId === false) return { code: -1, msg: '发布版本失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: recordId,
+      summary: `发布配置组版本（${zoneId} -> ${params.EnvId || '-'}）`,
+      detail: { aid, zoneId, recordId, envId: params.EnvId },
+    });
+    return { code: 0, msg: '发布任务已提交', data: { recordId } };
+  });
+
+  app.get('/api/cdn/accounts/:aid/sites/:zoneId/versions/:versionId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const versionId = String((req.params as any).versionId || '').trim();
+    if (!zoneId || !versionId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getConfigGroupVersionDetail !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
+    const data = await provider.getConfigGroupVersionDetail(zoneId, versionId);
+    if (data === false) return { code: -1, msg: '获取版本详情失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/sites/:zoneId/work-mode', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const infos = Array.isArray((req.body || {}).infos) ? req.body.infos : [];
+    if (!zoneId || !infos.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setZoneWorkMode !== 'function') return { code: -1, msg: '该 CDN 类型不支持工作模式修改' };
+    if (!(await provider.setZoneWorkMode(zoneId, infos))) return { code: -1, msg: '修改工作模式失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `修改站点工作模式（${zoneId}）`,
+      detail: { aid, zoneId, infos },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  // ===== 多通道安全网关 =====
+  app.get('/api/cdn/accounts/:aid/multipath/regions', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listMultiPathGatewayRegions !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const data = await provider.listMultiPathGatewayRegions(zoneId);
+    if (data === false) return { code: -1, msg: '获取网关地域失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.get('/api/cdn/accounts/:aid/multipath/gateways', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listMultiPathGateways !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const r = await provider.listMultiPathGateways(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取网关列表失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/multipath/gateways', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createMultiPathGateway !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const gatewayId = await provider.createMultiPathGateway(zoneId, params);
+    if (gatewayId === false) return { code: -1, msg: '创建网关失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `创建多通道安全网关 ${gatewayId}（${zoneId}）`, detail: { aid, zoneId, gatewayId, params } });
+    return { code: 0, msg: '创建成功', data: { gatewayId } };
+  });
+
+  app.get('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    if (!zoneId || !gatewayId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getMultiPathGateway !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const data = await provider.getMultiPathGateway(zoneId, gatewayId);
+    if (data === false) return { code: -1, msg: '获取网关详情失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.put('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !gatewayId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateMultiPathGateway !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.updateMultiPathGateway(zoneId, gatewayId, params))) return { code: -1, msg: '修改网关失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `修改多通道安全网关 ${gatewayId}（${zoneId}）`, detail: { aid, zoneId, gatewayId, params } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    if (!zoneId || !gatewayId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteMultiPathGateway !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.deleteMultiPathGateway(zoneId, gatewayId))) return { code: -1, msg: '删除网关失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `删除多通道安全网关 ${gatewayId}（${zoneId}）`, detail: { aid, zoneId, gatewayId } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/status', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const status = String(b.GatewayStatus || b.status || '').trim();
+    if (!zoneId || !gatewayId || !status) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setMultiPathGatewayStatus !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.setMultiPathGatewayStatus(zoneId, gatewayId, status))) return { code: -1, msg: '修改网关状态失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `修改网关状态 ${gatewayId} -> ${status}（${zoneId}）`, detail: { aid, zoneId, gatewayId, status } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/lines', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !gatewayId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createMultiPathGatewayLine !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const lineId = await provider.createMultiPathGatewayLine(zoneId, gatewayId, params);
+    if (lineId === false) return { code: -1, msg: '创建线路失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `创建网关线路 ${lineId}（${gatewayId}）`, detail: { aid, zoneId, gatewayId, lineId, params } });
+    return { code: 0, msg: '创建成功', data: { lineId } };
+  });
+
+  app.get('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/lines/:lineId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const lineId = String((req.params as any).lineId || '').trim();
+    if (!zoneId || !gatewayId || !lineId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getMultiPathGatewayLine !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const data = await provider.getMultiPathGatewayLine(zoneId, gatewayId, lineId);
+    if (data === false) return { code: -1, msg: '获取线路失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.put('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/lines/:lineId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const lineId = String((req.params as any).lineId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !gatewayId || !lineId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateMultiPathGatewayLine !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.updateMultiPathGatewayLine(zoneId, gatewayId, lineId, params))) return { code: -1, msg: '修改线路失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `修改网关线路 ${lineId}（${gatewayId}）`, detail: { aid, zoneId, gatewayId, lineId, params } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/lines/:lineId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const lineId = String((req.params as any).lineId || '').trim();
+    if (!zoneId || !gatewayId || !lineId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteMultiPathGatewayLine !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.deleteMultiPathGatewayLine(zoneId, gatewayId, lineId))) return { code: -1, msg: '删除线路失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `删除网关线路 ${lineId}（${gatewayId}）`, detail: { aid, zoneId, gatewayId, lineId } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/origin-acl', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    if (!zoneId || !gatewayId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getMultiPathGatewayOriginAcl !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const data = await provider.getMultiPathGatewayOriginAcl(zoneId, gatewayId);
+    if (data === false) return { code: -1, msg: '获取回源 ACL 失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/multipath/gateways/:gatewayId/origin-acl/confirm', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const gatewayId = String((req.params as any).gatewayId || '').trim();
+    const version = Number(b.OriginACLVersion || b.version || 0);
+    if (!zoneId || !gatewayId || !version) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.confirmMultiPathGatewayOriginAcl !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.confirmMultiPathGatewayOriginAcl(zoneId, gatewayId, version))) return { code: -1, msg: '确认回源 ACL 失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: gatewayId, summary: `确认网关回源 ACL 版本 ${version}（${gatewayId}）`, detail: { aid, zoneId, gatewayId, version } });
+    return { code: 0, msg: '确认成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/multipath/secret-key', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getMultiPathGatewaySecretKey !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const data = await provider.getMultiPathGatewaySecretKey(zoneId);
+    if (data === false) return { code: -1, msg: '获取接入密钥失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/multipath/secret-key', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createMultiPathGatewaySecretKey !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    const secretKey = b.SecretKey ? String(b.SecretKey) : (b.secretKey ? String(b.secretKey) : undefined);
+    if (!(await provider.createMultiPathGatewaySecretKey(zoneId, secretKey))) return { code: -1, msg: '创建接入密钥失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: zoneId, summary: `创建网关接入密钥（${zoneId}）`, detail: { aid, zoneId } });
+    return { code: 0, msg: '创建成功' };
+  });
+
+  app.put('/api/cdn/accounts/:aid/multipath/secret-key', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const secretKey = String(b.SecretKey || b.secretKey || '').trim();
+    if (!zoneId || !secretKey) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateMultiPathGatewaySecretKey !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.updateMultiPathGatewaySecretKey(zoneId, secretKey))) return { code: -1, msg: '更新接入密钥失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: zoneId, summary: `更新网关接入密钥（${zoneId}）`, detail: { aid, zoneId } });
+    return { code: 0, msg: '更新成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/multipath/secret-key/refresh', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.body || {}).zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.refreshMultiPathGatewaySecretKey !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
+    if (!(await provider.refreshMultiPathGatewaySecretKey(zoneId))) return { code: -1, msg: '刷新接入密钥失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: zoneId, summary: `刷新网关接入密钥（${zoneId}）`, detail: { aid, zoneId } });
+    return { code: 0, msg: '刷新成功' };
+  });
+
+  // ===== 边缘推理 =====
+  app.get('/api/cdn/accounts/:aid/inference/services', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listInferenceServices !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const r = await provider.listInferenceServices(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取推理服务失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/inference/services', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createInferenceService !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const serviceId = await provider.createInferenceService(zoneId, params);
+    if (serviceId === false) return { code: -1, msg: '创建推理服务失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: serviceId, summary: `创建推理服务 ${serviceId}（${zoneId}）`, detail: { aid, zoneId, serviceId, params } });
+    return { code: 0, msg: '创建成功', data: { serviceId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/inference/services/:serviceId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const serviceId = String((req.params as any).serviceId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !serviceId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateInferenceService !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    if (!(await provider.updateInferenceService(zoneId, serviceId, params))) return { code: -1, msg: '修改推理服务失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: serviceId, summary: `修改推理服务 ${serviceId}（${zoneId}）`, detail: { aid, zoneId, serviceId, params } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/inference/services/:serviceId/operate', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const serviceId = String((req.params as any).serviceId || '').trim();
+    const operation = String(b.operation || '').trim();
+    if (!zoneId || !serviceId || !operation) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.operateInferenceService !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    if (!(await provider.operateInferenceService(zoneId, serviceId, operation))) return { code: -1, msg: '操作推理服务失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: serviceId, summary: `推理服务 ${serviceId} 操作 ${operation}（${zoneId}）`, detail: { aid, zoneId, serviceId, operation } });
+    return { code: 0, msg: '操作成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/inference/services/:serviceId/records', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const serviceId = String((req.params as any).serviceId || '').trim();
+    if (!zoneId || !serviceId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listInferenceDeploymentRecords !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const r = await provider.listInferenceDeploymentRecords(zoneId, serviceId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取部署记录失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/inference/services/:serviceId/records/:recordId/logs', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const serviceId = String((req.params as any).serviceId || '').trim();
+    const recordId = String((req.params as any).recordId || '').trim();
+    if (!zoneId || !serviceId || !recordId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getInferenceDeploymentLogs !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const r = await provider.getInferenceDeploymentLogs(zoneId, serviceId, recordId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取部署日志失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/inference/monitor', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getInferenceMonitorData !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const data = await provider.getInferenceMonitorData(zoneId, params);
+    if (data === false) return { code: -1, msg: '获取监控数据失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.get('/api/cdn/accounts/:aid/inference/tokens', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listInferenceApiTokens !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const r = await provider.listInferenceApiTokens(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取推理 Token 失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/inference/tokens', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const name = String(b.Name || b.name || '').trim();
+    if (!zoneId || !name) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createInferenceApiToken !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const data = await provider.createInferenceApiToken(zoneId, name);
+    if (data === false) return { code: -1, msg: '创建推理 Token 失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: name, summary: `创建推理 Token ${name}（${zoneId}）`, detail: { aid, zoneId, name, tokenId: data.TokenId } });
+    return { code: 0, msg: '创建成功', data };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/inference/tokens/:tokenId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const tokenId = String((req.params as any).tokenId || '').trim();
+    if (!zoneId || !tokenId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteInferenceApiToken !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    if (!(await provider.deleteInferenceApiToken(zoneId, tokenId))) return { code: -1, msg: '删除推理 Token 失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: tokenId, summary: `删除推理 Token ${tokenId}（${zoneId}）`, detail: { aid, zoneId, tokenId } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/inference/domains', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const serviceId = String(req.query.serviceId || '').trim();
+    if (!zoneId || !serviceId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listInferenceDomains !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const r = await provider.listInferenceDomains(zoneId, serviceId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取推理域名失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/inference/domains', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createInferenceDomain !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    if (!(await provider.createInferenceDomain(zoneId, params))) return { code: -1, msg: '创建推理域名失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: String(params.Domain || ''), summary: `创建推理域名 ${params.Domain || ''}（${zoneId}）`, detail: { aid, zoneId, params } });
+    return { code: 0, msg: '创建成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/inference/domains/operate', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.operateInferenceDomain !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    if (!(await provider.operateInferenceDomain(zoneId, params))) return { code: -1, msg: '操作推理域名失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: String(params.Domain || ''), summary: `推理域名 ${params.Domain || ''} 操作 ${params.Operation || ''}（${zoneId}）`, detail: { aid, zoneId, params } });
+    return { code: 0, msg: '操作成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/inference/hardware', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listInferenceHardwareSpecifications !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
+    const data = await provider.listInferenceHardwareSpecifications(zoneId);
+    if (data === false) return { code: -1, msg: '获取硬件规格失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  // ===== 即时转码模板 =====
+  app.get('/api/cdn/accounts/:aid/media/transcode-templates', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listJitTranscodeTemplates !== 'function') return { code: -1, msg: '该 CDN 类型不支持即时转码' };
+    const r = await provider.listJitTranscodeTemplates(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    if (r === false) return { code: -1, msg: '获取转码模板失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/media/transcode-templates', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createJitTranscodeTemplate !== 'function') return { code: -1, msg: '该 CDN 类型不支持即时转码' };
+    const templateId = await provider.createJitTranscodeTemplate(zoneId, params);
+    if (templateId === false) return { code: -1, msg: '创建转码模板失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: String(params.TemplateName || templateId), summary: `创建即时转码模板 ${templateId}（${zoneId}）`, detail: { aid, zoneId, templateId, params } });
+    return { code: 0, msg: '创建成功', data: { templateId } };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/media/transcode-templates', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const rawTemplateIds = Array.isArray(b.TemplateIds) ? b.TemplateIds : (Array.isArray(b.templateIds) ? b.templateIds : []);
+    const templateIds = rawTemplateIds.map((x: any) => String(x));
+    if (!zoneId || !templateIds.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteJitTranscodeTemplates !== 'function') return { code: -1, msg: '该 CDN 类型不支持即时转码' };
+    if (!(await provider.deleteJitTranscodeTemplates(zoneId, templateIds))) return { code: -1, msg: '删除转码模板失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: zoneId, summary: `删除即时转码模板 ${templateIds.length} 个（${zoneId}）`, detail: { aid, zoneId, templateIds } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 套餐与计费 =====
+  app.post('/api/cdn/accounts/:aid/billing/data', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    const provider: any = await cdnForZone(aid, zoneId || null);
+    if (!provider || typeof provider.getBillingData !== 'function') return { code: -1, msg: '该 CDN 类型不支持计费数据查询' };
+    if (!Array.isArray(params.ZoneIds) || !params.ZoneIds.length) params.ZoneIds = zoneId ? [zoneId] : ['*'];
+    const data = await provider.getBillingData(params);
+    if (data === false) return { code: -1, msg: '获取计费数据失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.get('/api/cdn/accounts/:aid/billing/available-plans', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.listAvailablePlans !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐查询' };
+    const data = await provider.listAvailablePlans();
+    if (data === false) return { code: -1, msg: '获取可购买套餐失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/billing/plans', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.createPlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐购买' };
+    const data = await provider.createPlan(params);
+    if (data === false) return { code: -1, msg: '套餐购买失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_account', targetId: String(aid), targetName: data.PlanId, summary: `购买 EO 套餐 ${data.PlanId}`, detail: { aid, params } });
+    return { code: 0, msg: '下单成功', data };
+  });
+
+  app.put('/api/cdn/accounts/:aid/billing/plans/:planId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const planId = String((req.params as any).planId || '').trim();
+    const b = req.body || {};
+    const renewFlag = b.RenewFlag && typeof b.RenewFlag === 'object' ? b.RenewFlag : (b.renewFlag && typeof b.renewFlag === 'object' ? b.renewFlag : {});
+    if (!planId || !Object.keys(renewFlag).length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.updatePlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐修改' };
+    if (!(await provider.updatePlan(planId, renewFlag))) return { code: -1, msg: '修改套餐失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_account', targetId: String(aid), targetName: planId, summary: `修改套餐配置 ${planId}`, detail: { aid, planId, renewFlag } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/billing/plans/:planId/renew', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const planId = String((req.params as any).planId || '').trim();
+    const b = req.body || {};
+    const period = Number(b.Period || b.period || 0);
+    if (!planId || !period) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.renewPlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐续费' };
+    const voucher = b.AutoUseVoucher || b.autoUseVoucher;
+    if (!(await provider.renewPlan(planId, period, voucher ? String(voucher) : undefined))) return { code: -1, msg: '套餐续费失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_account', targetId: String(aid), targetName: planId, summary: `套餐续费 ${planId} / ${period} 个月`, detail: { aid, planId, period } });
+    return { code: 0, msg: '续费成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/billing/plans/:planId/upgrade', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const planId = String((req.params as any).planId || '').trim();
+    const b = req.body || {};
+    const planType = String(b.PlanType || b.planType || '').trim();
+    if (!planId || !planType) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.upgradePlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐升级' };
+    const voucher = b.AutoUseVoucher || b.autoUseVoucher;
+    if (!(await provider.upgradePlan(planId, planType, voucher ? String(voucher) : undefined))) return { code: -1, msg: '套餐升级失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_account', targetId: String(aid), targetName: planId, summary: `套餐升级 ${planId} -> ${planType}`, detail: { aid, planId, planType } });
+    return { code: 0, msg: '升级成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/billing/plans/:planId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const planId = String((req.params as any).planId || '').trim();
+    if (!planId) return { code: -1, msg: '缺少 planId' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.destroyPlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐销毁' };
+    if (!(await provider.destroyPlan(planId))) return { code: -1, msg: '销毁套餐失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_account', targetId: String(aid), targetName: planId, summary: `销毁套餐 ${planId}`, detail: { aid, planId } });
+    return { code: 0, msg: '销毁成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/billing/plans/:planId/quota', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const planId = String((req.params as any).planId || '').trim();
+    const b = req.body || {};
+    const quotaType = String(b.QuotaType || b.quotaType || '').trim();
+    const quotaNumber = Number(b.QuotaNumber || b.quotaNumber || 0);
+    if (!planId || !quotaType || !quotaNumber) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.increasePlanQuota !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐配额增购' };
+    if (!(await provider.increasePlanQuota(planId, quotaType, quotaNumber))) return { code: -1, msg: '增购套餐配额失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_account', targetId: String(aid), targetName: planId, summary: `套餐配额增购 ${planId} / ${quotaType} +${quotaNumber}`, detail: { aid, planId, quotaType, quotaNumber } });
+    return { code: 0, msg: '增购成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/sites/:zoneId/billing/plan', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.params as any).zoneId || '').trim();
+    const planType = String((req.body || {}).PlanType || (req.body || {}).planType || '').trim();
+    if (!zoneId || !planType) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createPlanForZone !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点套餐购买' };
+    const data = await provider.createPlanForZone(zoneId, planType);
+    if (data === false) return { code: -1, msg: '站点套餐购买失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: planType, summary: `为站点购买套餐 ${planType}（${zoneId}）`, detail: { aid, zoneId, planType, data } });
+    return { code: 0, msg: '下单成功', data };
+  });
+
   // 删除站点
   app.delete('/api/cdn/accounts/:aid/sites/:zoneId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
@@ -844,6 +1931,239 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.deleteZone !== 'function') return { code: -1, msg: '该 CDN 类型不支持删除站点' };
     if (!(await provider.deleteZone(zoneId))) return { code: -1, msg: '删除失败，' + provider.getError() };
     return { code: 0, msg: '站点已删除' };
+  });
+
+  // ===== 共享 CNAME =====
+  app.get('/api/cdn/accounts/:aid/shared-cnames', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listSharedCnames !== 'function') return { code: -1, msg: '该 CDN 类型不支持共享 CNAME' };
+    const r = await provider.listSharedCnames(zoneId, Number(req.query.page || 1), Number(req.query.size || 50));
+    if (r === false) return { code: -1, msg: '获取共享 CNAME 失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/shared-cnames', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const prefix = String(b.prefix || '').trim();
+    if (!zoneId || !prefix) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createSharedCname !== 'function') return { code: -1, msg: '该 CDN 类型不支持共享 CNAME' };
+    const sharedCname = await provider.createSharedCname(zoneId, prefix, b.description ? String(b.description) : undefined);
+    if (sharedCname === false) return { code: -1, msg: '创建共享 CNAME 失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: sharedCname,
+      summary: `创建共享 CNAME ${sharedCname}（${zoneId}）`,
+      detail: { aid, zoneId, prefix },
+    });
+    return { code: 0, msg: '创建成功', data: { sharedCname } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/shared-cnames/:sharedCname', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const sharedCname = decodeURIComponent(String((req.params as any).sharedCname || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !sharedCname) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateSharedCname !== 'function') return { code: -1, msg: '该 CDN 类型不支持共享 CNAME' };
+    if (!(await provider.updateSharedCname(zoneId, sharedCname, b.description !== undefined ? String(b.description) : undefined))) {
+      return { code: -1, msg: '修改共享 CNAME 失败，' + provider.getError() };
+    }
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: sharedCname,
+      summary: `修改共享 CNAME ${sharedCname}（${zoneId}）`,
+      detail: { aid, zoneId, sharedCname, description: b.description },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/shared-cnames/bind', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const maps = Array.isArray(b.maps) ? b.maps : [];
+    if (!zoneId || !maps.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.bindSharedCname !== 'function') return { code: -1, msg: '该 CDN 类型不支持共享 CNAME 绑定' };
+    if (!(await provider.bindSharedCname(zoneId, String(b.bindType || 'bind'), maps))) {
+      return { code: -1, msg: '绑定操作失败，' + provider.getError() };
+    }
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(b.bindType || 'bind'),
+      summary: `${b.bindType === 'unbind' ? '解绑' : '绑定'}共享 CNAME（${zoneId}）`,
+      detail: { aid, zoneId, bindType: b.bindType, maps: maps.slice(0, 50) },
+    });
+    return { code: 0, msg: b.bindType === 'unbind' ? '解绑成功' : '绑定成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/shared-cnames/:sharedCname', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const sharedCname = decodeURIComponent(String((req.params as any).sharedCname || ''));
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !sharedCname) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteSharedCname !== 'function') return { code: -1, msg: '该 CDN 类型不支持共享 CNAME' };
+    if (!(await provider.deleteSharedCname(zoneId, sharedCname))) return { code: -1, msg: '删除共享 CNAME 失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: sharedCname,
+      summary: `删除共享 CNAME ${sharedCname}（${zoneId}）`,
+      detail: { aid, zoneId, sharedCname },
+    });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 别称域名 =====
+  app.get('/api/cdn/accounts/:aid/alias-domains', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listAliasDomains !== 'function') return { code: -1, msg: '该 CDN 类型不支持别称域名' };
+    const r = await provider.listAliasDomains(zoneId, Number(req.query.page || 1), Number(req.query.size || 50));
+    if (r === false) return { code: -1, msg: '获取别称域名失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/alias-domains', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !b.aliasName || !b.targetName) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createAliasDomain !== 'function') return { code: -1, msg: '该 CDN 类型不支持别称域名' };
+    if (!(await provider.createAliasDomain(zoneId, b))) return { code: -1, msg: '创建别称域名失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(b.aliasName),
+      summary: `创建别称域名 ${b.aliasName} -> ${b.targetName}（${zoneId}）`,
+      detail: { aid, zoneId, aliasName: b.aliasName, targetName: b.targetName, certType: b.certType },
+    });
+    return { code: 0, msg: '创建成功' };
+  });
+
+  app.put('/api/cdn/accounts/:aid/alias-domains/:aliasName', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const aliasName = decodeURIComponent(String((req.params as any).aliasName || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !aliasName || !b.targetName) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateAliasDomain !== 'function') return { code: -1, msg: '该 CDN 类型不支持别称域名' };
+    if (!(await provider.updateAliasDomain(zoneId, { ...b, aliasName }))) return { code: -1, msg: '修改别称域名失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: aliasName,
+      summary: `修改别称域名 ${aliasName}（${zoneId}）`,
+      detail: { aid, zoneId, aliasName, targetName: b.targetName },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/alias-domains/:aliasName/status', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const aliasName = decodeURIComponent(String((req.params as any).aliasName || ''));
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !aliasName) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setAliasDomainStatus !== 'function') return { code: -1, msg: '该 CDN 类型不支持别称域名状态修改' };
+    const paused = b.paused === true || b.paused === 'true' || b.paused === 1;
+    if (!(await provider.setAliasDomainStatus(zoneId, [aliasName], paused))) return { code: -1, msg: '修改状态失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: aliasName,
+      summary: `${paused ? '停用' : '启用'}别称域名 ${aliasName}（${zoneId}）`,
+      detail: { aid, zoneId, aliasName, paused },
+    });
+    return { code: 0, msg: paused ? '已停用' : '已启用' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/alias-domains/:aliasName', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const aliasName = decodeURIComponent(String((req.params as any).aliasName || ''));
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !aliasName) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteAliasDomain !== 'function') return { code: -1, msg: '该 CDN 类型不支持别称域名' };
+    if (!(await provider.deleteAliasDomain(zoneId, aliasName))) return { code: -1, msg: '删除别称域名失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: aliasName,
+      summary: `删除别称域名 ${aliasName}（${zoneId}）`,
+      detail: { aid, zoneId, aliasName },
+    });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 自定义响应页面 =====
+  app.get('/api/cdn/accounts/:aid/error-pages', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listCustomErrorPages !== 'function') return { code: -1, msg: '该 CDN 类型不支持自定义响应页面' };
+    const r = await provider.listCustomErrorPages(zoneId, Number(req.query.page || 1), Number(req.query.size || 50));
+    if (r === false) return { code: -1, msg: '获取自定义响应页面失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/error-pages', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !b.name || !b.contentType) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createCustomErrorPage !== 'function') return { code: -1, msg: '该 CDN 类型不支持自定义响应页面' };
+    const pageId = await provider.createCustomErrorPage(zoneId, b);
+    if (pageId === false) return { code: -1, msg: '创建自定义响应页面失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { pageId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/error-pages/:pageId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const pageId = String((req.params as any).pageId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId || !pageId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateCustomErrorPage !== 'function') return { code: -1, msg: '该 CDN 类型不支持自定义响应页面' };
+    if (!(await provider.updateCustomErrorPage(zoneId, pageId, b))) return { code: -1, msg: '修改自定义响应页面失败，' + provider.getError() };
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/error-pages/:pageId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const pageId = String((req.params as any).pageId || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !pageId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteCustomErrorPage !== 'function') return { code: -1, msg: '该 CDN 类型不支持自定义响应页面' };
+    if (!(await provider.deleteCustomErrorPage(zoneId, pageId))) return { code: -1, msg: '删除自定义响应页面失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: pageId,
+      summary: `删除自定义响应页面 ${pageId}（${zoneId}）`,
+      detail: { aid, zoneId, pageId },
+    });
+    return { code: 0, msg: '删除成功' };
   });
 
   // ===== 源站组 =====
@@ -957,6 +2277,18 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.deleteLoadBalancer !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
     if (!(await provider.deleteLoadBalancer(zoneId, instanceId))) return { code: -1, msg: '删除失败，' + provider.getError() };
     return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/load-balancers/:instanceId/health', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const instanceId = String((req.params as any).instanceId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !instanceId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getLoadBalancerHealth !== 'function') return { code: -1, msg: '该 CDN 类型不支持健康状态查询' };
+    const list = await provider.getLoadBalancerHealth(zoneId, instanceId);
+    if (list === false) return { code: -1, msg: '获取健康状态失败，' + provider.getError() };
+    return { code: 0, data: list };
   });
 
   // ===== 规则引擎（EO L7 规则）=====
@@ -1100,6 +2432,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
   // 规则字段元数据：驱动可视化规则编辑器
   //   ESA：由官方 OpenAPI 元数据生成的静态字段表（15 类 × List/Create/Update/Delete 全支持）
   //   EO ：透传 DescribeRulesSetting，返回可用动作及其属性定义（Type=CHOICE/TOGGLE/OBJECT/...）
+  app.get('/api/cdn/accounts/:aid/rule-actions', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, String(req.query.zoneId || '').trim() || null);
+    if (!provider || typeof provider.getAvailableRuleActions !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则动作元数据' };
+    const data = await provider.getAvailableRuleActions();
+    if (data === false) return { code: -1, msg: '获取规则动作失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
   app.get('/api/cdn/accounts/:aid/rule-schema', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const acct: any = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
@@ -1278,6 +2619,398 @@ export default async function cdnRoutes(app: FastifyInstance) {
   securityConfigRoute('waf', 'getWafInfo', 'setWafInfo');
   securityConfigRoute('origin-protection', 'getOriginProtection', 'setOriginProtection');
 
+  app.get('/api/cdn/accounts/:aid/security/origin-protection/families', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getOriginAclFamilies !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站防护控制域查询' };
+    const data = await provider.getOriginAclFamilies(zoneId);
+    if (data === false) return { code: -1, msg: '获取控制域失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/origin-protection/confirm', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String((req.body || {}).zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.confirmOriginAclUpdate !== 'function') return { code: -1, msg: '该 CDN 类型不支持确认回源 IP 更新' };
+    if (!(await provider.confirmOriginAclUpdate(zoneId))) return { code: -1, msg: '确认失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: zoneId,
+      summary: `确认源站防护回源 IP 更新（${zoneId}）`,
+      detail: { aid, zoneId },
+    });
+    return { code: 0, msg: '确认成功' };
+  });
+
+  // ===== 安全策略模板：详情 / 删除 / 绑定关系 =====
+  app.get('/api/cdn/accounts/:aid/security/templates/:templateId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const templateId = String((req.params as any).templateId || '');
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId || !templateId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getWafTemplate !== 'function') return { code: -1, msg: '该 CDN 类型不支持安全策略模板' };
+    const data = await provider.getWafTemplate(zoneId, templateId);
+    if (data === false) return { code: -1, msg: '获取策略模板失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/security/templates/:templateId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const templateId = String((req.params as any).templateId || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !templateId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteWafTemplate !== 'function') return { code: -1, msg: '该 CDN 类型不支持安全策略模板' };
+    if (!(await provider.deleteWafTemplate(zoneId, templateId))) return { code: -1, msg: '删除策略模板失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: templateId,
+      summary: `删除安全策略模板 ${templateId}（${zoneId}）`,
+      detail: { aid, zoneId, templateId },
+    });
+    return { code: 0, msg: '策略模板已删除' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/security/template-bindings', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    const raw = req.query.templateIds ?? req.query.templateId ?? '';
+    const templateIds = (Array.isArray(raw) ? raw : String(raw).split(','))
+      .map((x: any) => String(x).trim())
+      .filter(Boolean);
+    if (!zoneId || !templateIds.length) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getWafTemplateBindings !== 'function') return { code: -1, msg: '该 CDN 类型不支持策略模板绑定查询' };
+    const data = await provider.getWafTemplateBindings(zoneId, templateIds);
+    if (data === false) return { code: -1, msg: '获取绑定关系失败，' + provider.getError() };
+    return { code: 0, data };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/template-bind', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const templateId = String(b.templateId || '').trim();
+    const entities = (Array.isArray(b.entities) ? b.entities : String(b.entities || '').split(','))
+      .map((x: any) => String(x).trim())
+      .filter(Boolean);
+    const operate = String(b.operate || 'bind');
+    if (!zoneId || !templateId || !entities.length) return { code: -1, msg: '参数不完整' };
+    if (!['bind', 'unbind-keep-policy', 'unbind-use-default'].includes(operate)) return { code: -1, msg: '不支持的绑定操作' };
+    if (operate !== 'bind' && entities.length !== 1) return { code: -1, msg: '解绑一次只能指定一个域名' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.bindWafTemplate !== 'function') return { code: -1, msg: '该 CDN 类型不支持策略模板绑定' };
+    const overWrite = b.overWrite === undefined ? undefined : (b.overWrite === true || b.overWrite === 'true' || b.overWrite === 1);
+    if (!(await provider.bindWafTemplate(zoneId, templateId, entities, operate, overWrite))) {
+      return { code: -1, msg: '绑定操作失败，' + provider.getError() };
+    }
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: templateId,
+      summary: `安全策略模板${operate === 'bind' ? '绑定' : '解绑'} ${templateId}（${entities.join(',')}）`,
+      detail: { aid, zoneId, templateId, entities, operate, overWrite },
+    });
+    return { code: 0, msg: operate === 'bind' ? '绑定成功' : '解绑成功' };
+  });
+
+  // ===== JavaScript 注入规则 / 客户端认证选项 =====
+  app.get('/api/cdn/accounts/:aid/security/js-injection', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listJsInjectionRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持 JS 注入规则' };
+    const r = await provider.listJsInjectionRules(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取 JS 注入规则失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/js-injection', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const rule = b.rule && typeof b.rule === 'object' ? b.rule : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createJsInjectionRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持 JS 注入规则' };
+    const ruleId = await provider.createJsInjectionRule(zoneId, rule);
+    if (ruleId === false) return { code: -1, msg: '创建 JS 注入规则失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: ruleId,
+      summary: `创建 JS 注入规则 ${rule.Name || ruleId}（${zoneId}）`,
+      detail: { aid, zoneId, ruleId },
+    });
+    return { code: 0, msg: '创建成功', data: { ruleId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/security/js-injection/:ruleId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const ruleId = String((req.params as any).ruleId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const rule = { ...(b.rule && typeof b.rule === 'object' ? b.rule : {}), RuleId: ruleId };
+    if (!zoneId || !ruleId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateJsInjectionRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持 JS 注入规则' };
+    if (!(await provider.updateJsInjectionRule(zoneId, rule))) return { code: -1, msg: '修改 JS 注入规则失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: ruleId,
+      summary: `修改 JS 注入规则 ${ruleId}（${zoneId}）`,
+      detail: { aid, zoneId, ruleId },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/security/js-injection/:ruleId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const ruleId = String((req.params as any).ruleId || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !ruleId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteJsInjectionRule !== 'function') return { code: -1, msg: '该 CDN 类型不支持 JS 注入规则' };
+    if (!(await provider.deleteJsInjectionRule(zoneId, ruleId))) return { code: -1, msg: '删除 JS 注入规则失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: ruleId,
+      summary: `删除 JS 注入规则 ${ruleId}（${zoneId}）`,
+      detail: { aid, zoneId, ruleId },
+    });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/security/client-attesters', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listClientAttesters !== 'function') return { code: -1, msg: '该 CDN 类型不支持客户端认证选项' };
+    const r = await provider.listClientAttesters(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取客户端认证选项失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/client-attesters', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const attester = b.attester && typeof b.attester === 'object' ? b.attester : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createClientAttester !== 'function') return { code: -1, msg: '该 CDN 类型不支持客户端认证选项' };
+    const id = await provider.createClientAttester(zoneId, attester);
+    if (id === false) return { code: -1, msg: '创建客户端认证选项失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: id,
+      summary: `创建客户端认证选项 ${attester.Name || id}（${zoneId}）`,
+      detail: { aid, zoneId, id },
+    });
+    return { code: 0, msg: '创建成功', data: { id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/security/client-attesters/:id', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const id = String((req.params as any).id || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const attester = { ...(b.attester && typeof b.attester === 'object' ? b.attester : {}), Id: id };
+    if (!zoneId || !id) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateClientAttester !== 'function') return { code: -1, msg: '该 CDN 类型不支持客户端认证选项' };
+    if (!(await provider.updateClientAttester(zoneId, attester))) return { code: -1, msg: '修改客户端认证选项失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: id,
+      summary: `修改客户端认证选项 ${id}（${zoneId}）`,
+      detail: { aid, zoneId, id },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/security/client-attesters/:id', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const id = String((req.params as any).id || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !id) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteClientAttester !== 'function') return { code: -1, msg: '该 CDN 类型不支持客户端认证选项' };
+    if (!(await provider.deleteClientAttester(zoneId, id))) return { code: -1, msg: '删除客户端认证选项失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: id,
+      summary: `删除客户端认证选项 ${id}（${zoneId}）`,
+      detail: { aid, zoneId, id },
+    });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== API 服务 / API 资源 =====
+  app.get('/api/cdn/accounts/:aid/security/api-services', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listApiServices !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 服务' };
+    const r = await provider.listApiServices(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取 API 服务失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/api-services', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const service = b.service && typeof b.service === 'object' ? b.service : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createApiService !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 服务' };
+    const id = await provider.createApiService(zoneId, service);
+    if (id === false) return { code: -1, msg: '创建 API 服务失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: id,
+      summary: `创建 API 服务 ${service.Name || id}（${zoneId}）`,
+      detail: { aid, zoneId, id },
+    });
+    return { code: 0, msg: '创建成功', data: { id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/security/api-services/:id', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const id = String((req.params as any).id || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const service = { ...(b.service && typeof b.service === 'object' ? b.service : {}), Id: id };
+    if (!zoneId || !id) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateApiService !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 服务' };
+    if (!(await provider.updateApiService(zoneId, service))) return { code: -1, msg: '修改 API 服务失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: id, summary: `修改 API 服务 ${id}（${zoneId}）`, detail: { aid, zoneId, id } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/security/api-services/:id', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const id = String((req.params as any).id || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !id) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteApiService !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 服务' };
+    if (!(await provider.deleteApiService(zoneId, id))) return { code: -1, msg: '删除 API 服务失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: id, summary: `删除 API 服务 ${id}（${zoneId}）`, detail: { aid, zoneId, id } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/security/api-resources', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listApiResources !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 资源' };
+    const r = await provider.listApiResources(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取 API 资源失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/security/api-resources', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const resource = b.resource && typeof b.resource === 'object' ? b.resource : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createApiResource !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 资源' };
+    const id = await provider.createApiResource(zoneId, resource);
+    if (id === false) return { code: -1, msg: '创建 API 资源失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: id, summary: `创建 API 资源 ${resource.Name || id}（${zoneId}）`, detail: { aid, zoneId, id } });
+    return { code: 0, msg: '创建成功', data: { id } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/security/api-resources/:id', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const id = String((req.params as any).id || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const resource = { ...(b.resource && typeof b.resource === 'object' ? b.resource : {}), Id: id };
+    if (!zoneId || !id) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateApiResource !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 资源' };
+    if (!(await provider.updateApiResource(zoneId, resource))) return { code: -1, msg: '修改 API 资源失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: id, summary: `修改 API 资源 ${id}（${zoneId}）`, detail: { aid, zoneId, id } });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/security/api-resources/:id', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const id = String((req.params as any).id || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !id) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteApiResource !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 资源' };
+    if (!(await provider.deleteApiResource(zoneId, id))) return { code: -1, msg: '删除 API 资源失败，' + provider.getError() };
+    audit(req, { targetType: 'cdn_zone', targetId: zoneId, targetName: id, summary: `删除 API 资源 ${id}（${zoneId}）`, detail: { aid, zoneId, id } });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  // ===== 内容标识符 =====
+  app.get('/api/cdn/accounts/:aid/content-identifiers', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.listContentIdentifiers !== 'function') return { code: -1, msg: '该 CDN 类型不支持内容标识符' };
+    const r = await provider.listContentIdentifiers(Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取内容标识符失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/content-identifiers', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.createContentIdentifier !== 'function') return { code: -1, msg: '该 CDN 类型不支持内容标识符' };
+    const contentId = await provider.createContentIdentifier(params);
+    if (contentId === false) return { code: -1, msg: '创建内容标识符失败，' + provider.getError() };
+    return { code: 0, msg: '创建成功', data: { contentId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/content-identifiers/:contentId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const contentId = String((req.params as any).contentId || '');
+    const description = String((req.body || {}).description || '');
+    if (!contentId || !description.trim()) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.updateContentIdentifier !== 'function') return { code: -1, msg: '该 CDN 类型不支持内容标识符' };
+    if (!(await provider.updateContentIdentifier(contentId, description))) return { code: -1, msg: '修改内容标识符失败，' + provider.getError() };
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/content-identifiers/:contentId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const contentId = String((req.params as any).contentId || '');
+    if (!contentId) return { code: -1, msg: '缺少 contentId' };
+    const provider: any = await cdnForZone(aid, null);
+    if (!provider || typeof provider.deleteContentIdentifier !== 'function') return { code: -1, msg: '该 CDN 类型不支持内容标识符' };
+    if (!(await provider.deleteContentIdentifier(contentId))) return { code: -1, msg: '删除内容标识符失败，' + provider.getError() };
+    return { code: 0, msg: '删除成功' };
+  });
+
   // ===== 四层代理 =====
   app.get('/api/cdn/accounts/:aid/l4-proxies', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
@@ -1316,6 +3049,26 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '更新成功' };
   });
 
+  app.post('/api/cdn/accounts/:aid/l4-proxies/:proxyId/status', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const status = String(b.status || '');
+    if (!zoneId || !proxyId || !['online', 'offline'].includes(status)) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setL4ProxyStatus !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理状态修改' };
+    if (!(await provider.setL4ProxyStatus(zoneId, proxyId, status))) return { code: -1, msg: '修改状态失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: proxyId,
+      summary: `${status === 'online' ? '启用' : '停用'}四层代理 ${proxyId}（${zoneId}）`,
+      detail: { aid, zoneId, proxyId, status },
+    });
+    return { code: 0, msg: status === 'online' ? '四层代理已启用' : '四层代理已停用' };
+  });
+
   app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
@@ -1352,6 +3105,48 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: 0, msg: '创建成功' };
   });
 
+  app.put('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const rules = Array.isArray(b.rules) ? b.rules : [];
+    if (!zoneId || !proxyId || !rules.length) return { code: -1, msg: '参数不完整' };
+    if (rules.some((r: any) => !r?.RuleId)) return { code: -1, msg: '修改规则时缺少 RuleId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateL4ProxyRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持修改四层转发规则' };
+    if (!(await provider.updateL4ProxyRules(zoneId, proxyId, rules))) return { code: -1, msg: '修改四层转发规则失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: proxyId,
+      summary: `修改四层转发规则 ${rules.length} 条（${proxyId}）`,
+      detail: { aid, zoneId, proxyId, ruleIds: rules.map((r: any) => String(r.RuleId)).slice(0, 50) },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.post('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules/status', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const proxyId = String((req.params as any).proxyId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const ruleIds = (Array.isArray(b.ruleIds) ? b.ruleIds : []).map((x: any) => String(x)).filter(Boolean);
+    const status = String(b.status || '');
+    if (!zoneId || !proxyId || !ruleIds.length || !['online', 'offline'].includes(status)) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setL4ProxyRulesStatus !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层规则状态修改' };
+    if (!(await provider.setL4ProxyRulesStatus(zoneId, proxyId, ruleIds, status))) return { code: -1, msg: '修改规则状态失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: proxyId,
+      summary: `${status === 'online' ? '启用' : '停用'}四层转发规则 ${ruleIds.length} 条（${proxyId}）`,
+      detail: { aid, zoneId, proxyId, ruleIds: ruleIds.slice(0, 50), status },
+    });
+    return { code: 0, msg: status === 'online' ? '规则已启用' : '规则已停用' };
+  });
+
   app.delete('/api/cdn/accounts/:aid/l4-proxies/:proxyId/rules', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const proxyId = String((req.params as any).proxyId || '');
@@ -1383,6 +3178,112 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.listPrefetchTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持预热任务查询' };
     const r = await provider.listPrefetchTasks(zoneId || null, Number(req.query.page || 1), Number(req.query.size || 20));
     if (r === false) return { code: -1, msg: '获取预热任务失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  // ===== 实时日志 / 离线日志 =====
+  app.get('/api/cdn/accounts/:aid/logs/realtime', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.listRealtimeLogTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持实时日志' };
+    const r = await provider.listRealtimeLogTasks(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取实时日志任务失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/logs/realtime', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.createRealtimeLogTask !== 'function') return { code: -1, msg: '该 CDN 类型不支持实时日志' };
+    const taskId = await provider.createRealtimeLogTask(zoneId, params);
+    if (taskId === false) return { code: -1, msg: '创建实时日志任务失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(params.TaskName || taskId),
+      summary: `创建实时日志投递任务 ${params.TaskName || taskId}（${zoneId}）`,
+      detail: { aid, zoneId, taskId, logType: params.LogType, taskType: params.TaskType },
+    });
+    return { code: 0, msg: '创建成功', data: { taskId } };
+  });
+
+  app.put('/api/cdn/accounts/:aid/logs/realtime/:taskId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const taskId = String((req.params as any).taskId || '');
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    const params = b.params && typeof b.params === 'object' ? b.params : {};
+    if (!zoneId || !taskId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.updateRealtimeLogTask !== 'function') return { code: -1, msg: '该 CDN 类型不支持实时日志' };
+    if (!(await provider.updateRealtimeLogTask(zoneId, taskId, params))) return { code: -1, msg: '修改实时日志任务失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(params.TaskName || taskId),
+      summary: `修改实时日志投递任务 ${params.TaskName || taskId}（${zoneId}）`,
+      detail: { aid, zoneId, taskId },
+    });
+    return { code: 0, msg: '修改成功' };
+  });
+
+  app.delete('/api/cdn/accounts/:aid/logs/realtime/:taskId', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const taskId = String((req.params as any).taskId || '');
+    const zoneId = String((req.body || {}).zoneId || req.query.zoneId || '').trim();
+    if (!zoneId || !taskId) return { code: -1, msg: '参数不完整' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.deleteRealtimeLogTask !== 'function') return { code: -1, msg: '该 CDN 类型不支持实时日志' };
+    if (!(await provider.deleteRealtimeLogTask(zoneId, taskId))) return { code: -1, msg: '删除实时日志任务失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: taskId,
+      summary: `删除实时日志投递任务 ${taskId}（${zoneId}）`,
+      detail: { aid, zoneId, taskId },
+    });
+    return { code: 0, msg: '删除成功' };
+  });
+
+  app.get('/api/cdn/accounts/:aid/logs/offline/l7', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const domains = String(req.query.domains || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.downloadL7Logs !== 'function') return { code: -1, msg: '该 CDN 类型不支持离线日志' };
+    const r = await provider.downloadL7Logs(
+      zoneIds,
+      String(req.query.startTime || ''),
+      String(req.query.endTime || ''),
+      Number(req.query.limit || 20),
+      Number(req.query.offset || 0),
+      domains,
+    );
+    if (r === false) return { code: -1, msg: '获取离线日志失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/logs/offline/l4', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const proxyIds = String(req.query.proxyIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.downloadL4Logs !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层离线日志' };
+    const r = await provider.downloadL4Logs(
+      zoneIds,
+      String(req.query.startTime || ''),
+      String(req.query.endTime || ''),
+      Number(req.query.limit || 20),
+      Number(req.query.offset || 0),
+      proxyIds,
+    );
+    if (r === false) return { code: -1, msg: '获取四层离线日志失败，' + provider.getError() };
     return { code: 0, data: r };
   });
 
@@ -1429,6 +3330,35 @@ export default async function cdnRoutes(app: FastifyInstance) {
   cacheAction('tiered', 'updateTieredCache', (z, b) => [z, String(b.mode || 'edge')]);
   cacheAction('upload-file', 'uploadFile', (z, b) => [z, String(b.url || ''), String(b.type || 'preload'), String(b.taskName || ('dnsmgr-' + Date.now()))]);
 
+  app.get('/api/cdn/accounts/:aid/cache/prefetch-origin-limit', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneId = String(req.query.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.getPrefetchOriginLimit !== 'function') return { code: -1, msg: '该 CDN 类型不支持预热回源限速' };
+    const r = await provider.getPrefetchOriginLimit(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    if (r === false) return { code: -1, msg: '获取预热回源限速失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.post('/api/cdn/accounts/:aid/cache/prefetch-origin-limit', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const b = req.body || {};
+    const zoneId = String(b.zoneId || '').trim();
+    if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
+    const provider: any = await cdnForZone(aid, zoneId);
+    if (!provider || typeof provider.setPrefetchOriginLimit !== 'function') return { code: -1, msg: '该 CDN 类型不支持预热回源限速' };
+    if (!(await provider.setPrefetchOriginLimit(zoneId, b))) return { code: -1, msg: '保存预热回源限速失败，' + provider.getError() };
+    audit(req, {
+      targetType: 'cdn_zone',
+      targetId: zoneId,
+      targetName: String(b.domainName || zoneId),
+      summary: `配置预热回源限速 ${b.domainName || zoneId}`,
+      detail: { aid, zoneId, domainName: b.domainName, area: b.area, bandwidth: b.bandwidth, enabled: b.enabled },
+    });
+    return { code: 0, msg: '保存成功' };
+  });
+
   app.get('/api/cdn/accounts/:aid/analysis/top', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
     const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -1447,6 +3377,59 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.timingCacheData !== 'function') return { code: -1, msg: '该 CDN 类型不支持统计' };
     const r = await provider.timingCacheData(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), metricNames);
     if (r === false) return { code: -1, msg: '获取统计失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/analysis/ddos/events', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.getDdosAttackEvents !== 'function') return { code: -1, msg: '该 CDN 类型不支持 DDoS 事件查询' };
+    const r = await provider.getDdosAttackEvents(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), Number(req.query.limit || 20));
+    if (r === false) return { code: -1, msg: '获取 DDoS 事件失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/analysis/ddos/top', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.getDdosAttackTop !== 'function') return { code: -1, msg: '该 CDN 类型不支持 DDoS Top 查询' };
+    const r = await provider.getDdosAttackTop(
+      zoneIds,
+      String(req.query.startTime || ''),
+      String(req.query.endTime || ''),
+      String(req.query.metricName || 'ddos_attackFlux_protocol'),
+      Number(req.query.limit || 10),
+    );
+    if (r === false) return { code: -1, msg: '获取 DDoS Top 失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/analysis/l4-timing', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const metricNames = String(req.query.metricNames || 'l4Flow_flux').split(',').map((x) => x.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, zoneIds[0] || null);
+    if (!provider || typeof provider.getL4TimingData !== 'function') return { code: -1, msg: '该 CDN 类型不支持 L4 统计' };
+    const r = await provider.getL4TimingData(
+      zoneIds,
+      String(req.query.startTime || ''),
+      String(req.query.endTime || ''),
+      metricNames,
+      String(req.query.interval || 'hour'),
+    );
+    if (r === false) return { code: -1, msg: '获取 L4 统计失败，' + provider.getError() };
+    return { code: 0, data: r };
+  });
+
+  app.get('/api/cdn/accounts/:aid/diagnostics/ip-region', authAid, async (req: any) => {
+    const aid = Number((req.params as any).aid);
+    const ips = String(req.query.ips || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const provider: any = await cdnForZone(aid, String(req.query.zoneId || '').trim() || null);
+    if (!provider || typeof provider.getIpRegion !== 'function') return { code: -1, msg: '该 CDN 类型不支持 IP 归属查询' };
+    const r = await provider.getIpRegion(ips);
+    if (r === false) return { code: -1, msg: '获取 IP 归属失败，' + provider.getError() };
     return { code: 0, data: r };
   });
 

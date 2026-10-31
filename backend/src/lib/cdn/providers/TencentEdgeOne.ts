@@ -64,14 +64,20 @@ export class TencentEdgeOne implements CdnProvider {
       const ident = identMap.get(String(z.ZoneName)) || '';
       const status = String(z.Status || '').toLowerCase();
       const ns = (z.NSDetail?.NameServers ?? z.NameServers ?? []).map((x: any) => String(x).toLowerCase());
+      const resources = Array.isArray(z.Resources) ? z.Resources : [];
+      const plan = resources.find((r: any) => r?.PlanId || r?.PlanName || r?.PlanType) || {};
       return {
         zoneId: z.ZoneId,
         zoneName: z.ZoneName,
+        type: z.Type || z.ZoneType || '',
         status: z.Status,
         area: z.Area,
         // DescribeZones 本身已返回 Paused，这里一并带出，避免调用方逐站再查一次（N+1）
         paused: z.Paused === true,
         identificationStatus: ident,
+        planId: String(plan.PlanId || z.PlanId || ''),
+        planName: String(plan.PlanName || plan.PlanType || ''),
+        planExpireTime: String(plan.ExpireTime || plan.ExpiredTime || ''),
         // 三路判定：识别接口明确完成 / 站点已生效 / NS 已切换到 EdgeOne
         ownershipVerified:
           ident === 'finished' ||
@@ -216,6 +222,119 @@ export class TencentEdgeOne implements CdnProvider {
       return out;
     });
     return results.flat();
+  }
+
+  async listSharedCnames(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeSharedCNAME', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.SharedCNAMEInfo || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createSharedCname(zoneId: string, prefix: string, description?: string): Promise<string | false> {
+    const param: Record<string, any> = { ZoneId: zoneId, SharedCNAMEPrefix: prefix };
+    if (description) param.Description = description;
+    const d = await this.send('CreateSharedCNAME', param);
+    return d && d.SharedCNAME ? String(d.SharedCNAME) : false;
+  }
+
+  async updateSharedCname(zoneId: string, sharedCname: string, description?: string): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, SharedCNAME: sharedCname };
+    if (description !== undefined) param.Description = description;
+    return (await this.send('ModifySharedCNAME', param)) !== false;
+  }
+
+  async bindSharedCname(zoneId: string, bindType: string, maps: any[]): Promise<boolean> {
+    return (await this.send('BindSharedCNAME', {
+      ZoneId: zoneId,
+      BindType: bindType === 'unbind' ? 'unbind' : 'bind',
+      BindSharedCNAMEMaps: maps,
+    })) !== false;
+  }
+
+  async deleteSharedCname(zoneId: string, sharedCname: string): Promise<boolean> {
+    return (await this.send('DeleteSharedCNAME', { ZoneId: zoneId, SharedCNAME: sharedCname })) !== false;
+  }
+
+  async listAliasDomains(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeAliasDomains', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.AliasDomains || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createAliasDomain(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      AliasName: String(params.aliasName || ''),
+      TargetName: String(params.targetName || ''),
+      CertType: String(params.certType || 'none'),
+    };
+    if (Array.isArray(params.certIds) && params.certIds.length) param.CertId = params.certIds.map((x: any) => String(x));
+    return (await this.send('CreateAliasDomain', param)) !== false;
+  }
+
+  async updateAliasDomain(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      AliasName: String(params.aliasName || ''),
+      TargetName: String(params.targetName || ''),
+    };
+    if (params.certType !== undefined) param.CertType = String(params.certType);
+    if (Array.isArray(params.certIds) && params.certIds.length) param.CertId = params.certIds.map((x: any) => String(x));
+    return (await this.send('ModifyAliasDomain', param)) !== false;
+  }
+
+  async setAliasDomainStatus(zoneId: string, aliasNames: string[], paused: boolean): Promise<boolean> {
+    return (await this.send('ModifyAliasDomainStatus', { ZoneId: zoneId, AliasNames: aliasNames, Paused: paused })) !== false;
+  }
+
+  async deleteAliasDomain(zoneId: string, aliasName: string): Promise<boolean> {
+    return (await this.send('DeleteAliasDomain', { ZoneId: zoneId, AliasNames: [aliasName] })) !== false;
+  }
+
+  async listCustomErrorPages(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeCustomErrorPages', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.ErrorPages || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createCustomErrorPage(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      Name: String(params.name || ''),
+      ContentType: String(params.contentType || 'text/html'),
+      Content: String(params.content || ''),
+    };
+    if (params.description !== undefined) param.Description = String(params.description || '');
+    const d = await this.send('CreateCustomizeErrorPage', param);
+    return d && d.PageId ? String(d.PageId) : false;
+  }
+
+  async updateCustomErrorPage(zoneId: string, pageId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, PageId: pageId };
+    if (params.name !== undefined) param.Name = String(params.name || '');
+    if (params.description !== undefined) param.Description = String(params.description || '');
+    if (params.contentType !== undefined) param.ContentType = String(params.contentType || '');
+    if (params.content !== undefined) param.Content = String(params.content || '');
+    return (await this.send('ModifyCustomErrorPage', param)) !== false;
+  }
+
+  async deleteCustomErrorPage(zoneId: string, pageId: string): Promise<boolean> {
+    return (await this.send('DeleteCustomErrorPage', { ZoneId: zoneId, PageId: pageId })) !== false;
   }
 
   async deleteDomain(domain: string) {
@@ -762,6 +881,102 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('DeleteZone', { ZoneId: zoneId })) !== false;
   }
 
+  // 套餐列表：EO 的 DescribePlans 单页上限 100，站点较多时统一翻页
+  async listPlanInstances(): Promise<any[] | false> {
+    const limit = 100;
+    const all: any[] = [];
+    for (let offset = 0; offset < limit * 100; offset += limit) {
+      const data = await this.send('DescribePlans', {
+        Offset: offset,
+        Limit: limit,
+        Order: 'enable-time',
+        Direction: 'desc',
+      });
+      if (!data) return false;
+      const plans: any[] = data.Plans || [];
+      all.push(...plans);
+      if (plans.length < limit) break;
+      if (data.TotalCount != null && offset + plans.length >= Number(data.TotalCount)) break;
+    }
+    return all
+      .map((p: any) => ({
+        ...p,
+        InstanceId: String(p.PlanId || ''),
+        PlanId: String(p.PlanId || ''),
+        PlanName: String(p.PlanName || p.PlanType || p.PlanId || ''),
+        ExpireTime: p.ExpireTime || p.ExpiredTime || '',
+      }))
+      .filter((p: any) => p.InstanceId);
+  }
+
+  async bindZoneToPlan(zoneId: string, planId: string): Promise<boolean> {
+    return (await this.send('BindZoneToPlan', { ZoneId: zoneId, PlanId: planId })) !== false;
+  }
+
+  async modifyZone(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId };
+    if (params.type !== undefined) param.Type = String(params.type);
+    if (params.area !== undefined) param.Area = String(params.area);
+    if (params.aliasZoneName !== undefined) param.AliasZoneName = String(params.aliasZoneName || '');
+    if (params.vanityNs !== undefined) {
+      const servers = (Array.isArray(params.vanityNs) ? params.vanityNs : String(params.vanityNs || '').split(','))
+        .map((x: any) => String(x).trim())
+        .filter(Boolean);
+      param.VanityNameServers = { Switch: servers.length ? 'on' : 'off', Servers: servers };
+    }
+    if (Object.keys(param).length === 1) {
+      this.error = '没有需要修改的站点属性';
+      return false;
+    }
+    return (await this.send('ModifyZone', param)) !== false;
+  }
+
+  async getSiteProperties(zoneId: string): Promise<Record<string, any> | false> {
+    const z = await this.findZoneById(zoneId);
+    if (!z) {
+      this.error = '未找到站点';
+      return false;
+    }
+    const vanity = z.VanityNameServers || {};
+    return {
+      zoneId: z.ZoneId,
+      zoneName: z.ZoneName,
+      aliasZoneName: z.AliasZoneName || '',
+      type: z.Type || z.ZoneType || '',
+      area: z.Area || '',
+      status: z.Status || '',
+      paused: z.Paused === true,
+      nameServers: z.NSDetail?.NameServers || z.NameServers || [],
+      vanityNameServers: vanity.Servers || [],
+      vanityNameServersSwitch: vanity.Switch || 'off',
+      resources: z.Resources || [],
+      workModeInfos: z.WorkModeInfos || [],
+    };
+  }
+
+  async exportZoneConfig(zoneId: string, types: string[] = []): Promise<string | false> {
+    const param: Record<string, any> = { ZoneId: zoneId };
+    if (types.length) param.Types = types;
+    const d = await this.send('ExportZoneConfig', param);
+    if (!d) return false;
+    return d.Content || '';
+  }
+
+  async importZoneConfig(zoneId: string, content: string): Promise<string | false> {
+    if (!content.trim()) {
+      this.error = '配置内容不能为空';
+      return false;
+    }
+    const d = await this.send('ImportZoneConfig', { ZoneId: zoneId, Content: content });
+    if (!d) return false;
+    return d.TaskId || '';
+  }
+
+  async getZoneConfigImportResult(zoneId: string, taskId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeZoneConfigImportResult', { ZoneId: zoneId, TaskId: taskId });
+    return d || false;
+  }
+
   async setZonePaused(zoneId: string, paused: boolean): Promise<boolean> {
     return (await this.send('ModifyZoneStatus', { ZoneId: zoneId, Paused: paused })) !== false;
   }
@@ -881,6 +1096,15 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('DeleteLoadBalancer', { ZoneId: zoneId, InstanceId: instanceId })) !== false;
   }
 
+  async getLoadBalancerHealth(zoneId: string, instanceId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeOriginGroupHealthStatus', {
+      ZoneId: zoneId,
+      LBInstanceId: instanceId,
+    });
+    if (!d) return false;
+    return d.OriginGroupHealthStatusList || [];
+  }
+
   // ===== Phase 3：L7 规则引擎（官方 L7Acc 接口，与控制台「规则引擎」完全一致）=====
   // 旧版 CreateRule/DescribeRules/ModifyRule/DeleteRules 已被腾讯云标记为「旧」，
   // 控制台实际使用 CreateL7AccRules/DescribeL7AccRules/ModifyL7AccRule/DeleteL7AccRules，
@@ -954,6 +1178,253 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('ModifyL7AccRulePriority', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
   }
 
+  async getZoneCustomVariables(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeZoneCustomVariables', { ZoneId: zoneId });
+    if (!d) return false;
+    return {
+      CustomVariables: d.CustomVariables || [],
+      CustomVariableOperations: d.CustomVariableOperations || [],
+    };
+  }
+
+  async setZoneCustomVariables(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId };
+    if (params.CustomVariables !== undefined) param.CustomVariables = params.CustomVariables;
+    if (params.CustomVariableOperations !== undefined) param.CustomVariableOperations = params.CustomVariableOperations;
+    return (await this.send('ModifyZoneCustomVariables', param)) !== false;
+  }
+
+  async listFunctions(zoneId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeFunctions', { ZoneId: zoneId, Offset: 0, Limit: 100 });
+    if (!d) return false;
+    return d.Functions || [];
+  }
+
+  async createFunction(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateFunction', { ZoneId: zoneId, ...params });
+    return d && d.FunctionId ? String(d.FunctionId) : false;
+  }
+
+  async updateFunction(zoneId: string, functionId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyFunction', { ZoneId: zoneId, FunctionId: functionId, ...params })) !== false;
+  }
+
+  async deleteFunction(zoneId: string, functionId: string): Promise<boolean> {
+    return (await this.send('DeleteFunction', { ZoneId: zoneId, FunctionId: functionId })) !== false;
+  }
+
+  async getFunctionRuntime(zoneId: string, functionId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeFunctionRuntimeEnvironment', { ZoneId: zoneId, FunctionId: functionId });
+    return d || false;
+  }
+
+  async handleFunctionRuntime(zoneId: string, functionId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('HandleFunctionRuntimeEnvironment', { ZoneId: zoneId, FunctionId: functionId, ...params })) !== false;
+  }
+
+  async listFunctionReplicas(zoneId: string, functionId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeFunctionReplicas', {
+      ZoneId: zoneId,
+      FunctionId: functionId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.FunctionReplicas || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createFunctionReplica(zoneId: string, functionId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('CreateFunctionReplica', { ZoneId: zoneId, FunctionId: functionId, ...params })) !== false;
+  }
+
+  async updateFunctionReplica(zoneId: string, functionId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyFunctionReplica', { ZoneId: zoneId, FunctionId: functionId, ...params })) !== false;
+  }
+
+  async deleteFunctionReplicas(zoneId: string, functionId: string, replicaNames: string[]): Promise<boolean> {
+    return (await this.send('DeleteFunctionReplica', { ZoneId: zoneId, FunctionId: functionId, ReplicaNames: replicaNames })) !== false;
+  }
+
+  async listFunctionBindings(zoneId: string, functionId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeFunctionComponentBindings', { ZoneId: zoneId, FunctionId: functionId, Offset: 0, Limit: 1000 });
+    if (!d) return false;
+    return d.FunctionComponentBindings || [];
+  }
+
+  async modifyFunctionBindings(zoneId: string, functionId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyFunctionComponentBindings', { ZoneId: zoneId, FunctionId: functionId, ...params })) !== false;
+  }
+
+  async listFunctionRules(zoneId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeFunctionRules', { ZoneId: zoneId });
+    if (!d) return false;
+    return d.FunctionRules || [];
+  }
+
+  async createFunctionRule(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateFunctionRule', { ZoneId: zoneId, ...params });
+    return d && d.RuleId ? String(d.RuleId) : false;
+  }
+
+  async updateFunctionRule(zoneId: string, ruleId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyFunctionRule', { ZoneId: zoneId, RuleId: ruleId, ...params })) !== false;
+  }
+
+  async deleteFunctionRules(zoneId: string, ruleIds: string[]): Promise<boolean> {
+    return (await this.send('DeleteFunctionRules', { ZoneId: zoneId, RuleIds: ruleIds })) !== false;
+  }
+
+  async listKvNamespaces(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeEdgeKVNamespaces', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.Namespaces || d.KVNamespaces || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createKvNamespace(zoneId: string, namespace: string, remark?: string): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, Namespace: namespace };
+    if (remark) param.Remark = remark;
+    return (await this.send('CreateEdgeKVNamespace', param)) !== false;
+  }
+
+  async updateKvNamespace(zoneId: string, namespace: string, remark?: string): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, Namespace: namespace };
+    if (remark !== undefined) param.Remark = remark;
+    return (await this.send('ModifyEdgeKVNamespace', param)) !== false;
+  }
+
+  async deleteKvNamespace(zoneId: string, namespace: string): Promise<boolean> {
+    return (await this.send('DeleteEdgeKVNamespace', { ZoneId: zoneId, Namespace: namespace })) !== false;
+  }
+
+  async kvGet(zoneId: string, namespace: string, keys: string[]): Promise<any[] | false> {
+    const d = await this.send('EdgeKVGet', { ZoneId: zoneId, Namespace: namespace, Keys: keys });
+    if (!d) return false;
+    return d.Data || [];
+  }
+
+  async kvPut(zoneId: string, namespace: string, key: string, value: string, expiration?: number, ttl?: number): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId, Namespace: namespace, Key: key, Value: value };
+    if (expiration !== undefined) param.Expiration = expiration;
+    if (ttl !== undefined) param.ExpirationTTL = ttl;
+    return (await this.send('EdgeKVPut', param)) !== false;
+  }
+
+  async kvDelete(zoneId: string, namespace: string, keys: string[]): Promise<boolean> {
+    return (await this.send('EdgeKVDelete', { ZoneId: zoneId, Namespace: namespace, Keys: keys })) !== false;
+  }
+
+  async kvList(zoneId: string, namespace: string, prefix?: string, cursor?: string, limit = 100): Promise<Record<string, any> | false> {
+    const param: Record<string, any> = { ZoneId: zoneId, Namespace: namespace, Limit: limit };
+    if (prefix) param.Prefix = prefix;
+    if (cursor) param.Cursor = cursor;
+    const d = await this.send('EdgeKVList', param);
+    return d || false;
+  }
+
+  async listEnvironments(zoneId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeEnvironments', { ZoneId: zoneId });
+    if (!d) return false;
+    return d.EnvInfos || [];
+  }
+
+  async listConfigGroupVersions(zoneId: string, groupId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeConfigGroupVersions', {
+      ZoneId: zoneId,
+      GroupId: groupId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.ConfigGroupVersionInfos || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async getConfigGroupVersionDetail(zoneId: string, versionId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeConfigGroupVersionDetail', { ZoneId: zoneId, VersionId: versionId });
+    return d || false;
+  }
+
+  async createConfigGroupVersion(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateConfigGroupVersion', { ...params, ZoneId: zoneId });
+    return d && d.VersionId ? String(d.VersionId) : false;
+  }
+
+  async deployConfigGroupVersion(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('DeployConfigGroupVersion', { ...params, ZoneId: zoneId });
+    return d && d.RecordId ? String(d.RecordId) : false;
+  }
+
+  async getDeployHistory(zoneId: string, envId: string): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeDeployHistory', { ZoneId: zoneId, EnvId: envId });
+    if (!d) return false;
+    const list = d.Records || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async setZoneWorkMode(zoneId: string, infos: any[]): Promise<boolean> {
+    return (await this.send('ModifyZoneWorkMode', { ZoneId: zoneId, WorkModeInfos: infos })) !== false;
+  }
+
+  async listApiServices(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeSecurityAPIService', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.APIServices || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createApiService(zoneId: string, service: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateSecurityAPIService', { ZoneId: zoneId, APIServices: [service] });
+    return d && Array.isArray(d.APIServiceIds) && d.APIServiceIds.length ? String(d.APIServiceIds[0]) : false;
+  }
+
+  async updateApiService(zoneId: string, service: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifySecurityAPIService', { ZoneId: zoneId, APIServices: [service] })) !== false;
+  }
+
+  async deleteApiService(zoneId: string, id: string): Promise<boolean> {
+    return (await this.send('DeleteSecurityAPIService', { ZoneId: zoneId, APIServiceIds: [id] })) !== false;
+  }
+
+  async listApiResources(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeSecurityAPIResource', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.APIResources || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createApiResource(zoneId: string, resource: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateSecurityAPIResource', { ZoneId: zoneId, APIResources: [resource] });
+    return d && Array.isArray(d.APIResourceIds) && d.APIResourceIds.length ? String(d.APIResourceIds[0]) : false;
+  }
+
+  async updateApiResource(zoneId: string, resource: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifySecurityAPIResource', { ZoneId: zoneId, APIResources: [resource] })) !== false;
+  }
+
+  async deleteApiResource(zoneId: string, id: string): Promise<boolean> {
+    return (await this.send('DeleteSecurityAPIResource', { ZoneId: zoneId, APIResourceIds: [id] })) !== false;
+  }
+
+  async getAvailableRuleActions(): Promise<any[] | false> {
+    const d = await this.send('DescribeAvailableCustomActionsForRuleEngine', {});
+    if (!d) return false;
+    return d.CustomActions || d.Actions || [];
+  }
+
   // ===== Phase 4：安全 =====
 
   async listSecurityIpGroups(zoneId: string): Promise<SecurityIpGroupItem[] | false> {
@@ -981,6 +1452,112 @@ export class TencentEdgeOne implements CdnProvider {
     return d.IPList || [];
   }
 
+  async getOriginProtection(zoneId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeOriginACL', { ZoneId: zoneId });
+    return d || false;
+  }
+
+  async setOriginProtection(zoneId: string, config: Record<string, any>): Promise<boolean> {
+    if (config?.enabled === false) {
+      return (await this.send('DisableOriginACL', { ZoneId: zoneId })) !== false;
+    }
+    if (config?.enabled === true) {
+      const param: Record<string, any> = { ZoneId: zoneId };
+      if (Array.isArray(config.OriginACLEntities)) param.OriginACLEntities = config.OriginACLEntities;
+      if (config.OriginACLFamily) param.OriginACLFamily = config.OriginACLFamily;
+      return (await this.send('EnableOriginACL', param)) !== false;
+    }
+    const param: Record<string, any> = { ZoneId: zoneId };
+    if (Array.isArray(config?.OriginACLEntities)) param.OriginACLEntities = config.OriginACLEntities;
+    if (config?.OriginACLFamily) param.OriginACLFamily = config.OriginACLFamily;
+    if (Object.keys(param).length === 1) {
+      this.error = '没有需要修改的源站防护配置';
+      return false;
+    }
+    return (await this.send('ModifyOriginACL', param)) !== false;
+  }
+
+  async confirmOriginAclUpdate(zoneId: string): Promise<boolean> {
+    return (await this.send('ConfirmOriginACLUpdate', { ZoneId: zoneId })) !== false;
+  }
+
+  async getOriginAclFamilies(zoneId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeAvailableOriginACLFamily', { ZoneId: zoneId });
+    if (!d) return false;
+    return d.OriginACLFamilyInfos || d.Families || [];
+  }
+
+  async listJsInjectionRules(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeSecurityJSInjectionRule', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.JSInjectionRules || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createJsInjectionRule(zoneId: string, rule: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateSecurityJSInjectionRule', { ZoneId: zoneId, JSInjectionRules: [rule] });
+    return d && Array.isArray(d.JSInjectionRuleIds) && d.JSInjectionRuleIds.length ? String(d.JSInjectionRuleIds[0]) : false;
+  }
+
+  async updateJsInjectionRule(zoneId: string, rule: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifySecurityJSInjectionRule', { ZoneId: zoneId, JSInjectionRules: [rule] })) !== false;
+  }
+
+  async deleteJsInjectionRule(zoneId: string, ruleId: string): Promise<boolean> {
+    return (await this.send('DeleteSecurityJSInjectionRule', { ZoneId: zoneId, JSInjectionRuleIds: [ruleId] })) !== false;
+  }
+
+  async listClientAttesters(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeSecurityClientAttester', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.ClientAttesters || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createClientAttester(zoneId: string, attester: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateSecurityClientAttester', { ZoneId: zoneId, ClientAttesters: [attester] });
+    return d && Array.isArray(d.ClientAttesterIds) && d.ClientAttesterIds.length ? String(d.ClientAttesterIds[0]) : false;
+  }
+
+  async updateClientAttester(zoneId: string, attester: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifySecurityClientAttester', { ZoneId: zoneId, ClientAttesters: [attester] })) !== false;
+  }
+
+  async deleteClientAttester(zoneId: string, attesterId: string): Promise<boolean> {
+    return (await this.send('DeleteSecurityClientAttester', { ZoneId: zoneId, ClientAttesterIds: [attesterId] })) !== false;
+  }
+
+  async listContentIdentifiers(page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeContentIdentifiers', {
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.ContentIdentifiers || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createContentIdentifier(params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateContentIdentifier', params);
+    return d && d.ContentId ? String(d.ContentId) : false;
+  }
+
+  async updateContentIdentifier(contentId: string, description: string): Promise<boolean> {
+    return (await this.send('ModifyContentIdentifier', { ContentId: contentId, Description: description })) !== false;
+  }
+
+  async deleteContentIdentifier(contentId: string): Promise<boolean> {
+    return (await this.send('DeleteContentIdentifier', { ContentId: contentId })) !== false;
+  }
+
   async getDdosProtection(zoneId: string): Promise<Record<string, any> | false> {
     const d = await this.send('DescribeDDoSProtection', { ZoneId: zoneId });
     if (!d) return false;
@@ -994,7 +1571,8 @@ export class TencentEdgeOne implements CdnProvider {
   async getWafInfo(zoneId: string): Promise<Record<string, any> | false> {
     const d = await this.send('DescribeWebSecurityTemplates', { ZoneIds: [zoneId] });
     if (!d) return false;
-    return { templates: d.SecurityPolicyTemplates || [] };
+    const templates: any[] = d.SecurityPolicyTemplates || [];
+    return { total: Number(d.TotalCount || templates.length), templates };
   }
 
   async setWafInfo(zoneId: string, config: Record<string, any>): Promise<boolean> {
@@ -1003,6 +1581,41 @@ export class TencentEdgeOne implements CdnProvider {
       return (await this.send('ModifyWebSecurityTemplate', { ...rest, ZoneId: zoneId, TemplateId })) !== false;
     }
     return (await this.send('CreateWebSecurityTemplate', { ...config, ZoneId: zoneId })) !== false;
+  }
+
+  async getWafTemplate(zoneId: string, templateId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeWebSecurityTemplate', { ZoneId: zoneId, TemplateId: templateId });
+    if (!d) return false;
+    return d.SecurityPolicy || d;
+  }
+
+  async deleteWafTemplate(zoneId: string, templateId: string): Promise<boolean> {
+    return (await this.send('DeleteWebSecurityTemplate', { ZoneId: zoneId, TemplateId: templateId })) !== false;
+  }
+
+  async getWafTemplateBindings(zoneId: string, templateIds: string[]): Promise<any[] | false> {
+    if (!templateIds.length) return [];
+    const d = await this.send('DescribeSecurityTemplateBindings', {
+      ZoneId: zoneId,
+      TemplateId: templateIds,
+    });
+    if (!d) return false;
+    return d.SecurityTemplate || [];
+  }
+
+  async bindWafTemplate(zoneId: string, templateId: string, entities: string[], operate: string, overWrite?: boolean): Promise<boolean> {
+    if (!templateId || !entities.length) {
+      this.error = '策略模板和域名不能为空';
+      return false;
+    }
+    const param: Record<string, any> = {
+      ZoneId: zoneId,
+      TemplateId: templateId,
+      Entities: entities,
+      Operate: operate,
+    };
+    if (overWrite !== undefined) param.OverWrite = overWrite;
+    return (await this.send('BindSecurityTemplateToEntity', param)) !== false;
   }
 
   // ===== Phase 5：四层代理 =====
@@ -1031,6 +1644,14 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('ModifyL4Proxy', param)) !== false;
   }
 
+  async setL4ProxyStatus(zoneId: string, proxyId: string, status: string): Promise<boolean> {
+    return (await this.send('ModifyL4ProxyStatus', {
+      ZoneId: zoneId,
+      ProxyId: proxyId,
+      Status: status === 'offline' ? 'offline' : 'online',
+    })) !== false;
+  }
+
   async deleteL4Proxy(zoneId: string, proxyId: string): Promise<boolean> {
     return (await this.send('DeleteL4Proxy', { ZoneId: zoneId, ProxyId: proxyId })) !== false;
   }
@@ -1046,6 +1667,23 @@ export class TencentEdgeOne implements CdnProvider {
     return (await this.send('CreateL4ProxyRules', { ZoneId: zoneId, ProxyId: proxyId, L4ProxyRules: rules })) !== false;
   }
 
+  async updateL4ProxyRules(zoneId: string, proxyId: string, rules: any[]): Promise<boolean> {
+    return (await this.send('ModifyL4ProxyRules', {
+      ZoneId: zoneId,
+      ProxyId: proxyId,
+      L4ProxyRules: rules,
+    })) !== false;
+  }
+
+  async setL4ProxyRulesStatus(zoneId: string, proxyId: string, ruleIds: string[], status: string): Promise<boolean> {
+    return (await this.send('ModifyL4ProxyRulesStatus', {
+      ZoneId: zoneId,
+      ProxyId: proxyId,
+      RuleIds: ruleIds,
+      Status: status === 'offline' ? 'offline' : 'online',
+    })) !== false;
+  }
+
   async deleteL4ProxyRules(zoneId: string, proxyId: string, ruleIds: string[]): Promise<boolean> {
     return (await this.send('DeleteL4ProxyRules', { ZoneId: zoneId, ProxyId: proxyId, RuleIds: ruleIds })) !== false;
   }
@@ -1057,6 +1695,64 @@ export class TencentEdgeOne implements CdnProvider {
     if (!data) return false;
     const list = data.Tasks || [];
     return { total: Number(data.TotalCount || list.length), list };
+  }
+
+  async listRealtimeLogTasks(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeRealtimeLogDeliveryTasks', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.RealtimeLogDeliveryTasks || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createRealtimeLogTask(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateRealtimeLogDeliveryTask', { ...params, ZoneId: zoneId });
+    return d && d.TaskId ? String(d.TaskId) : false;
+  }
+
+  async updateRealtimeLogTask(zoneId: string, taskId: string, params: Record<string, any>): Promise<boolean> {
+    // 官方限制：TaskType / LogType / Area 创建后不可修改
+    const { TaskType: _taskType, LogType: _logType, Area: _area, ...rest } = params;
+    return (await this.send('ModifyRealtimeLogDeliveryTask', { ...rest, ZoneId: zoneId, TaskId: taskId })) !== false;
+  }
+
+  async deleteRealtimeLogTask(zoneId: string, taskId: string): Promise<boolean> {
+    return (await this.send('DeleteRealtimeLogDeliveryTask', { ZoneId: zoneId, TaskId: taskId })) !== false;
+  }
+
+  async downloadL7Logs(
+    zoneIds: string[],
+    startTime: string,
+    endTime: string,
+    limit = 20,
+    offset = 0,
+    domains: string[] = [],
+  ): Promise<PagedResult<any> | false> {
+    const param: Record<string, any> = { ZoneIds: zoneIds, StartTime: startTime, EndTime: endTime, Limit: limit, Offset: offset };
+    if (domains.length) param.Domains = domains;
+    const d = await this.send('DownloadL7Logs', param);
+    if (!d) return false;
+    const list = d.Data || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async downloadL4Logs(
+    zoneIds: string[],
+    startTime: string,
+    endTime: string,
+    limit = 20,
+    offset = 0,
+    proxyIds: string[] = [],
+  ): Promise<PagedResult<any> | false> {
+    const param: Record<string, any> = { ZoneIds: zoneIds, StartTime: startTime, EndTime: endTime, Limit: limit, Offset: offset };
+    if (proxyIds.length) param.ProxyIds = proxyIds;
+    const d = await this.send('DownloadL4Logs', param);
+    if (!d) return false;
+    const list = d.Data || [];
+    return { total: Number(d.TotalCount || list.length), list };
   }
 
   async listPrefetchTasks(zoneId: string | null, page = 1, size = 20): Promise<PagedResult<any> | false> {
@@ -1071,6 +1767,27 @@ export class TencentEdgeOne implements CdnProvider {
     return d || false;
   }
 
+  async getPrefetchOriginLimit(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribePrefetchOriginLimit', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.Limits || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async setPrefetchOriginLimit(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyPrefetchOriginLimit', {
+      ZoneId: zoneId,
+      DomainName: String(params.domainName || ''),
+      Area: String(params.area || 'Overseas'),
+      Bandwidth: Number(params.bandwidth || 0),
+      Enabled: params.enabled === false || params.enabled === 'off' ? 'off' : 'on',
+    })) !== false;
+  }
+
   async topAnalysis(zoneIds: string[], startTime: string, endTime: string, metricName: string, limit = 10): Promise<any[] | false> {
     const d = await this.send('DescribeTopL7AnalysisData', { ZoneIds: zoneIds, StartTime: startTime, EndTime: endTime, MetricName: metricName, Limit: limit, Interval: 'hour' });
     if (!d) return false;
@@ -1081,5 +1798,324 @@ export class TencentEdgeOne implements CdnProvider {
     const d = await this.send('DescribeTimingL7CacheData', { ZoneIds: zoneIds, StartTime: startTime, EndTime: endTime, MetricNames: metricNames, Interval: 'hour' });
     if (!d) return false;
     return d.Data || [];
+  }
+
+  async getDdosAttackEvents(zoneIds: string[], startTime: string, endTime: string, limit = 20): Promise<any[] | false> {
+    const d = await this.send('DescribeDDoSAttackEvent', {
+      ZoneIds: zoneIds,
+      StartTime: startTime,
+      EndTime: endTime,
+      Limit: limit,
+      Offset: 0,
+      ShowDetail: true,
+    });
+    if (!d) return false;
+    return d.Data || [];
+  }
+
+  async getDdosAttackTop(zoneIds: string[], startTime: string, endTime: string, metricName: string, limit = 10): Promise<any[] | false> {
+    const d = await this.send('DescribeDDoSAttackTopData', {
+      ZoneIds: zoneIds,
+      StartTime: startTime,
+      EndTime: endTime,
+      MetricName: metricName,
+      Limit: limit,
+    });
+    if (!d) return false;
+    return d.Data || [];
+  }
+
+  async getL4TimingData(zoneIds: string[], startTime: string, endTime: string, metricNames: string[], interval = 'hour'): Promise<any[] | false> {
+    const d = await this.send('DescribeTimingL4Data', {
+      ZoneIds: zoneIds,
+      StartTime: startTime,
+      EndTime: endTime,
+      MetricNames: metricNames,
+      Interval: interval,
+    });
+    if (!d) return false;
+    return d.Data || [];
+  }
+
+  async getIpRegion(ips: string[]): Promise<any[] | false> {
+    if (!ips.length) return [];
+    const d = await this.send('DescribeIPRegion', { IPs: ips });
+    if (!d) return false;
+    return d.IPRegionInfo || [];
+  }
+
+  async listMultiPathGatewayRegions(zoneId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeMultiPathGatewayRegions', { ZoneId: zoneId });
+    if (!d) return false;
+    return d.GatewayRegions || [];
+  }
+
+  async listMultiPathGateways(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeMultiPathGateways', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.Gateways || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createMultiPathGateway(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateMultiPathGateway', { ZoneId: zoneId, ...params });
+    return d && d.GatewayId ? String(d.GatewayId) : false;
+  }
+
+  async getMultiPathGateway(zoneId: string, gatewayId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeMultiPathGateway', { ZoneId: zoneId, GatewayId: gatewayId });
+    if (!d) return false;
+    return d.GatewayDetail || false;
+  }
+
+  async updateMultiPathGateway(zoneId: string, gatewayId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyMultiPathGateway', { ZoneId: zoneId, GatewayId: gatewayId, ...params })) !== false;
+  }
+
+  async deleteMultiPathGateway(zoneId: string, gatewayId: string): Promise<boolean> {
+    return (await this.send('DeleteMultiPathGateway', { ZoneId: zoneId, GatewayId: gatewayId })) !== false;
+  }
+
+  async setMultiPathGatewayStatus(zoneId: string, gatewayId: string, status: string): Promise<boolean> {
+    return (await this.send('ModifyMultiPathGatewayStatus', { ZoneId: zoneId, GatewayId: gatewayId, GatewayStatus: status })) !== false;
+  }
+
+  async createMultiPathGatewayLine(zoneId: string, gatewayId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateMultiPathGatewayLine', { ZoneId: zoneId, GatewayId: gatewayId, ...params });
+    return d && d.LineId ? String(d.LineId) : false;
+  }
+
+  async getMultiPathGatewayLine(zoneId: string, gatewayId: string, lineId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeMultiPathGatewayLine', { ZoneId: zoneId, GatewayId: gatewayId, LineId: lineId });
+    if (!d) return false;
+    return d.Line || false;
+  }
+
+  async updateMultiPathGatewayLine(zoneId: string, gatewayId: string, lineId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyMultiPathGatewayLine', { ZoneId: zoneId, GatewayId: gatewayId, LineId: lineId, ...params })) !== false;
+  }
+
+  async deleteMultiPathGatewayLine(zoneId: string, gatewayId: string, lineId: string): Promise<boolean> {
+    return (await this.send('DeleteMultiPathGatewayLine', { ZoneId: zoneId, GatewayId: gatewayId, LineId: lineId })) !== false;
+  }
+
+  async getMultiPathGatewaySecretKey(zoneId: string): Promise<string | false> {
+    const d = await this.send('DescribeMultiPathGatewaySecretKey', { ZoneId: zoneId });
+    return d && d.SecretKey ? String(d.SecretKey) : false;
+  }
+
+  async createMultiPathGatewaySecretKey(zoneId: string, secretKey?: string): Promise<boolean> {
+    const param: Record<string, any> = { ZoneId: zoneId };
+    if (secretKey) param.SecretKey = secretKey;
+    return (await this.send('CreateMultiPathGatewaySecretKey', param)) !== false;
+  }
+
+  async updateMultiPathGatewaySecretKey(zoneId: string, secretKey: string): Promise<boolean> {
+    return (await this.send('ModifyMultiPathGatewaySecretKey', { ZoneId: zoneId, SecretKey: secretKey })) !== false;
+  }
+
+  async refreshMultiPathGatewaySecretKey(zoneId: string): Promise<boolean> {
+    return (await this.send('RefreshMultiPathGatewaySecretKey', { ZoneId: zoneId })) !== false;
+  }
+
+  async getMultiPathGatewayOriginAcl(zoneId: string, gatewayId: string): Promise<Record<string, any> | false> {
+    const d = await this.send('DescribeMultiPathGatewayOriginACL', { ZoneId: zoneId, GatewayId: gatewayId });
+    if (!d) return false;
+    return d.MultiPathGatewayOriginACLInfo || false;
+  }
+
+  async confirmMultiPathGatewayOriginAcl(zoneId: string, gatewayId: string, version: number): Promise<boolean> {
+    return (await this.send('ConfirmMultiPathGatewayOriginACL', {
+      ZoneId: zoneId,
+      GatewayId: gatewayId,
+      OriginACLVersion: version,
+    })) !== false;
+  }
+
+  async listInferenceServices(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeInferenceServices', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.Services || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createInferenceService(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateInferenceService', { ZoneId: zoneId, ...params });
+    return d && d.ServiceId ? String(d.ServiceId) : false;
+  }
+
+  async updateInferenceService(zoneId: string, serviceId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyInferenceService', { ZoneId: zoneId, ServiceId: serviceId, ...params })) !== false;
+  }
+
+  async operateInferenceService(zoneId: string, serviceId: string, operation: string): Promise<boolean> {
+    return (await this.send('OperateInferenceService', {
+      ZoneId: zoneId,
+      ServiceId: serviceId,
+      Operation: operation,
+    })) !== false;
+  }
+
+  async listInferenceDeploymentRecords(zoneId: string, serviceId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeInferenceServiceDeploymentRecords', {
+      ZoneId: zoneId,
+      ServiceId: serviceId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.RecordSet || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async getInferenceDeploymentLogs(zoneId: string, serviceId: string, recordId: string, page = 1, size = 100): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeInferenceServiceDeploymentLogs', {
+      ZoneId: zoneId,
+      ServiceId: serviceId,
+      RecordId: recordId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.DeploymentLogInfoSet || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async getInferenceMonitorData(zoneId: string, params: Record<string, any>): Promise<any[] | false> {
+    const d = await this.send('DescribeInferenceServiceMonitorData', { ZoneId: zoneId, ...params });
+    if (!d) return false;
+    return d.InferenceServiceMonitorRecords || [];
+  }
+
+  async listInferenceApiTokens(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeInferenceAPITokens', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.Tokens || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createInferenceApiToken(zoneId: string, name: string): Promise<Record<string, any> | false> {
+    const d = await this.send('CreateInferenceAPIToken', { ZoneId: zoneId, Name: name });
+    if (!d) return false;
+    return { TokenId: String(d.TokenId || ''), Content: String(d.Content || '') };
+  }
+
+  async deleteInferenceApiToken(zoneId: string, tokenId: string): Promise<boolean> {
+    return (await this.send('DeleteInferenceAPIToken', { ZoneId: zoneId, TokenId: tokenId })) !== false;
+  }
+
+  async listInferenceDomains(zoneId: string, serviceId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeInferenceDomains', {
+      ZoneId: zoneId,
+      ServiceId: serviceId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.Domains || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createInferenceDomain(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('CreateInferenceDomain', { ZoneId: zoneId, ...params })) !== false;
+  }
+
+  async operateInferenceDomain(zoneId: string, params: Record<string, any>): Promise<boolean> {
+    return (await this.send('OperateInferenceDomain', { ZoneId: zoneId, ...params })) !== false;
+  }
+
+  async listInferenceHardwareSpecifications(zoneId: string): Promise<any[] | false> {
+    const d = await this.send('DescribeInferenceHardwareSpecifications', { ZoneId: zoneId });
+    if (!d) return false;
+    return d.HardwareSpecifications || [];
+  }
+
+  async listJitTranscodeTemplates(zoneId: string, page = 1, size = 20): Promise<PagedResult<any> | false> {
+    const d = await this.send('DescribeJustInTimeTranscodeTemplates', {
+      ZoneId: zoneId,
+      Offset: (page - 1) * size,
+      Limit: size,
+    });
+    if (!d) return false;
+    const list = d.TemplateSet || [];
+    return { total: Number(d.TotalCount || list.length), list };
+  }
+
+  async createJitTranscodeTemplate(zoneId: string, params: Record<string, any>): Promise<string | false> {
+    const d = await this.send('CreateJustInTimeTranscodeTemplate', { ZoneId: zoneId, ...params });
+    return d && d.TemplateId ? String(d.TemplateId) : false;
+  }
+
+  async deleteJitTranscodeTemplates(zoneId: string, templateIds: string[]): Promise<boolean> {
+    return (await this.send('DeleteJustInTimeTranscodeTemplates', { ZoneId: zoneId, TemplateIds: templateIds })) !== false;
+  }
+
+  async getBillingData(params: Record<string, any>): Promise<any[] | false> {
+    const d = await this.send('DescribeBillingData', params);
+    if (!d) return false;
+    return d.Data || [];
+  }
+
+  async listAvailablePlans(): Promise<any[] | false> {
+    const d = await this.send('DescribeAvailablePlans', {});
+    if (!d) return false;
+    return d.PlanInfo || [];
+  }
+
+  async createPlan(params: Record<string, any>): Promise<Record<string, any> | false> {
+    const param = { ...params };
+    if (String(param.PlanType || '') === 'enterprise') {
+      delete param.PrepaidPlanParam;
+      delete param.AutoUseVoucher;
+    }
+    const d = await this.send('CreatePlan', param);
+    if (!d) return false;
+    return { PlanId: String(d.PlanId || ''), DealName: String(d.DealName || '') };
+  }
+
+  async createPlanForZone(zoneId: string, planType: string): Promise<Record<string, any> | false> {
+    const d = await this.send('CreatePlanForZone', { ZoneId: zoneId, PlanType: planType });
+    if (!d) return false;
+    return { ResourceNames: d.ResourceNames || [], DealNames: d.DealNames || [] };
+  }
+
+  async updatePlan(planId: string, renewFlag: Record<string, any>): Promise<boolean> {
+    return (await this.send('ModifyPlan', { PlanId: planId, RenewFlag: renewFlag })) !== false;
+  }
+
+  async renewPlan(planId: string, period: number, autoUseVoucher?: string): Promise<boolean> {
+    const param: Record<string, any> = { PlanId: planId, Period: period };
+    if (autoUseVoucher) param.AutoUseVoucher = autoUseVoucher;
+    return (await this.send('RenewPlan', param)) !== false;
+  }
+
+  async upgradePlan(planId: string, planType: string, autoUseVoucher?: string): Promise<boolean> {
+    const param: Record<string, any> = { PlanId: planId, PlanType: planType };
+    if (autoUseVoucher) param.AutoUseVoucher = autoUseVoucher;
+    return (await this.send('UpgradePlan', param)) !== false;
+  }
+
+  async destroyPlan(planId: string): Promise<boolean> {
+    return (await this.send('DestroyPlan', { PlanId: planId })) !== false;
+  }
+
+  async increasePlanQuota(planId: string, quotaType: string, quotaNumber: number): Promise<boolean> {
+    return (await this.send('IncreasePlanQuota', {
+      PlanId: planId,
+      QuotaType: quotaType,
+      QuotaNumber: quotaNumber,
+    })) !== false;
   }
 }

@@ -119,6 +119,16 @@
           </n-form-item>
         </template>
         <template v-else>
+          <n-form-item :label="t('cdnSite.planId')">
+            <EsaCardSelect
+              v-model="createForm.planId"
+              :options="planOptions"
+              compact
+              clearable
+              searchable
+              :placeholder="t('cdnSite.planIdHint')"
+            />
+          </n-form-item>
           <n-form-item :label="t('cdnSite.type')">
             <EsaCardSelect v-model="createForm.type" :options="eoTypeOptions" compact />
           </n-form-item>
@@ -180,7 +190,7 @@ const checkBusy = ref(false);
 const planBusy = ref(false);
 const planOptions = ref<any[]>([]);
 const checkResult = ref<{ passed: boolean; message: string } | null>(null);
-const createForm = reactive<any>({ aid: null, name: '', coverage: 'domestic', accessType: 'NS', instanceId: '', type: 'partial', area: 'global' });
+const createForm = reactive<any>({ aid: null, name: '', coverage: 'domestic', accessType: 'NS', instanceId: '', planId: '', type: 'partial', area: 'global' });
 const coverageOptions = computed(() => [
   { label: t('cdnSite.coverageDomestic'), value: 'domestic' },
   { label: t('cdnSite.coverageGlobal'), value: 'global' },
@@ -255,6 +265,7 @@ function openCreate() {
   createForm.coverage = 'domestic';
   createForm.accessType = 'NS';
   createForm.instanceId = '';
+  createForm.planId = '';
   createForm.type = 'partial';
   createForm.area = 'global';
   showCreate.value = true;
@@ -265,7 +276,9 @@ function onCreateAid(aid: number) {
   checkResult.value = null;
   planOptions.value = [];
   createForm.instanceId = '';
-  if (String(createAccount.value?.type || '') === 'aliyun_esa') loadPlans();
+  createForm.planId = '';
+  const type = String(createAccount.value?.type || '');
+  if (type === 'aliyun_esa' || type === 'tencent_edgeone') loadPlans();
 }
 
 async function loadPlans() {
@@ -284,7 +297,8 @@ async function loadPlans() {
         label: `${p.PlanName || p.InstanceId} · ${p.InstanceId}${p.ExpireTime ? ' · ' + String(p.ExpireTime).slice(0, 10) : ''}`,
         value: String(p.InstanceId),
       }));
-    if (!createForm.instanceId && planOptions.value.length) createForm.instanceId = planOptions.value[0].value;
+    if (createIsEsa.value && !createForm.instanceId && planOptions.value.length) createForm.instanceId = planOptions.value[0].value;
+    if (!createIsEsa.value && !createForm.planId && planOptions.value.length) createForm.planId = planOptions.value[0].value;
   } finally {
     planBusy.value = false;
   }
@@ -323,6 +337,7 @@ async function createSite() {
     } else {
       body.type = createForm.type;
       body.area = createForm.area;
+      if (createForm.planId) body.planId = createForm.planId;
     }
     const res = await api<any>('POST', `/cdn/accounts/${createForm.aid}/sites`, body);
     if (res.code !== 0) return message.error(res.msg);
