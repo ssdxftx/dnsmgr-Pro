@@ -298,8 +298,26 @@ function getDirectDispatcher(): Agent {
   return directDispatcher;
 }
 
+export interface SafeFetchOptions {
+  /**
+   * 目标地址可由用户/管理员配置时必须开启。
+   *
+   * 配置了出站代理时，请求会交给代理端发起，域名由**代理端**重新解析，
+   * 本地校验通过的 IP 根本不会被使用（本地查公网 IP → 代理端解析到 127.0.0.1/169.254.169.254）。
+   * 开启后，代理场景下只允许 IP 字面量目标，除非运维显式设置 DNSMGR_PROXY_ALLOW_REMOTE_DNS=1。
+   */
+  requirePinnedDns?: boolean;
+}
+
 // 统一的逐跳跳转处理：仅 http/https、逐跳复校目标、跨主机剥离敏感头、跨域 307/308 丢弃请求体、IP pin 防重绑定
-async function followFetch(raw: string, init: RequestInit, maxRedirects: number, resolve: PinResolver, useProxy = true): Promise<Response> {
+async function followFetch(
+  raw: string,
+  init: RequestInit,
+  maxRedirects: number,
+  resolve: PinResolver,
+  useProxy = true,
+  opts: SafeFetchOptions = {},
+): Promise<Response> {
   const proxy = useProxy ? await getConfiguredProxyAgent() : undefined;
   let current = raw;
   let method = String(init.method || 'GET').toUpperCase();
@@ -320,9 +338,18 @@ async function followFetch(raw: string, init: RequestInit, maxRedirects: number,
     };
     // 始终校验目标地址（协议在上方已校验）；仅当调用方未自带 dispatcher 时注入 pinned dispatcher
     const pin = await resolve(u);
-    if (!reqInit.dispatcher) {
-      if (proxy) reqInit.dispatcher = proxy;
-      else if (pin) reqInit.dispatcher = getPinnedAgent(u.hostname.replace(/^\[|\]$/g, ''), pin.address, pin.family);
+    const host = u.hostname.replace(/^\[|\]$/g, '');
+    if (proxy) {
+      // 代理端会重新解析域名，本地 pin 的 IP 不会被使用：域名目标在「目标可由用户配置」的场景下必须拒绝
+      if (opts.requirePinnedDns && !net.isIP(host) && process.env.DNSMGR_PROXY_ALLOW_REMOTE_DNS !== '1') {
+        throw new Error(
+          '已配置出站代理：该地址不允许经代理访问域名目标（代理端会重新解析，SSRF 校验无法保证）。' +
+            '如代理可信，可设置 DNSMGR_PROXY_ALLOW_REMOTE_DNS=1 放行',
+        );
+      }
+      if (!reqInit.dispatcher) reqInit.dispatcher = proxy;
+    } else if (!reqInit.dispatcher) {
+      if (pin) reqInit.dispatcher = getPinnedAgent(host, pin.address, pin.family);
       else if (!useProxy) reqInit.dispatcher = getDirectDispatcher();
     }
     const res = (await undiciFetch(current, reqInit as any)) as unknown as Response;
@@ -347,11 +374,16 @@ async function followFetch(raw: string, init: RequestInit, maxRedirects: number,
 
 // SSRF 安全的 fetch：默认不自动跟随跳转，改为手动逐跳校验 Location 的目标地址，
 // 避免经 302/307 跳转到内网/云元数据地址绕过 assertUrlAllowed；并 pin 校验通过的 IP。
-export async function safeFetch(raw: string, init: RequestInit = {}, maxRedirects = 5): Promise<Response> {
+export async function safeFetch(
+  raw: string,
+  init: RequestInit = {},
+  maxRedirects = 5,
+  opts: SafeFetchOptions = {},
+): Promise<Response> {
   const resolve: PinResolver = privateFetchAllowed()
     ? async () => null
     : (u) => resolveForPin(u.hostname, isPrivateIp, '禁止访问内网地址');
-  return followFetch(raw, init, maxRedirects, resolve, true);
+  return followFetch(raw, init, maxRedirects, resolve, true, opts);
 }
 
 // 跳转时会随请求转发的敏感凭据头，跨主机跳转时必须剥离，避免被 302 带到攻击者/元数据地址

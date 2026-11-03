@@ -57,7 +57,7 @@ function basicAuth(user: string, pass: string): string {
 async function webdavFetch(cfg: any, url: string, init: RequestInit = {}): Promise<Response> {
   await assertUrlAllowed(url);
   const headers: Record<string, string> = { Authorization: basicAuth(cfg.username, cfg.password), ...(init.headers as any) };
-  return safeFetch(url, { ...init, headers });
+  return safeFetch(url, { ...init, headers }, 5, { requirePinnedDns: true });
 }
 
 interface WebdavDirState {
@@ -264,13 +264,13 @@ export async function downloadRemote(destId: number, name: string, localPath: st
       if (!res.ok || !res.body) {
         throw new Error(`WebDAV 下载失败（HTTP ${res.status}，路径 ${urlPath(url)}）${await responseSnippet(res)}`);
       }
-      await pipeline(Readable.fromWeb(res.body as any), createWriteStream(part));
+      await pipeline(Readable.fromWeb(res.body as any), createWriteStream(part, { mode: 0o600 }));
     } else {
       const client = await s3Client(row.config);
       const { GetObjectCommand } = await s3Module();
       const res = await client.send(new GetObjectCommand({ Bucket: row.config.bucket, Key: s3Key(row.config, name) }));
       if (!res.Body) throw new Error('S3 下载失败');
-      await pipeline(res.Body as any, createWriteStream(part));
+      await pipeline(res.Body as any, createWriteStream(part, { mode: 0o600 }));
     }
     await rename(part, localPath);
   } catch (e) {

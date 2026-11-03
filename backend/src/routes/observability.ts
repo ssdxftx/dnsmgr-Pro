@@ -12,7 +12,7 @@ function line(name: string, value: number, labels?: Record<string, string>): str
 }
 
 export default async function observabilityRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/api/ready', async (_req: any, reply: any) => {
+  app.get('/api/ready', async (req: any, reply: any) => {
     let db = false;
     try {
       await query('SELECT 1');
@@ -29,9 +29,27 @@ export default async function observabilityRoutes(app: FastifyInstance): Promise
     const maintenance = isMaintenance();
     // 未安装时数据库尚未初始化，安装向导本身需要保持可访问；已安装后必须确认数据库可用。
     const ok = !maintenance && (installState === 'not_installed' || db);
+    // 匿名探针只回 ready：DB 连通性、安装状态、维护模式、运行时长属于内部信息，
+    // 只对已登录管理员展示，避免未认证请求把部署细节当侦察面。
+    let isAdmin = false;
+    if (req.headers?.authorization) {
+      try {
+        await req.jwtVerify();
+      } catch {
+        // 令牌无效按匿名处理，仍然返回探针结果
+      }
+      isAdmin = checkLevel(req.user, 2);
+    }
+    const data: any = { ready: ok };
+    if (isAdmin) {
+      data.db = db;
+      data.installState = installState;
+      data.maintenance = maintenance;
+      data.uptime = Math.floor(process.uptime());
+    }
     return reply.code(ok ? 200 : 503).send({
       code: ok ? 0 : -1,
-      data: { ready: ok, db, installState, maintenance, uptime: Math.floor(process.uptime()) },
+      data,
     });
   });
 

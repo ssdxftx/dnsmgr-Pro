@@ -1,13 +1,21 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { configGet } from '../config.js';
-import { queryOne, table } from '../db.js';
+import { isDuplicateError, query, queryOne, table } from '../db.js';
+
+/** v2：HMAC 绑定 method+path+参数+nonce，不可重放；v1：历史 md5(uid+timestamp+apikey)，需显式开启 */
+export type LegacyAuthScheme = 'v1' | 'v2';
 
 export type LegacyAuthResult =
-  | { ok: true; user: any; body: Record<string, any> }
+  | { ok: true; user: any; body: Record<string, any>; scheme: LegacyAuthScheme }
   | { ok: false; status: number; msg: string };
 
 export async function legacyApiEnabled(): Promise<boolean> {
   return (await configGet('legacy_api_enable', '0')) === '1';
+}
+
+/** 旧版 md5 签名不绑定请求，可在 300 秒内被重放到任意旧版接口；默认关闭，需显式开启 */
+async function legacyV1Enabled(): Promise<boolean> {
+  return (await configGet('legacy_api_v1_enable', '0')) === '1';
 }
 
 function addValue(out: Record<string, any>, key: string, value: string): void {
@@ -46,13 +54,67 @@ function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
+/** 参与 v2 签名计算时排除的字段（签名本身、一次性随机数） */
+const SIGN_EXCLUDE = new Set(['sign', 'sign2', 'nonce']);
+
+/** 参数规范化：按键名排序后拼接，避免参数顺序不同导致同一请求算出不同摘要 */
+function canonicalParams(body: Record<string, any>): string {
+  return Object.keys(body)
+    .filter((k) => !SIGN_EXCLUDE.has(k))
+    .sort()
+    .map((k) => k + '=' + scalar(body[k]))
+    .join('&');
+}
+
+/** v2 签名：HMAC-SHA256(apikey, method\npath\nuid\ntimestamp\nnonce\nsha256(params)) */
+function signV2(
+  apikey: string,
+  method: string,
+  path: string,
+  uid: number,
+  timestamp: string,
+  nonce: string,
+  body: Record<string, any>,
+): string {
+  const paramsHash = createHash('sha256').update(canonicalParams(body)).digest('hex');
+  const payload = [method.toUpperCase(), path, String(uid), timestamp, nonce, paramsHash].join('\n');
+  return createHmac('sha256', apikey).update(payload).digest('hex');
+}
+
+/** 落库 nonce 做一次性校验：插入冲突即视为重放。表不可用时 fail-closed。 */
+async function consumeNonce(nonce: string, uid: number): Promise<boolean> {
+  try {
+    await query(`INSERT INTO ${table('legacy_nonce')} (nonce, uid, created_at) VALUES (?, ?, NOW())`, [nonce, uid]);
+  } catch (e: any) {
+    if (isDuplicateError(e)) return false;
+    throw e;
+  }
+  // 时间窗只有 300 秒，顺手清理过期记录（1% 概率触发，避免每次请求都删表）
+  if (Math.random() < 0.01) {
+    await query(`DELETE FROM ${table('legacy_nonce')} WHERE created_at < DATE_ADD(NOW(), INTERVAL -1 HOUR)`).catch(() => undefined);
+  }
+  return true;
+}
+
+/**
+ * 一次性票据（quicklogin 的签名 URL 等）：复用同一张 nonce 表，
+ * 同一张签名票据只能被消费一次，重放直接拒绝。表不可用时 fail-closed。
+ */
+export async function consumeOneTimeTicket(key: string, uid: number): Promise<boolean> {
+  const id = String(key || '').trim();
+  if (!id) return false;
+  return consumeNonce(`t:${id}`, uid);
+}
+
 export async function legacyApiAuth(req: any): Promise<LegacyAuthResult> {
   if (!(await legacyApiEnabled())) return { ok: false, status: 404, msg: '404 Not Found' };
   const body = legacyBody(req);
   const uid = Number(scalar(body.uid));
   const timestamp = scalar(body.timestamp);
   const sign = scalar(body.sign);
-  if (!Number.isInteger(uid) || uid <= 0 || !timestamp || !sign) {
+  const sign2 = scalar(body.sign2);
+  const nonce = scalar(body.nonce);
+  if (!Number.isInteger(uid) || uid <= 0 || !timestamp || (!sign && !sign2)) {
     return { ok: false, status: 403, msg: '认证参数不能为空' };
   }
   const ts = Number(timestamp);
@@ -65,8 +127,26 @@ export async function legacyApiAuth(req: any): Promise<LegacyAuthResult> {
   if (Number(user.status) === 0) return { ok: false, status: 403, msg: '该用户已被封禁' };
   if (Number(user.is_api) !== 1) return { ok: false, status: 403, msg: '该用户未开启API权限' };
   if (!user.apikey) return { ok: false, status: 403, msg: '该用户未设置API密钥' };
-  const expected = createHash('md5').update(String(uid) + timestamp + String(user.apikey)).digest('hex');
-  if (!safeEqual(expected, sign.toLowerCase())) return { ok: false, status: 403, msg: '签名错误' };
+
+  let scheme: LegacyAuthScheme;
+  if (sign2) {
+    if (!nonce) return { ok: false, status: 403, msg: 'v2 签名必须携带 nonce' };
+    if (nonce.length < 16 || nonce.length > 64) return { ok: false, status: 403, msg: 'nonce 格式不合法' };
+    const method = String(req.method || 'POST');
+    const path = String(req.url || req.raw?.url || '').split('?')[0];
+    const expected = signV2(String(user.apikey), method, path, uid, timestamp, nonce, body);
+    if (!safeEqual(expected, sign2.toLowerCase())) return { ok: false, status: 403, msg: '签名错误' };
+    if (!(await consumeNonce(nonce, uid))) return { ok: false, status: 403, msg: '重复的 nonce，请重新生成签名' };
+    scheme = 'v2';
+  } else {
+    // 历史 md5 签名不绑定请求路径与参数，可在时间窗内重放；默认关闭，需要旧版客户端时显式开启
+    if (!(await legacyV1Enabled())) {
+      return { ok: false, status: 403, msg: '旧版签名已停用，请使用 v2 签名（sign2 + nonce）或开启 legacy_api_v1_enable' };
+    }
+    const expected = createHash('md5').update(String(uid) + timestamp + String(user.apikey)).digest('hex');
+    if (!safeEqual(expected, sign.toLowerCase())) return { ok: false, status: 403, msg: '签名错误' };
+    scheme = 'v1';
+  }
 
   req.user = {
     uid: Number(user.id),
@@ -79,8 +159,9 @@ export async function legacyApiAuth(req: any): Promise<LegacyAuthResult> {
     token_version: Number(user.token_version || 0),
     type: 'session',
     auth_type: 'legacy_api',
+    legacy_scheme: scheme,
     api_key_id: 0,
     api_key_name: 'legacy',
   };
-  return { ok: true, user, body };
+  return { ok: true, user, body, scheme };
 }

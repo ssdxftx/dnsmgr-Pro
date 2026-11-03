@@ -234,6 +234,18 @@ export default async function userRoutes(app: FastifyInstance) {
     }
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     if (apikey.length > 256) return { code: -1, msg: 'API密钥长度不能超过 256 位' };
+    // 旧版 apikey 等价于该用户的永久全权凭据（每次请求都以对方身份执行）。
+    // 管理员若能替他人写入一个自己知道的 apikey，就能在不改密码、不产生任何用户可见变化的情况下
+    // 完全冒充对方，读到对方保险库里的私有账户——这与「私有账户仅所有者可见」直接冲突。
+    // 因此只允许本人设置；管理员修改他人时该字段必须保持不变。
+    const apikeyChanging = apikeyProvided && apikeyRaw !== SECRET_MASK && apikey !== String(row.apikey ?? '');
+    const isApiChanging = Number(isApi) !== Number(row.is_api ?? 0);
+    if (Number(id) !== Number(req.user.uid) && (apikeyChanging || isApiChanging)) {
+      return {
+        code: -1,
+        msg: '不能为其他账号设置或启用旧版 API 密钥，请让该用户自行在「偏好设置 → API 密钥」中创建',
+      };
+    }
     if (isApi === 1 && await queryOne(`SELECT id FROM ${table('user')} WHERE apikey = ? AND id <> ? LIMIT 1`, [apikey, id])) return { code: -1, msg: 'API密钥已被使用' };
     const sets: string[] = ['username = ?', 'is_api = ?', 'apikey = ?', 'level = ?'];
     const params: any[] = [username, isApi, apikey, level];

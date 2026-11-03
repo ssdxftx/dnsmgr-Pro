@@ -53,7 +53,7 @@ import vaultRoutes from './routes/vault.js';
 import { cleanTmpFiles } from './lib/backup/export.js';
 import { ensureDataDirs } from './lib/backup/archive.js';
 import { initMaintenance, isMaintenance, refreshMaintenance } from './lib/backup/maintenance.js';
-import { enterRequestContext } from './lib/requestContext.js';
+import { bindRequestContext, runInRequestContext } from './lib/requestContext.js';
 import { isTokenRevoked } from './lib/auth/revocation.js';
 import { refreshGlobalProxyDispatcher } from './lib/proxy.js';
 import { hashApiKey, ipAllowed, parseScopes, scopeAllows } from './lib/apiKeys.js';
@@ -62,6 +62,7 @@ import { hitRateLimit } from './lib/rateLimit.js';
 import { registerOpenApi } from './lib/openapi.js';
 import apiKeyRoutes from './routes/apiKeys.js';
 import jobRoutes from './routes/jobs.js';
+import { resetStaleJobs } from './lib/jobs.js';
 import eventRoutes from './routes/events.js';
 import observabilityRoutes from './routes/observability.js';
 
@@ -167,6 +168,15 @@ await app.register(multipart, {
   },
 });
 
+// 请求上下文必须先于所有其他 onRequest/preHandler 建立：鉴权钩子只负责回填 uid/jti，
+// 保险库等会话级密钥在 handler 深层函数里通过 currentRequestContext() 取当前会话。
+// 必须用回调式钩子 + storage.run()：async 钩子里 enterWith() 建立的上下文传不到 handler。
+app.addHook('onRequest', (req: any, _reply: any, done: any) => {
+  const ctx = { uid: 0, jti: '' };
+  req.requestContext = ctx;
+  runInRequestContext(ctx, () => done());
+});
+
 app.addHook('onRequest', async (req: any, reply: any) => {
   const headerId = String(req.headers?.['x-request-id'] || '').trim();
   if (/^[A-Za-z0-9._:-]{8,128}$/.test(headerId)) req.id = headerId;
@@ -261,6 +271,12 @@ if (process.env.DNSMGR_RATE_LIMIT !== '0') {
     { paths: new Set(['/api/register']), fn: createRateLimit({ windowMs: 60_000, max: 10 }) },
     { paths: new Set(['/api/register/send-code']), fn: createRateLimit({ windowMs: 60_000, max: 5 }) },
     { paths: new Set(['/api/qqbot/webhook']), fn: createRateLimit({ windowMs: 60_000, max: 60 }) },
+    // 保险库口令校验是 scrypt（每次 32MB 内存 + 数十毫秒）：原先完全不限流，
+    // 并发请求既能把「每 15 分钟 5 次」放大数倍，也能用内存压力拖慢整机。
+    {
+      paths: new Set(['/api/vault/unlock', '/api/vault/recover', '/api/vault/passphrase']),
+      fn: createRateLimit({ windowMs: 60_000, max: 20 }),
+    },
   ];
   app.addHook('onRequest', async (req: any, reply: any) => {
     const url = String(req.raw.url || '').split('?')[0];
@@ -299,13 +315,19 @@ if (bootState !== 'not_installed') {
     // 首次部署且尚无配置：使用进程内随机密钥，仅用于安装阶段
   }
 }
-// 供账号凭据加解密使用（AES-256-GCM，密钥由 sys_key 派生）
+// 供账号凭据加解密使用（AES-256-GCM，密钥由 sys_key 派生；可用 DNSMGR_CONFIG_KEY 指定独立根密钥）
 setSecretKey(sysKey);
 // 业务令牌默认 7 天过期（可通过 DNSMGR_JWT_TTL 缩短，如 12h）；TOTP 预令牌单独指定 5 分钟。
-// 显式限定 HS256，避免算法混淆
+// 显式限定 HS256，避免算法混淆。
+// JWT 与配置加密必须使用不同密钥：DNSMGR_JWT_KEY 可指定独立签名密钥，
+// 这样 sys_key 泄露（SQL 注入/裸库 dump）不会再同时导致会话伪造与全部凭据被解密。
+const jwtSecret = String(process.env.DNSMGR_JWT_KEY || '').trim() || sysKey;
+if (jwtSecret !== sysKey && jwtSecret.length < 32) {
+  console.warn('[dnsmgr-backend] DNSMGR_JWT_KEY 长度不足 32 字符，建议使用至少 32 字节的随机密钥');
+}
 const jwtTtl = String(process.env.DNSMGR_JWT_TTL || '7d');
 await app.register(jwt, {
-  secret: sysKey,
+  secret: jwtSecret,
   sign: { algorithm: 'HS256', expiresIn: jwtTtl },
   verify: { algorithms: ['HS256'] },
 });
@@ -386,7 +408,7 @@ const apiKeyLastTouch = new Map<number, number>();
       api_key_name: apiKeyName,
       api_key_scopes: scopes,
     };
-    enterRequestContext({ uid, jti: String(req.user.jti) });
+    bindRequestContext({ uid, jti: String(req.user.jti) });
     if (keyRow) {
       const last = apiKeyLastTouch.get(apiKeyId) || 0;
       if (Date.now() - last > 60_000) {
@@ -426,6 +448,7 @@ const apiKeyLastTouch = new Map<number, number>();
       auth_type: 'legacy_domain',
       legacy_domain_id: did,
       legacy_domain: String(d.name),
+      legacy_domain_readonly: Number(req.user.lro || 0) === 1 ? 1 : 0,
       jti,
       exp: Number(req.user.exp || 0),
       api_key_id: 0,
@@ -481,7 +504,7 @@ const apiKeyLastTouch = new Map<number, number>();
     return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
   }
   // 保险库会话绑定 jti：下游私有凭证解密通过请求上下文取当前会话密钥
-  enterRequestContext({ uid, jti });
+  bindRequestContext({ uid, jti });
   return beginIdempotent(req, reply);
 });
 
@@ -507,6 +530,9 @@ if (installed) {
   await encryptLegacyConfigSecrets().catch((e: any) =>
     console.error('[dnsmgr-backend] 加密历史系统密钥失败:', e?.message || e),
   );
+  // 上一个进程被 kill 时留下的 pending/running 任务永远不会再被推进，
+  // 既挡住同类新任务（去重），也让前端一直显示「进行中」：启动时统一标记为失败。
+  await resetStaleJobs();
   // 系统代理配置在启动时应用到全局 fetch；保存设置时还会再次刷新
   await refreshGlobalProxyDispatcher().catch((e: any) =>
     console.error('[dnsmgr-backend] 应用系统代理失败:', e?.message || e),

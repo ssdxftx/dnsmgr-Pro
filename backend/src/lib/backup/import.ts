@@ -95,6 +95,33 @@ function emptyReport(): TableReport {
   return { inserted: 0, reused: 0, skipped: 0, dropped: 0 };
 }
 
+// API Key 作用域名白名单：只接受模块名或 '*'，其余一律丢弃（fail-closed）
+const API_SCOPE_RE = /^[a-z][a-z0-9_-]{0,31}$/;
+
+/** 归档里的 scopes 是任意字符串，导入前必须归一化，避免写出无法解析的作用域 */
+function sanitizeApiScopes(raw: any): string[] {
+  let list: any = raw;
+  if (typeof raw === 'string') {
+    try {
+      list = JSON.parse(raw);
+    } catch {
+      list = [];
+    }
+  }
+  if (!Array.isArray(list)) return [];
+  const out: string[] = [];
+  for (const v of list) {
+    const s = String(v ?? '').trim().toLowerCase();
+    if (!s) continue;
+    if (s === '*') {
+      if (!out.includes('*')) out.push('*');
+      continue;
+    }
+    if (API_SCOPE_RE.test(s) && !out.includes(s)) out.push(s);
+  }
+  return out;
+}
+
 /** 目标表实际列，避免归档里版本较新的列导致 INSERT 失败 */
 async function targetColumns(q: Q, name: string): Promise<Set<string>> {
   const rows = await listColumns(table(name), q);
@@ -258,7 +285,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
           switch (name) {
             case 'config': {
               const key = String(row.key || '');
-              if (!key || key === 'sys_key' || key === 'backup_key' || key === 'maintenance') {
+              if (!key || key === 'sys_key' || key === 'backup_key' || key === 'backup_key_prev' || key === 'maintenance') {
                 report.config.skipped++;
                 continue;
               }
@@ -374,6 +401,46 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               if (wrappedPass) row.wrapped_dek = wrappedPass;
               delete row.__dek_bk;
               await insertRow(q, name, row, columns);
+              rep.inserted++;
+              continue;
+            }
+            case 'api_key': {
+              // 归档中的 uid 是导出站点的用户 ID，必须重映射到本次导入后的用户。
+              // 不重映射时，个人归档可以插入一行 uid=1 的 Key，导入者随后用该 Key
+              // 认证即可拿到管理员身份（备份导入提权）。
+              const mappedUid = uidMap.get(Number(row.uid));
+              if (!mappedUid) {
+                rep.skipped++;
+                report.warnings.push('API Key 所属用户未导入，已跳过');
+                continue;
+              }
+              if (scope === 'user' && !actorIsAdmin && mappedUid !== actorUid) {
+                rep.skipped++;
+                continue;
+              }
+              const keyHash = String(row.key_hash || '').trim().toLowerCase();
+              if (!/^[0-9a-f]{64}$/.test(keyHash)) {
+                rep.skipped++;
+                report.warnings.push('API Key 哈希格式不合法，已跳过');
+                continue;
+              }
+              row.uid = mappedUid;
+              row.key_hash = keyHash;
+              // 作用域按模块名白名单归一化：归档里的任意字符串不能变成全权限
+              row.scopes = JSON.stringify(sanitizeApiScopes(row.scopes));
+              if ('active' in row) row.active = Number(row.active) === 1 ? 1 : 0;
+              if (row.expires_at) {
+                const exp = new Date(String(row.expires_at).replace(' ', 'T')).getTime();
+                if (!Number.isFinite(exp)) row.expires_at = null;
+              }
+              // key_hash 唯一：同一把 Key 重复导入时复用已有记录，不覆盖其归属
+              const dupKey = await q(`SELECT id FROM ${table('api_key')} WHERE key_hash = ? LIMIT 1`, [keyHash]);
+              if (dupKey.length) {
+                rep.reused++;
+                continue;
+              }
+              delete row.id;
+              await insertRow(q, 'api_key', row, columns);
               rep.inserted++;
               continue;
             }

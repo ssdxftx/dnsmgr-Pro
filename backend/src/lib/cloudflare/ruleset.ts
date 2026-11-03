@@ -40,6 +40,13 @@ export function phaseScope(phase: string): 'zone' | 'account' {
   return PHASE_META[phase]?.scope === 'account' ? 'account' : 'zone';
 }
 
+/** 路径段白名单：规则/规则集 ID 只允许 [A-Za-z0-9_-]，防止 ../ 之类把请求引到其它端点 */
+function idSeg(value: any, label = '资源 ID'): string {
+  const s = String(value ?? '').trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(s)) throw new Error(`非法的${label}`);
+  return s;
+}
+
 export function phasePermission(phase: string): string {
   return PHASE_META[phase]?.permission || '';
 }
@@ -49,8 +56,8 @@ export class CloudflareRulesetService {
   constructor(private cf: CloudflareEnhanceService, private scope: RulesetScope) {}
 
   private basePath(): string {
-    if (this.scope.kind === 'account') return `/accounts/${this.scope.accountId}/rulesets`;
-    return `/zones/${this.scope.zoneId}/rulesets`;
+    if (this.scope.kind === 'account') return `/accounts/${idSeg(this.scope.accountId, 'Account ID')}/rulesets`;
+    return `/zones/${idSeg(this.scope.zoneId, 'Zone ID')}/rulesets`;
   }
 
   private rulesetKind(): string {
@@ -101,7 +108,7 @@ export class CloudflareRulesetService {
   async updateRule(phase: string, ruleId: string, input: GenericRuleInput): Promise<any> {
     const rsId = await this.resolveRulesetId(phase, true);
     if (!rsId) throw new EnhanceError('无法定位或创建规则集', 400);
-    const result = await this.cf.apiResult('PATCH', `${this.basePath()}/${rsId}/rules/${ruleId}`, {}, {
+    const result = await this.cf.apiResult('PATCH', `${this.basePath()}/${idSeg(rsId, 'Ruleset ID')}/rules/${idSeg(ruleId, 'Rule ID')}`, {}, {
       description: input.description,
       expression: input.expression,
       action: input.action,

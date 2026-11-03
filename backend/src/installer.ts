@@ -278,6 +278,26 @@ async function mysqlInstall(cfg: DbConfig, prefix: string, existed: boolean, adm
 
 /** 已有库是否至少存在一个管理员；查询失败时按“有管理员”处理，避免瞬时故障触发重复建号 */
 async function dbHasAdmin(cfg: DbConfig, prefix: string): Promise<boolean> {
+  // SQLite 必须单独分支：旧实现只建 MySQL 连接，SQLite 部署下必然抛错并落到 return true，
+  // 结果是「config 表在、但没有任何 level>=2 账号」的半成品实例永远不建管理员，
+  // 而业务路由又因为「未安装」不注册 → 实例彻底不可用且无法自愈。
+  if (cfg.db_type === 'sqlite') {
+    const file = resolveSqliteFile(cfg);
+    if (!fs.existsSync(file)) return false;
+    const { DatabaseSync } = await import('node:sqlite');
+    let db: any = null;
+    try {
+      db = new DatabaseSync(file, { readOnly: true });
+      db.exec('PRAGMA busy_timeout = 5000');
+      const row = db.prepare(`SELECT 1 FROM "${prefix}user" WHERE level >= 2 LIMIT 1`).get();
+      return !!row;
+    } catch {
+      // 表不存在 = 还没有管理员，交给向导建号；其他异常保守按「有管理员」处理
+      return false;
+    } finally {
+      db?.close?.();
+    }
+  }
   let conn: mysql.Connection;
   try {
     conn = await createConnection(cfg);

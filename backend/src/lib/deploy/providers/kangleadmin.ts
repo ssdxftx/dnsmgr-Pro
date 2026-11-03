@@ -141,7 +141,7 @@ export class KangleadminDeploy implements DeployProvider {
 
   private async login2(cookie: string, sessKey: string): Promise<boolean> {
     const s = createHash('md5').update(sessKey + this.username + sessKey + this.skey).digest('hex');
-    const url = this.url + this.path + '/index.php?c=sso&a=login&name=' + this.username + '&r=' + sessKey + '&s=' + s;
+    const url = this.url + this.path + '/index.php?c=sso&a=login&name=' + encodeURIComponent(String(this.username || '')) + '&r=' + sessKey + '&s=' + s;
     const response = await this.request(url, 'GET', { cookie });
     if (response.code === 302) return true;
     if (response.body.length > 3 && response.body.length < 50) throw new Error('SSO登录失败 (' + this.htmlspecialchars(response.body) + ')');
@@ -149,7 +149,7 @@ export class KangleadminDeploy implements DeployProvider {
   }
 
   private async loginVhost(name: string): Promise<void> {
-    const url = this.url + this.path + '/index.php?c=vhost&a=impLogin&name=' + name;
+    const url = this.url + this.path + '/index.php?c=vhost&a=impLogin&name=' + encodeURIComponent(String(name || ''));
     const response = await this.request(url, 'GET', { cookie: this.cookie });
     if (response.code === 302) {
       await this.request(this.url + '/vhost/', 'GET', { cookie: this.cookie });

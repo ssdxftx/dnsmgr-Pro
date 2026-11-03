@@ -129,5 +129,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           # 只读缓存，避免 mode=max 缓存导出在并发时拖慢/挂住构建
           cache-from: type=gha
-          provenance: false
+          # 生成 SLSA provenance 证明与 SBOM：便于用 cosign verify-attestation 校验镜像来源
+          provenance: true
+          sbom: true
 

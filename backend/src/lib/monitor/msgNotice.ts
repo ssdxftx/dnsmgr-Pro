@@ -135,12 +135,17 @@ export async function sendTelegram(content: string): Promise<boolean | string> {
   if (topicid > 0) post.message_thread_id = topicid;
   let res: Response;
   try {
-    res = await safeFetch(`${base}/bot${token}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams(Object.fromEntries(Object.entries(post).map(([k, v]) => [k, String(v)]))),
-      signal: AbortSignal.timeout(15000),
-    });
+    res = await safeFetch(
+      `${base}/bot${token}/sendMessage`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(Object.fromEntries(Object.entries(post).map(([k, v]) => [k, String(v)]))),
+        signal: AbortSignal.timeout(15000),
+      },
+      5,
+      { requirePinnedDns: true },
+    );
   } catch (e: any) {
     return e?.message || 'Telegram 代理地址不合法';
   }
@@ -211,12 +216,17 @@ export async function sendWebhook(sub: string, content: string): Promise<boolean
   }
   let res: Response;
   try {
-    res = await safeFetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json; charset=UTF-8' },
-      body: JSON.stringify(post),
-      signal: AbortSignal.timeout(15000),
-    });
+    res = await safeFetch(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        body: JSON.stringify(post),
+        signal: AbortSignal.timeout(15000),
+      },
+      5,
+      { requirePinnedDns: true },
+    );
   } catch (e: any) {
     return e?.message || 'Webhook地址不合法';
   }
@@ -281,7 +291,7 @@ export async function sendCustomWebhook(sub: string, content: string): Promise<b
   }
 
   try {
-    const res = await safeFetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend, signal: AbortSignal.timeout(15000) });
+    const res = await safeFetch(fetchUrl, { method: methodToUse, headers, body: bodyToSend, signal: AbortSignal.timeout(15000) }, 5, { requirePinnedDns: true });
     if (res.status >= 200 && res.status < 300) return true;
     return '请求失败，HTTP状态码：' + res.status;
   } catch (e: any) {

@@ -245,6 +245,87 @@ function recordOwnedByDomain(cur: any, domainName: string): boolean {
   return norm(d) === norm(domainName);
 }
 
+// 多个厂商适配层把 getDomainRecordInfo 返回的 Domain 直接写成"当前域名"，
+// 单看该字段无法证明记录归属。权威判定是「该 RecordId 是否出现在本域名的记录列表中」，
+// 因此这里按域名缓存一份 RecordId 集合（60s），避免每次写操作都全量翻页。
+const zoneRecordIdCache = new Map<string, { at: number; ids: Set<string>; complete: boolean }>();
+const ZONE_RECORD_ID_TTL = 60_000;
+const ZONE_RECORD_ID_MAX = 500;
+
+async function zoneRecordIdSet(provider: any, d: any, acct: any): Promise<{ ids: Set<string>; complete: boolean } | null> {
+  const cacheKey = domainCacheKey(d);
+  const cacheable = !!acct && acct.visibility !== 'private';
+  if (cacheable) {
+    const hit = zoneRecordIdCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < ZONE_RECORD_ID_TTL) return { ids: hit.ids, complete: hit.complete };
+  }
+  const ids = new Set<string>();
+  let complete = true;
+  let pageSize = 500;
+  for (let page = 1; page <= 10; page++) {
+    const r: any = await Promise.resolve()
+      .then(() => provider.getDomainRecords(page, 500, null, null, null, null, null, null))
+      .catch(() => false);
+    if (r === false) return null;
+    const list: any[] = Array.isArray(r?.list) ? r.list : [];
+    if (!list.length) break;
+    for (const item of list) if (item && item.RecordId !== undefined) ids.add(String(item.RecordId));
+    if (page === 1) pageSize = list.length;
+    if (list.length < pageSize) break;
+    if (page === 10) complete = false;
+  }
+  if (cacheable) {
+    if (zoneRecordIdCache.size > ZONE_RECORD_ID_MAX) zoneRecordIdCache.clear();
+    zoneRecordIdCache.set(cacheKey, { at: Date.now(), ids, complete });
+  }
+  return { ids, complete };
+}
+
+/** 记录归属守卫：Domain 字段匹配 + 云端记录列表成员校验（缺失 Domain 时不再 fail-open） */
+async function recordBelongsToDomain(
+  provider: any,
+  info: { domain: any; account: any },
+  recordId: any,
+  cur: any,
+): Promise<boolean> {
+  if (cur && cur.Domain && !recordOwnedByDomain(cur, info.domain.name)) return false;
+  const set = await zoneRecordIdSet(provider, info.domain, info.account);
+  if (set) {
+    if (set.ids.has(String(recordId))) return true;
+    // 超大 Zone 只取了前 5000 条时无法断言不存在，退回 Domain 字段判定，避免误伤正常操作
+    return !set.complete && !!cur?.Domain;
+  }
+  // 云端列表拉取失败：只有在厂商确实返回了归属域名时才放行
+  return !!cur?.Domain;
+}
+
+/** 校验域名是否存在于该云账户的 Zone 列表中，并返回云端 Zone ID（客户端传入的 thirdid 不可信） */
+async function resolveCloudZone(acct: any, domainName: string): Promise<{ ok: boolean; thirdid?: string }> {
+  let provider: any;
+  try {
+    provider = getDnsProvider(acct.type, await accountConfigOf(acct), domainName, null);
+  } catch {
+    return { ok: false };
+  }
+  if (!provider) return { ok: false };
+  const key = (v: any) => String(v || '').trim().toLowerCase().replace(/\.$/, '');
+  const want = key(domainName);
+  for (let page = 1; page <= 20; page++) {
+    const res: any = await Promise.resolve()
+      .then(() => provider.getDomainList(null, page, 100))
+      .catch(() => false);
+    if (res === false) return { ok: false };
+    const list: any[] = Array.isArray(res?.list) ? res.list : [];
+    for (const row of list) {
+      if (key(row?.name || row?.Domain || row?.domain) !== want) continue;
+      const id = row.DomainId ?? row.domainId ?? row.ZoneId ?? row.zone_id ?? row.id ?? row.thirdid;
+      return { ok: true, thirdid: id === undefined || id === null ? undefined : String(id) };
+    }
+    if (list.length < 100) break;
+  }
+  return { ok: false };
+}
+
 /** 普通用户记录列表过滤：只保留授权子域名树内的记录 */
 function filterRecords(acc: { admin: boolean; perms: SubPermission[] }, domainName: string, list: any[]): any[] {
   if (acc.admin) return list;
@@ -597,10 +678,18 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (exists) return { code: -1, msg: '域名已存在' };
     const acct = await getVisibleAccount('account', aid, req.user);
     if (!acct) return { code: -1, msg: '账户不存在' };
+    // 域名接入必须确认该域名确实在所选云账户下：否则普通用户可以把任意未接入的域名
+    // 登记进自己账户占位（管理员随后只会看到「域名已存在」），thirdid 也不能由客户端指定。
+    const zone = await resolveCloudZone(acct, domainName);
+    if (!zone.ok && !checkLevel(req.user, 2)) {
+      return { code: -1, msg: '该域名不在所选云账户的域名列表中，无法接入' };
+    }
+    // 云端返回的 Zone ID 优先于客户端传值，避免用错误 thirdid 操作到别人的 Zone
+    const finalThirdid = zone.ok && zone.thirdid ? zone.thirdid : thirdid;
     // 历史数据可能残留同名域名的权限行；重新接入前清掉，避免旧用户自动获得新域名权限
     await clearDomainPermissions([domainName]);
     const id = await query(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      aid, domainName, thirdid, recordcount,
+      aid, domainName, finalThirdid, recordcount,
     ]).then((r: any) => r.insertId || 0);
     audit(req, {
       targetType: 'domain',
@@ -608,7 +697,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       targetName: domainName,
       summary: `接入域名 ${domainName}`,
       changes: [{ field: '域名', to: domainName }],
-      detail: { aid, domain: domainName, thirdid, recordcount },
+      detail: { aid, domain: domainName, thirdid: finalThirdid, recordcount, verified: zone.ok },
     });
     return { code: 0, msg: '添加域名成功', data: id };
   });
@@ -858,7 +947,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         cur = await provider.getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
-        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+        if (!(await recordBelongsToDomain(provider, info, recordId, cur))) return { code: -1, msg: '无权限操作该记录' };
         const err = writeErr(acc, info.domain.name, cur.Name);
         if (err) return { code: -1, msg: err };
       }
@@ -902,7 +991,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
-        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+        if (!(await recordBelongsToDomain(provider, info, recordId, cur))) return { code: -1, msg: '无权限操作该记录' };
         let e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
         e = writeErr(acc, info.domain.name, name);
@@ -941,7 +1030,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
-        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+        if (!(await recordBelongsToDomain(provider, info, recordId, cur))) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }
@@ -975,7 +1064,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (!acc.admin) {
         cur = await (provider as any).getDomainRecordInfo(recordId);
         if (!cur) return { code: -1, msg: '无权限操作该记录' };
-        if (!recordOwnedByDomain(cur, info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+        if (!(await recordBelongsToDomain(provider, info, recordId, cur))) return { code: -1, msg: '无权限操作该记录' };
         const e = writeErr(acc, info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }
@@ -1038,7 +1127,8 @@ export default async function domainRoutes(app: FastifyInstance) {
           const p: any = makeProvider();
           const cur = recordMap ? recordMap.get(String(r.RecordId)) : await p.getDomainRecordInfo(r.RecordId);
           if (!cur) throw new Error('无权限操作该记录');
-          if (!recordOwnedByDomain(cur, info.domain.name)) throw new Error('无权限操作该记录');
+          // recordMap 来自本域名记录列表，命中即已证明归属；否则按 RecordId 成员校验
+          if (!recordMap && !(await recordBelongsToDomain(p, info, r.RecordId, cur))) throw new Error('无权限操作该记录');
           const e = writeErr(acc, info.domain.name, cur.Name);
           if (e) throw new Error(e);
         });
@@ -1246,7 +1336,7 @@ export default async function domainRoutes(app: FastifyInstance) {
           if (!acc.admin) {
             const cur = await (provider as any).getDomainRecordInfo(recordId);
             if (!cur) continue;
-            if (!recordOwnedByDomain(cur, info.domain.name)) continue;
+            if (!(await recordBelongsToDomain(provider, info, recordId, cur))) continue;
             if (writeErr(acc, info.domain.name, cur.Name)) continue;
           }
           if (await provider.updateRecordWeight(recordId, Number(w))) success++;
@@ -1469,14 +1559,24 @@ export default async function domainRoutes(app: FastifyInstance) {
     const config = { ...meta, type: ctx.info.account.type, alias: LEGACY_ALIAS_TYPES.has(String(ctx.info.account.type)) };
     const data: any = { ...ctx.info.domain, config, recordLine, minTTL };
     if (asText(auth.body.loginurl) === '1') {
+      // 快捷登录签发的是"整域名"会话，必须先把调用者的细粒度授权收口：
+      // 只有整域名（sub 为空）授权才能换取该会话，只读授权签发只读会话，
+      // 仅子域名授权直接拒绝——否则 2 小时会话会把 sub/readonly 放大成整域名可写。
+      let readonly = 0;
+      if (!ctx.acc.admin) {
+        const m = matchPermission(ctx.acc.perms, ctx.info.domain.name, '@');
+        if (m < 0) return { code: -1, msg: '无权限：仅整域名授权可使用快捷登录' };
+        readonly = m === 1 ? 1 : 0;
+      }
       const sysKey = await getSysKey();
       const token = randomUUID();
       const timestamp = Math.floor(Date.now() / 1000);
-      const sign = md5(sysKey + ctx.info.domain.name + timestamp + token + sysKey);
+      // 只读标记参与签名，避免被篡改为可写
+      const sign = md5(sysKey + ctx.info.domain.name + timestamp + token + String(readonly) + sysKey);
       const proto = String(req.headers?.['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
       const host = String(req.headers?.host || '');
       const base = host ? `${proto}://${host}` : '';
-      data.loginurl = `${base}/quicklogin?domain=${encodeURIComponent(ctx.info.domain.name)}&timestamp=${timestamp}&token=${encodeURIComponent(token)}&sign=${sign}`;
+      data.loginurl = `${base}/quicklogin?domain=${encodeURIComponent(ctx.info.domain.name)}&timestamp=${timestamp}&token=${encodeURIComponent(token)}&ro=${readonly}&sign=${sign}`;
     }
     return { code: 0, data };
   });
@@ -1572,7 +1672,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     let cur: any = null;
     if (!ctx.acc.admin) {
       cur = await ctx.provider.getDomainRecordInfo(recordid);
-      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      if (!cur || !(await recordBelongsToDomain(ctx.provider, ctx.info, recordid, cur))) return { code: -1, msg: '无权限操作该记录' };
       let e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
       if (e) return { code: -1, msg: e };
       e = writeErr(ctx.acc, ctx.info.domain.name, name);
@@ -1598,7 +1698,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     let cur: any = null;
     if (!ctx.acc.admin) {
       cur = await ctx.provider.getDomainRecordInfo(recordid);
-      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      if (!cur || !(await recordBelongsToDomain(ctx.provider, ctx.info, recordid, cur))) return { code: -1, msg: '无权限操作该记录' };
       const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
       if (e) return { code: -1, msg: e };
     }
@@ -1622,7 +1722,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     let cur: any = null;
     if (!ctx.acc.admin) {
       cur = await ctx.provider.getDomainRecordInfo(recordid);
-      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      if (!cur || !(await recordBelongsToDomain(ctx.provider, ctx.info, recordid, cur))) return { code: -1, msg: '无权限操作该记录' };
       const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
       if (e) return { code: -1, msg: e };
     }
@@ -1645,7 +1745,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     let cur: any = null;
     if (!ctx.acc.admin) {
       cur = await ctx.provider.getDomainRecordInfo(recordid);
-      if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+      if (!cur || !(await recordBelongsToDomain(ctx.provider, ctx.info, recordid, cur))) return { code: -1, msg: '无权限操作该记录' };
       const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
       if (e) return { code: -1, msg: e };
     }
@@ -1677,7 +1777,10 @@ export default async function domainRoutes(app: FastifyInstance) {
       const map = await fetchProviderRecordMap(ctx.provider);
       for (const r of records) {
         const cur = map ? map.get(String(r.RecordId)) : await ctx.provider.getDomainRecordInfo(String(r.RecordId));
-        if (!cur || !recordOwnedByDomain(cur, ctx.info.domain.name)) return { code: -1, msg: '无权限操作该记录' };
+        if (!cur) return { code: -1, msg: '无权限操作该记录' };
+        if (!map && !(await recordBelongsToDomain(ctx.provider, ctx.info, String(r.RecordId), cur))) {
+          return { code: -1, msg: '无权限操作该记录' };
+        }
         const e = writeErr(ctx.acc, ctx.info.domain.name, cur.Name);
         if (e) return { code: -1, msg: e };
       }

@@ -183,7 +183,9 @@ export async function updateNexttime(row: any): Promise<void> {
     const today = new Date();
     if (row.cycle === 2) {
       const date = parseInt(row.switchdate);
-      if (isNaN(date)) throw new PermanentTaskError('每月日期配置错误');
+      // 必须校验范围：switchdate=0 时 new Date(y, m, 0) 会落到「上月最后一天」，
+      // 重算分支同样落在过去，nexttime 恒为「已到期」，任务会被每 60s 反复执行（永久泄漏）。
+      if (isNaN(date) || date < 1 || date > 31) throw new PermanentTaskError('每月日期必须在 1-31 之间');
       const daysIn = (y: number, mIdx: number) => new Date(y, mIdx + 1, 0).getDate();
       const y = today.getFullYear();
       let d = new Date(y, today.getMonth(), Math.min(date, daysIn(y, today.getMonth())), 0, 0, 0);
@@ -197,6 +199,7 @@ export async function updateNexttime(row: any): Promise<void> {
       nexttime = Math.floor(d.getTime() / 1000);
     } else if (row.cycle === 1) {
       const weekday = parseInt(row.switchdate);
+      if (isNaN(weekday) || weekday < 0 || weekday > 6) throw new PermanentTaskError('每周星期必须在 0-6 之间');
       const todayDow = today.getDay();
       const daysAhead = ((weekday - todayDow + 7) % 7);
       let d = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0);
@@ -215,6 +218,8 @@ export async function updateNexttime(row: any): Promise<void> {
       }
       nexttime = Math.floor(d.getTime() / 1000);
     }
+    // 兜底：周期任务的 nexttime 必须落在未来，否则会被每分钟的扫描反复命中
+    if (!nexttime || nexttime <= now) nexttime = now + 60;
   } else {
     // 单次执行，switchtime 为 datetime-local 值（YYYY-MM-DDTHH:mm）
     const t = new Date(String(row.switchtime).replace(' ', 'T'));

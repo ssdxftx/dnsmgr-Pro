@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { query, queryOne, table } from './db.js';
-import { decryptText, encryptText, isSecretKey } from './lib/secret.js';
+import { decryptText, encryptText, hasSecretKey, isEncryptedConfig, isSecretKey, setSecretKey } from './lib/secret.js';
 
 let cache: Record<string, string> = {};
 let loadedAt = 0;
@@ -11,21 +11,22 @@ function isNullOrEmpty(v: any): boolean {
 
 // 系统设置中的凭据与通道密钥使用与账户配置相同的 AES-GCM 加密后落库。
 // sys_key 用于派生加密密钥，backup_key 需保持独立于 sys_key，二者维持明文存储。
+// backup_key_prev（历史备份密钥）按凭据处理：它一旦明文外泄，轮换备份密钥就失去意义。
 const PLAINTEXT_CONFIG_KEYS = new Set(['sys_key', 'backup_key', 'maintenance']);
 
 function decryptConfigValue(value: any): any {
-  if (typeof value !== 'string' || !value.startsWith('enc:v1:')) return value;
+  if (typeof value !== 'string' || !isEncryptedConfig(value)) return value;
   const plain = decryptText(value);
   return plain === null ? value : plain;
 }
 
 function encryptConfigValue(key: string, value: string): string {
-  if (!value || PLAINTEXT_CONFIG_KEYS.has(key) || !isSecretKey(key) || value.startsWith('enc:v1:')) return value;
+  if (!value || PLAINTEXT_CONFIG_KEYS.has(key) || !isSecretKey(key) || isEncryptedConfig(value)) return value;
   try {
     return encryptText(value);
-  } catch {
-    // 密钥尚未初始化时保持明文，待密钥就绪后的下一次保存会重新加密。
-    return value;
+  } catch (e: any) {
+    // fail-closed：密钥未就绪时宁可让保存失败，也不能把凭据静默写成明文
+    throw new Error(`配置项 ${key} 加密失败，已拒绝以明文保存：${e?.message || e}`);
   }
 }
 
@@ -44,8 +45,20 @@ export async function configGet(key: string, def: string | null = null, force = 
   return isNullOrEmpty(v) ? def : v;
 }
 
+/** 密钥未初始化时按需用 sys_key 初始化：安装早期写入的凭据不能拿进程内临时密钥加密 */
+async function ensureSecretKey(): Promise<void> {
+  if (hasSecretKey()) return;
+  try {
+    setSecretKey(await getSysKey());
+  } catch {
+    // 数据库不可用：保持未初始化，由 encryptConfigValue fail-closed
+  }
+}
+
 export async function configSet(key: string, value: string): Promise<void> {
-  const stored = encryptConfigValue(key, String(value));
+  const text = String(value);
+  if (text && !PLAINTEXT_CONFIG_KEYS.has(key) && isSecretKey(key)) await ensureSecretKey();
+  const stored = encryptConfigValue(key, text);
   await query(`INSERT INTO ${table('config')} (\`key\`, value) VALUES (?, ?) ON DUPLICATE KEY UPDATE value = ?`, [key, stored, stored]);
   cache[key] = stored;
 }
@@ -54,7 +67,7 @@ export async function configSet(key: string, value: string): Promise<void> {
 export async function encryptLegacyConfigSecrets(): Promise<void> {
   const cfg = await loadConfig(true);
   for (const [key, raw] of Object.entries(cfg)) {
-    if (!raw || PLAINTEXT_CONFIG_KEYS.has(key) || !isSecretKey(key) || raw.startsWith('enc:v1:')) continue;
+    if (!raw || PLAINTEXT_CONFIG_KEYS.has(key) || !isSecretKey(key) || isEncryptedConfig(raw)) continue;
     try {
       await configSet(key, raw);
     } catch (e: any) {

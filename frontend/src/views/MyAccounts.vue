@@ -94,6 +94,9 @@
         <n-form-item :label="t('vault.confirmPassphrase')">
           <n-input v-model:value="initForm.confirm" type="password" show-password-on="click" />
         </n-form-item>
+        <n-form-item :label="t('vault.loginPass')">
+          <n-input v-model:value="confirmLoginPass" type="password" show-password-on="click" :placeholder="t('vault.loginPass')" />
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -132,6 +135,9 @@
         <n-form-item :label="t('vault.passphrase')">
           <n-input v-model:value="upgradePass" type="password" show-password-on="click" :placeholder="t('vault.passphraseHint')" />
         </n-form-item>
+        <n-form-item :label="t('vault.loginPass')">
+          <n-input v-model:value="confirmLoginPass" type="password" show-password-on="click" :placeholder="t('vault.loginPass')" />
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -155,10 +161,17 @@
     <n-modal v-model:show="noneOpen" preset="card" :title="t('vault.modeNone')" class="modal-md" :mask-closable="false">
       <n-alert type="warning" class="mb-3">{{ t('vault.modeNoneWarn') }}</n-alert>
       <n-checkbox v-model:checked="noneAck">{{ t('vault.acknowledge') }}</n-checkbox>
+      <n-input
+        v-model:value="confirmLoginPass"
+        type="password"
+        show-password-on="click"
+        class="mt-3"
+        :placeholder="t('vault.loginPass')"
+      />
       <template #footer>
         <n-space justify="end">
           <n-button @click="noneOpen = false">{{ t('backup.cancel') }}</n-button>
-          <n-button :loading="busy" :disabled="!noneAck" @click="initConvenient">{{ t('vault.initNone') }}</n-button>
+          <n-button :loading="busy" :disabled="!noneAck || !confirmLoginPass" @click="initConvenient">{{ t('vault.initNone') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -262,6 +275,8 @@ const destroyConfirm = ref('');
 const destroyLoginPass = ref('');
 const destroyPass = ref('');
 const initForm = reactive({ passphrase: '', confirm: '' });
+// 建立/升级保险库需要登录密码二次确认（后端 /api/vault/init|upgrade 会校验）
+const confirmLoginPass = ref('');
 const passForm = reactive({ old: '', next: '' });
 
 const ready = computed(() => status.value.unlocked || status.value.mode === 'none');
@@ -271,9 +286,10 @@ watch(unlockOpen, (v) => { if (!v) unlockPass.value = ''; });
 watch(downgradeOpen, (v) => { if (!v) downgradePass.value = ''; });
 watch(recoveryOpen, (v) => { if (!v) recoveryPass.value = ''; });
 watch(destroyOpen, (v) => { if (!v) { destroyConfirm.value = ''; destroyLoginPass.value = ''; destroyPass.value = ''; } });
-watch(upgradeOpen, (v) => { if (!v) upgradePass.value = ''; });
+watch(upgradeOpen, (v) => { if (!v) { upgradePass.value = ''; confirmLoginPass.value = ''; } });
 watch(passOpen, (v) => { if (!v) { passForm.old = ''; passForm.next = ''; } });
-watch(initOpen, (v) => { if (!v) { initForm.passphrase = ''; initForm.confirm = ''; } });
+watch(initOpen, (v) => { if (!v) { initForm.passphrase = ''; initForm.confirm = ''; confirmLoginPass.value = ''; } });
+watch(noneOpen, (v) => { if (!v) confirmLoginPass.value = ''; });
 
 async function load() {
   statusState.value = 'loading';
@@ -299,7 +315,7 @@ async function initPassphrase() {
   if (initForm.passphrase !== initForm.confirm) return message.warning(t('vault.passphraseMismatch'));
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/init', { mode: 'passphrase', passphrase: initForm.passphrase });
+    const res = await api<any>('POST', '/vault/init', { mode: 'passphrase', passphrase: initForm.passphrase, password: confirmLoginPass.value });
     if (res.code !== 0) return message.error(res.msg);
     initOpen.value = false;
     message.success(t('vault.initDone'));
@@ -318,7 +334,7 @@ async function initConvenient() {
   if (!noneAck.value) return message.warning(t('vault.ackRequired'));
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/init', { mode: 'none', acknowledge: true });
+    const res = await api<any>('POST', '/vault/init', { mode: 'none', acknowledge: true, password: confirmLoginPass.value });
     if (res.code !== 0) return message.error(res.msg);
     noneOpen.value = false;
     noneAck.value = false;
@@ -364,7 +380,7 @@ async function changePass() {
 async function upgrade() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/upgrade', { passphrase: upgradePass.value });
+    const res = await api<any>('POST', '/vault/upgrade', { passphrase: upgradePass.value, password: confirmLoginPass.value });
     if (res.code !== 0) return message.error(res.msg);
     upgradeOpen.value = false;
     message.success(t('vault.saved'));

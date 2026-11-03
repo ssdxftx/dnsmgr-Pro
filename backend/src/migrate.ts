@@ -37,6 +37,7 @@ export async function migrate(): Promise<void> {
 
   await migrateBackupAndVault();
   await migrateApiGovernance();
+  await migrateLegacyNonce();
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('totp_replay')} (
@@ -391,6 +392,19 @@ async function ensureColumn(tableName: string, column: string, definition: strin
     // 等关键列缺失，实例带病对外服务并持续 500，比启动失败更难排查。
     throw new Error(`迁移失败：${tableName}.${column} — ${msg}`);
   }
+}
+
+// 旧版 API v2 签名的一次性 nonce 表：同一 nonce 只能成功落库一次，借此拒绝重放
+async function migrateLegacyNonce(): Promise<void> {
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('legacy_nonce')} (
+      nonce varchar(64) NOT NULL,
+      uid int(11) unsigned NOT NULL,
+      created_at datetime NOT NULL,
+      PRIMARY KEY (nonce),
+      KEY idx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+  );
 }
 
 // API 机器身份、幂等请求、统一异步任务与事件回调（幂等）

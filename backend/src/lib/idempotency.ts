@@ -3,7 +3,9 @@ import { query, queryOne, table } from '../db.js';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const MAX_RESPONSE_BYTES = 256 * 1024;
-const SKIP_PREFIXES = ['/api/api-keys', '/api/auth/reauth', '/api/vault'];
+// /api/events 的创建响应里带一次性 HMAC secret，缓存到 idempotency_key 表等于把密钥
+// 明文多存一份 24 小时；这类响应一律不进入幂等缓存。
+const SKIP_PREFIXES = ['/api/api-keys', '/api/auth/reauth', '/api/vault', '/api/events'];
 
 function keyHash(key: string): string {
   return createHash('sha256').update(key).digest('hex');

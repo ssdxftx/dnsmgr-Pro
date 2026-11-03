@@ -11,6 +11,15 @@ export class EnhanceError extends Error {
   }
 }
 
+/** Cloudflare 资源 ID 白名单：只允许字母数字、下划线与短横线。
+ *  路径参数若含 `../`、`%2F` 等字符，拼接后会被归一化成完全不同的端点（路径穿越），
+ *  因此所有拼进 URL 的 ID 必须先经过这里校验。 */
+function cfId(value: any, label = '资源 ID'): string {
+  const s = String(value ?? '').trim();
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(s)) throw new EnhanceError(`非法的${label}`, 400);
+  return s;
+}
+
 function normalizeHostname(hostname: any): string {
   const raw = String(hostname ?? '').trim();
   if (!raw) return '';
@@ -74,7 +83,7 @@ export class CloudflareEnhanceService {
 
   async getZone(zoneId: string): Promise<any> {
     try {
-      return await this.requestResult('GET', '/zones/' + zoneId);
+      return await this.requestResult('GET', '/zones/' + cfId(zoneId, 'Zone ID'));
     } catch (e: any) {
       this.throwActionError('获取域名详情', e, 'Zone:Read');
     }
@@ -109,7 +118,7 @@ export class CloudflareEnhanceService {
 
   async listCustomHostnames(zoneId: string): Promise<any[]> {
     try {
-      return await this.paginate('/zones/' + zoneId + '/custom_hostnames', {}, 100);
+      return await this.paginate('/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames', {}, 100);
     } catch (e: any) {
       this.throwActionError('获取自定义主机名列表', e, 'SSL and Certificates:Read');
     }
@@ -117,7 +126,7 @@ export class CloudflareEnhanceService {
 
   async getCustomHostname(zoneId: string, hostnameId: string): Promise<any> {
     try {
-      return await this.requestResult('GET', '/zones/' + zoneId + '/custom_hostnames/' + hostnameId.trim());
+      return await this.requestResult('GET', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames/' + cfId(hostnameId, 'Hostname ID'));
     } catch (e: any) {
       this.throwActionError('获取自定义主机名详情', e, 'SSL and Certificates:Read');
     }
@@ -143,7 +152,7 @@ export class CloudflareEnhanceService {
     if (origin) payload.custom_origin_server = this.normalize(origin);
 
     try {
-      return await this.requestResult('POST', '/zones/' + zoneId + '/custom_hostnames', {}, payload);
+      return await this.requestResult('POST', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames', {}, payload);
     } catch (e: any) {
       this.throwActionError('创建自定义主机名', e, 'SSL and Certificates:Write');
     }
@@ -158,7 +167,7 @@ export class CloudflareEnhanceService {
     }
 
     try {
-      return await this.requestResult('PATCH', '/zones/' + zoneId + '/custom_hostnames/' + hostnameId.trim(), {}, payload);
+      return await this.requestResult('PATCH', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames/' + cfId(hostnameId, 'Hostname ID'), {}, payload);
     } catch (e: any) {
       this.throwActionError('更新自定义主机名', e, 'SSL and Certificates:Write');
     }
@@ -166,7 +175,7 @@ export class CloudflareEnhanceService {
 
   async deleteCustomHostname(zoneId: string, hostnameId: string): Promise<boolean> {
     try {
-      await this.requestResult('DELETE', '/zones/' + zoneId + '/custom_hostnames/' + hostnameId);
+      await this.requestResult('DELETE', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames/' + cfId(hostnameId, 'Hostname ID'));
       return true;
     } catch (e: any) {
       this.throwActionError('删除自定义主机名', e, 'SSL and Certificates:Write');
@@ -175,7 +184,7 @@ export class CloudflareEnhanceService {
 
   async getFallbackOrigin(zoneId: string): Promise<string> {
     try {
-      const result = await this.requestResult('GET', '/zones/' + zoneId + '/custom_hostnames/fallback_origin', {}, null, true);
+      const result = await this.requestResult('GET', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames/fallback_origin', {}, null, true);
       if (result === null) return '';
       return String(result.origin ?? '').trim();
     } catch (e: any) {
@@ -186,7 +195,7 @@ export class CloudflareEnhanceService {
 
   async updateFallbackOrigin(zoneId: string, origin: string): Promise<string> {
     try {
-      const result = await this.requestResult('PUT', '/zones/' + zoneId + '/custom_hostnames/fallback_origin', {}, {
+      const result = await this.requestResult('PUT', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames/fallback_origin', {}, {
         origin: this.normalize(origin),
       });
       return String(result?.origin ?? origin).trim();
@@ -197,7 +206,7 @@ export class CloudflareEnhanceService {
 
   async deleteFallbackOrigin(zoneId: string): Promise<boolean> {
     try {
-      await this.requestResult('DELETE', '/zones/' + zoneId + '/custom_hostnames/fallback_origin', {}, null, true);
+      await this.requestResult('DELETE', '/zones/' + cfId(zoneId, 'Zone ID') + '/custom_hostnames/fallback_origin', {}, null, true);
       return true;
     } catch (e: any) {
       if (e.status === 404) return true;
@@ -207,7 +216,7 @@ export class CloudflareEnhanceService {
 
   async getDcvDelegationUuid(zoneId: string): Promise<string> {
     try {
-      const result = await this.requestResult('GET', '/zones/' + zoneId + '/dcv_delegation/uuid', {}, null, true);
+      const result = await this.requestResult('GET', '/zones/' + cfId(zoneId, 'Zone ID') + '/dcv_delegation/uuid', {}, null, true);
       if (result === null) return '';
       return String(result.uuid ?? '').trim();
     } catch (e: any) {
@@ -218,7 +227,7 @@ export class CloudflareEnhanceService {
   async listTunnels(accountId: string): Promise<any[]> {
     this.assertTunnelSupported();
     try {
-      return await this.paginate('/accounts/' + accountId + '/cfd_tunnel', { is_deleted: 'false' }, 100);
+      return await this.paginate('/accounts/' + cfId(accountId, 'Account ID') + '/cfd_tunnel', { is_deleted: 'false' }, 100);
     } catch (e: any) {
       this.throwActionError('获取 Tunnel 列表', e, 'Cloudflare Tunnel:Read');
     }
@@ -227,7 +236,7 @@ export class CloudflareEnhanceService {
   async createTunnel(accountId: string, name: string): Promise<any> {
     this.assertTunnelSupported();
     try {
-      return await this.requestResult('POST', '/accounts/' + accountId + '/cfd_tunnel', {}, {
+      return await this.requestResult('POST', '/accounts/' + cfId(accountId, 'Account ID') + '/cfd_tunnel', {}, {
         name: name.trim(),
         tunnel_secret: randomBytes(32).toString('base64'),
       });
@@ -239,7 +248,7 @@ export class CloudflareEnhanceService {
   async deleteTunnel(accountId: string, tunnelId: string): Promise<boolean> {
     this.assertTunnelSupported();
     try {
-      await this.requestResult('DELETE', '/accounts/' + accountId + '/cfd_tunnel/' + tunnelId);
+      await this.requestResult('DELETE', '/accounts/' + cfId(accountId, 'Account ID') + '/cfd_tunnel/' + cfId(tunnelId, 'Tunnel ID'));
       return true;
     } catch (e: any) {
       this.throwActionError('删除 Tunnel', e, 'Cloudflare Tunnel:Write');
@@ -249,7 +258,7 @@ export class CloudflareEnhanceService {
   async getTunnelToken(accountId: string, tunnelId: string): Promise<string> {
     this.assertTunnelSupported();
     try {
-      const result = await this.requestResult('GET', '/accounts/' + accountId + '/cfd_tunnel/' + tunnelId + '/token');
+      const result = await this.requestResult('GET', '/accounts/' + cfId(accountId, 'Account ID') + '/cfd_tunnel/' + cfId(tunnelId, 'Tunnel ID') + '/token');
       if (typeof result === 'string') return result;
       return String(result?.token ?? '').trim();
     } catch (e: any) {
@@ -260,7 +269,7 @@ export class CloudflareEnhanceService {
   async getTunnelConfig(accountId: string, tunnelId: string): Promise<any> {
     this.assertTunnelSupported();
     try {
-      const result = await this.requestResult('GET', '/accounts/' + accountId + '/cfd_tunnel/' + tunnelId + '/configurations', {}, null, true);
+      const result = await this.requestResult('GET', '/accounts/' + cfId(accountId, 'Account ID') + '/cfd_tunnel/' + cfId(tunnelId, 'Tunnel ID') + '/configurations', {}, null, true);
       return Array.isArray(result) || result === null ? {} : result;
     } catch (e: any) {
       this.throwActionError('获取 Tunnel 配置', e, 'Cloudflare Tunnel:Read');
@@ -270,7 +279,7 @@ export class CloudflareEnhanceService {
   async updateTunnelConfig(accountId: string, tunnelId: string, config: any): Promise<any> {
     this.assertTunnelSupported();
     try {
-      return await this.requestResult('PUT', '/accounts/' + accountId + '/cfd_tunnel/' + tunnelId + '/configurations', {}, {
+      return await this.requestResult('PUT', '/accounts/' + cfId(accountId, 'Account ID') + '/cfd_tunnel/' + cfId(tunnelId, 'Tunnel ID') + '/configurations', {}, {
         config,
       });
     } catch (e: any) {
@@ -284,7 +293,7 @@ export class CloudflareEnhanceService {
     if (tunnelId) query.tunnel_id = tunnelId;
 
     try {
-      return await this.paginate('/accounts/' + accountId + '/teamnet/routes', query, 100);
+      return await this.paginate('/accounts/' + cfId(accountId, 'Account ID') + '/teamnet/routes', query, 100);
     } catch (e: any) {
       this.throwActionError('获取 CIDR 路由列表', e, 'Cloudflare Tunnel:Read');
     }
@@ -300,7 +309,7 @@ export class CloudflareEnhanceService {
     if (virtualNetworkId) payload.virtual_network_id = virtualNetworkId.trim();
 
     try {
-      return await this.requestResult('POST', '/accounts/' + accountId + '/teamnet/routes', {}, payload);
+      return await this.requestResult('POST', '/accounts/' + cfId(accountId, 'Account ID') + '/teamnet/routes', {}, payload);
     } catch (e: any) {
       this.throwActionError('创建 CIDR 路由', e, 'Cloudflare Tunnel:Write');
     }
@@ -309,7 +318,7 @@ export class CloudflareEnhanceService {
   async deleteCidrRoute(accountId: string, routeId: string): Promise<boolean> {
     this.assertTunnelSupported();
     try {
-      await this.requestResult('DELETE', '/accounts/' + accountId + '/teamnet/routes/' + routeId);
+      await this.requestResult('DELETE', '/accounts/' + cfId(accountId, 'Account ID') + '/teamnet/routes/' + cfId(routeId, 'Route ID'));
       return true;
     } catch (e: any) {
       this.throwActionError('删除 CIDR 路由', e, 'Cloudflare Tunnel:Write');
@@ -322,7 +331,7 @@ export class CloudflareEnhanceService {
     if (tunnelId) query.tunnel_id = tunnelId;
 
     try {
-      return await this.paginate('/accounts/' + accountId + '/zerotrust/routes/hostname', query, 100);
+      return await this.paginate('/accounts/' + cfId(accountId, 'Account ID') + '/zerotrust/routes/hostname', query, 100);
     } catch (e: any) {
       this.throwActionError('获取主机名路由列表', e, 'Cloudflare Tunnel:Read');
     }
@@ -337,7 +346,7 @@ export class CloudflareEnhanceService {
     if (comment) payload.comment = comment.trim();
 
     try {
-      return await this.requestResult('POST', '/accounts/' + accountId + '/zerotrust/routes/hostname', {}, payload);
+      return await this.requestResult('POST', '/accounts/' + cfId(accountId, 'Account ID') + '/zerotrust/routes/hostname', {}, payload);
     } catch (e: any) {
       this.throwActionError('创建主机名路由', e, 'Cloudflare Tunnel:Write');
     }
@@ -346,7 +355,7 @@ export class CloudflareEnhanceService {
   async deleteHostnameRoute(accountId: string, routeId: string): Promise<boolean> {
     this.assertTunnelSupported();
     try {
-      await this.requestResult('DELETE', '/accounts/' + accountId + '/zerotrust/routes/hostname/' + routeId);
+      await this.requestResult('DELETE', '/accounts/' + cfId(accountId, 'Account ID') + '/zerotrust/routes/hostname/' + cfId(routeId, 'Route ID'));
       return true;
     } catch (e: any) {
       this.throwActionError('删除主机名路由', e, 'Cloudflare Tunnel:Write');
@@ -359,7 +368,7 @@ export class CloudflareEnhanceService {
     const target = (tunnelId.trim() + '.cfargotunnel.com').toLowerCase();
 
     try {
-      const payload = await this.requestRaw('GET', '/zones/' + zoneId + '/dns_records', {
+      const payload = await this.requestRaw('GET', '/zones/' + cfId(zoneId, 'Zone ID') + '/dns_records', {
         name: hostname,
         type: 'CNAME',
         page: 1,
@@ -367,7 +376,7 @@ export class CloudflareEnhanceService {
       });
       const records: any[] = payload?.result ?? [];
 
-      const allByNamePayload = await this.requestRaw('GET', '/zones/' + zoneId + '/dns_records', {
+      const allByNamePayload = await this.requestRaw('GET', '/zones/' + cfId(zoneId, 'Zone ID') + '/dns_records', {
         name: hostname,
         page: 1,
         per_page: 100,
@@ -392,7 +401,7 @@ export class CloudflareEnhanceService {
           return { action: 'unchanged' };
         }
 
-        await this.requestResult('PUT', '/zones/' + zoneId + '/dns_records/' + record.id, {}, {
+        await this.requestResult('PUT', '/zones/' + cfId(zoneId, 'Zone ID') + '/dns_records/' + cfId(record.id, 'Record ID'), {}, {
           type: 'CNAME',
           name: hostname,
           content: target,
@@ -402,7 +411,7 @@ export class CloudflareEnhanceService {
         return { action: 'updated' };
       }
 
-      await this.requestResult('POST', '/zones/' + zoneId + '/dns_records', {}, {
+      await this.requestResult('POST', '/zones/' + cfId(zoneId, 'Zone ID') + '/dns_records', {}, {
         type: 'CNAME',
         name: hostname,
         content: target,
@@ -421,7 +430,7 @@ export class CloudflareEnhanceService {
     const target = this.normalize(tunnelId.trim() + '.cfargotunnel.com');
 
     try {
-      const payload = await this.requestRaw('GET', '/zones/' + zoneId + '/dns_records', {
+      const payload = await this.requestRaw('GET', '/zones/' + cfId(zoneId, 'Zone ID') + '/dns_records', {
         name: hostname,
         type: 'CNAME',
         page: 1,
@@ -432,7 +441,7 @@ export class CloudflareEnhanceService {
         const name = this.normalize(record.name);
         const content = this.normalize(record.content);
         if (name === hostname && content === target) {
-          await this.requestResult('DELETE', '/zones/' + zoneId + '/dns_records/' + record.id);
+          await this.requestResult('DELETE', '/zones/' + cfId(zoneId, 'Zone ID') + '/dns_records/' + cfId(record.id, 'Record ID'));
           return { deleted: true };
         }
       }

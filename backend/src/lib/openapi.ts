@@ -1,12 +1,11 @@
 import type { FastifyInstance } from 'fastify';
 import { moduleForPath } from './apiKeys.js';
+import { checkLevel } from '../auth.js';
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const PUBLIC_PATHS = new Set([
   '/api/health',
   '/api/ready',
-  '/api/openapi.json',
-  '/api/docs',
   '/api/setup/status',
   '/api/setup/check',
   '/api/setup/install',
@@ -41,8 +40,16 @@ export function registerOpenApi(app: FastifyInstance): void {
     }
   });
 
-  app.get('/api/openapi.json', async () => buildSpec(routes));
-  app.get('/api/docs', async (_req: any, reply: any) => {
+  // 接口清单本身是内部资产：匿名枚举全部端点会替攻击者省掉大量探测。
+  // 两个入口都改为管理员可读（程序化访问带 Authorization 头即可）。
+  const adminOnly = async (req: any, reply: any) => {
+    await (app as any).authenticate(req, reply);
+    if (!req.user) return;
+    if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
+  };
+
+  app.get('/api/openapi.json', { preHandler: adminOnly }, async () => buildSpec(routes));
+  app.get('/api/docs', { preHandler: adminOnly }, async (_req: any, reply: any) => {
     reply.type('text/html; charset=utf-8');
     return docsHtml(buildSpec(routes));
   });

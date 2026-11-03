@@ -42,6 +42,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: dnsmgr-pro
+          # 生产环境建议固定到版本标签或镜像 digest（升级前可先用 cosign verify 校验签名）：
+          #   image: ssdxftx/dnsmgr-pro@sha256:<digest>
           image: ssdxftx/dnsmgr-pro:latest
           imagePullPolicy: Always
           securityContext:
@@ -138,7 +140,16 @@ metadata:
   namespace: dnsmgr-pro
   annotations:
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    # 强制 HTTPS：会话令牌与备份上传都走明文 HTTP 会被链路嗅探
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
 spec:
+  tls:
+    # 需事先创建 TLS Secret（cert-manager 或手工导入）：
+    #   kubectl -n dnsmgr-pro create secret tls dnsmgr-pro-tls --cert=fullchain.pem --key=privkey.pem
+    - hosts:
+        - dns.example.com
+      secretName: dnsmgr-pro-tls
   rules:
     - host: dns.example.com
       http:
@@ -149,4 +160,50 @@ spec:
               service:
                 name: dnsmgr-pro
                 port:
-                  number: 8082
+                  number: 8082---
+# 默认拒绝全部入站/出站，再按需放行：
+# 入站只允许 Ingress 控制器访问 8082；出站只允许 DNS 与 HTTPS（云厂商 API、Webhook、备份目的地）。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dnsmgr-pro-default-deny
+  namespace: dnsmgr-pro
+spec:
+  podSelector:
+    matchLabels:
+      app: dnsmgr-pro
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: dnsmgr-pro-allow
+  namespace: dnsmgr-pro
+spec:
+  podSelector:
+    matchLabels:
+      app: dnsmgr-pro
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8082
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 80

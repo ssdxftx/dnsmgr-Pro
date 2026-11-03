@@ -55,6 +55,7 @@ const loadBusy = ref(false);
 const step = ref('');
 const enabled = ref(false);
 const secret = ref('');
+const bindToken = ref('');
 const qrcode = ref('');
 const code = ref('');
 const password = ref('');
@@ -71,6 +72,7 @@ async function generate() {
   loadBusy.value = false;
   if (res.code === 0) {
     secret.value = res.data.secret;
+    bindToken.value = res.data.bind_token || '';
     qrcode.value = res.data.qrcode;
     code.value = '';
     step.value = 'bind';
@@ -82,7 +84,7 @@ async function bind() {
   if (!code.value) return message.warning(t('totp.codeRequired'));
   if (!password.value) return message.warning(t('totp.passwordRequired'));
   loadBusy.value = true;
-  const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, code: code.value, password: password.value });
+  const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, bind_token: bindToken.value, code: code.value, password: password.value });
   loadBusy.value = false;
   if (res.code === 0) {
     message.success(res.msg);

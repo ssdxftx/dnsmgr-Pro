@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { randomBytes, randomInt } from 'node:crypto';
 import bcrypt from 'bcryptjs';
-import { query, queryOne, table, isDuplicateError } from '../db.js';
+import { query, queryOne, table, isDuplicateError, withTransaction } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { sendMail } from '../lib/monitor/msgNotice.js';
@@ -13,6 +13,45 @@ const SITENAME = '聚合DNS管理系统';
 const CODE_TTL_SECONDS = 10 * 60; // 验证码有效期 10 分钟
 const RESEND_INTERVAL_MS = 60 * 1000; // 重发间隔 60 秒
 const MAX_VERIFY_ATTEMPTS = 5; // 单个验证码允许的最大校验失败次数
+
+/** 校验邮箱验证码（只校验不占用）：返回验证码行 id，或可直接回给前端的错误文案 */
+async function checkEmailCode(email: string, rawCode: any): Promise<{ id: number } | { error: string }> {
+  const code = String(rawCode ?? '').trim();
+  if (!code) return { error: '请输入邮箱验证码' };
+  const verify = await queryOne<any>(
+    `SELECT * FROM ${table('reg_verify')} WHERE email = ? AND code = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
+    [email, code]
+  );
+  if (!verify) {
+    // 校验失败计数，超过上限即作废该验证码，防止在线爆破
+    const latest = await queryOne<any>(
+      `SELECT id, attempts FROM ${table('reg_verify')} WHERE email = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
+      [email]
+    );
+    if (latest) {
+      // 原子累加：并发错误请求不会互相覆盖计数；达到上限时同一条语句作废验证码
+      await query(
+        `UPDATE ${table('reg_verify')}
+            SET used = CASE WHEN attempts + 1 >= ? THEN 1 ELSE used END,
+                attempts = attempts + 1
+          WHERE id = ?`,
+        [MAX_VERIFY_ATTEMPTS, latest.id]
+      );
+      const cur = await queryOne<any>(`SELECT attempts, used FROM ${table('reg_verify')} WHERE id = ?`, [latest.id]);
+      if (Number(cur?.attempts || 0) >= MAX_VERIFY_ATTEMPTS || Number(cur?.used || 0) === 1) {
+        return { error: '验证码错误次数过多，请重新获取验证码' };
+      }
+    }
+    return { error: '验证码错误或已过期' };
+  }
+  // 验证码有效后再检查邮箱占用，避免无凭据时枚举已注册邮箱
+  const emailUsed = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
+  if (emailUsed) return { error: '该用户名或邮箱不可用，请更换后重试' };
+  return { id: Number(verify.id) };
+}
+
+/** 事务内「消耗凭据」失败的信号：抛出后整体回滚，注册码/验证码不会被烧掉 */
+class TicketConflict extends Error {}
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -47,8 +86,8 @@ export default async function registerRoutes(app: FastifyInstance) {
 
   // 公开：发送邮箱验证码
   app.post('/api/register/send-code', async (req: any) => {
+    // 两种注册方式都允许发码：注册码模式下填写邮箱同样需要证明邮箱归属（见 /api/register）
     if (!(await registerEnabled())) return { code: -1, msg: '注册功能未开放' };
-    if ((await registerMode()) !== 'email') return { code: -1, msg: '当前注册方式不支持邮箱验证' };
     const email = String((req.body?.email) ?? '').trim().toLowerCase();
     if (email.length > 254 || !isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
     if (!hitRateLimit(`register:send-code:${req.ip}`, 10, 60_000)) {
@@ -100,42 +139,13 @@ export default async function registerRoutes(app: FastifyInstance) {
     if (password.length < 8) return { code: -1, msg: '密码长度至少为 8 位' };
     if (!/^[A-Za-z0-9_.-]+$/.test(username)) return { code: -1, msg: '用户名仅支持字母、数字、下划线、点和横线' };
 
+    let verifyId = 0;
+    let regCodeId = 0;
     if (mode === 'email') {
       if (!isValidEmail(email)) return { code: -1, msg: '请输入正确的邮箱地址' };
-      const code = String(b.code ?? '').trim();
-      if (!code) return { code: -1, msg: '请输入邮箱验证码' };
-      const verify = await queryOne<any>(
-        `SELECT * FROM ${table('reg_verify')} WHERE email = ? AND code = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
-        [email, code]
-      );
-      if (!verify) {
-        // 校验失败计数，超过上限即作废该验证码，防止在线爆破
-        const latest = await queryOne<any>(
-          `SELECT id, attempts FROM ${table('reg_verify')} WHERE email = ? AND used = 0 AND expiretime > NOW() ORDER BY id DESC LIMIT 1`,
-          [email]
-        );
-        if (latest) {
-          // 原子累加：并发错误请求不会互相覆盖计数；达到上限时同一条语句作废验证码
-          await query(
-            `UPDATE ${table('reg_verify')}
-                SET used = CASE WHEN attempts + 1 >= ? THEN 1 ELSE used END,
-                    attempts = attempts + 1
-              WHERE id = ?`,
-            [MAX_VERIFY_ATTEMPTS, latest.id]
-          );
-          const cur = await queryOne<any>(`SELECT attempts, used FROM ${table('reg_verify')} WHERE id = ?`, [latest.id]);
-          if (Number(cur?.attempts || 0) >= MAX_VERIFY_ATTEMPTS || Number(cur?.used || 0) === 1) {
-            return { code: -1, msg: '验证码错误次数过多，请重新获取验证码' };
-          }
-        }
-        return { code: -1, msg: '验证码错误或已过期' };
-      }
-      // 验证码有效后再检查邮箱占用，避免无凭据时枚举已注册邮箱
-      const emailUsed = await queryOne(`SELECT id FROM ${table('user')} WHERE email = ? LIMIT 1`, [email]);
-      if (emailUsed) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
-      // 原子占用验证码：在 UPDATE 中再次校验 used=0，避免并发下同一验证码重复注册
-      const consumed: any = await query(`UPDATE ${table('reg_verify')} SET used = 1 WHERE id = ? AND used = 0`, [verify.id]);
-      if (!consumed || !consumed.affectedRows) return { code: -1, msg: '验证码错误或已过期' };
+      const r = await checkEmailCode(email, b.code);
+      if ('error' in r) return { code: -1, msg: r.error };
+      verifyId = r.id;
     } else {
       // 注册码模式
       const regCode = String(b.reg_code ?? '').trim().toUpperCase();
@@ -146,27 +156,47 @@ export default async function registerRoutes(app: FastifyInstance) {
       if (codeRow.status !== 1) return { code: -1, msg: '该注册码已停用' };
       if (codeRow.expiretime && new Date(codeRow.expiretime).getTime() < Date.now()) return { code: -1, msg: '该注册码已过期' };
       if (codeRow.max_use > 0 && codeRow.used >= codeRow.max_use) return { code: -1, msg: '该注册码使用次数已用完' };
-      // 原子占用：在 UPDATE 中再次校验状态/有效期/剩余次数，避免并发下超额使用（TOCTOU）
-      const upd: any = await query(
-        `UPDATE ${table('reg_code')} SET used = used + 1 WHERE id = ? AND status = 1 AND (expiretime IS NULL OR expiretime > NOW()) AND (max_use = 0 OR used < max_use)`,
-        [codeRow.id]
-      );
-      if (!upd || !upd.affectedRows) return { code: -1, msg: '该注册码已过期、停用或使用次数已用完' };
+      // 占用推迟到事务内执行：在 UPDATE 中再次校验状态/有效期/剩余次数（TOCTOU），
+      // 且与建号同事务，撞名回滚时不会把 max_use=1 的注册码白白烧掉。
+      regCodeId = Number(codeRow.id);
+      // 注册码模式也必须验证邮箱归属：注册码只证明「有邀请」，不证明「这个邮箱是你的」。
+      // 否则可以抢注他人邮箱（该邮箱之后无法再注册），并让系统把劫持告警投递到受害者信箱。
+      if (email) {
+        const r = await checkEmailCode(email, b.code);
+        if ('error' in r) return { code: -1, msg: '填写邮箱时需同时提供邮箱验证码：' + r.error };
+        verifyId = r.id;
+      }
     }
 
-    // 验证码/注册码校验通过后再检查用户名，避免无凭据时枚举账号
+    // 凭据有效（未消耗）时才检查用户名：既能防止无凭据枚举账号，又不会在撞名时烧掉注册码
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? LIMIT 1`, [username]);
     if (exists) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
 
     const hash = await bcrypt.hash(password, 10);
     let newId = 0;
     try {
-      const ins: any = await query(
-        `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, regtime, status, email) VALUES (?, ?, 0, '', 1, NOW(), 1, ?)`,
-        [username, hash, email || null]
-      );
-      newId = Number(ins?.insertId || 0);
+      // 消耗凭据与建号必须同一事务：任何一步失败都整体回滚，
+      // 避免「注册码已被消耗但用户没建出来」这种不可恢复的损失。
+      newId = await withTransaction(async (q) => {
+        if (verifyId) {
+          const consumed: any = await q(`UPDATE ${table('reg_verify')} SET used = 1 WHERE id = ? AND used = 0`, [verifyId]);
+          if (!consumed?.affectedRows) throw new TicketConflict('验证码错误或已过期');
+        }
+        if (regCodeId) {
+          const upd: any = await q(
+            `UPDATE ${table('reg_code')} SET used = used + 1 WHERE id = ? AND status = 1 AND (expiretime IS NULL OR expiretime > NOW()) AND (max_use = 0 OR used < max_use)`,
+            [regCodeId]
+          );
+          if (!upd?.affectedRows) throw new TicketConflict('该注册码已过期、停用或使用次数已用完');
+        }
+        const ins: any = await q(
+          `INSERT INTO ${table('user')} (username, password, is_api, apikey, level, regtime, status, email) VALUES (?, ?, 0, '', 1, NOW(), 1, ?)`,
+          [username, hash, email || null]
+        );
+        return Number(ins?.insertId || 0);
+      });
     } catch (e: any) {
+      if (e instanceof TicketConflict) return { code: -1, msg: e.message };
       if (isDuplicateError(e)) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
       throw e;
     }

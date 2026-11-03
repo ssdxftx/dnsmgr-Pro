@@ -95,9 +95,20 @@ export async function hasBackupKey(): Promise<boolean> {
 }
 
 /** 按归档头选择密钥：口令归档用用户口令派生，整站归档在当前/历史密钥中匹配 */
-export async function keyForArchive(file: string, passphrase?: string): Promise<Buffer> {
+export async function keyForArchive(
+  file: string,
+  passphrase?: string,
+  opts: { allowPassphraseForSite?: boolean } = {},
+): Promise<Buffer> {
   const { header } = await readArchiveHeader(file);
   if (header.kdf?.algo === 'scrypt') {
+    // 口令派生密钥只允许用于个人备份：归档头的 HMAC 用的是归档自己声明的密钥，
+    // 若整站归档也接受 scrypt，任何管理员都能自造一份"合法"整站归档（含 api_key/user 表）
+    // 完成提权。整站归档必须使用站点 backup_key（或安装向导的一次性令牌通道）。
+    const scope = String(header.scope || '').trim();
+    if (scope !== 'user' && !opts.allowPassphraseForSite) {
+      throw new Error('该归档使用口令加密，但归档范围不是个人备份，已拒绝导入');
+    }
     if (!passphrase) throw new Error('该归档使用口令加密，请输入导出时使用的口令');
     return deriveKek(passphrase, Buffer.from(String(header.kdf.salt || ''), 'base64'));
   }

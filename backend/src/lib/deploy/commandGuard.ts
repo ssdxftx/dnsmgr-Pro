@@ -1,5 +1,15 @@
 // 部署任务中的自定义命令（cmd/cmd_pre）默认禁用，避免后台主机被配置项直接执行任意命令。
 // 确需执行时显式设置 DNSMGR_ALLOW_DEPLOY_CMD=1。
+
+/** 解释器/万能执行器黑名单：它们进入白名单等同于任意命令执行 */
+const INTERPRETER_DENY = new Set([
+  'sh', 'bash', 'zsh', 'dash', 'ksh', 'csh', 'tcsh', 'fish',
+  'env', 'sudo', 'su', 'doas', 'nice', 'nohup', 'timeout', 'watch',
+  'python', 'python2', 'python3', 'perl', 'ruby', 'php', 'node', 'nodejs', 'deno', 'bun', 'lua',
+  'awk', 'gawk', 'sed', 'xargs', 'find', 'eval', 'exec', 'source', '.',
+  'ssh', 'scp', 'sftp', 'curl', 'wget', 'nc', 'ncat', 'socat', 'telnet',
+]);
+
 export function commandExecAllowed(): boolean {
   return process.env.DNSMGR_ALLOW_DEPLOY_CMD === '1';
 }
@@ -15,8 +25,7 @@ export function commandAllowlist(): string[] {
     .filter(Boolean);
 }
 
-function assertCommandAllowedInner(cmd?: string): string {
-  if (!commandExecAllowed()) {
+function assertCommandAllowedInner(cmd?: string): string {  if (!commandExecAllowed()) {
     throw new Error('出于安全考虑已禁用部署自定义命令（cmd）。如确需执行，请设置环境变量 DNSMGR_ALLOW_DEPLOY_CMD=1 后重启服务');
   }
   const list = commandAllowlist();
@@ -34,6 +43,13 @@ function assertCommandAllowedInner(cmd?: string): string {
   // 前缀必须按完整命令名匹配：允许 "p" 或 "p 参数"，禁止 "pXxx"
   if (!list.some((p) => c === p || c.startsWith(p + ' '))) {
     throw new Error('命令不在允许列表内（DNSMGR_DEPLOY_CMD_ALLOWLIST）：' + c.slice(0, 120));
+  }
+  // 解释器与"万能执行器"出现在白名单里等于任意命令执行（sh -c、env、xargs、find -exec…），
+  // 即便管理员误配也在这里兜住。
+  const first = c.split(/\s+/)[0] || '';
+  const base = first.includes('/') ? first.slice(first.lastIndexOf('/') + 1) : first;
+  if (INTERPRETER_DENY.has(base.toLowerCase())) {
+    throw new Error('不允许通过解释器执行部署命令（' + base + '）');
   }
   return c;
 }

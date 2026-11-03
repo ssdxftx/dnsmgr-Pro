@@ -21,6 +21,7 @@ import { escapeLike, clientMessage, clampLimit, clampOffset, fmtDateTime, logDir
 import { assertDeployConfigAllowed } from '../lib/netGuard.js';
 import { localResolve } from '../lib/dns/localResolve.js';
 import { requireLoginPassword } from '../lib/reauth.js';
+import { hitRateLimit } from '../lib/rateLimit.js';
 import { createJob, runJobInBackground } from '../lib/jobs.js';
 import { emitEvent } from '../lib/events.js';
 import { legacyApiAuth } from '../lib/legacyApi.js';
@@ -608,7 +609,10 @@ export default async function certRoutes(app: FastifyInstance) {
         return reply.code(404).send({ code: -1, msg: `证书订单 #${id} 不存在` });
       }
     }
+    // 批处理每次最多 100 个订单，每个订单都要打一次上游接口：必须限流，避免被当成放大器
+    if (!hitRateLimit(`cert-batch:${req.user.uid}`, 10, 10 * 60_000)) return { code: -1, msg: '批量处理过于频繁，请稍后再试' };
     const jobId = await createJob(Number(req.user.uid), 'cert.orders.process', ids.length, { ids });
+    if (!jobId) return { code: -1, msg: '已有同类批量任务在执行，或后台任务已达并发上限，请稍后再试' };
     runJobInBackground(jobId, async (progress) => {
       let done = 0;
       let failed = 0;
@@ -925,7 +929,9 @@ export default async function certRoutes(app: FastifyInstance) {
         return reply.code(404).send({ code: -1, msg: `部署任务 #${id} 不存在` });
       }
     }
+    if (!hitRateLimit(`cert-batch:${req.user.uid}`, 10, 10 * 60_000)) return { code: -1, msg: '批量处理过于频繁，请稍后再试' };
     const jobId = await createJob(Number(req.user.uid), 'cert.deploy.process', ids.length, { ids });
+    if (!jobId) return { code: -1, msg: '已有同类批量任务在执行，或后台任务已达并发上限，请稍后再试' };
     runJobInBackground(jobId, async (progress) => {
       let done = 0;
       let failed = 0;
@@ -1011,16 +1017,28 @@ export default async function certRoutes(app: FastifyInstance) {
       return reply.code(auth.status).send({ code: -1, msg: auth.msg });
     }
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    // 该接口返回明文私钥，绝不能被"截获的旧版请求"重放调用：只接受绑定请求路径与 nonce 的 v2 签名
+    if (auth.scheme !== 'v2') {
+      return reply.code(403).send({ code: -1, msg: '该接口要求 v2 签名（sign2 + nonce），旧版签名已拒绝' });
+    }
     const id = Number(auth.body.id);
     if (!Number.isInteger(id) || id <= 0) return { code: -1, msg: '证书订单不存在' };
+    // 与其他订单读接口保持一致：私有证书账户只对所有者可见
+    if (!(await canAccessCertOrder(id, req.user))) {
+      return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    }
     const row: any = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '证书订单不存在' };
+    // PFX 口令由调用方指定且不得为空，避免用固定弱口令导出等同于无口令的 PKCS#12
+    const pfxPass = String(auth.body.pfx_pass ?? '').trim();
+    if (pfxPass.length < 8) {
+      return reply.code(400).send({ code: -1, msg: '请通过 pfx_pass 提供至少 8 位的 PFX 口令' });
+    }
     const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
     let pfx: string | null = null;
     if (row.fullchain && privateKey) {
       try {
-        // 旧版接口生成的 PFX 默认口令为 123456；仅在显式开启兼容层时保留该行为
-        pfx = (await buildPfx(row.fullchain, privateKey, '123456')).toString('base64');
+        pfx = (await buildPfx(row.fullchain, privateKey, pfxPass)).toString('base64');
       } catch {
         pfx = null;
       }

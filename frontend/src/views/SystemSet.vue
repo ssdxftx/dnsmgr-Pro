@@ -253,10 +253,20 @@
               <n-form-item :label="t('systemSet.legacyApiEnable')">
                 <n-switch :value="(cfg.legacy_api_enable || '0') === '1'" :disabled="saveBusy" @update:value="setLegacyApi" />
               </n-form-item>
+              <n-form-item :label="t('systemSet.legacyApiV1Enable')">
+                <n-switch
+                  :value="(cfg.legacy_api_v1_enable || '0') === '1'"
+                  :disabled="saveBusy || (cfg.legacy_api_enable || '0') !== '1'"
+                  @update:value="setLegacyApiV1"
+                />
+              </n-form-item>
               <n-form-item :label="t('systemSet.legacyApiEndpoints')">
                 <n-input value="/api/domain, /api/domain/:id, /api/record/*, /api/cert/order, /cron" readonly type="textarea" :rows="2" />
               </n-form-item>
             </n-form>
+            <n-alert v-if="(cfg.legacy_api_v1_enable || '0') === '1'" type="error" :show-icon="false" style="margin-top:8px">
+              {{ t('systemSet.legacyApiV1Hint') }}
+            </n-alert>
             <n-alert type="info" :show-icon="false" style="margin-top:16px">
               {{ t('systemSet.legacyApiHint') }}
             </n-alert>
@@ -614,7 +624,23 @@ async function setCronType(v: boolean) {
 async function setLegacyApi(v: boolean) {
   const prev = cfg.legacy_api_enable;
   cfg.legacy_api_enable = v ? '1' : '0';
-  if (!(await saveFields(['legacy_api_enable']))) cfg.legacy_api_enable = prev;
+  // 关闭兼容层时顺带关掉旧版 MD5 签名，避免下次重新开启时残留弱签名开关
+  const body = v ? ['legacy_api_enable'] : ['legacy_api_enable', 'legacy_api_v1_enable'];
+  if (!v) {
+    const prevV1 = cfg.legacy_api_v1_enable;
+    cfg.legacy_api_v1_enable = '0';
+    if (!(await saveFields(body))) {
+      cfg.legacy_api_enable = prev;
+      cfg.legacy_api_v1_enable = prevV1;
+    }
+    return;
+  }
+  if (!(await saveFields(body))) cfg.legacy_api_enable = prev;
+}
+async function setLegacyApiV1(v: boolean) {
+  const prev = cfg.legacy_api_v1_enable;
+  cfg.legacy_api_v1_enable = v ? '1' : '0';
+  if (!(await saveFields(['legacy_api_v1_enable']))) cfg.legacy_api_v1_enable = prev;
 }
 
 const statCacheInterval = computed<number>({

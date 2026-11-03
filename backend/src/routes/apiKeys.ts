@@ -14,14 +14,6 @@ import {
   parseScopes,
 } from '../lib/apiKeys.js';
 
-function isAdmin(user: any): boolean {
-  return Number(user?.level || 0) >= 2;
-}
-
-function isSuper(user: any): boolean {
-  return Number(user?.is_super || 0) === 1;
-}
-
 function fmtDateOnly(value: any): string | null {
   if (value === undefined) return undefined as any;
   if (value === null || value === '') return null;
@@ -37,24 +29,16 @@ async function targetUid(req: any, input: any): Promise<number | null> {
   const self = Number(req.user?.uid || 0);
   const requested = Number(input || 0);
   if (!requested || requested === self) return self;
-  if (!isAdmin(req.user)) return null;
-  const user = await findUserById(requested);
-  if (!user) return null;
-  // 二级管理员只能管理普通用户的 Key，不能把目标指向其他管理员或超级管理员，
-  // 否则可通过创建/轮换目标账号的 Key 继承对方权限。
-  if (!isSuper(req.user) && (Number(user.is_super || 0) === 1 || Number(user.level || 0) >= 2)) return null;
-  return requested;
+  // API Key 是「明文即身份」的凭据：替他人签发等于拿到对方的永久身份
+  // （用这把 Key 请求时 owner_uid === 对方 uid，可以读到对方保险库里的私有账户）。
+  // 因此一律只允许本人操作自己的 Key，管理员也不能代签。
+  return null;
 }
 
-/** 非超级管理员不得操作其他管理员/超级管理员的 Key，防止轮换后拿到更高权限的明文 Key。 */
+/** Key 只能由本人管理：rotate 会返回明文，允许管理员轮换他人 Key 等同于接管对方身份。 */
 async function canManageKey(req: any, row: any): Promise<boolean> {
   if (!row) return false;
-  if (Number(row.uid) === Number(req.user?.uid || 0)) return true;
-  if (!isAdmin(req.user)) return false;
-  if (isSuper(req.user)) return true;
-  const owner = await findUserById(Number(row.uid));
-  if (!owner) return false;
-  return Number(owner.is_super || 0) !== 1 && Number(owner.level || 0) < 2;
+  return Number(row.uid) === Number(req.user?.uid || 0);
 }
 
 async function requireWriteReauth(req: any): Promise<string | null> {
@@ -112,6 +96,9 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
     let expiresAt: string | null;
     try {
       scopes = normalizeScopes(req.body?.scopes);
+      // 空作用域不再是「全权限」的另一种写法：必须显式选 '*'，否则拒绝创建，
+      // 避免用户在界面上清空勾选后拿到一把看起来能用、实际全禁的 Key（或反过来提权）。
+      if (!scopes.length) return { code: -1, msg: '至少选择一个权限范围；如需全权限请显式选择 *' };
       ipList = normalizeIpAllowlist(req.body?.ip_allowlist);
       expiresAt = fmtDateOnly(req.body?.expires_at);
     } catch (e: any) {
@@ -160,8 +147,11 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
         params.push(name);
       }
       if (req.body?.scopes !== undefined) {
+        const nextScopes = normalizeScopes(req.body.scopes);
+        // 清空作用域不再等于 '*'：要停用请用 active=0 或吊销，避免「收权」被当成提权
+        if (!nextScopes.length) return { code: -1, msg: '至少选择一个权限范围；如需全权限请显式选择 *' };
         sets.push('scopes = ?');
-        params.push(JSON.stringify(normalizeScopes(req.body.scopes)));
+        params.push(JSON.stringify(nextScopes));
       }
       if (req.body?.ip_allowlist !== undefined) {
         sets.push('ip_allowlist = ?');

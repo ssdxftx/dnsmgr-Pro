@@ -59,6 +59,7 @@ export async function deliverToSubscription(sub: EventSubscription, event: strin
         signal: AbortSignal.timeout(10_000),
       },
       3,
+      { requirePinnedDns: true },
     );
     status = res.status;
     if (!res.ok) {

@@ -588,6 +588,8 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       const ctx = await getCloudflareDomainContext(Number(req.params.domainId), req.user);
       const hostnameIds: any[] = Array.isArray(req.body?.hostname_ids) ? req.body.hostname_ids : [];
       if (!hostnameIds.length) throw new EnhanceError('缺少 hostname_ids');
+      // 与 batch_add 一致限制单批数量，避免一次请求对上游发起无上限的删除
+      if (hostnameIds.length > 100) throw new EnhanceError('单次最多删除 100 个自定义主机名');
 
       let deletedCount = 0;
       for (const hostnameId of hostnameIds) {
@@ -617,6 +619,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         .map((s: string) => s.trim())
         .filter(Boolean);
       if (!hostnameIds.length) throw new EnhanceError('缺少 hostname_ids');
+      if (hostnameIds.length > 100) throw new EnhanceError('单次最多更新 100 个自定义主机名');
 
       const origin = String(b.custom_origin_server ?? '').trim();
       const sslMethod = String(b.ssl_method ?? '').trim();

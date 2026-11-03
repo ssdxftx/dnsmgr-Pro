@@ -15,6 +15,19 @@ const UNBIND_NOTICE = '# 绑定已变更\n\n您的QQ机器人消息通知绑定�
  * 否则公开的 op=13 会退化为「对任意 event_ts+plain_token 签名」的预言机，
  * 攻击者可借此伪造任意 Webhook 事件（如改写 qqbot_openid 劫持通知）。
  */
+// 回调消息去重：签名合法但内容相同的请求在 5 分钟内可被原样重放，
+// 这里按消息 ID 记录已处理事件（多副本场景下每个副本各记一份，已足够阻止重复改绑）。
+const qqSeenMessages = new Map<string, number>();
+const QQ_SEEN_TTL = 10 * 60_000;
+function qqMessageFresh(id: string): boolean {
+  if (!id) return true;
+  const now = Date.now();
+  for (const [k, at] of qqSeenMessages) if (now - at > QQ_SEEN_TTL) qqSeenMessages.delete(k);
+  if (qqSeenMessages.has(id)) return false;
+  qqSeenMessages.set(id, now);
+  return true;
+}
+
 export default async function qqbotRoutes(app: FastifyInstance) {
   app.post('/api/qqbot/webhook', async (req: any, reply: any) => {
     const payload = req.body;
@@ -47,6 +60,9 @@ export default async function qqbotRoutes(app: FastifyInstance) {
       if (!Number.isFinite(ts) || Math.abs(Date.now() / 1000 - ts) > 300) {
         return reply.code(401).send('stale signature timestamp');
       }
+
+      // 同一消息 ID 只处理一次，避免重放已通过验签的旧回调
+      if (!qqMessageFresh(String(payload?.d?.id || payload?.id || ''))) return reply.send('');
 
       const op = Number(payload.op || 0);
       if (op === 13) {

@@ -38,9 +38,20 @@ export async function runMonitorTask(row: any): Promise<void> {
   }
 }
 
+/**
+ * 状态迁移必须带 `AND status = <读到的值>` 的 CAS：
+ * 手动「立即执行」与调度器 tick 可能同时处理同一任务，两边都读到 status=0 后会各做一次
+ * 厂商 DNS 切换 + 一条 dmlog + 一次通知。CAS 失败说明另一个执行者已经迁移过状态，直接放弃本次。
+ */
+async function casUpdate(sql: string, params: any[]): Promise<boolean> {
+  const res: any = await query(sql, params);
+  return Number(res?.affectedRows || 0) > 0;
+}
+
 async function handle(row: any): Promise<void> {
   let action = 0;
   let result: CheckResult = { status: false, errmsg: null, usetime: 0 };
+  const now = Math.floor(Date.now() / 1000);
 
   if (row.type === 3) {
     // 条件开启解析
@@ -50,11 +61,19 @@ async function handle(row: any): Promise<void> {
     );
     const cnt = remain?.c ?? 0;
     if (cnt <= row.cycle && row.status === 0) {
+      const claimed = await casUpdate(
+        `UPDATE ${table('dmtask')} SET status = 1, errcount = 0, switchtime = ? WHERE id = ? AND status = 0`,
+        [now, row.id]
+      );
+      if (!claimed) return;
       action = 2;
-      await query(`UPDATE ${table('dmtask')} SET status = 1, errcount = 0, switchtime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
     } else if (cnt > row.cycle && row.status === 1) {
+      const claimed = await casUpdate(
+        `UPDATE ${table('dmtask')} SET status = 0, errcount = 0, switchtime = ? WHERE id = ? AND status = 1`,
+        [now, row.id]
+      );
+      if (!claimed) return;
       action = 1;
-      await query(`UPDATE ${table('dmtask')} SET status = 0, errcount = 0, switchtime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
     }
   } else {
     if (row.checktype === 2) {
@@ -71,20 +90,28 @@ async function handle(row: any): Promise<void> {
     const needConfirm = Number(row.cycle || 1);
     if (result.status && row.status === 1) {
       if (needConfirm <= 1 || confirmCount >= needConfirm) {
-        await query(`UPDATE ${table('dmtask')} SET status = 0, errcount = 0, switchtime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
+        const claimed = await casUpdate(
+          `UPDATE ${table('dmtask')} SET status = 0, errcount = 0, switchtime = ? WHERE id = ? AND status = 1`,
+          [now, row.id]
+        );
+        if (!claimed) return;
         action = 2;
       } else {
-        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ?`, [confirmCount, row.id]);
+        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ? AND status = 1`, [confirmCount, row.id]);
       }
     } else if (!result.status && row.status === 0) {
       if (needConfirm <= 1 || confirmCount >= needConfirm) {
-        await query(`UPDATE ${table('dmtask')} SET status = 1, errcount = 0, switchtime = ? WHERE id = ?`, [Math.floor(Date.now() / 1000), row.id]);
+        const claimed = await casUpdate(
+          `UPDATE ${table('dmtask')} SET status = 1, errcount = 0, switchtime = ? WHERE id = ? AND status = 0`,
+          [now, row.id]
+        );
+        if (!claimed) return;
         action = 1;
       } else {
-        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ?`, [confirmCount, row.id]);
+        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ? AND status = 0`, [confirmCount, row.id]);
       }
     } else if (row.errcount > 0) {
-      await query(`UPDATE ${table('dmtask')} SET errcount = 0 WHERE id = ?`, [row.id]);
+      await query(`UPDATE ${table('dmtask')} SET errcount = 0 WHERE id = ? AND status = ?`, [row.id, Number(row.status || 0)]);
     }
   }
 

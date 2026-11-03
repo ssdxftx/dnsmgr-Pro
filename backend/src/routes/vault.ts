@@ -38,6 +38,11 @@ export default async function vaultRoutes(app: FastifyInstance) {
 
   app.post('/api/vault/init', auth, async (req: any, reply: any) => {
     const b = req.body || {};
+    // 建立保险库会确定「谁的密钥保护这些凭据」，是一次性的不可逆选择：
+    // 被窃会话必须先证明自己是账号主人（登录密码或 X-Reauth-Token），否则攻击者
+    // 可以抢先初始化一个只有他知道口令的保险库，把真正的用户锁在外面。
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'vault.init');
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     try {
       const r = await initVault(Number(req.user.uid), jtiOf(req), {
         mode: b.mode,
@@ -96,6 +101,11 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/upgrade', auth, async (req: any, reply: any) => {
+    // 升级会清空 wrapped_dek_sys 并把 DEK 重新包进「攻击者已知的口令」，
+    // 一旦被窃会话调用，原主人既没有口令也没有恢复码，私有凭据就永久不可读（只能 destroy）。
+    // 因此这里必须先做二次确认，且把令牌限定到该操作。
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.upgrade');
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     try {
       const r = await upgradeVault(
         Number(req.user.uid),

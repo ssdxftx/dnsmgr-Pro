@@ -43,6 +43,15 @@
             <n-form-item :label="t('register.emailOptional')">
               <n-input v-model:value="form.email" :placeholder="t('register.emailOptionalPlaceholder')" size="large" />
             </n-form-item>
+            <!-- 填了邮箱就必须验证邮箱归属，避免抢注他人邮箱（注册码只证明有邀请） -->
+            <n-form-item v-if="form.email" :label="t('register.emailCode')">
+              <n-input-group>
+                <n-input v-model:value="form.code" :placeholder="t('register.emailCodePlaceholder')" size="large" maxlength="6" />
+                <n-button size="large" :disabled="countdown > 0 || sendBusy" @click="onSendCode">
+                  {{ countdown > 0 ? countdown + 's' : sendBusy ? t('register.sending') : t('register.sendCode') }}
+                </n-button>
+              </n-input-group>
+            </n-form-item>
           </template>
 
           <n-button type="primary" size="large" block :loading="registerBusy" @click="onRegister">{{ t('register.submit') }}</n-button>
@@ -122,6 +131,8 @@ async function onRegister() {
   if (form.password !== form.password2) return message.warning(t('register.passwordMismatch'));
   if (config.mode === 'email' && !form.code) return message.warning(t('register.emailCodeRequired'));
   if (config.mode === 'code' && !form.reg_code) return message.warning(t('register.regCodeRequired'));
+  // 注册码模式下填写邮箱同样要邮箱验证码（后端强制校验邮箱归属）
+  if (config.mode === 'code' && form.email && !form.code) return message.warning(t('register.emailCodeRequired'));
 
   registerBusy.value = true;
   try {
@@ -131,7 +142,10 @@ async function onRegister() {
       body.code = form.code;
     } else {
       body.reg_code = form.reg_code;
-      if (form.email) body.email = form.email;
+      if (form.email) {
+        body.email = form.email;
+        body.code = form.code;
+      }
     }
     const res = await api<any>('POST', '/register', body);
     if (res.code === 0) {

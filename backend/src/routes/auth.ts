@@ -11,7 +11,7 @@ import { revokeToken } from '../lib/auth/revocation.js';
 import { clearVaultSession } from '../lib/vault/session.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { getSysKey } from '../config.js';
-import { legacyApiEnabled } from '../lib/legacyApi.js';
+import { legacyApiEnabled, consumeOneTimeTicket } from '../lib/legacyApi.js';
 
 const SUPPORTED_LANGS = new Set(['zh-CN', 'en-US']);
 const MAX_AUTH_FAILURES = 5;
@@ -112,6 +112,7 @@ export default async function authRoutes(app: FastifyInstance) {
     const locked = authLocked(user.login_locked_until);
     const ok = await verifyPassword(user.password, password);
     if (!ok) {
+      // 已锁定时不再累加，避免攻击者把锁定时间无限续期
       if (!locked) await recordLoginFailure(user);
       audit(req, {
         module: 'auth',
@@ -124,6 +125,10 @@ export default async function authRoutes(app: FastifyInstance) {
       });
       return { code: -1, msg: GENERIC_LOGIN_FAILED };
     }
+    // 锁定只用于记录「这个账号正在被猜」，不再阻断口令正确的登录。
+    // 旧行为下任何匿名者每 15 分钟发 5 次错误口令就能把管理员永久锁在门外（纯 DoS，无安全收益）：
+    // 口令本来就会在锁定期内继续被校验，锁定并没有减少一次猜测成本。
+    // 爆破节奏由 per-IP 限流（/api/auth/login 20/min）+ bcrypt 成本承担。
     if (locked) {
       audit(req, {
         module: 'auth',
@@ -131,10 +136,9 @@ export default async function authRoutes(app: FastifyInstance) {
         targetType: 'user',
         targetId: user.id,
         targetName: String(user.username),
-        summary: `登录失败：${username}（账号临时锁定）`,
-        detail: { reason: 'login_locked' },
+        summary: `账号处于失败锁定窗口内但口令正确：${username}（已放行）`,
+        detail: { reason: 'login_locked_but_password_ok' },
       });
-      return { code: -1, msg: GENERIC_LOGIN_FAILED };
     }
     // 密码正确后再提示封禁，避免未认证的用户名枚举
     if (user.status == 0) {
@@ -239,7 +243,9 @@ export default async function authRoutes(app: FastifyInstance) {
     if (Number(decoded.token_version || 0) !== Number(user.token_version || 0)) {
       return totpFail('token_version_changed', '登录状态已失效，请重新登录', user);
     }
-    if (authLocked(user.totp_locked_until)) return totpFail('totp_locked', '动态口令错误', user);
+    // 锁定不阻断「口令正确」的登录（否则任何拿到密码的人都能把账号锁在门外），
+    // 只用来限制错误口令的累加节奏：锁定期内错误口令不再续期锁定。
+    const totpLocked = authLocked(user.totp_locked_until);
     if (user.totp_open != 1 || !user.totp_secret) return totpFail('totp_not_enabled', '未开启TOTP二次验证', user);
     // 解密失败必须 fail-closed：旧实现 decryptText(user.totp_secret) || '' 会退化为空 HMAC 密钥，
     // 攻击者只需密码即可离线算出确定性的 6 位码完成登录。
@@ -253,8 +259,8 @@ export default async function authRoutes(app: FastifyInstance) {
       return totpFail('totp_secret_corrupt', '二次验证配置异常，请联系管理员重置', user);
     }
     if (!verifyTOTP(totpSecret, code)) {
-      await recordTotpFailure(user);
-      return totpFail('bad_code', '动态口令错误', user);
+      if (!totpLocked) await recordTotpFailure(user);
+      return totpFail(totpLocked ? 'totp_locked' : 'bad_code', '动态口令错误', user);
     }
     if (!(await markTotpUsed(user.id, String(code).trim()))) return totpFail('code_reused', '动态口令已被使用，请稍后再试', user);
     await clearLoginFailure(user.id);
@@ -292,10 +298,16 @@ export default async function authRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/auth/totp-config', { preHandler: (app as any).authenticate }, async (req: any) => {
-    const { action, secret, code, password } = req.body || {};
+    const { action, secret, code, password, bind_token } = req.body || {};
     if (action === 'generate') {
       const s = generateSecret();
-      return { code: 0, data: { secret: s, qrcode: provisioningUri(s, req.user.username, 'DNS Manager') } };
+      // 密钥由服务端生成并签名进一次性令牌：绑定只能使用服务端下发的密钥，
+      // 客户端自选 secret（例如 AAAAAAAA…）会让 2FA 变成可预测的固定码。
+      const token = (app as any).jwt.sign(
+        { uid: Number(req.user.uid), type: 'totp_pending', secret: s },
+        { expiresIn: '10m', jti: randomUUID() },
+      );
+      return { code: 0, data: { secret: s, bind_token: token, qrcode: provisioningUri(s, req.user.username, 'DNS Manager') } };
     }
     if (action !== 'bind' && action !== 'close') return { code: -1, msg: '未知操作' };
     // 变更二次验证状态属于敏感操作，必须重新校验登录密码，防止会话被盗后关闭/重绑 2FA
@@ -308,10 +320,30 @@ export default async function authRoutes(app: FastifyInstance) {
     }
     if (!(await verifyPassword(user.password, String(password)))) return { code: -1, msg: '登录密码错误' };
     if (action === 'bind') {
-      if (!secret) return { code: -1, msg: '密钥不能为空' };
       if (!code) return { code: -1, msg: '请输入动态口令' };
-      if (!verifyTOTP(secret, code)) return { code: -1, msg: '动态口令错误' };
-      await query(`UPDATE ${table('user')} SET totp_open = 1, totp_secret = ?, token_version = token_version + 1 WHERE id = ?`, [encryptText(secret), req.user.uid]);
+      let pending: any = null;
+      if (bind_token) {
+        try {
+          pending = (app as any).jwt.verify(String(bind_token));
+        } catch {
+          return { code: -1, msg: '密钥已过期，请重新生成' };
+        }
+      }
+      if (!pending || pending.type !== 'totp_pending' || Number(pending.uid) !== Number(req.user.uid)) {
+        return { code: -1, msg: '请先点击启用获取服务端下发的密钥' };
+      }
+      // 客户端传回的 secret 只用于校验一致性，真正绑定的是令牌里的服务端密钥
+      if (secret && String(secret) !== String(pending.secret)) {
+        return { code: -1, msg: '密钥与服务端下发的不一致，请重新生成' };
+      }
+      const bindSecret = String(pending.secret || '');
+      if (!bindSecret) return { code: -1, msg: '密钥已过期，请重新生成' };
+      if (!verifyTOTP(bindSecret, code)) return { code: -1, msg: '动态口令错误' };
+      // 绑定环节同样登记防重放，避免同一个口令在登录流程中被再次使用
+      if (!(await markTotpUsed(Number(req.user.uid), String(code).trim()))) {
+        return { code: -1, msg: '动态口令已被使用，请稍后再试' };
+      }
+      await query(`UPDATE ${table('user')} SET totp_open = 1, totp_secret = ?, token_version = token_version + 1 WHERE id = ?`, [encryptText(bindSecret), req.user.uid]);
       return { code: 0, msg: 'TOTP 二次验证绑定成功' };
     }
     await query(`UPDATE ${table('user')} SET totp_open = 0, totp_secret = NULL, token_version = token_version + 1 WHERE id = ?`, [req.user.uid]);
@@ -324,12 +356,15 @@ export default async function authRoutes(app: FastifyInstance) {
     if (passwordErr) return { code: -1, msg: passwordErr };
     const user = await findUserById(uid);
     if (!user || Number(user.status) === 0) return { code: -1, msg: '用户不存在或已禁用' };
+    // sid 绑定签发会话、op 绑定具体操作：令牌不能再被拿去执行别的敏感操作，
+    // 也不会在登出/换设备后继续有效（校验时比对当前请求的 jti）。
+    const reauthOp = String(req.body?.op || '*').trim().slice(0, 64) || '*';
     const token = (app as any).jwt.sign(
-      { uid, type: 'reauth', token_version: Number(user.token_version || 0) },
+      { uid, type: 'reauth', token_version: Number(user.token_version || 0), sid: String(req.user.jti || ''), op: reauthOp },
       { expiresIn: '5m', jti: randomUUID() },
     );
-    audit(req, { module: 'auth', action: 'auth.reauth', summary: '获取敏感操作二次确认令牌', scrubBody: true });
-    return { code: 0, data: { token, expires_in: 300 } };
+    audit(req, { module: 'auth', action: 'auth.reauth', summary: '获取敏感操作二次确认令牌', detail: { op: reauthOp }, scrubBody: true });
+    return { code: 0, data: { token, expires_in: 300, op: reauthOp } };
   });
 
   // 服务端登出：把当前 jti 写入吊销表，令牌在过期前立即失效，而不只是清 localStorage
@@ -362,28 +397,36 @@ export default async function authRoutes(app: FastifyInstance) {
     const timestamp = String(req.query?.timestamp || '').trim();
     const token = String(req.query?.token || '').trim();
     const sign = String(req.query?.sign || '').trim();
+    // 只读标记由签发方（旧版 API）按调用者真实授权计算并参与签名，快捷登录不能自行放大
+    const readonly = String(req.query?.ro ?? '0').trim() === '1' ? 1 : 0;
     if (!domain || !timestamp || !token || !sign) return reply.code(400).type('text/plain').send('参数错误');
     const ts = Number(timestamp);
     const now = Math.floor(Date.now() / 1000);
-    if (!Number.isFinite(ts) || ts < now - 300 || ts > now + 300) return reply.code(400).type('text/plain').send('时间戳无效');
+    // 时间窗只用来兜住"签发后多久还能用"，重放由下面的一次性票据拦截；
+    // 原来的 ±300s 窗口内同一张签名 URL 可以无限次换取 2 小时会话。
+    if (!Number.isFinite(ts) || ts < now - 120 || ts > now + 120) return reply.code(400).type('text/plain').send('时间戳无效');
     const sysKey = await getSysKey();
-    const expected = md5(sysKey + domain + timestamp + token + sysKey);
+    const expected = md5(sysKey + domain + timestamp + token + String(readonly) + sysKey);
     const ha = createHash('sha256').update(expected).digest();
     const hb = createHash('sha256').update(sign).digest();
     if (!timingSafeEqual(ha, hb)) return reply.code(400).type('text/plain').send('签名错误');
     const row: any = await queryOne(`SELECT id, name, is_sso FROM ${table('domain')} WHERE name = ? LIMIT 1`, [domain]);
     if (!row) return reply.code(404).type('text/plain').send('该域名不存在');
     if (Number(row.is_sso) !== 1) return reply.code(403).type('text/plain').send('该域名不支持快捷登录');
+    // 一次性消费：sign 唯一对应一组 (domain, timestamp, token, ro)，重放同一链接直接拒绝
+    if (!(await consumeOneTimeTicket(`ql:${sign}`, Number(row.id)))) {
+      return reply.code(403).type('text/plain').send('该快捷登录链接已被使用，请重新获取');
+    }
     const jti = randomUUID();
     const nonce = randomUUID();
     const session = (app as any).jwt.sign(
-      { uid: -Number(row.id), did: Number(row.id), domain: row.name, type: 'legacy_domain', jti },
+      { uid: -Number(row.id), did: Number(row.id), domain: row.name, type: 'legacy_domain', lro: readonly, jti },
       { expiresIn: '2h' },
     );
-    const user = { id: 0, username: `domain:${row.name}`, level: 1, totp_open: 0, stat_cache: 0, is_super: 0, lang: '', legacy_domain: row.name };
+    const user = { id: 0, username: `domain:${row.name}`, level: 1, totp_open: 0, stat_cache: 0, is_super: 0, lang: '', legacy_domain: row.name, legacy_domain_readonly: readonly };
     const js = (value: any) => JSON.stringify(value).replace(/</g, '\\u003c');
     const target = `/domains/${Number(row.id)}/records`;
-    audit(req, { uid: 0, username: `domain:${row.name}`, targetType: 'domain', targetId: Number(row.id), targetName: row.name, summary: `旧版域名快捷登录 ${row.name}` });
+    audit(req, { uid: 0, username: `domain:${row.name}`, targetType: 'domain', targetId: Number(row.id), targetName: row.name, summary: `旧版域名快捷登录 ${row.name}${readonly ? '（只读）' : ''}` });
     reply.header('Cache-Control', 'no-store');
     reply.header(
       'Content-Security-Policy',

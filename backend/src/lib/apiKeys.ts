@@ -51,7 +51,9 @@ export function normalizeScopes(input: any): string[] {
     if (!['read', 'write', '*'].includes(action)) throw new Error(`无效动作：${action}`);
     out.add(`${mod}:${action}`);
   }
-  if (!out.size) return ['*'];
+  // 空集合必须保持为空：兜底成 ['*'] 会让「把权限多选框全部清空」这种收权操作变成提权，
+  // 也会让 scopeAllows() 里的 fail-closed 分支变成死代码。
+  // 全权限只能由显式提交 '*' 产生。
   return [...out];
 }
 
@@ -85,6 +87,9 @@ export function moduleForPath(method: string, rawPath: string): string {
     ['/api/dns-check', 'dnscheck'],
     ['/api/dns', 'dns'],
     ['/api/domains', 'dns'],
+    // 旧版单数路由（/api/domain、/api/record）不走 API Key 鉴权，但模块映射仍需准确
+    ['/api/domain', 'dns'],
+    ['/api/record', 'dns'],
     ['/api/records', 'dns'],
     ['/api/cdn', 'cdn'],
     ['/api/preheat', 'cdn'],

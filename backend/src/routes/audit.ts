@@ -163,6 +163,9 @@ function fmt(d: Date): string {
 
 function csvCell(value: any): string {
   if (value === null || value === undefined) return '';
-  const text = String(value);
+  let text = String(value);
+  // 公式注入：以 = + - @ 或制表/回车开头的单元格会被 Excel/WPS 当作公式求值（DDE/HYPERLINK 外带）。
+  // 审计内容包含未认证用户可写入的用户名，必须在导出时中和。
+  if (/^[=+\-@\t\r]/.test(text)) text = "'" + text;
   return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
 }

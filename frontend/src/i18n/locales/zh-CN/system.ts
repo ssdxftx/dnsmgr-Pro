@@ -113,6 +113,8 @@ export default {
     legacyApiCardTitle: '旧版彩虹 DNS API 兼容',
     legacyApiAlert: '开启后会暴露旧版签名 API。该接口使用 user.apikey 明文密钥与 MD5 签名，安全性低于新版 X-API-Key，仅建议在迁移旧客户端期间开启。',
     legacyApiEnable: '启用旧版 API',
+    legacyApiV1Enable: '允许旧版 MD5 签名',
+    legacyApiV1Hint: '旧版签名（sign）不绑定请求路径与参数，被截获后可在 5 分钟内重放到任意旧版接口，因此默认停用。仅在旧客户端尚未支持 sign2 + nonce 时临时开启，并尽快升级客户端。',
     legacyApiEndpoints: '兼容路径',
     legacyApiHint: '兼容范围：域名列表/详情、快捷登录链接、解析记录增删改查与批量操作、证书订单读取、/cron?key= 定时触发。目标用户需开启 API 权限并保留旧版 apikey；新版 /api/v1 不受影响。',
     statCacheCardTitle: 'CDN 数据统计缓存',

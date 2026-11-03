@@ -191,13 +191,18 @@ export default async function backupRoutes(app: FastifyInstance) {
         const pwErr = await requireLoginPassword(Number(req.user.uid), fields.password, req);
         if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
       }
-      const key = await keyForArchive(tmp, fields.passphrase ? String(fields.passphrase) : undefined);
       const header = (await readArchiveHeader(tmp)).header;
       const archiveScope = String(header.scope || '').trim();
       // scope 必须显式且只允许 site/user；缺失或任意字符串都不能退化成整站导入。
       if (archiveScope !== 'site' && archiveScope !== 'user') {
         return reply.code(400).send({ code: -1, msg: '备份归档范围不合法' });
       }
+      // 口令派生密钥只能用于个人备份：整站归档必须用站点 backup_key，
+      // 否则任何管理员都能自造整站归档写入 api_key/user 表完成提权。
+      if (archiveScope === 'site' && header.kdf?.algo === 'scrypt') {
+        return reply.code(400).send({ code: -1, msg: '整站归档不支持口令加密，请使用站点备份密钥导出的归档' });
+      }
+      const key = await keyForArchive(tmp, fields.passphrase ? String(fields.passphrase) : undefined);
       if (mode === 'replace' && archiveScope !== 'site') {
         return reply.code(400).send({ code: -1, msg: 'replace 模式仅支持整站备份' });
       }

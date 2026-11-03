@@ -1,4 +1,4 @@
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 const ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const PERIOD = 30;
@@ -57,12 +57,22 @@ export function generateCode(secret: string, timestamp = Date.now()): string {
   return String(code).padStart(DIGITS, '0');
 }
 
+/** 常量时间比较：6 位码虽短，也不应通过比较耗时泄露前缀信息 */
+function codeEquals(a: string, b: string): boolean {
+  const ba = Buffer.from(String(a), 'utf8');
+  const bb = Buffer.from(String(b), 'utf8');
+  if (ba.length !== bb.length || ba.length === 0) return false;
+  return timingSafeEqual(ba, bb);
+}
+
 export function verifyTOTP(secret: string, code: string, window = 1): boolean {
   const input = String(code || '').trim();
   if (!/^\d{6}$/.test(input)) return false;
+  // 空/过短的密钥会让 HMAC 退化为可预测的固定值，必须直接拒绝
+  if (base32Decode(String(secret || '')).length < 10) return false;
   const now = Math.floor(Date.now() / 1000);
   for (let i = -window; i <= window; i++) {
-    if (generateCode(secret, (now + i * PERIOD) * 1000) === input) return true;
+    if (codeEquals(generateCode(secret, (now + i * PERIOD) * 1000), input)) return true;
   }
   return false;
 }

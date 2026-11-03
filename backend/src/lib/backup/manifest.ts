@@ -25,6 +25,8 @@ export const EXCLUDE_COLUMNS: Record<string, string[]> = {
 };
 
 export const ENC_V1_PREFIX = 'enc:v1:';
+/** 新版配置密文前缀（HKDF 域分离）；导出/导入必须与 v1 同样处理，否则恢复后无法解密 */
+export const ENC_V2_PREFIX = 'enc:v2:';
 
 /** 归档中 Buffer 的传输形态：base64 包装，避免 JSON.stringify 变成 {type:'Buffer'} */
 export interface B64Value {
@@ -55,7 +57,7 @@ export function encodeStoredValue(v: any): any {
   if (v instanceof Date) return v.toISOString();
   if (typeof v !== 'string') return v;
   if (v.startsWith(U1_PREFIX)) return v;
-  if (v.startsWith(ENC_V1_PREFIX)) {
+  if (v.startsWith(ENC_V1_PREFIX) || v.startsWith(ENC_V2_PREFIX)) {
     const plain = decryptText(v);
     if (plain !== null) return { __encv1: plain } as PlainEncValue;
   }

@@ -11,9 +11,11 @@
 
 .git
 .gitignore
-.env
-.env.*
-!/.env.example
+# 递归匹配所有层级的 env 文件：只写 .env 只能挡住仓库根目录，
+# COPY backend/ 仍可能把 backend/.env 这类嵌套文件带进镜像
+**/.env
+**/.env.*
+!**/.env.example
 Dockerfile
 docker-compose.yml
 .dockerignore

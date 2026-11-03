@@ -103,7 +103,12 @@ export default async function scheduleRoutes(app: FastifyInstance) {
 
   app.post('/api/schedule/tasks', auth, async (req: any) => {
     const b = req.body || {};
-    let val = buildTask(b);
+    let val: any;
+    try {
+      val = buildTask(b);
+    } catch (e: any) {
+      return { code: -1, msg: e?.message || '参数错误' };
+    }
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };
     if (!(await canAccessDomainAccount(val.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const exists = await queryOne(
@@ -136,7 +141,12 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     if (!current) return { code: -1, msg: '任务不存在' };
     if (!(await canAccessDomainAccount(current.did, req.user))) return { code: -1, msg: '无权限操作该任务的域名账户' };
     const b = req.body || {};
-    const val = buildTask(b);
+    let val: any;
+    try {
+      val = buildTask(b);
+    } catch (e: any) {
+      return { code: -1, msg: e?.message || '参数错误' };
+    }
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };
     if (!(await canAccessDomainAccount(val.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const exists = await queryOne(
@@ -211,7 +221,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
 }
 
 function buildTask(b: Record<string, any>) {
-  return {
+  const val = {
     did: Number(b.did),
     rr: (b.rr || '').trim(),
     recordid: (b.recordid || '').trim(),
@@ -225,4 +235,17 @@ function buildTask(b: Record<string, any>) {
     remark: (b.remark || '').trim(),
     recordinfo: (b.recordinfo || '').trim(),
   };
+  // 周期任务的下标必须在这里就校验：switchdate 越界（如 cycle=2 传 0）会让
+  // updateNexttime 算出「永远已到期」的时刻，任务被每 60s 反复执行。
+  if (val.type === 1) {
+    if (val.cycle === 2) {
+      const day = Number(val.switchdate);
+      if (!Number.isInteger(day) || day < 1 || day > 31) throw new Error('每月日期必须在 1-31 之间');
+    } else if (val.cycle === 1) {
+      const weekday = Number(val.switchdate);
+      if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) throw new Error('每周星期必须在 0-6 之间');
+    }
+    if (!/^([01]?\d|2[0-3]):[0-5]\d/.test(val.switchtime)) throw new Error('执行时间格式应为 HH:mm');
+  }
+  return val;
 }

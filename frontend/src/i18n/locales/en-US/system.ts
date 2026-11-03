@@ -113,6 +113,8 @@ export default {
     legacyApiCardTitle: 'Legacy Rainbow DNS API Compatibility',
     legacyApiAlert: 'Enabling this exposes the legacy signed API. It uses the plaintext user.apikey and MD5 signatures, which are weaker than the new X-API-Key scheme. Enable it only while migrating legacy clients.',
     legacyApiEnable: 'Enable Legacy API',
+    legacyApiV1Enable: 'Allow legacy MD5 signatures',
+    legacyApiV1Hint: 'The legacy "sign" value is not bound to the request path or parameters, so a captured request can be replayed against any legacy endpoint within 5 minutes. It is therefore disabled by default; enable it only while an old client still lacks sign2 + nonce support, and upgrade it as soon as possible.',
     legacyApiEndpoints: 'Compatible Endpoints',
     legacyApiHint: 'Coverage: domain list/detail, quick-login links, record CRUD and batch actions, certificate order retrieval, and /cron?key= triggering. The target user must have API access enabled and retain the legacy apikey; the new /api/v1 API is unaffected.',
     statCacheCardTitle: 'CDN Statistics Cache',

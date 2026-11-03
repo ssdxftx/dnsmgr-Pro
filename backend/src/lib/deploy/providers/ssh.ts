@@ -6,6 +6,7 @@ import { assertCommandAllowed } from '../commandGuard.js';
 import { applyHostKeyVerification } from '../sshHostKey.js';
 import { assertNotMetadataHost } from '../../netGuard.js';
 import type { DeployProvider } from '../types.js';
+import { redactCommand } from '../redact.js';
 
 // 远端部署目标路径安全约束：禁止路径穿越；可通过 DNSMGR_SSH_DEPLOY_DIRS 提供目录白名单；
 // 默认拒绝写入高风险系统位置（authorized_keys、crontab、/etc/passwd、systemd 单元等），
@@ -65,6 +66,7 @@ function safeRemotePath(p: any): string {
   const denied =
     SSH_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
     low.includes('/.ssh/') ||
+    low.endsWith('/.ssh') ||
     low.endsWith('/authorized_keys') ||
     low.endsWith('/authorized_keys2');
   if (denied) throw new Error('远程路径指向受保护的系统位置，禁止写入：' + raw);
@@ -142,7 +144,7 @@ export class SshDeploy implements DeployProvider {
 
   private exec(conn: Client, cmd: string, display?: string): Promise<string> {
     // display 用于在命令含敏感信息（如 PFX 口令）时输出脱敏后的日志
-    this.log('执行命令：' + (display ?? cmd));
+    this.log('执行命令：' + redactCommand(display ?? cmd));
     return new Promise((resolve, reject) => {
       conn.exec(cmd, (err, stream) => {
         if (err) return reject(new Error('执行命令失败：' + err.message));

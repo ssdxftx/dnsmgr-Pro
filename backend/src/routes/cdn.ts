@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { domainToASCII } from 'node:url';
 import { query, queryOne, table, withTransaction } from '../db.js';
-import { hitRateLimitDistributed } from '../lib/rateLimit.js';
+import { hitRateLimit, hitRateLimitDistributed } from '../lib/rateLimit.js';
+import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
 import { configGet, configSet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
@@ -27,6 +28,9 @@ import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
 import { asText } from '../lib/util.js';
+
+// 统计区间上限（31 天）：区间越大生成的标签越多，超长区间可一次性产出数万个标签
+const MAX_STAT_RANGE_MS = 31 * 86400_000;
 import { loadCached as loadCachedStatistics, isStatCacheEnabled, STAT_COVER_MS, EO_DATA_DELAY_MS } from '../lib/cdn/statistics/cacheService.js';
 import { getCatalog, listCatalogs } from '../lib/cdn/statistics/catalog/index.js';
 import type { DetailResponse, MetricSeries, ProviderCard, BreakdownItem } from '../lib/cdn/statistics/catalog/result.js';
@@ -748,12 +752,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.verifyOwnership !== 'function') return { code: -1, msg: '该 CDN 类型不支持归属验证' };
     const r = await provider.verifyOwnership(zoneId, b.domain ? String(b.domain) : undefined);
     if (r === false) return { code: -1, msg: '验证失败，' + provider.getError() };
-    // 记录本地确认，避免云端状态延迟导致按钮再次出现
+    // 记录本地确认，避免云端状态延迟导致按钮再次出现。
+    // 这里是「读整张 map → 改一项 → 写回」，并发验证会互相覆盖（连别的账户的条目一起抹掉），
+    // 因此必须用命名锁把这段读改写串行化。
     try {
-      const raw = (await configGet('cdn_zone_verified', '{}')) || '{}';
-      const map = JSON.parse(raw);
-      map[`${aid}:${zoneId}`] = new Date().toISOString();
-      await configSet('cdn_zone_verified', JSON.stringify(map));
+      await withDistributedLockResult('dnsmgr:cdn-zone-verified', async () => {
+        const raw = (await configGet('cdn_zone_verified', '{}')) || '{}';
+        const map = JSON.parse(raw);
+        map[`${aid}:${zoneId}`] = new Date().toISOString();
+        await configSet('cdn_zone_verified', JSON.stringify(map));
+      }, 3);
     } catch {
       /* 记录失败不影响验证结果 */
     }
@@ -3467,6 +3475,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 接入域名 + 联动 DNS + 自动同步
   app.post('/api/cdn/domains', auth, async (req: any, reply: any) => {
+    // 每次接入都会做三张表的全量扫描 + 多次厂商调用，必须限流，避免被当作资源放大器
+    if (!hitRateLimit(`cdn-domain-add:${req.user.uid}`, 30, 10 * 60_000)) {
+      return { code: -1, msg: '接入操作过于频繁，请稍后再试' };
+    }
     const { aid, did, name, origin, origin_type, service_area, zone_id, cert_mode, cert_order_id, cert_aid, cert_use_default } = req.body || {};
     if (!aid || !name || !origin) return { code: -1, msg: '必填参数不能为空' };
     const visibleAcct = await getVisibleAccount('cdn_account', Number(aid), req.user);
@@ -3715,7 +3727,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const provider = await cdnForRow(row);
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
-    if (!(await provider.setCacheRules(row.name, ruleList))) return { code: -1, msg: '缓存规则更新失败，' + provider.getError() };
+    // 下发的必须是校验/归一化后的列表：旧实现校验 normalized 却把原始 ruleList 发给厂商，
+    // 可以写出「本地没有记录、云端却生效」的整站 TTL 规则（例如 path 为空但 ttl 极大）。
+    if (!(await provider.setCacheRules(row.name, normalized))) return { code: -1, msg: '缓存规则更新失败，' + provider.getError() };
     await withTransaction(async (q) => {
       await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
       for (const r of normalized) {
@@ -3726,8 +3740,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
       targetType: 'cdn_domain',
       targetId: id,
       targetName: String(row.name),
-      summary: `修改缓存配置 ${row.name}（${ruleList.length} 条规则）`,
-      detail: { rules: ruleList.slice(0, 20) },
+      summary: `修改缓存配置 ${row.name}（${normalized.length} 条规则）`,
+      detail: { rules: normalized.slice(0, 20) },
     });
     return { code: 0, msg: '缓存规则更新成功' };
   });
@@ -4473,6 +4487,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const start = parseStatTime(q.startTime);
       const end = parseStatTime(q.endTime);
       if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
+      // 区间上限：buildTimeline 会按区间生成标签，1970→now 一次就能产出两万多个标签把内存打满
+      if (end.getTime() - start.getTime() > MAX_STAT_RANGE_MS) return { code: -1, msg: '统计区间最长 31 天' };
       const latest = Date.now() - catalog.delayMinutes * 60 * 1000;
       if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };

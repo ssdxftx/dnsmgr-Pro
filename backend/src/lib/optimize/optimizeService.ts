@@ -5,7 +5,7 @@ import { fmtDateTime } from '../util.js';
 
 // 通用线路代码 -> 各 DNS 服务商线路值
 import { fetchWithProxy } from '../http.js';
-import { assertUrlAllowed } from '../netGuard.js';
+import { safeFetch } from '../netGuard.js';
 const LINE_NAME: Record<string, Record<string, string>> = {
   aliyun: { DEF: 'default', CT: 'telecom', CU: 'unicom', CM: 'mobile', AB: 'oversea' },
   dnspod: { DEF: '0', CT: '10=0', CU: '10=1', CM: '10=3', AB: '3=0' },
@@ -71,9 +71,11 @@ async function getIpAddressXingpingcn(ipType: string): Promise<Record<string, an
   } else {
     url = 'https://raw.githubusercontent.com/xingpingcn/enhanced-FaaS-in-China/refs/heads/main/Cf.json';
   }
-  // 代理地址可由管理员配置为任意 URL：必须走 SSRF 校验，避免被用作内网探测通道
-  await assertUrlAllowed(url);
-  const res = await fetchWithProxy(url, { signal: AbortSignal.timeout(20000) });
+  // 代理地址可由管理员配置为任意 URL：必须走 SSRF 校验，避免被用作内网探测通道。
+  // 用 safeFetch 而不是「先 assertUrlAllowed 再 fetchWithProxy」：
+  // 后者默认 follow 重定向，一次 302 就能把请求带到 127.0.0.1 / 云元数据地址（盲 SSRF）。
+  // safeFetch 逐跳复校并做 DNS pin，重定向目标同样受约束。
+  const res = await safeFetch(url, { signal: AbortSignal.timeout(20000) }, 3, { requirePinnedDns: true });
   const text = await res.text();
   let arr: any;
   try {

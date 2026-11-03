@@ -4,6 +4,7 @@ import { dirname, normalize, sep, basename, join, win32 } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { commandArgv } from '../commandGuard.js';
 import type { DeployProvider } from '../types.js';
+import { redactCommand } from '../redact.js';
 
 // 本地部署目标路径安全约束：必须为规范化的绝对路径；
 // 若配置了 DNSMGR_DEPLOY_LOCAL_DIRS（逗号分隔的允许目录），则目标必须位于其中之一；
@@ -63,6 +64,10 @@ function safeTargetPath(p: any): string {
     // 默认数据目录不能作为拒绝 Windows 部署的依据，否则该分支永远不可达。
     if (configuredDirs.length) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
     // Windows 路径：按 win32 语义规范化后做系统位置拒绝
+    // \\?\ 前缀与 8.3 短名（PROGRA~1）能绕过前缀匹配，直接拒绝
+    if (/^\\\\\?\\/.test(raw) || /~[0-9]/.test(basename(raw))) {
+      throw new Error('目标文件路径包含不允许的 Windows 特殊前缀或短名：' + raw);
+    }
     const wn = win32.normalize(raw).toLowerCase();
     const denied =
       WIN_DENY_PREFIXES.some((pre) => wn === pre || wn.startsWith(pre + '\\')) ||
@@ -101,7 +106,8 @@ function safeTargetPath(p: any): string {
       resolved = candidate;
     } catch (e2: any) {
       if (String(e2?.message || '').includes('符号链接')) throw e2;
-      resolved = normalized;
+      // 无法解析真实路径时不能退回词法比较：那样软链父目录可把写入引到白名单之外
+      throw new Error('无法解析目标文件的真实路径，已拒绝写入：' + raw);
     }
   }
   if (allowDirs.length) {
@@ -185,7 +191,7 @@ export class LocalDeploy implements DeployProvider {
       for (const raw of cmds) {
         const cmd = raw.trim();
         if (!cmd) continue;
-        this.log('执行命令：' + cmd);
+        this.log('执行命令：' + redactCommand(cmd));
         await this.execAsync(cmd);
         this.log('执行命令成功');
       }

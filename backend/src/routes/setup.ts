@@ -11,7 +11,7 @@ import { importArchive } from '../lib/backup/import.js';
 import { setMaintenance } from '../lib/backup/maintenance.js';
 import { keyForArchive } from '../lib/backup/key.js';
 import { fieldValue, saveUpload, releaseTemp } from '../lib/backup/upload.js';
-import { verifySetupToken } from '../lib/setupToken.js';
+import { revokeSetupToken, verifySetupToken } from '../lib/setupToken.js';
 import { publicError } from '../lib/util.js';
 
 function parseDbConfig(body: any): DbConfig {
@@ -112,6 +112,8 @@ export default async function setupRoutes(app: FastifyInstance) {
       endInstall();
     }
     if (!result.ok) return { code: -1, msg: result.message };
+    // 安装已成功：立刻作废安装令牌，避免「已装但未重启」窗口内令牌继续被复用
+    revokeSetupToken();
 
     // 安装完成：保存配置后优雅退出，由容器编排/守护进程重启加载完整业务路由与调度器。
     // 返回一次性令牌，允许在重启前导入已有备份；令牌 10 分钟未使用则自动重启。
@@ -132,6 +134,8 @@ export default async function setupRoutes(app: FastifyInstance) {
 
   // 跳过后立即重启，避免等待令牌过期
   app.post('/api/setup/skip', async (req: any) => {
+    // 这两个接口只在「装完但还没重启」的窗口里有意义，必须复查安装状态
+    if ((await getInstallState()) !== 'installed') return { code: -1, msg: '系统尚未完成安装' };
     const cfg = getDbConfig();
     const token = String(req.body?.install_token || '');
     if (!consumeInstallToken(token, dbIdentity(cfg))) {
@@ -143,6 +147,7 @@ export default async function setupRoutes(app: FastifyInstance) {
 
   // 安装向导导入已有备份（仅安装后 10 分钟内、持有一次性令牌时可用）
   app.post('/api/setup/import', async (req: any, reply: any) => {
+    if ((await getInstallState()) !== 'installed') return { code: -1, msg: '系统尚未完成安装' };
     const cfg = getDbConfig();
     let tmp = '';
     try {
@@ -166,7 +171,8 @@ export default async function setupRoutes(app: FastifyInstance) {
         key = Buffer.from(String(rawKey), 'base64url');
         if (key.length !== 32) return { code: -1, msg: '备份密钥格式不正确（需为 32 字节 Base64URL）' };
       } else {
-        key = await keyForArchive(tmp, pass ? String(pass) : undefined);
+        // 安装向导本身是一次性令牌保护的受信任通道，允许导入口令加密的整站归档
+        key = await keyForArchive(tmp, pass ? String(pass) : undefined, { allowPassphraseForSite: true });
       }
       const report = await importArchive(tmp, { key, mode: 'install', trusted: true });
       // 旧归档可能带 maintenance=1，安装完成后必须归零

@@ -1,37 +1,69 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 import { decryptWithDek, encryptWithDek, isUserEncrypted, U1_PREFIX } from './vault/keys.js';
 
-// 账号凭据（AK/SK、密码、Token 等）加密存储：AES-256-GCM，密钥由 sys_key 派生。
+// 账号凭据（AK/SK、密码、Token 等）加密存储：AES-256-GCM。
+// 密钥由 sys_key 派生；v1 为历史格式（单次 SHA-256），v2 使用 HKDF 做域分离，
+// 并支持通过 DNSMGR_CONFIG_KEY 指定与 sys_key 完全独立的根密钥（数据库被拖库时无法解密）。
 // 历史明文数据仍可直接解析，读取后下次保存即自动加密，无需迁移脚本。
 const ENC_PREFIX = 'enc:v1:';
+const ENC_PREFIX_V2 = 'enc:v2:';
 export const SECRET_MASK = '**********';
 
 /** 账户配置存在且为密文，但无法解密（系统密钥变更或密文损坏） */
 export class ConfigDecryptError extends Error {}
 
 let secretKey = '';
-let derivedKey: Buffer | null = null;
+let derivedKeyV1: Buffer | null = null;
+let derivedKeyV2: Buffer | null = null;
+let derivedRoot = '';
+
+/** 配置加密根密钥：优先使用环境变量托管的独立密钥，避免 sys_key 同时承担 JWT 与密文职责 */
+function configRoot(): string {
+  return String(process.env.DNSMGR_CONFIG_KEY || '').trim() || secretKey;
+}
 
 export function setSecretKey(key: string): void {
   secretKey = key || '';
   // 预计算派生密钥，避免每次加解密重复做 SHA-256
-  derivedKey = secretKey ? createHash('sha256').update('dnsmgr-config:' + secretKey).digest() : null;
+  derivedKeyV1 = secretKey ? createHash('sha256').update('dnsmgr-config:' + secretKey).digest() : null;
+  derivedKeyV2 = null;
+  derivedRoot = '';
 }
 
-function deriveKey(): Buffer {
-  if (!derivedKey) derivedKey = createHash('sha256').update('dnsmgr-config:' + secretKey).digest();
-  return derivedKey;
+function deriveKeyV1(): Buffer | null {
+  if (!derivedKeyV1 && secretKey) derivedKeyV1 = createHash('sha256').update('dnsmgr-config:' + secretKey).digest();
+  return derivedKeyV1;
+}
+
+/** v2 派生：HKDF-SHA256(root, salt='dnsmgr-key-separation', info='config-enc-v2') */
+function deriveKeyV2(): Buffer | null {
+  const root = configRoot();
+  if (!root) return null;
+  if (!derivedKeyV2 || derivedRoot !== root) {
+    derivedKeyV2 = Buffer.from(
+      hkdfSync('sha256', Buffer.from(root, 'utf8'), Buffer.from('dnsmgr-key-separation'), Buffer.from('config-enc-v2'), 32),
+    );
+    derivedRoot = root;
+  }
+  return derivedKeyV2;
+}
+
+/** 配置加密密钥是否已就绪（sys_key 或 DNSMGR_CONFIG_KEY 已加载） */
+export function hasSecretKey(): boolean {
+  return !!configRoot();
 }
 
 export function encryptText(plain: string): string {
   // 密钥未初始化时拒绝保存，避免敏感配置被静默以明文写入数据库
-  if (!secretKey) {
+  if (!configRoot()) {
     throw new Error('系统密钥未初始化，出于安全考虑拒绝保存敏感配置，请重启服务后重试');
   }
+  const key = deriveKeyV2();
+  if (!key) throw new Error('系统密钥未初始化，出于安全考虑拒绝保存敏感配置，请重启服务后重试');
   const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', deriveKey(), iv);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
   const enc = Buffer.concat([cipher.update(Buffer.from(plain, 'utf8')), cipher.final()]);
-  return ENC_PREFIX + [iv.toString('base64'), cipher.getAuthTag().toString('base64'), enc.toString('base64')].join(':');
+  return ENC_PREFIX_V2 + [iv.toString('base64'), cipher.getAuthTag().toString('base64'), enc.toString('base64')].join(':');
 }
 
 export function decryptText(raw: string | null | undefined): string | null {
@@ -39,11 +71,20 @@ export function decryptText(raw: string | null | undefined): string | null {
   if (typeof raw !== 'string') return null;
   // 个人凭证保险库密文：绝不能拿 sys_key 去试，否则会被误判为「配置损坏」
   if (raw.startsWith(U1_PREFIX)) return null;
-  if (!raw.startsWith(ENC_PREFIX)) return raw;
-  if (!secretKey) return null;
+  const isV2 = raw.startsWith(ENC_PREFIX_V2);
+  if (!isV2 && !raw.startsWith(ENC_PREFIX)) {
+    // 任何 enc: 前缀都必须按密文处理：未知版本（密钥轮换事故、版本回滚、伪造数据）
+    // 一律返回 null 表示「解密失败」。旧实现把 'enc:v3:...' 当明文原样返回，
+    // 结果是被当成一份「看起来正常但内容诡异」的配置，事故现场被掩盖成配置为空。
+    if (raw.toLowerCase().startsWith('enc:')) return null;
+    return raw;
+  }
+  const key = isV2 ? deriveKeyV2() : deriveKeyV1();
+  if (!key) return null;
   try {
-    const [ivB64, tagB64, dataB64] = raw.slice(ENC_PREFIX.length).split(':');
-    const decipher = createDecipheriv('aes-256-gcm', deriveKey(), Buffer.from(ivB64, 'base64'));
+    const body = raw.slice(isV2 ? ENC_PREFIX_V2.length : ENC_PREFIX.length);
+    const [ivB64, tagB64, dataB64] = body.split(':');
+    const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivB64, 'base64'));
     decipher.setAuthTag(Buffer.from(tagB64, 'base64'));
     return Buffer.concat([decipher.update(Buffer.from(dataB64, 'base64')), decipher.final()]).toString('utf8');
   } catch {
@@ -52,7 +93,7 @@ export function decryptText(raw: string | null | undefined): string | null {
 }
 
 export function encryptConfig(config: any): string {
-  if (typeof config === 'string' && config.startsWith(ENC_PREFIX)) {
+  if (typeof config === 'string' && (config.startsWith(ENC_PREFIX) || config.startsWith(ENC_PREFIX_V2))) {
     throw new Error('检测到重复加密：请检查调用方是否传入了已加密的配置');
   }
   return encryptText(JSON.stringify(config ?? {}));
@@ -60,7 +101,11 @@ export function encryptConfig(config: any): string {
 
 /** 是否为加密存储的配置串（用于区分「空配置」与「解密失败」） */
 export function isEncryptedConfig(raw: unknown): boolean {
-  return typeof raw === 'string' && raw.startsWith(ENC_PREFIX);
+  if (typeof raw !== 'string') return false;
+  // 个人保险库密文（enc:u1:）由 DEK 路径处理，不参与 sys_key 解密，避免被误判为损坏
+  if (raw.startsWith(U1_PREFIX)) return false;
+  // 与 decryptText 保持一致：未知的 enc: 版本也算「密文且无法解密」，供上层展示 config_error
+  return raw.toLowerCase().startsWith('enc:');
 }
 
 // 聚合场景读取配置：不抛错，用 configError 标记「密文无法解密」，便于单账户隔离
@@ -90,6 +135,9 @@ export function isSecretKey(key: string): boolean {
   if (SECRET_KEY_RE.test(k)) return true;
   // 收尾为 key / pass 的字段名（如 access_key、pfx_pass）同样是敏感字段
   if (/(^|_)(key|pass)$/i.test(k)) return true;
+  // backup_key_prev 是历史备份密钥数组：必须与 backup_key 一样按凭据处理，
+  // 否则它会明文入库并随整站归档外泄，轮换备份密钥的安全目标随之失效
+  if (k === 'backup_key_prev') return true;
   return ['SecretId', 'AccessKeyId', 'access_key_id', 'api_password', 'skey', 'passphrase', 'kubeconfig', 'kube_config', 'pfx_pass', 'qqbot_bind_code', 'custom_webhook_headers'].includes(k);
 }
 

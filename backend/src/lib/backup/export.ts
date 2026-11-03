@@ -187,7 +187,10 @@ async function buildSiteExclusions(read: SnapshotRead, users: Set<number>): Prom
 function siteFilter(name: string, ex: SiteExclusions) {
   return (row: any): boolean => {
     // 运行态标志不进归档：否则恢复中的快照被带到别的站点会永久卡在维护模式
-    if (name === 'config') return !['maintenance', 'sys_key', 'backup_key'].includes(String(row.key));
+    if (name === 'config') {
+      // backup_key_prev 是历史备份密钥数组：带进归档等于把轮换前的密钥一起泄露
+      return !['maintenance', 'sys_key', 'backup_key', 'backup_key_prev'].includes(String(row.key));
+    }
     if (!ex.users.size) return true;
     if (name === 'user') return !ex.users.has(Number(row.id));
     if (name === 'user_vault') return !ex.users.has(Number(row.uid));

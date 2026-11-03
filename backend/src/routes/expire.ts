@@ -35,6 +35,7 @@ export default async function expireRoutes(app: FastifyInstance) {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     if (!(await hitRateLimitDistributed(`expire:scan:${req.user.uid}`, 2, 10 * 60_000))) return { code: -1, msg: '扫描过于频繁，请稍后再试' };
     const jobId = await createJob(Number(req.user.uid), 'expire.scan', 1, { action: 'expire.scan' });
+    if (!jobId) return { code: -1, msg: '已有扫描任务在执行，或后台任务已达并发上限，请稍后再试' };
     runJobInBackground(jobId, async (progress) => {
       await expireNoticeTask();
       await progress(1, 0, { done: true });

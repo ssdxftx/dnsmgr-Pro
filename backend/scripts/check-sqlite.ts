@@ -78,12 +78,37 @@ const offAuth = await legacyApiAuth({ query: {}, body: { uid: 1000, timestamp: '
 assert(!offAuth.ok && offAuth.status === 404, '旧版 API 兼容层默认关闭');
 await config.configSet('legacy_api_enable', '1');
 const timestamp = String(Math.floor(Date.now() / 1000));
-const sign = createHash('md5').update('1000' + timestamp + 'legacy-check-key').digest('hex');
-const legacyReq: any = { query: {}, body: { uid: '1000', timestamp, sign }, headers: {} };
+// v2 签名：HMAC 绑定 method + path + 参数 + nonce，旧版 md5 已默认停用
+const { createHmac } = await import('node:crypto');
+const signV2 = (uid: string, ts: string, nonce: string, body: Record<string, any>, path = '/api/domain') => {
+  const params = Object.keys(body)
+    .filter((k) => !['sign', 'sign2', 'nonce'].includes(k))
+    .sort()
+    .map((k) => k + '=' + String(body[k]))
+    .join('&');
+  const payload = ['POST', path, uid, ts, nonce, createHash('sha256').update(params).digest('hex')].join('\n');
+  return createHmac('sha256', 'legacy-check-key').update(payload).digest('hex');
+};
+const v2Body: any = { uid: '1000', timestamp };
+const nonce = 'check-nonce-1234567890';
+const legacyReq: any = { method: 'POST', url: '/api/domain', query: {}, body: { ...v2Body, nonce, sign2: signV2('1000', timestamp, nonce, v2Body) }, headers: {} };
 const okAuth = await legacyApiAuth(legacyReq);
-assert(okAuth.ok && legacyReq.user.uid === 1000 && legacyReq.user.auth_type === 'legacy_api', '旧版签名认证通过');
-const badAuth = await legacyApiAuth({ query: {}, body: { uid: 1000, timestamp, sign: 'bad' }, headers: {} });
+assert(okAuth.ok && legacyReq.user.uid === 1000 && legacyReq.user.auth_type === 'legacy_api', '旧版 v2 签名认证通过');
+// 同一 nonce 重放必须被拒绝
+const replayReq: any = { method: 'POST', url: '/api/domain', query: {}, body: { ...v2Body, nonce, sign2: signV2('1000', timestamp, nonce, v2Body) }, headers: {} };
+const replayAuth = await legacyApiAuth(replayReq);
+assert(!replayAuth.ok && replayAuth.status === 403, 'v2 签名重放被拒绝');
+const badAuth = await legacyApiAuth({ method: 'POST', url: '/api/domain', query: {}, body: { uid: 1000, timestamp, nonce: 'other-nonce-1234567890', sign2: 'bad' }, headers: {} });
 assert(!badAuth.ok && badAuth.status === 403, '旧版签名错误被拒绝');
+const v1Auth = await legacyApiAuth({ method: 'POST', url: '/api/domain', query: {}, body: { uid: '1000', timestamp, sign: createHash('md5').update('1000' + timestamp + 'legacy-check-key').digest('hex') }, headers: {} });
+assert(!v1Auth.ok && v1Auth.status === 403, '旧版 md5 签名默认被拒绝');
+// 过渡开关：显式开启后旧版 md5 仍可用（迁移期兼容），关闭后立即恢复拒绝
+await config.configSet('legacy_api_v1_enable', '1');
+const v1Allowed = await legacyApiAuth({ method: 'POST', url: '/api/domain', query: {}, body: { uid: '1000', timestamp, sign: createHash('md5').update('1000' + timestamp + 'legacy-check-key').digest('hex') }, headers: {} });
+assert(v1Allowed.ok && v1Allowed.scheme === 'v1', '显式开启 legacy_api_v1_enable 后旧版 md5 签名可用');
+await config.configSet('legacy_api_v1_enable', '0');
+const v1Rejected = await legacyApiAuth({ method: 'POST', url: '/api/domain', query: {}, body: { uid: '1000', timestamp, sign: createHash('md5').update('1000' + timestamp + 'legacy-check-key').digest('hex') }, headers: {} });
+assert(!v1Rejected.ok && v1Rejected.status === 403, '关闭开关后旧版 md5 签名再次被拒绝');
 
 const setInsert: any = await db.query('INSERT INTO dnsmgr_cert_order SET ?', [
   { aid: 1, status: 0, isauto: true },
@@ -103,10 +128,12 @@ await db.query('INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addt
 const Fastify = (await import('fastify')).default;
 const legacyApp = Fastify({ logger: false });
 await legacyApp.register((await import('../src/routes/domain.js')).default);
+const listBody: any = { uid: 1000, timestamp, offset: 0, limit: 10 };
+const listNonce = 'check-list-nonce-123456';
 const legacyRes = await legacyApp.inject({
   method: 'POST',
   url: '/api/domain',
-  payload: { uid: 1000, timestamp, sign, offset: 0, limit: 10 },
+  payload: { ...listBody, nonce: listNonce, sign2: signV2('1000', timestamp, listNonce, listBody, '/api/domain') },
 });
 assert(legacyRes.statusCode === 200 && JSON.parse(legacyRes.body).total === 2, '旧版域名列表接口可用');
 await legacyApp.close();

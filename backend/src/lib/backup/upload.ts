@@ -14,7 +14,7 @@ export async function saveUpload(req: any): Promise<{ file: string; fields: Reco
   // 登记为进行中，避免 1 小时清理任务删掉正在导入的上传文件
   markTempActive(dest);
   await new Promise<void>((resolve, reject) => {
-    const ws = createWriteStream(dest);
+    const ws = createWriteStream(dest, { mode: 0o600 });
     let failed = false;
     const fail = (e: Error) => {
       if (failed) return;

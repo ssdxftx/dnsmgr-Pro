@@ -1,7 +1,17 @@
 import { findUserById, verifyPassword } from '../auth.js';
+import { isTokenRevoked } from './auth/revocation.js';
 import { hitRateLimitDistributed } from './rateLimit.js';
 
-async function verifyReauthToken(req: any, uid: number): Promise<string | null> {
+/**
+ * 二次确认令牌的校验。
+ *
+ * 三个必须同时成立的约束（缺一个都可能让一次确认被无限期、跨操作复用）：
+ * 1. 绑定到具体会话：令牌里带 `sid`（签发时的会话 jti），当前请求的 jti 必须一致，
+ *    登出或换设备后旧令牌自动失效，不需要额外维护吊销列表；
+ * 2. 绑定到具体操作：令牌里带 `op`，使用点传入自己期望的 op 时要求匹配；
+ * 3. 进会话级吊销表：显式吊销（登出、改密）后令牌立即不可用。
+ */
+async function verifyReauthToken(req: any, uid: number, op?: string): Promise<string | null> {
   const token = String(req?.headers?.['x-reauth-token'] || '').trim();
   if (!token) return null;
   let decoded: any;
@@ -13,6 +23,14 @@ async function verifyReauthToken(req: any, uid: number): Promise<string | null> 
   if (decoded?.type !== 'reauth' || Number(decoded.uid) !== Number(uid)) {
     return '二次确认令牌无效';
   }
+  // 会话绑定：不同会话（含登出后重新登录）签发的令牌不能互用
+  const sid = String(decoded.sid || '');
+  const currentSid = String(req?.user?.jti || '');
+  if (sid && currentSid && sid !== currentSid) return '二次确认令牌不属于当前会话，请重新验证';
+  // 操作绑定：'*' 表示签发时未限定操作（兼容旧客户端），其余必须精确匹配
+  const tokenOp = String(decoded.op || '*');
+  if (op && tokenOp !== '*' && tokenOp !== op) return '二次确认令牌不适用于该操作，请重新验证';
+  if (decoded.jti && (await isTokenRevoked(String(decoded.jti)))) return '二次确认已失效，请重新验证';
   const user: any = await findUserById(Number(uid));
   if (!user || Number(user.status) === 0) return '用户不存在或已禁用';
   if (Number(decoded.token_version || 0) !== Number(user.token_version || 0)) {
@@ -21,8 +39,12 @@ async function verifyReauthToken(req: any, uid: number): Promise<string | null> 
   return null;
 }
 
-export async function requireLoginPassword(uid: number, password: any, req?: any): Promise<string | null> {
-  const tokenResult = await verifyReauthToken(req, uid);
+/**
+ * 敏感操作的二次确认。`op` 把令牌限定到具体操作（例如 'vault.destroy'），
+ * 不传则只做会话级校验（兼容既有调用点）。
+ */
+export async function requireLoginPassword(uid: number, password: any, req?: any, op?: string): Promise<string | null> {
+  const tokenResult = await verifyReauthToken(req, uid, op);
   if (tokenResult !== null) return tokenResult;
   if (req?.headers?.['x-reauth-token']) return null;
   if (!password) {
