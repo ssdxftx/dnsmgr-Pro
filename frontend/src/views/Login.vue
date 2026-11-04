@@ -36,6 +36,7 @@ import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api, setToken, setUser } from '../api';
 import { useAuthStore } from '../stores/auth';
+import { isAdminUser } from '../lib/admin';
 import AuthShell from '../components/AuthShell.vue';
 
 const { t } = useI18n();
@@ -53,7 +54,8 @@ async function doSuccess(res: any) {
   setUser(res.data.user);
   auth.setAuth(res.data.token, res.data.user);
   message.success(res.msg);
-  router.push('/dashboard');
+  // 普通用户直接落到有权访问的域名页，避免先跳 /dashboard 再被守卫二次重定向
+  router.push(isAdminUser(res.data.user) ? '/dashboard' : '/domains');
 }
 
 async function onLogin() {

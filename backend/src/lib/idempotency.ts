@@ -4,8 +4,9 @@ import { query, queryOne, table } from '../db.js';
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const MAX_RESPONSE_BYTES = 256 * 1024;
 // /api/events 的创建响应里带一次性 HMAC secret，缓存到 idempotency_key 表等于把密钥
-// 明文多存一份 24 小时；这类响应一律不进入幂等缓存。
-const SKIP_PREFIXES = ['/api/api-keys', '/api/auth/reauth', '/api/vault', '/api/events'];
+// 明文多存一份 24 小时；/api/auth 的 TOTP 生成响应同样带 secret/一次性令牌。
+// 这类响应一律不进入幂等缓存。
+const SKIP_PREFIXES = ['/api/api-keys', '/api/auth', '/api/vault', '/api/events'];
 
 function keyHash(key: string): string {
   return createHash('sha256').update(key).digest('hex');
@@ -28,9 +29,21 @@ export async function beginIdempotent(req: any, reply: any): Promise<any> {
   const uid = Number(req.user?.uid || 0);
   if (!uid) return undefined;
   const method = String(req.method || '').toUpperCase();
-  const path = String(req.url || req.raw?.url || '').split('?')[0].slice(0, 255);
+  const rawUrl = String(req.url || req.raw?.url || '');
+  const path = rawUrl.split('?')[0].slice(0, 255);
   if (SKIP_PREFIXES.some((prefix) => path === prefix || path.startsWith(prefix + '/'))) return undefined;
   const hash = keyHash(raw);
+  // 请求指纹必须覆盖 query 与 body：否则同一个 Idempotency-Key 改参数重放时，
+  // 会直接返回上一次的缓存响应（例如把「删除 A」的响应返回给「删除 B」）。
+  let bodyText = '';
+  try {
+    bodyText = req.body === undefined ? '' : JSON.stringify(req.body);
+  } catch {
+    bodyText = '';
+  }
+  const requestHash = createHash('sha256')
+    .update(`${method}\n${rawUrl.slice(0, 2048)}\n${bodyText.slice(0, 65536)}`)
+    .digest('hex');
 
   let row: any = await queryOne(
     `SELECT * FROM ${table('idempotency_key')} WHERE uid = ? AND key_hash = ? LIMIT 1`,
@@ -39,7 +52,7 @@ export async function beginIdempotent(req: any, reply: any): Promise<any> {
   if (row) {
     const ageMs = Date.now() - new Date(String(row.created_at).replace(' ', 'T')).getTime();
     if (row.status === 'done') {
-      if (row.method !== method || row.path !== path) {
+      if (row.method !== method || row.path !== path || (row.request_hash && row.request_hash !== requestHash)) {
         return reply.code(409).send({ code: -1, msg: '同一 Idempotency-Key 不能用于不同请求' });
       }
       reply.header('X-Idempotency-Replayed', 'true');
@@ -57,13 +70,16 @@ export async function beginIdempotent(req: any, reply: any): Promise<any> {
   try {
     await query(
       `INSERT INTO ${table('idempotency_key')}
-        (uid, key_hash, method, path, status, http_status, response, created_at, expires_at)
-       VALUES (?, ?, ?, ?, 'processing', 0, NULL, NOW(), DATE_ADD(NOW(), INTERVAL 24 HOUR))`,
-      [uid, hash, method, path],
+        (uid, key_hash, method, path, request_hash, status, http_status, response, created_at, expires_at)
+       VALUES (?, ?, ?, ?, ?, 'processing', 0, NULL, NOW(), DATE_ADD(NOW(), INTERVAL 24 HOUR))`,
+      [uid, hash, method, path, requestHash],
     );
   } catch {
     row = await queryOne(`SELECT * FROM ${table('idempotency_key')} WHERE uid = ? AND key_hash = ? LIMIT 1`, [uid, hash]);
     if (row?.status === 'done') {
+      if (row.method !== method || row.path !== path || (row.request_hash && row.request_hash !== requestHash)) {
+        return reply.code(409).send({ code: -1, msg: '同一 Idempotency-Key 不能用于不同请求' });
+      }
       reply.header('X-Idempotency-Replayed', 'true');
       return reply.code(Number(row.http_status || 200)).type('application/json').send(row.response || '');
     }

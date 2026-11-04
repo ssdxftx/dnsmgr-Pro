@@ -24,9 +24,9 @@
               <n-tag v-if="versionMismatch" type="warning" size="tiny" :bordered="false" class="inline-tag">{{ t('about.versionMismatch') }}</n-tag>
             </n-descriptions-item>
             <n-descriptions-item :label="t('about.buildTime')">{{ formatTime(buildTime) }}</n-descriptions-item>
-            <n-descriptions-item :label="t('about.runtime')">{{ runtimeText }}</n-descriptions-item>
-            <n-descriptions-item :label="t('about.uptime')">{{ uptimeText }}</n-descriptions-item>
-            <n-descriptions-item :label="t('about.startedAt')">{{ formatTime(info?.startedAt) }}</n-descriptions-item>
+            <n-descriptions-item v-if="isAdmin" :label="t('about.runtime')">{{ runtimeText }}</n-descriptions-item>
+            <n-descriptions-item v-if="isAdmin" :label="t('about.uptime')">{{ uptimeText }}</n-descriptions-item>
+            <n-descriptions-item v-if="isAdmin" :label="t('about.startedAt')">{{ formatTime(info?.startedAt) }}</n-descriptions-item>
             <n-descriptions-item :label="t('about.license')">{{ info?.license || '-' }}</n-descriptions-item>
             <n-descriptions-item :label="t('about.repo')">
               <n-a :href="safeHref(info?.repo || repoFallback)" target="_blank" rel="noreferrer">{{ repoLabel }}</n-a>
@@ -130,6 +130,7 @@ import { NIcon, useMessage } from 'naive-ui';
 import { RefreshOutline } from '@vicons/ionicons5';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import { safeHref } from '../lib/safe';
 
@@ -162,6 +163,8 @@ interface UpdateResult {
   error: string | null;
 }
 
+const auth = useAuthStore();
+const isAdmin = computed(() => Number(auth.user?.level ?? 0) >= 2);
 const message = useMessage();
 const { t } = useI18n();
 const frontendVersion = __APP_VERSION__;

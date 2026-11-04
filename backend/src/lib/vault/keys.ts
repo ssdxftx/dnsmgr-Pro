@@ -11,13 +11,41 @@ const DATA_AAD = Buffer.from('u1|account');
 const wrapAad = (uid: number) => Buffer.from(`vault|${uid}`);
 
 // N=32768,r=8 已占约 32MB，maxmem 必须放大到 64MB，否则 scrypt 直接抛参数错误
+export interface KdfParams {
+  N: number;
+  r: number;
+  p: number;
+  maxmem: number;
+}
 export const KDF_PARAMS = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 } as const;
 export const KDF_PARAMS_JSON = JSON.stringify({ N: 32768, r: 8, p: 1 });
 
 export const newDek = (): Buffer => randomBytes(32);
 export const newSalt = (): Buffer => randomBytes(16);
 
-export async function deriveKek(passphrase: string, salt: Buffer, params = KDF_PARAMS): Promise<Buffer> {
+/**
+ * 从 user_vault.kdf_params 解析 scrypt 参数。
+ * 解锁路径必须与写入时使用同一组参数，否则 KDF 升级后旧保险库会永久解不开；
+ * 同时必须做上限校验，避免写入超大 N 后让每次解锁耗尽内存（DoS）。
+ */
+export function kdfParamsFromJson(raw: any): KdfParams {
+  let parsed: any = null;
+  try {
+    parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
+  } catch {
+    parsed = null;
+  }
+  if (!parsed || typeof parsed !== 'object') return KDF_PARAMS;
+  const N = Number(parsed.N);
+  const r = Number(parsed.r);
+  const p = Number(parsed.p);
+  if (!Number.isInteger(N) || N < 16384 || N > 262144 || (N & (N - 1)) !== 0) return KDF_PARAMS;
+  if (!Number.isInteger(r) || r < 1 || r > 32) return KDF_PARAMS;
+  if (!Number.isInteger(p) || p < 1 || p > 8) return KDF_PARAMS;
+  return { N, r, p, maxmem: Math.max(64 * 1024 * 1024, 256 * N * r) };
+}
+
+export async function deriveKek(passphrase: string, salt: Buffer, params: KdfParams = KDF_PARAMS): Promise<Buffer> {
   return scryptAsync(Buffer.from(passphrase.normalize('NFKC'), 'utf8'), salt, 32, params);
 }
 

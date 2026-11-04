@@ -68,30 +68,40 @@ async function refreshQr() {
 
 async function generate() {
   loadBusy.value = true;
-  const res = await api<any>('POST', '/auth/totp-config', { action: 'generate' });
-  loadBusy.value = false;
-  if (res.code === 0) {
-    secret.value = res.data.secret;
-    bindToken.value = res.data.bind_token || '';
-    qrcode.value = res.data.qrcode;
-    code.value = '';
-    step.value = 'bind';
-    await refreshQr();
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/auth/totp-config', { action: 'generate' });
+    if (res.code === 0) {
+      secret.value = res.data.secret;
+      bindToken.value = res.data.bind_token || '';
+      qrcode.value = res.data.qrcode;
+      code.value = '';
+      step.value = 'bind';
+      await refreshQr();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function bind() {
   if (!code.value) return message.warning(t('totp.codeRequired'));
   if (!password.value) return message.warning(t('totp.passwordRequired'));
   loadBusy.value = true;
-  const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, bind_token: bindToken.value, code: code.value, password: password.value });
-  loadBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    enabled.value = true;
-    step.value = '';
-    password.value = '';
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', '/auth/totp-config', { action: 'bind', secret: secret.value, bind_token: bindToken.value, code: code.value, password: password.value });
+    if (res.code === 0) {
+      message.success(res.msg);
+      enabled.value = true;
+      step.value = '';
+      password.value = '';
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 function close() {
@@ -104,13 +114,18 @@ function close() {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       loadBusy.value = true;
-      const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd });
-      loadBusy.value = false;
-      if (res.code === 0) {
-        message.success(res.msg);
-        enabled.value = false;
-        password.value = '';
-      } else message.error(res.msg);
+      try {
+        const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd });
+        if (res.code === 0) {
+          message.success(res.msg);
+          enabled.value = false;
+          password.value = '';
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      } finally {
+        loadBusy.value = false;
+      }
     },
   });
 }

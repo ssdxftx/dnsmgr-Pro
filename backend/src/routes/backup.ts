@@ -30,7 +30,7 @@ import {
 } from '../lib/backup/destinations.js';
 import { saveUpload, releaseTemp } from '../lib/backup/upload.js';
 import { contentDisposition } from '../lib/util.js';
-import { hitRateLimit } from '../lib/rateLimit.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { publicError } from '../lib/util.js';
 import { emitEvent } from '../lib/events.js';
@@ -81,7 +81,9 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (scope === 'site' && !isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     // 恢复/维护期间表数据正在被替换，此时导出会得到不一致快照
     if (isMaintenance()) return reply.code(409).send({ code: -1, msg: '系统维护中，暂不能导出备份' });
-    if (!hitRateLimit(`backup:export:${req.user.uid}`, 5, 10 * 60_000)) {
+    // 跨实例限流：否则 N 个副本会把 5 次/10 分钟放大成 5N 次，
+// 导出口令校验也会被用来低成本试探保险库口令。
+    if (!(await hitRateLimitDistributed(`backup:export:${req.user.uid}`, 5, 10 * 60_000))) {
       return reply.code(429).send({ code: -1, msg: '备份导出过于频繁，请稍后再试' });
     }
     try {
@@ -164,7 +166,7 @@ export default async function backupRoutes(app: FastifyInstance) {
     // /api/backup 整体绕过维护模式 503，但导入会写业务表，恢复期间必须拒绝
     if (isMaintenance()) return reply.code(503).send({ code: -1, msg: '系统维护中，暂不可导入备份' });
     // 限流必须在落盘前执行，否则攻击者可反复上传 200MB 文件占满数据卷
-    if (!hitRateLimit(`backup:import:${req.user.uid}`, 3, 10 * 60_000)) {
+    if (!(await hitRateLimitDistributed(`backup:import:${req.user.uid}`, 3, 10 * 60_000))) {
       return reply.code(429).send({ code: -1, msg: '备份导入过于频繁，请稍后再试' });
     }
     importRunning = true;
@@ -188,8 +190,6 @@ export default async function backupRoutes(app: FastifyInstance) {
         if (String(fields.confirm || '') !== 'REPLACE') {
           return reply.code(400).send({ code: -1, msg: '请输入 REPLACE 确认整站替换' });
         }
-        const pwErr = await requireLoginPassword(Number(req.user.uid), fields.password, req);
-        if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
       }
       const header = (await readArchiveHeader(tmp)).header;
       const archiveScope = String(header.scope || '').trim();
@@ -211,15 +211,22 @@ export default async function backupRoutes(app: FastifyInstance) {
       }
       if (
         archiveScope === 'user' &&
-        !admin &&
         Number(header.ownerUid || 0) !== Number(req.user.uid)
       ) {
-        return reply.code(403).send({ code: -1, msg: '只能导入自己的备份' });
+        // 个人归档必须由所有者本人导入。管理员也不例外：允许按归档里自声明的
+        // ownerUid 映射到任意既有账号（含超管）会让 merge 导入变成提权通道。
+        return reply.code(403).send({ code: -1, msg: '个人备份只能由账号本人导入' });
       }
       if (getRestoreStatus().running) {
         return reply.code(409).send({ code: -1, msg: '恢复任务正在执行，请稍后再试' });
       }
       const dryRun = fields.dry_run === true || fields.dry_run === 'true';
+      // 任何会真正写库的导入都必须二次确认（会话被盗时，攻击者不知道登录密码）：
+      // merge 会写 user_vault/api_key，replace 会重建整站数据。预检不写库，无需确认。
+      if (!dryRun) {
+        const pwErr = await requireLoginPassword(Number(req.user.uid), fields.password, req, 'backup.import');
+        if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
+      }
       const importOpts = {
         key,
         mode,
@@ -273,24 +280,21 @@ export default async function backupRoutes(app: FastifyInstance) {
   });
 
   // ===== 在线恢复 =====
-  const restoreHits: number[] = [];
   app.post('/api/backup/restore', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     const b = req.body || {};
     if (String(b.confirm || '') !== 'RESTORE') return { code: -1, msg: '请输入 RESTORE 确认恢复' };
     const restoreMode = b.mode === 'merge' ? 'merge' : 'replace';
     // 整站替换与导入的 replace 同级危险：必须超管 + 重输登录密码，否则 level 2 管理员可借恢复接管站点
-    if (restoreMode === 'replace') {
-      if (Number(req.user.is_super || 0) !== 1) {
-        return reply.code(403).send({ code: -1, msg: '整站替换仅允许超级管理员执行' });
-      }
-      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req);
-      if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
+    if (restoreMode === 'replace' && Number(req.user.is_super || 0) !== 1) {
+      return reply.code(403).send({ code: -1, msg: '整站替换仅允许超级管理员执行' });
     }
-    const now = Date.now();
-    while (restoreHits.length && now - restoreHits[0] > 5 * 60_000) restoreHits.shift();
-    if (restoreHits.length >= 3) return reply.code(429).send({ code: -1, msg: '恢复操作过于频繁，请稍后再试' });
-    restoreHits.push(now);
+    // merge 同样会覆盖用户/API Key/保险库，必须二次确认（会话被盗时攻击者没有密码）
+    const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.restore');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
+    if (!(await hitRateLimitDistributed(`backup:restore:${req.user.uid}`, 3, 5 * 60_000))) {
+      return reply.code(429).send({ code: -1, msg: '恢复操作过于频繁，请稍后再试' });
+    }
 
     const destId = Number(b.destId || 0);
     const remoteName = path.basename(String(b.fileName || ''));
@@ -395,7 +399,7 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.post('/api/backup/key', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
-    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req);
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'backup.key.rotate');
     if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const existed = await hasBackupKey();
     // 轮换影响整站所有历史备份的可恢复性，仅超级管理员可执行；首次生成仍允许任意管理员
@@ -436,10 +440,18 @@ export default async function backupRoutes(app: FastifyInstance) {
     const old = decryptConfig(row.config) || {};
     // 前端回显的是掩码，敏感字段沿用原值
     const merged = mergeMaskedConfig(b.config || {}, old);
+    // 编辑时未显式传入 enabled 必须保持原状态：否则因凭据泄露而禁用的目的地
+    // 会在「编辑名称」后被静默重新启用，继续把备份写到不可信端点。
+    const enabled =
+      b.enabled === undefined
+        ? Number(row.enabled ?? 1)
+        : b.enabled === false || b.enabled === 0 || b.enabled === '0'
+          ? 0
+          : 1;
     await query(`UPDATE ${table('backup_destination')} SET name = ?, config = ?, enabled = ? WHERE id = ?`, [
       String(b.name ?? row.name),
       encryptConfig(merged),
-      b.enabled === false ? 0 : 1,
+      enabled,
       row.id,
     ]);
     return { code: 0, msg: '已保存' };

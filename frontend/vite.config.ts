@@ -47,12 +47,14 @@ export default defineConfig({
   },
   preview: {
     port: 4173,
-    host: '0.0.0.0',
+    // 默认只监听回环：0.0.0.0 会让同网段任意主机经 /api 代理访问后端。
+    // 需要局域网调试时显式设置 VITE_DEV_HOST=0.0.0.0。
+    host: process.env.VITE_DEV_HOST || '127.0.0.1',
     allowedHosts,
   },
   server: {
     port: 5173,
-    host: '0.0.0.0',
+    host: process.env.VITE_DEV_HOST || '127.0.0.1',
     // 本地预览：仅放行平台域名；隧道域名通过 VITE_ALLOWED_HOSTS 显式追加
     allowedHosts,
     proxy: {

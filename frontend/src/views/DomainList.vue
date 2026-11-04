@@ -141,7 +141,8 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { NButton, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
 import { CloudDownloadOutline, RefreshOutline, SearchOutline, GlobeOutline, AlertCircleOutline, NotificationsOutline, FolderOpenOutline } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
@@ -166,7 +167,9 @@ const message = useMessage();
 const dialog = useDialog();
 const { busy: actionBusy, run: runAction } = useAction();
 const { isMobile } = useResponsive();
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const auth = useAuthStore();
+// 角色以 store 为准：接口 403/401 后会派发 dnsmgr:user-updated，降级后按钮/tab 立即收敛
+const isAdmin = computed(() => Number(auth.user?.level ?? 0) >= 2);
 const loadBusy = ref(false);
 const loadError = ref(false);
 const saveBusy = ref(false);
@@ -436,6 +439,10 @@ async function toggleNotice(row: any) {
       row.is_notice = prev; // 失败回滚
       message.error(res.msg);
     }
+  } catch (e: any) {
+    // api() 在断网/超时/网关非 JSON 时是抛异常而非返回 -1，必须回滚并提示
+    row.is_notice = prev;
+    message.error(e?.message || t('common.networkError'));
   } finally {
     noticePending.delete(id);
   }
@@ -451,14 +458,17 @@ async function batchNotice(isNotice: number) {
       d.is_notice = isNotice;
     }
   }
-  const res = await api('POST', '/domains/batch-notice', { ids, is_notice: isNotice });
-  if (res.code === 0) message.success(res.msg);
+  const res = await api('POST', '/domains/batch-notice', { ids, is_notice: isNotice }).catch((e: any) => {
+    message.error(e?.message || t('common.networkError'));
+    return null;
+  });
+  if (res?.code === 0) message.success(res.msg);
   else {
     for (const d of domains.value) {
       const p = prev.get(Number(d.id));
       if (p !== undefined) d.is_notice = p;
     }
-    message.error(res.msg);
+    if (res) message.error(res.msg);
   }
 }
 

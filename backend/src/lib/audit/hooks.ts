@@ -5,8 +5,9 @@ import { enqueueAudit, nowStr } from './store.js';
 import type { AuditRow } from './types.js';
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
-const SKIP_PREFIXES = ['/api/setup', '/api/health', '/api/qqbot/webhook'];
-const ANON_WRITE_ROUTES = ['/api/auth/login', '/api/auth/totp', '/api/register'];
+const SKIP_PREFIXES = ['/api/setup', '/api/health'];
+// QQ 机器人 webhook 是匿名入口，但绑定变更必须留痕（含来源 IP），不能整体跳过审计
+const ANON_WRITE_ROUTES = ['/api/auth/login', '/api/auth/totp', '/api/register', '/api/qqbot/webhook'];
 
 function shouldSkip(req: any, route: string): boolean {
   if (!WRITE_METHODS.has(req.method)) return true;
@@ -17,6 +18,9 @@ function shouldSkip(req: any, route: string): boolean {
   if ((req as any).audit?.skip) return true;
   // 匿名且非登录接口：多半是扫描器/过期令牌，不记录
   const uid = Number(req.user?.uid || 0);
+  // webhook 每条消息都会打进来，只有处理逻辑显式写了 audit 上下文（如改绑）才落库，
+  // 否则会产生大量无意义的匿名记录
+  if (route === '/api/qqbot/webhook' && !(req as any).audit) return true;
   if (!uid && !ANON_WRITE_ROUTES.includes(route)) return true;
   return false;
 }

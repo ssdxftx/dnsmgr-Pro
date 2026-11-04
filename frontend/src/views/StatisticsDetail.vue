@@ -111,7 +111,8 @@ import {
   RefreshOutline,
   SpeedometerOutline,
 } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import KpiRow, { type KpiItem } from '../components/statistics/KpiRow.vue';
 import RangeFilter from '../components/statistics/RangeFilter.vue';
@@ -158,7 +159,9 @@ const providerView = defineAsyncComponent(
     aliyun_esa: () => import('./statistics/DetailAliyunEsa.vue'),
   } as Record<string, () => Promise<any>>)[routeKey] || (() => import('./statistics/DetailEdgeOne.vue')),
 );
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const auth = useAuthStore();
+// 角色以 store 为准：接口 403/401 后会派发 dnsmgr:user-updated，降级后按钮/tab 立即收敛
+const isAdmin = computed(() => Number(auth.user?.level ?? 0) >= 2);
 const EsaAnalyticsPanel = defineAsyncComponent(() => import('../components/statistics/EsaAnalyticsPanel.vue'));
 
 const range = ref('24h');

@@ -123,6 +123,8 @@ export default {
     noFile: '未选择文件',
     importNow: '开始导入',
     importConfirm: '导入会写入当前账号的数据，确认继续？',
+    loginPassword: '登录密码',
+    loginPasswordHint: '导入会写入保险库/API Key，请重输登录密码确认',
     importInserted: '新增',
     importReused: '复用',
     importSkipped: '跳过',

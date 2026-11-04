@@ -1,5 +1,5 @@
 import { isIP } from 'node:net';
-import { queryOne, table } from '../db.js';
+import { query, queryOne, table } from '../db.js';
 import { getDnsProvider } from './dns/factory.js';
 import { getDnsRecords, queryDnsDoh } from './dnsQuery.js';
 import type { DnsRecord } from './cert/types.js';
@@ -43,13 +43,32 @@ function getHuaweiDnsRecords(list: DnsRecord[]): DnsRecord[] {
   return rest;
 }
 
-export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname = false): Promise<void> {
+/**
+ * 按域名名解析 DNS 账户。项目允许不同云账户接入同名域名，因此不能随便取第一行：
+ * 先精确匹配；有多个时用证书账户的归属用户收口；仍无法唯一确定时直接报错，
+ * 宁可签发失败也不能把 ACME TXT 写进其他租户的 Zone。
+ */
+async function findDnsDomain(mainDomain: string, ownerUid = 0): Promise<any> {
+  const select = `SELECT A.*, B.type, B.config, B.owner_uid, B.visibility FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id`;
+  let rows: any[] = await query(`${select} WHERE A.name = ? ORDER BY A.id ASC`, [mainDomain]);
+  if (!rows.length && /^xn--/i.test(mainDomain)) {
+    // 国际化域名大小写/编码差异：只在结果唯一时采用
+    rows = await query(`${select} WHERE LOWER(A.name) = LOWER(?) ORDER BY A.id ASC`, [mainDomain]);
+  }
+  if (rows.length <= 1) return rows[0] ?? null;
+  if (ownerUid > 0) {
+    const mine = rows.filter((r) => Number(r.owner_uid) === ownerUid && String(r.visibility || '') !== 'shared');
+    if (mine.length === 1) return mine[0];
+    const shared = rows.filter((r) => String(r.visibility || '') === 'shared');
+    if (shared.length === 1) return shared[0];
+  }
+  throw new Error('域名' + mainDomain + '在多个云账户中存在同名记录，无法确定使用哪个 DNS 账户');
+}
+
+export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname = false, ownerUid = 0): Promise<void> {
   const cnameDomainList: DnsList = {};
   for (const [mainDomain, list] of Object.entries(dnsList)) {
-    let drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
-    if (!drow && /^xn--/.test(mainDomain)) {
-      drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
-    }
+    const drow = await findDnsDomain(mainDomain, ownerUid);
     if (!drow) {
       if (cname) {
         for (let i = list.length - 1; i >= 0; i--) {
@@ -81,16 +100,6 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
     let records = list.slice().sort((a, b) => a.name.localeCompare(b.name));
     if (drow.type === 'huawei') records = getHuaweiDnsRecords(records);
 
-    // 同一记录名下本批次需保留的全部值：通配符+主域会在同一 _acme-challenge 名下产生多条 TXT，
-    // 清理同名同类型旧记录时必须避开本批次仍需保留的值，避免误删导致校验失败
-    const neededValues: Record<string, Set<string>> = {};
-    for (const r of records) {
-      if (!neededValues[r.name]) neededValues[r.name] = new Set<string>();
-      const v = String(r.value);
-      neededValues[r.name].add(v);
-      neededValues[r.name].add(v.replace(/\.$/, ''));
-    }
-
     const cache: Record<string, any> = {};
     for (const row of records) {
       const domain = row.name + '.' + mainDomain;
@@ -110,17 +119,9 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
         continue;
       }
 
-      const keep = neededValues[row.name] || new Set<string>();
-      const sameType = list2.filter((v: any) => v.Type === row.type && normName(v.Name) === normName(row.name));
-      for (const rec of sameType) {
-        const rv = Array.isArray(rec.Value) ? rec.Value.join(',') : String(rec.Value ?? '');
-        // 本批次仍需保留的值（如通配符与主域各自的 TXT）跳过，避免误删
-        if (keep.has(rv) || keep.has(rv.replace(/\.$/, ''))) continue;
-        await provider.deleteDomainRecord(rec.RecordId);
-        cache[row.name].list = cache[row.name].list.filter((v: any) => v.RecordId !== rec.RecordId);
-        log('Delete DNS Record: ' + domain + ' ' + row.type);
-      }
-
+      // 不再删除「同名同类型的其他记录」：那会删掉用户自建 TXT 以及其他并发订单/续签
+      // 刚写入的 _acme-challenge 值，导致两边都验证失败。CA 允许多条同名 TXT，
+      // 过期值由 delDns 在验证结束后按精确值清理。若厂商拒绝重复记录，会在下面报错。
       const ttl = drow.type === 'namesilo' ? 3600 : 600;
       const line = lineDef[drow.type] ?? 'default';
       const res = await provider.addDomainRecord(row.name, row.type, row.value, line, ttl);
@@ -129,17 +130,14 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
     }
   }
   if (Object.keys(cnameDomainList).length) {
-    await addDns(cnameDomainList, log);
+    await addDns(cnameDomainList, log, false, ownerUid);
   }
 }
 
-export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname = false): Promise<void> {
+export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname = false, ownerUid = 0): Promise<void> {
   const cnameDomainList: DnsList = {};
   for (const [mainDomain, list] of Object.entries(dnsList)) {
-    let drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
-    if (!drow && /^xn--/.test(mainDomain)) {
-      drow = await queryOne(`SELECT A.*, B.type, B.config, B.owner_uid FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.name = ?`, [mainDomain]);
-    }
+    const drow = await findDnsDomain(mainDomain, ownerUid);
     if (!drow) {
       if (cname) {
         for (let i = list.length - 1; i >= 0; i--) {
@@ -187,7 +185,7 @@ export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname
     }
   }
   if (Object.keys(cnameDomainList).length) {
-    await delDns(cnameDomainList, log);
+    await delDns(cnameDomainList, log, false, ownerUid);
   }
 }
 

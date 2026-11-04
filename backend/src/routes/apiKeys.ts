@@ -3,7 +3,7 @@ import { findUserById } from '../auth.js';
 import { query, queryOne, table } from '../db.js';
 import { audit } from '../lib/audit/context.js';
 import { requireLoginPassword } from '../lib/reauth.js';
-import { hitRateLimit } from '../lib/rateLimit.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import {
   API_KEY_MODULES,
   apiKeyPrefix,
@@ -42,7 +42,7 @@ async function canManageKey(req: any, row: any): Promise<boolean> {
 }
 
 async function requireWriteReauth(req: any): Promise<string | null> {
-  return requireLoginPassword(Number(req.user.uid), req.body?.password, req);
+  return requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'api-key.write');
 }
 
 export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> {
@@ -84,7 +84,7 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
   });
 
   app.post('/api/api-keys', auth, async (req: any) => {
-    if (!hitRateLimit(`api-key-create:${req.user.uid}`, 20, 60 * 60_000)) {
+    if (!(await hitRateLimitDistributed(`api-key-create:${req.user.uid}`, 20, 60 * 60_000))) {
       return { code: -1, msg: 'API Key 创建过于频繁，请稍后再试' };
     }
     const uid = await targetUid(req, req.body?.uid);

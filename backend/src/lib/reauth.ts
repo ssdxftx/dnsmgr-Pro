@@ -27,9 +27,11 @@ async function verifyReauthToken(req: any, uid: number, op?: string): Promise<st
   const sid = String(decoded.sid || '');
   const currentSid = String(req?.user?.jti || '');
   if (sid && currentSid && sid !== currentSid) return '二次确认令牌不属于当前会话，请重新验证';
-  // 操作绑定：'*' 表示签发时未限定操作（兼容旧客户端），其余必须精确匹配
+  // 操作绑定：令牌只能用于签发时指定的操作。旧的 `*` 通配令牌不再接受，
+// 否则一次泄露的令牌可被拿去执行任意敏感操作（例如 vault.destroy）。
   const tokenOp = String(decoded.op || '*');
-  if (op && tokenOp !== '*' && tokenOp !== op) return '二次确认令牌不适用于该操作，请重新验证';
+  if (!tokenOp || tokenOp === '*') return '二次确认令牌缺少操作范围，请重新验证';
+  if (!op || tokenOp !== op) return '二次确认令牌不适用于该操作，请重新验证';
   if (decoded.jti && (await isTokenRevoked(String(decoded.jti)))) return '二次确认已失效，请重新验证';
   const user: any = await findUserById(Number(uid));
   if (!user || Number(user.status) === 0) return '用户不存在或已禁用';

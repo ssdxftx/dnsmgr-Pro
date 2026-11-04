@@ -115,6 +115,10 @@ export async function purgeUserData(uid: number): Promise<void> {
     const files = await purgePrivateAssets(q, uid, { deleteUserTasks: true });
     await q(`DELETE FROM ${table('permission')} WHERE uid = ?`, [uid]);
     await q(`DELETE FROM ${table('log')} WHERE uid = ?`, [uid]);
+    // API Key 是「明文即身份」的长期凭据：不清理的话，uid 被新账号复用时
+    // 旧 Key 会直接认证成新用户（若新用户是管理员则等于提权）。
+    await q(`DELETE FROM ${table('api_key')} WHERE uid = ?`, [uid]);
+    await q(`DELETE FROM ${table('token_revocation')} WHERE uid = ?`, [uid]);
     await q(`DELETE FROM ${table('user')} WHERE id = ?`, [uid]);
     return files;
   });

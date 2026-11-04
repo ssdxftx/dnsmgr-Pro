@@ -143,10 +143,15 @@ async function loadProviders() {
 
 async function loadAccounts() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/cert/accounts');
-  const rows = res.code === 0 ? res.data : [];
-  accounts.value = rows.map((r: any) => ({ ...r, typename: r.typename || providers.value[r.type]?.name || r.type, class: providers.value[r.type]?.class }));
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/cert/accounts');
+    const rows = res.code === 0 ? res.data : [];
+    accounts.value = rows.map((r: any) => ({ ...r, typename: r.typename || providers.value[r.type]?.name || r.type, class: providers.value[r.type]?.class }));
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 function onTypeChange() {

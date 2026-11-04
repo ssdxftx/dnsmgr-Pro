@@ -100,8 +100,11 @@ Authorization: Bearer <token>
 POST /api/auth/reauth
 Authorization: Bearer <token>
 
-{ "password": "你的密码" }
+{ "password": "你的密码", "op": "vault.destroy" }
 ```
+
+`op` 必填，令牌只能用于该操作（例如 `backup.import`、`backup.restore`、`vault.destroy`、`api-key.write`）。
+该接口只接受登录密码，不能用已有二次确认令牌换取新令牌。
 
 返回：
 
@@ -110,7 +113,8 @@ Authorization: Bearer <token>
   "code": 0,
   "data": {
     "token": "<reauth token>",
-    "expires_in": 300
+    "expires_in": 300,
+    "op": "vault.destroy"
   }
 }
 ```
@@ -121,7 +125,7 @@ Authorization: Bearer <token>
 X-Reauth-Token: <reauth token>
 ```
 
-令牌有效 5 分钟。也兼容旧的 `X-Confirm-Password` 与请求体 `password`。
+令牌有效 5 分钟，并与签发会话的 `jti` 绑定。也兼容请求体直接传 `password`（无需先换令牌）。
 
 敏感操作包括证书详情、系统密钥设置、备份替换、保险库销毁与 API Key 轮换等。
 

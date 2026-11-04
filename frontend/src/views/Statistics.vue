@@ -59,7 +59,8 @@ import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
 import { NAlert, NButton, NCard, NIcon } from 'naive-ui';
 import { CloudOutline, RefreshOutline } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import RangeFilter from '../components/statistics/RangeFilter.vue';
@@ -67,7 +68,9 @@ import ProviderCard, { type ProviderCardData } from '../components/statistics/Pr
 
 const { t } = useI18n();
 const router = useRouter();
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const auth = useAuthStore();
+// 角色以 store 为准：接口 403/401 后会派发 dnsmgr:user-updated，降级后按钮/tab 立即收敛
+const isAdmin = computed(() => Number(auth.user?.level ?? 0) >= 2);
 
 const range = ref('24h');
 const customRange = ref<[number, number] | null>(null);

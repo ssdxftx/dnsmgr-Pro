@@ -40,6 +40,9 @@
         <n-form-item :label="t('myBackup.passphraseLabel')">
           <n-input v-model:value="importPass" type="password" show-password-on="click" :placeholder="t('myBackup.passphraseHint')" />
         </n-form-item>
+        <n-form-item :label="t('myBackup.loginPassword')">
+          <n-input v-model:value="importLoginPass" type="password" show-password-on="click" :placeholder="t('myBackup.loginPasswordHint')" />
+        </n-form-item>
       </n-form>
       <n-space>
         <n-button :loading="importing" :disabled="!file" @click="doImport(true)">{{ t('myBackup.dryRun') }}</n-button>
@@ -82,6 +85,7 @@ const exporting = ref(false);
 const importing = ref(false);
 const exportPass = ref('');
 const importPass = ref('');
+const importLoginPass = ref('');
 const fileEl = ref<HTMLInputElement | null>(null);
 const file = ref<File | null>(null);
 const report = ref<any>(null);
@@ -165,6 +169,10 @@ function onFile(e: Event) {
 
 async function doImport(dryRun: boolean, confirmed = false) {
   if (!file.value) return;
+  if (!dryRun && !importLoginPass.value) {
+    message.warning(t('myBackup.loginPasswordHint'));
+    return;
+  }
   if (!dryRun && !confirmed) {
     dialog.warning({
       title: t('myBackup.importNow'),
@@ -182,6 +190,8 @@ async function doImport(dryRun: boolean, confirmed = false) {
     fd.append('mode', 'merge');
     fd.append('dry_run', dryRun ? 'true' : 'false');
     if (importPass.value) fd.append('passphrase', importPass.value);
+    // 导入会写保险库/API Key，服务端要求重输登录密码做二次确认
+    if (!dryRun && importLoginPass.value) fd.append('password', importLoginPass.value);
     fd.append('file', file.value);
     const res = await fetch('/api/backup/import', {
       method: 'POST',
@@ -201,17 +211,22 @@ async function doImport(dryRun: boolean, confirmed = false) {
 }
 
 async function download(row: any) {
-  const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers: { Authorization: 'Bearer ' + getToken() } });
-  if (!res.ok) return message.error(t('backup.loadFailed'));
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = row.file_name || `backup-${row.id}.dnsmgrbk`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // 下载同样可能断网/401/非 JSON 响应：必须捕获异常并提示，否则点击后毫无反馈
+  try {
+    const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers: { Authorization: 'Bearer ' + getToken() } });
+    if (!res.ok) return message.error(t('backup.loadFailed'));
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = row.file_name || `backup-${row.id}.dnsmgrbk`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
+  }
 }
 
 function remove(row: any) {

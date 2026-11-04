@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
 import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
-import { deriveKek, deriveSysKek, KDF_PARAMS, KDF_PARAMS_JSON, unwrapDek, wrapDek } from '../vault/keys.js';
+import { deriveKek, deriveSysKek, KDF_PARAMS_JSON, kdfParamsFromJson, unwrapDek, wrapDek } from '../vault/keys.js';
 import { decodeStoredValue, TABLES } from './manifest.js';
 import { ADMIN_ONLY_DNS_TYPES, dnsProviders } from '../dns/factory.js';
 import { cdnConfig } from '../cdn/factory.js';
@@ -178,7 +178,10 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
   if (!actorIsAdmin && scope !== 'user') return await reject('无权限导入整站备份');
   if (scope === 'user') {
     if (!actorUid) return await reject('个人备份导入缺少用户标识');
-    if (!actorIsAdmin && ownerUid !== actorUid) return await reject('只能导入自己的备份');
+    // 个人归档只能导回所有者本人：merge 时不得按归档自声明的 ownerUid 复用其他账号
+    // （管理员也一样，否则可映射到超级管理员并注入 api_key 完成提权）。
+    // 安装向导是唯一例外：它需要从归档中创建首个管理员账号。
+    if (mode !== 'install' && ownerUid !== actorUid) return await reject('个人备份只能由账号本人导入');
   }
 
   const report: ImportReport = {
@@ -192,6 +195,9 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
 
   const userSafe = scope === 'user' && actorUid > 0;
   const selfImport = scope === 'user' && !actorIsAdmin && actorUid > 0;
+  // 除安装向导外，个人归档一律视为「本人恢复」：只把归档所有者映射到当前账号，
+  // 不创建/复用任何其他用户。管理员导入自己的归档同样走这条路径。
+  const selfMerge = scope === 'user' && mode !== 'install' && actorUid > 0;
   const names = TABLES.filter((t) => archive.tableNames.includes(t)).filter(
     (t) => scope !== 'user' || USER_IMPORT_TABLES.has(t),
   );
@@ -247,6 +253,9 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       }
 
       const uidMap = new Map<number, number>();
+      // 个人归档的 uid 映射在进入表循环前就固定：仅 owner → 当前账号。
+      // 这样即使归档里混入其他 user 行，也无法把账户/Key/保险库挂到别人名下。
+      if (selfMerge) uidMap.set(ownerUid, actorUid);
       const aidMap = new Map<number, number>();
       const caidMap = new Map<number, number>();
       const xaidMap = new Map<number, number>();
@@ -258,7 +267,6 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       const destMap = new Map<number, number>();
       const userCount = await q(`SELECT COUNT(*) AS c FROM ${table('user')}`);
       const isEmptySite = Number((userCount as any[])[0]?.c || 0) === 0;
-      const selfMerge = scope === 'user' && actorUid > 0 && !actorIsAdmin;
       let privateBlocked = false;
       let warnedPrivate = false;
 
@@ -414,8 +422,11 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 report.warnings.push('API Key 所属用户未导入，已跳过');
                 continue;
               }
-              if (scope === 'user' && !actorIsAdmin && mappedUid !== actorUid) {
+              if (scope === 'user' && mode !== 'install' && mappedUid !== actorUid) {
+                // 个人归档里的 Key 只能落回本人：否则导入通道会被用来给其他账号
+                // （含超管）写入一把上传者已知明文的 Key。
                 rep.skipped++;
+                report.warnings.push('API Key 不属于当前账号，已跳过');
                 continue;
               }
               const keyHash = String(row.key_hash || '').trim().toLowerCase();
@@ -870,11 +881,9 @@ async function unwrapTargetDek(row: any, passphrase?: string): Promise<Buffer | 
     return unwrapDek(deriveSysKek(await getSysKey()), Buffer.from(row.wrapped_dek_sys), Number(row.uid));
   }
   if (!passphrase || !row.salt || !row.wrapped_dek) return null;
-  let params: any = KDF_PARAMS;
-  try {
-    params = { ...KDF_PARAMS, ...(JSON.parse(String(row.kdf_params || '{}')) || {}) };
-  } catch {
-    params = KDF_PARAMS;
-  }
-  return unwrapDek(await deriveKek(String(passphrase), Buffer.from(row.salt), params), Buffer.from(row.wrapped_dek), Number(row.uid));
+  return unwrapDek(
+    await deriveKek(String(passphrase), Buffer.from(row.salt), kdfParamsFromJson(row.kdf_params)),
+    Buffer.from(row.wrapped_dek),
+    Number(row.uid),
+  );
 }

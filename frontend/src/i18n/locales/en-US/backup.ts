@@ -123,6 +123,8 @@ export default {
     noFile: 'No file selected',
     importNow: 'Start import',
     importConfirm: 'Import will write data into this account. Continue?',
+    loginPassword: 'Login password',
+    loginPasswordHint: 'Import writes vault/API keys; re-enter your login password to confirm',
     importInserted: 'Inserted',
     importReused: 'Reused',
     importSkipped: 'Skipped',

@@ -29,8 +29,9 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 async function bootstrap() {
-  // Mock 数据仅在显式开启时动态加载，避免生产入口携带整份演示数据
-  if (import.meta.env.VITE_MOCK === 'true') {
+  // Mock 数据仅在显式开启时动态加载，避免生产入口携带整份演示数据；
+  // 同时必须处于开发模式，防止 VITE_MOCK=true 的构建产物被误部署成「任意密码可登录」的控制台
+  if (import.meta.env.DEV && import.meta.env.VITE_MOCK === 'true') {
     const { installMock } = await import('./mock');
     installMock();
   }

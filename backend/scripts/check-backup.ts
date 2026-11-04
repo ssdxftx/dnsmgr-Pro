@@ -119,6 +119,12 @@ await expectImportRejected(
   { key, mode: 'merge', actor: { uid: 2, username: 'bob' } },
   '非管理员导入他人个人备份被拒绝',
 );
+// 管理员同样不能把个人归档导到别人账号：否则可按 ownerUid 复用超管并注入 api_key
+await expectImportRejected(
+  userArchive,
+  { key, mode: 'merge', actor: { uid: 2, username: 'bob' }, actorIsAdmin: true },
+  '管理员导入他人个人备份被拒绝',
+);
 
 const dek = newDek();
 const kek = await deriveKek('correct horse battery staple', randomBytes(16));

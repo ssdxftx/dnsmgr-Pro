@@ -160,7 +160,8 @@ import { useI18n } from 'vue-i18n';
 import { NButton, NCard, NSpin, NTag, useMessage } from 'naive-ui';
 import { FolderOpenOutline } from '@vicons/ionicons5';
 import CfRulesPanel from '../components/cf/CfRulesPanel.vue';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
 import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
@@ -175,7 +176,9 @@ const zoneList = ref<any[]>([]);
 const accounts = ref<any[]>([]);
 const cfAccounts = ref<any[]>([]);
 const providers = ref<Record<string, any>>({});
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const auth = useAuthStore();
+// 角色以 store 为准：接口 403/401 后会派发 dnsmgr:user-updated，降级后按钮/tab 立即收敛
+const isAdmin = computed(() => Number(auth.user?.level ?? 0) >= 2);
 
 const showCfPanel = ref(false);
 const cfPanelAid = ref(0);

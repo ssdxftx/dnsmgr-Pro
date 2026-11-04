@@ -101,10 +101,15 @@ const columns = computed(() => [
 
 async function load() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/cert/cnames');
-  rows.value = res.code === 0 ? res.data || [] : [];
-  if (res.code !== 0) message.error(res.msg);
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/cert/cnames');
+    rows.value = res.code === 0 ? res.data || [] : [];
+    if (res.code !== 0) message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function loadDomains() {
@@ -115,16 +120,21 @@ async function loadDomains() {
 async function add() {
   if (!form.domain || !form.did || !form.rr) return message.warning(t('record.fillRequired'));
   saveBusy.value = true;
-  const res = await api('POST', '/cert/cnames', { domain: form.domain, did: form.did, rr: form.rr });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(t('cname.addSuccess'));
-    showAdd.value = false;
-    form.domain = '';
-    form.did = null;
-    form.rr = '';
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', '/cert/cnames', { domain: form.domain, did: form.did, rr: form.rr });
+    if (res.code === 0) {
+      message.success(t('cname.addSuccess'));
+      showAdd.value = false;
+      form.domain = '';
+      form.did = null;
+      form.rr = '';
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 async function check(r: any) {

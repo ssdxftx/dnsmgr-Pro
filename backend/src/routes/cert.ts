@@ -693,7 +693,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessCertOrder(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
-    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.headers['x-confirm-password'], req);
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.headers['x-confirm-password'], req, 'cert.privatekey');
     if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });

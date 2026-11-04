@@ -237,7 +237,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import { isAdminUser } from '../lib/admin';
 import PageHeader from '../components/PageHeader.vue';
 import EmptyState from '../components/EmptyState.vue';
@@ -248,7 +249,8 @@ import CertAccount from './CertAccount.vue';
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false });
 const embedded = computed(() => props.embedded);
-const admin = computed(() => isAdminUser(getUser()));
+const auth = useAuthStore();
+const admin = computed(() => isAdminUser(auth.user));
 
 const { t } = useI18n();
 const message = useMessage();
@@ -360,7 +362,9 @@ async function unlock() {
 }
 
 async function lock() {
-  await api<any>('POST', '/vault/lock', {});
+  // 锁定失败不能提示「已锁定」，否则用户以为私有凭据已从会话中清除
+  const res = await api<any>('POST', '/vault/lock', {});
+  if (res?.code !== 0) return message.error(res?.msg || t('common.failed'));
   message.success(t('vault.lockedDone'));
   await load();
 }
@@ -415,15 +419,12 @@ async function generateRecovery() {
     const res = await api<any>('POST', '/vault/recovery', { recovery: 'random', password: recoveryPass.value });
     if (res.code !== 0) return message.error(res.msg);
     const code = String(res?.data?.recoveryCode || '');
-    if (!code) return message.error(t('vault.saved'));
+    if (!code) return message.error(t('common.failed'));
     recoveryCode.value = code;
     recoveryAck.value = false;
-    try {
-      await navigator.clipboard.writeText(code);
-      message.success(t('vault.copied'));
-    } catch {
-      message.warning(t('vault.recoveryCode'));
-    }
+    // 不自动写入剪贴板：恢复码是敏感凭据，静默复制会让其他应用/脚本可直接读取。
+    // 用户可在下方只读输入框中手动全选复制。
+    message.warning(t('vault.recoveryCode'));
   } finally {
     busy.value = false;
   }

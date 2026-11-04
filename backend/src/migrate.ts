@@ -37,6 +37,9 @@ export async function migrate(): Promise<void> {
 
   await migrateBackupAndVault();
   await migrateApiGovernance();
+  // 幂等键必须绑定请求内容：只绑定 method+path 时，同一 Key 换 body/query 会拿到旧响应。
+  // 必须放在 migrateApiGovernance 之后：幂等表由它创建，新库首次启动时表还不存在。
+  await ensureColumn('idempotency_key', 'request_hash', 'char(64) DEFAULT NULL');
   await migrateLegacyNonce();
 
   await query(

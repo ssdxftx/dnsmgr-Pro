@@ -22,8 +22,9 @@ export function formatBytes(value: number | null | undefined): string {
 export function formatBitRate(value: number | null | undefined): string {
   if (!valid(value)) return EMPTY;
   if (value <= 0) return '0 Mbps';
-  const mbps = value / 1024 / 1024;
-  if (mbps >= 1024) return `${(mbps / 1024).toFixed(2)} Gbps`;
+  // 带宽是 SI 单位：1 Mbps = 1,000,000 bps（按 1024 折算会偏高约 4.9%）
+  const mbps = value / 1_000_000;
+  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
   return `${mbps >= 100 ? mbps.toFixed(0) : mbps.toFixed(2)} Mbps`;
 }
 

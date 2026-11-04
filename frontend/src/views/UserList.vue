@@ -412,10 +412,15 @@ async function toggleStatus(row: any) {
   const prev = row.status ? 1 : 0;
   const target = prev ? 0 : 1;
   row.status = target; // 乐观更新：立即反馈，避免整表重拉
-  const res = await api('POST', `/users/${row.id}/status`, { status: target });
-  if (res.code !== 0) {
-    row.status = prev; // 失败回滚
-    message.error(res.msg);
+  try {
+    const res = await api('POST', `/users/${row.id}/status`, { status: target });
+    if (res.code !== 0) {
+      row.status = prev; // 失败回滚
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    row.status = prev;
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -423,11 +428,16 @@ async function toggleStatCache(row: any) {
   const prev = row.stat_cache ? 1 : 0;
   const target = prev ? 0 : 1;
   row.stat_cache = target; // 乐观更新
-  const res = await api('POST', `/users/${row.id}/stat-cache`, { stat_cache: target });
-  if (res.code === 0) message.success(res.msg);
-  else {
-    row.stat_cache = prev; // 失败回滚
-    message.error(res.msg);
+  try {
+    const res = await api('POST', `/users/${row.id}/stat-cache`, { stat_cache: target });
+    if (res.code === 0) message.success(res.msg);
+    else {
+      row.stat_cache = prev; // 失败回滚
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    row.stat_cache = prev;
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -441,13 +451,18 @@ function del(row: any) {
       const idx = users.value.findIndex((u: any) => Number(u.id) === Number(row.id));
       const removed = idx >= 0 ? users.value[idx] : null;
       if (idx >= 0) users.value.splice(idx, 1);
-      const res = await api('DELETE', `/users/${row.id}`);
-      if (res.code === 0) {
-        message.success(t('userList.deleteSuccess'));
-        if (pagination.itemCount > 0) pagination.itemCount--;
-      } else {
-        if (removed) users.value.splice(idx, 0, removed); // 失败回滚
-        message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/users/${row.id}`);
+        if (res.code === 0) {
+          message.success(t('userList.deleteSuccess'));
+          if (pagination.itemCount > 0) pagination.itemCount--;
+        } else {
+          if (removed) users.value.splice(idx, 0, removed); // 失败回滚
+          message.error(res.msg);
+        }
+      } catch (e: any) {
+        if (removed) users.value.splice(idx, 0, removed);
+        message.error(e?.message || t('common.networkError'));
       }
     },
   });

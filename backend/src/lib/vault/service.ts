@@ -4,6 +4,7 @@ import { getSysKey } from '../../config.js';
 import {
   deriveKek,
   deriveSysKek,
+  kdfParamsFromJson,
   KDF_PARAMS_JSON,
   newDek,
   newSalt,
@@ -168,7 +169,11 @@ export async function unlockVault(uid: number, jti: string, passphrase: string):
     return setVaultSession(uid, jti, dek);
   }
   await claimAttempt(uid);
-  const dek = unwrapDek(await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer), buf(row.wrapped_dek) as Buffer, uid);
+  const dek = unwrapDek(
+    await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+    buf(row.wrapped_dek) as Buffer,
+    uid,
+  );
   if (!dek) return await failAttempt(uid);
   await query(`UPDATE ${table('user_vault')} SET fail_count = 0, locked_until = NULL WHERE uid = ?`, [uid]);
   return setVaultSession(uid, jti, dek);
@@ -206,7 +211,11 @@ export async function downgradeVault(uid: number, jti: string, passphrase: strin
   if (!row) throw new VaultError('保险库未初始化');
   if (row.mode !== 'passphrase') throw new VaultError('当前已是便捷模式');
   await claimAttempt(uid);
-  const dek = unwrapDek(await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer), buf(row.wrapped_dek) as Buffer, uid);
+  const dek = unwrapDek(
+    await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+    buf(row.wrapped_dek) as Buffer,
+    uid,
+  );
   if (!dek) return await failAttempt(uid);
   await query(
     `UPDATE ${table('user_vault')}
@@ -222,7 +231,11 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
   if (!row) throw new VaultError('保险库未初始化');
   if (row.mode !== 'passphrase') throw new VaultError('便捷模式没有口令');
   await claimAttempt(uid);
-  const dek = unwrapDek(await deriveKek(String(oldPass || ''), buf(row.salt) as Buffer), buf(row.wrapped_dek) as Buffer, uid);
+  const dek = unwrapDek(
+    await deriveKek(String(oldPass || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+    buf(row.wrapped_dek) as Buffer,
+    uid,
+  );
   if (!dek) return await failAttempt(uid);
   const pass = String(nextPass || '');
   if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
@@ -286,7 +299,7 @@ export async function destroyVault(uid: number, confirm: string, passphrase?: st
   if (row?.mode === 'passphrase') {
     await claimAttempt(uid);
     const dek = unwrapDek(
-      await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer),
+      await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
       buf(row.wrapped_dek) as Buffer,
       uid,
     );

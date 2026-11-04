@@ -210,7 +210,7 @@ function fmtDate(ts: number | null): string | null {
 }
 
 async function getReauthToken(password: string): Promise<string> {
-  const res = await api<any>('POST', '/auth/reauth', { password });
+  const res = await api<any>('POST', '/auth/reauth', { password, op: 'api-key.write' });
   if (res?.code !== 0 || !res.data?.token) throw new Error(res?.msg || t('preferences.reauthFailed'));
   return String(res.data.token);
 }

@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { configGet, configSet } from '../config.js';
 import { QqBot } from '../lib/monitor/qqbot.js';
+import { audit } from '../lib/audit/context.js';
 
 const BIND_REPLY = '# 绑定成功\n\n您已成功绑定QQ机器人消息通知，聚合DNS管理系统通知将通过本机器人发送。';
 const UNBIND_NOTICE = '# 绑定已变更\n\n您的QQ机器人消息通知绑定已被其他账号替换。若非本人操作，请立即检查系统账号安全。';
@@ -83,6 +84,17 @@ export default async function qqbotRoutes(app: FastifyInstance) {
         if (openid !== '' && old !== openid) {
           await configSet('qqbot_openid', openid);
           console.warn('[qqbot] 通知绑定 openid 变更：' + (old || '(空)') + ' -> ' + openid);
+          // 绑定变更是安全敏感配置：必须留痕（来源 IP、旧值掩码），否则被换绑后无从追溯
+          const mask = (v: string) => (v ? v.slice(0, 4) + '***' + v.slice(-2) : '(空)');
+          audit(req, {
+            module: 'system',
+            action: 'qqbot.bind',
+            targetType: 'config',
+            targetName: 'qqbot_openid',
+            summary: `QQ 机器人通知绑定变更：${mask(old)} → ${mask(openid)}`,
+            detail: { old: mask(old), next: mask(openid), messageId: String(d.id || '') },
+            scrubBody: true,
+          });
           if (old !== '') {
             try {
               await bot.sendMarkdown(old, UNBIND_NOTICE);

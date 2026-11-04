@@ -34,6 +34,7 @@ export class CertOrderService {
   private client!: CertProvider;
   private aid!: number;
   private atype!: string;
+  private ownerUid = 0;
   private order: any;
   private info: any;
   private dnsList: any;
@@ -52,6 +53,8 @@ export class CertOrderService {
     const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ?`, [this.aid]);
     if (!account) throw new Error('该证书账户不存在');
     this.atype = account.type;
+    // 证书账户的归属用户：同名域名存在于多个云账户时，用它选择正确的 DNS 账户
+    this.ownerUid = Number(account.owner_uid || 0);
     const config = safeJson(account.config) || {};
     const ext = safeJson(account.ext);
     this.client = getCertProvider(account.type, config, ext);
@@ -406,7 +409,7 @@ export class CertOrderService {
       return;
     }
     try {
-      await addDns(this.dnsList, (txt) => this.saveLog(txt), this.cnameDomainList.length > 0);
+      await addDns(this.dnsList, (txt) => this.saveLog(txt), this.cnameDomainList.length > 0, this.ownerUid);
     } catch (e: any) {
       await this.saveResult(-3, e.message);
       throw e;
@@ -418,7 +421,7 @@ export class CertOrderService {
   async delDns() {
     if (!this.dnsList || !Object.keys(this.dnsList).length) return;
     try {
-      await delDns(this.dnsList, (txt) => this.saveLog(txt), true);
+      await delDns(this.dnsList, (txt) => this.saveLog(txt), true, this.ownerUid);
     } catch (e: any) {
       this.saveLog('[Error] ' + e.message);
     }

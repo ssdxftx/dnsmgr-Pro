@@ -281,7 +281,36 @@ async function zoneRecordIdSet(provider: any, d: any, acct: any): Promise<{ ids:
   return { ids, complete };
 }
 
-/** 记录归属守卫：Domain 字段匹配 + 云端记录列表成员校验（缺失 Domain 时不再 fail-open） */
+/**
+ * 大 Zone 的定向归属校验：按「记录名 + 类型」查询当前 Zone，命中 RecordId 才算本域名记录。
+ * 全量列表翻页不完整时用它兜底，避免 zone 记录数超过翻页上限（如按 100/页分页的厂商
+ * 在千条级就会 complete=false）导致所有普通用户都无法改记录。
+ */
+async function recordIdInFilteredList(
+  provider: any,
+  name: any,
+  type: any,
+  recordId: any,
+): Promise<boolean> {
+  const rn = String(name ?? '').trim();
+  if (!rn) return false;
+  let pageSize = 100;
+  for (let page = 1; page <= 10; page++) {
+    const r: any = await Promise.resolve()
+      .then(() => provider.getDomainRecords(page, 100, null, rn, null, type || null, null, null))
+      .catch(() => false);
+    if (r === false) return false;
+    const list: any[] = Array.isArray(r?.list) ? r.list : [];
+    for (const item of list) if (item && String(item.RecordId) === String(recordId)) return true;
+    if (!list.length) break;
+    if (page === 1) pageSize = list.length;
+    if (list.length < pageSize) break;
+    if (typeof r?.total === 'number' && page * pageSize >= Number(r.total)) break;
+  }
+  return false;
+}
+
+/** 记录归属守卫：必须能证明该 RecordId 属于本域名（fail-closed） */
 async function recordBelongsToDomain(
   provider: any,
   info: { domain: any; account: any },
@@ -290,13 +319,13 @@ async function recordBelongsToDomain(
 ): Promise<boolean> {
   if (cur && cur.Domain && !recordOwnedByDomain(cur, info.domain.name)) return false;
   const set = await zoneRecordIdSet(provider, info.domain, info.account);
-  if (set) {
-    if (set.ids.has(String(recordId))) return true;
-    // 超大 Zone 只取了前 5000 条时无法断言不存在，退回 Domain 字段判定，避免误伤正常操作
-    return !set.complete && !!cur?.Domain;
-  }
-  // 云端列表拉取失败：只有在厂商确实返回了归属域名时才放行
-  return !!cur?.Domain;
+  // 列表拉取失败：不放行。多个适配层会把 Domain 直接写成当前域名，
+  // 单看该字段无法证明记录归属；误判的代价是跨域名改/删他人记录。
+  if (!set) return false;
+  if (set.ids.has(String(recordId))) return true;
+  if (set.complete) return false;
+  // 超大 Zone 只取了前 N 条：用记录名+类型定向确认，而不是退回可伪造的 Domain 字段
+  return recordIdInFilteredList(provider, cur?.Name, cur?.Type, recordId);
 }
 
 /** 校验域名是否存在于该云账户的 Zone 列表中，并返回云端 Zone ID（客户端传入的 thirdid 不可信） */
@@ -917,6 +946,8 @@ export default async function domainRoutes(app: FastifyInstance) {
       const err = writeErr(acc, info.domain.name, name);
       if (err) return { code: -1, msg: err };
     }
+    const invalid = validateRecordInput(type, name, value);
+    if (invalid) return { code: -1, msg: invalid };
     const recordId = await provider.addDomainRecord(name, type, value, line || 'default', Number(ttl || 600), Number(mx || 1), weight ?? null, remark || null);
     if (!recordId) return { code: -1, msg: provider.getError() };
     if (remark && typeof (provider as any).updateDomainRecordRemark === 'function') {
@@ -1001,6 +1032,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!cur && typeof (provider as any).getDomainRecordInfo === 'function') {
       cur = await (provider as any).getDomainRecordInfo(recordId).catch(() => null);
     }
+    const invalid = validateRecordInput(type, name, value);
+    if (invalid) return { code: -1, msg: invalid };
     const ok = await provider.updateDomainRecord(recordId, name, type, value, line || 'default', Number(ttl || 600), Number(mx || 1), weight ?? null, remark || null);
     if (!ok) return { code: -1, msg: provider.getError() };
     audit(req, {
@@ -1102,6 +1135,19 @@ export default async function domainRoutes(app: FastifyInstance) {
     const records: any[] = Array.isArray(b.records) ? b.records : [];
     if (!action || !records.length) return { code: -1, msg: '参数不能为空' };
     if (records.length > 500) return { code: -1, msg: '单次最多操作 500 条解析记录' };
+    // 改记录值/线路时不能使用空记录名：部分厂商把空名当作根记录（@），
+    // 会用客户端传来的 r.Name 覆盖成授权范围外的记录名。必须在任何写操作前拒绝。
+    if (action === 'value' || action === 'line') {
+      for (const r of records) {
+        if (!r || !String(r.Name ?? '').trim()) return { code: -1, msg: '批量修改记录值/线路时必须提供记录名' };
+      }
+      if (!acc.admin) {
+        for (const r of records) {
+          const le = writeErr(acc, info.domain.name, String(r.Name).trim());
+          if (le) return { code: -1, msg: '新记录超出授权子域名范围' };
+        }
+      }
+    }
     const actionText: Record<string, string> = {
       open: '启用', pause: '暂停', delete: '删除', remark: '修改备注', value: '修改记录值', line: '修改线路', group: '修改分组',
     };
@@ -1167,7 +1213,10 @@ export default async function domainRoutes(app: FastifyInstance) {
         const type = action === 'value' ? String(b.type || r.Type) : r.Type;
         const value = action === 'value' ? String(b.value ?? '') : (Array.isArray(r.Value) ? r.Value.join(',') : r.Value);
         const line = action === 'line' ? String(b.line ?? '') : r.Line;
-        return !!(await makeProvider().updateDomainRecord(r.RecordId, r.Name, type, value, line || 'default', Number(r.TTL || 600), Number(r.MX || 1), r.Weight ?? null, r.Remark ?? null));
+        const name = String(r.Name ?? '').trim();
+        const bad = validateRecordInput(type, name, value);
+        if (bad) return false;
+        return !!(await makeProvider().updateDomainRecord(r.RecordId, name, type, value, line || 'default', Number(r.TTL || 600), Number(r.MX || 1), r.Weight ?? null, r.Remark ?? null));
       });
       success = results.filter(Boolean).length;
       fail = results.length - success;
@@ -1216,6 +1265,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       const rType = type || detectType(p.value);
       const e = writeErr(acc, info.domain.name, p.name);
       if (e) return false;
+      if (validateRecordInput(rType, p.name, p.value)) return false;
       const rid = await makeProvider()?.addDomainRecord(p.name, rType, p.value, line, ttl, mx, null, remark);
       return !!rid;
     });
@@ -1643,6 +1693,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!name || !type || !value) return { code: -1, msg: '参数不能为空' };
     const typeErr = legacyTypeError(ctx.info.account.type, type);
     if (typeErr) return { code: -1, msg: typeErr };
+    const invalid = validateRecordInput(type, name, value);
+    if (invalid) return { code: -1, msg: invalid };
     const err = writeErr(ctx.acc, ctx.info.domain.name, name);
     if (err) return { code: -1, msg: err };
     const rid = await ctx.provider.addDomainRecord(
@@ -1678,6 +1730,8 @@ export default async function domainRoutes(app: FastifyInstance) {
       e = writeErr(ctx.acc, ctx.info.domain.name, name);
       if (e) return { code: -1, msg: '新记录超出授权子域名范围' };
     }
+    const invalid = validateRecordInput(type, name, value);
+    if (invalid) return { code: -1, msg: invalid };
     const ok = await ctx.provider.updateDomainRecord(
       recordid, name, type, value, asText(b.line) || 'default', legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
       b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
@@ -1840,4 +1894,19 @@ function detectType(value: string): string {
   if (net.isIPv4(v)) return 'A';
   if (net.isIPv6(v)) return 'AAAA';
   return 'CNAME';
+}
+
+// 服务端记录写入校验：类型白名单 + 名称/值长度与控制字符。
+// 不能把「前端下拉框」当作唯一约束——直连 API 可以写任意类型/超长值。
+const RECORD_TYPE_RE = /^(A|AAAA|CNAME|TXT|MX|NS|SRV|CAA|ALIAS|REDIRECT_URL|FORWARD_URL)$/;
+function validateRecordInput(type: any, name: any, value: any): string | null {
+  const t = String(type ?? '').trim().toUpperCase();
+  if (!RECORD_TYPE_RE.test(t)) return '不支持的记录类型';
+  const n = String(name ?? '').trim();
+  // 空名表示根记录（部分调用方用 '' / '@'），仅拒绝空白与控制字符
+  if (n.length > 255 || /[\s\x00-\x1f]/.test(n)) return '记录名不合法';
+  const v = String(value ?? '');
+  if (!v.length) return '记录值不能为空';
+  if (v.length > 8192 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(v)) return '记录值不合法';
+  return null;
 }

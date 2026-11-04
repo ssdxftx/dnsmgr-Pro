@@ -152,6 +152,9 @@
         <n-form-item :label="t('backup.destType')">
           <n-select v-model:value="destForm.type" :options="[{ label: 'WebDAV', value: 'webdav' }, { label: 'S3', value: 's3' }]" />
         </n-form-item>
+        <n-form-item :label="t('backup.enabled')">
+          <n-switch v-model:value="destForm.enabled" />
+        </n-form-item>
         <template v-if="destForm.type === 'webdav'">
           <n-form-item :label="t('backup.destUrl')" :feedback="t('backup.destUrlHint')"><n-input v-model:value="destForm.config.url" placeholder="https://dav.example.com/backup/" /></n-form-item>
           <n-form-item :label="t('backup.destUser')"><n-input v-model:value="destForm.config.username" /></n-form-item>
@@ -209,7 +212,8 @@ import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { NButton, NInput, NSpace, useDialog, useMessage } from 'naive-ui';
 import { ArchiveOutline, CloudDownloadOutline, FolderOpenOutline, KeyOutline, TimeOutline } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
+import { api, getToken } from '../api';
+import { useAuthStore } from '../stores/auth';
 import { isAdminUser } from '../lib/admin';
 import { useAction } from '../composables/useAction';
 import PageHeader from '../components/PageHeader.vue';
@@ -225,10 +229,12 @@ const dialog = useDialog();
 const route = useRoute();
 const router = useRouter();
 
-const admin = isAdminUser(getUser());
-const validTabs = admin ? ['site', 'mine', 'vault'] : ['mine', 'vault'];
+const auth = useAuthStore();
+// 降级后立即收敛管理页入口（后端仍会 403）
+const admin = computed(() => isAdminUser(auth.user));
+const validTabs = admin.value ? ['site', 'mine', 'vault'] : ['mine', 'vault'];
 const initialTab = String(route.query.tab || '');
-const tab = ref(validTabs.includes(initialTab) ? initialTab : (admin ? 'site' : 'mine'));
+const tab = ref(validTabs.includes(initialTab) ? initialTab : (admin.value ? 'site' : 'mine'));
 
 watch(
   () => route.query.tab,
@@ -266,7 +272,7 @@ const remoteLoading = ref(false);
 const showSched = ref(false);
 const restoreTarget = ref<any>(null);
 const restoreForm = reactive({ mode: 'replace', confirm: '' });
-const destForm = reactive<any>({ id: 0, name: '', type: 'webdav', config: {} });
+const destForm = reactive<any>({ id: 0, name: '', type: 'webdav', config: {}, enabled: true });
 const schedForm = reactive<any>({
   id: 0, name: '自动备份', freq: 'daily', hour: 3, minute: 0, weekday: 1,
   keep_count: 7, keep_days: 30, dest_id: 0, include_logs: false, enabled: true,
@@ -333,7 +339,7 @@ const jobColumns = computed(() => [
 ]);
 
 async function loadMaint() {
-  if (!admin) return;
+  if (!admin.value) return;
   try {
     const r = await api<any>('GET', '/backup/restore/status');
     maintenanceOn.value = !!r?.data?.maintenance;
@@ -417,18 +423,22 @@ async function rotateKey() {
 }
 
 async function download(row: any) {
-  const token = localStorage.getItem('dnsmgr_token') || '';
-  const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers: { Authorization: 'Bearer ' + token } });
-  if (!res.ok) return message.error(t('backup.loadFailed'));
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = row.file_name || `backup-${row.id}.dnsmgrbk`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  // 用统一的 getToken() 读取令牌，避免 localStorage 键名变更后下载 401 且无提示
+  try {
+    const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers: { Authorization: 'Bearer ' + getToken() } });
+    if (!res.ok) return message.error(t('backup.loadFailed'));
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = row.file_name || `backup-${row.id}.dnsmgrbk`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
+  }
 }
 
 let remoteSeq = 0;
@@ -487,8 +497,8 @@ function openRestore(row: any) {
 async function doRestore() {
   if (!restoreTarget.value) return;
   const body: any = { mode: restoreForm.mode, confirm: restoreForm.confirm };
-  // 整站替换与导入的 replace 同级危险：后端要求重新输入登录密码
-  if (restoreForm.mode === 'replace') {
+  // 恢复（含 merge）会覆盖用户/API Key/保险库，后端要求重新输入登录密码
+  {
     const password = await askPassword(t('backup.restoreTitle'), t('vault.loginPass'));
     if (password === null) return;
     body.password = password;
@@ -555,13 +565,15 @@ function openDest(d?: any) {
   destForm.name = d?.name || '';
   destForm.type = d?.type || 'webdav';
   destForm.config = { ...(d?.config || {}) };
+  // 编辑时回填启用状态，避免 PUT 省略 enabled 后后端把它当默认值重新启用
+  destForm.enabled = d ? Number(d.enabled) === 1 : true;
   showDest.value = true;
 }
 
 async function saveDest() {
   saving.value = true;
   try {
-    const body = { name: destForm.name, type: destForm.type, config: destForm.config };
+    const body = { name: destForm.name, type: destForm.type, config: destForm.config, enabled: destForm.enabled };
     const res = destForm.id
       ? await api<any>('PUT', `/backup/destinations/${destForm.id}`, body)
       : await api<any>('POST', '/backup/destinations', body);
@@ -667,7 +679,7 @@ onMounted(() => {
   if (String(route.query.tab || '') !== tab.value) {
     router.replace({ path: '/backup', query: { ...route.query, tab: tab.value } });
   }
-  if (admin) loadAll();
+  if (admin.value) loadAll();
 });
 </script>
 

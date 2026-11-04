@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { checkLevel } from '../auth.js';
+import { checkLevel, findUserById } from '../auth.js';
 import { query, queryOne, table } from '../db.js';
 import { isMaintenance } from '../lib/backup/maintenance.js';
 import { getInstallState } from '../installer.js';
@@ -35,10 +35,19 @@ export default async function observabilityRoutes(app: FastifyInstance): Promise
     if (req.headers?.authorization) {
       try {
         await req.jwtVerify();
+        // 仅 jwtVerify 不够：被降权/封禁/吊销后的旧令牌仍在有效期内。
+        // 必须回查账号状态与 token_version，否则已撤销的管理员仍能读到运行态信息。
+        const dbUser: any = await findUserById(Number(req.user?.uid || 0));
+        if (
+          dbUser &&
+          Number(dbUser.status) !== 0 &&
+          Number(req.user?.token_version || 0) === Number(dbUser.token_version || 0)
+        ) {
+          isAdmin = checkLevel(dbUser, 2);
+        }
       } catch {
         // 令牌无效按匿名处理，仍然返回探针结果
       }
-      isAdmin = checkLevel(req.user, 2);
     }
     const data: any = { ready: ok };
     if (isAdmin) {

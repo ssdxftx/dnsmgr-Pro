@@ -105,7 +105,7 @@
 </template>
 
 <script setup lang="ts">
-import { h, onMounted, reactive, ref, computed } from 'vue';
+import { h, onMounted, onUnmounted, reactive, ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { NButton, NDropdown, NDynamicInput, NInput, NTag, NEllipsis, useMessage, useDialog } from 'naive-ui';
@@ -367,11 +367,16 @@ async function toggleAuto(row: any) {
   const prev = row.isauto ? 1 : 0;
   const target = prev ? 0 : 1;
   row.isauto = target; // 乐观更新
-  const res = await api('POST', `/cert/orders/${row.id}/setauto`, { isauto: target });
-  if (res.code === 0) message.success(t('common.success'));
-  else {
-    row.isauto = prev; // 失败回滚
-    message.error(res.msg);
+  try {
+    const res = await api('POST', `/cert/orders/${row.id}/setauto`, { isauto: target });
+    if (res.code === 0) message.success(t('common.success'));
+    else {
+      row.isauto = prev; // 失败回滚
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    row.isauto = prev;
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -490,6 +495,14 @@ function del(row: any) {
 onMounted(() => {
   loadOrders();
   loadAccounts();
+});
+
+// 离开页面时清空私钥/证书明文，避免组件实例被路由缓存或 DevTools 长期持有
+onUnmounted(() => {
+  info.value = null;
+  logText.value = '';
+  form.privatekey = '';
+  form.fullchain = '';
 });
 </script>
 

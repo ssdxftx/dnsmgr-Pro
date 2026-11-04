@@ -23,12 +23,15 @@ function prune(): void {
 export async function revokeToken(jti: string, uid: number, expireAt?: Date): Promise<void> {
   const id = String(jti || '').trim();
   if (!id) return;
+  // token_revocation.uid 是 unsigned：快捷登录会话的 uid = -did，直接写入会触发
+  // MySQL 严格模式 1264 导致登出 500。吊销本身按 jti 生效，uid 只是附加信息，归零即可。
+  const owner = Number(uid) > 0 ? Number(uid) : 0;
   // 调用方应传入令牌实际 exp；兜底保留 30 天，避免自定义长 TTL 令牌的吊销记录提前被清理
   const exp = expireAt && expireAt.getTime() > Date.now() ? expireAt : new Date(Date.now() + 30 * 86400_000);
   await query(
     `INSERT INTO ${table('token_revocation')} (jti, uid, expire_at, addtime) VALUES (?, ?, ?, NOW())
      ON DUPLICATE KEY UPDATE expire_at = VALUES(expire_at)`,
-    [id, uid, exp],
+    [id, owner, exp],
   );
   cache.set(id, { revoked: true, at: Date.now() });
   prune();

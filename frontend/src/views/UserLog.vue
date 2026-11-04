@@ -236,7 +236,8 @@ import {
   AlertCircleOutline,
   PeopleOutline,
 } from '@vicons/ionicons5';
-import { api, getUser } from '../api';
+import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import StatusBadge from '../components/StatusBadge.vue';
@@ -267,7 +268,9 @@ const filterEnd = ref<number | null>(null);
 const copied = ref(false);
 const cur = ref<any>({});
 
-const isAdmin = computed(() => (getUser()?.level || 0) >= 2);
+const auth = useAuthStore();
+// 角色以 store 为准：接口 403/401 后会派发 dnsmgr:user-updated，降级后按钮/tab 立即收敛
+const isAdmin = computed(() => Number(auth.user?.level ?? 0) >= 2);
 const hasFilters = computed(() => uid.value != null || !!module.value || result.value != null);
 
 const moduleOptions = computed(() =>
