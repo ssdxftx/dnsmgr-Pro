@@ -447,7 +447,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
     const key = `${aid}#${zoneId || ''}`;
     const cached = providerCache.get(key);
-    if (cached && Date.now() - cached.at < PROVIDER_CACHE_TTL) return cached.provider;
+    if (cached && Date.now() - cached.at < PROVIDER_CACHE_TTL) {
+      const p: any = cached.provider;
+      if (p && zoneId && typeof p.setZoneId === 'function') p.setZoneId(zoneId);
+      if (p && zoneId && typeof p.setSiteId === 'function') p.setSiteId(zoneId);
+      return p;
+    }
     let provider: CdnProvider | false = false;
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
     if (acct) {
@@ -458,8 +463,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
         provider = p;
       }
     }
-    // 私有账户的 provider 不进入共享缓存，避免缓存键仅按 aid 时被其他请求复用
-    if (acct?.visibility === 'shared') {
+    // 私有账户不进入共享缓存；zoneId 为空的 provider 也不缓存，
+    // 因为 provider 会把 findSite/findZone 解析出的状态写进实例，跨请求复用会串站。
+    if (acct?.visibility === 'shared' && zoneId) {
       if (providerCache.size > 200) providerCache.clear();
       providerCache.set(key, { at: Date.now(), provider });
     }
@@ -522,7 +528,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const data = rows.map((r: any) => ({
       ...r,
       routename: typeNames[r.route] || r.route,
-      cert_mode: r.cert_mode || (linkedDids.has(Number(r.id)) ? 'certlink' : ''),
+      cert_mode:
+        r.cert_mode === null || r.cert_mode === undefined
+          ? linkedDids.has(Number(r.id))
+            ? 'certlink'
+            : ''
+          : String(r.cert_mode),
       can_freecert: freeAids.has(r.aid) ? 1 : 0,
       can_certapply: certAids.has(r.aid) ? 1 : 0,
       can_certlink: linkAids.has(r.aid) ? 1 : 0,
@@ -752,6 +763,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.verifyOwnership !== 'function') return { code: -1, msg: '该 CDN 类型不支持归属验证' };
     const r = await provider.verifyOwnership(zoneId, b.domain ? String(b.domain) : undefined);
     if (r === false) return { code: -1, msg: '验证失败，' + provider.getError() };
+    const passed = (r as any)?.passed ?? (r as any)?.Passed ?? (r as any)?.VerifyOwnershipResult?.Passed;
+    if (passed === false) return { code: -1, msg: '归属验证未通过，请检查 DNS 解析后重试' };
     // 记录本地确认，避免云端状态延迟导致按钮再次出现。
     // 这里是「读整张 map → 改一项 → 写回」，并发验证会互相覆盖（连别的账户的条目一起抹掉），
     // 因此必须用命名锁把这段读改写串行化。
@@ -1937,6 +1950,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String((req.params as any).zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.deleteZone !== 'function') return { code: -1, msg: '该 CDN 类型不支持删除站点' };
+    const local: any = await queryOne(
+      `SELECT COUNT(*) AS c FROM ${table('cdn_domain')} WHERE aid = ? AND zone_id = ?`,
+      [aid, zoneId],
+    );
+    if (Number(local?.c || 0) > 0) {
+      return { code: -1, msg: '该站点下仍有已接入的加速域名，请先删除/迁移这些域名后再删除站点' };
+    }
     if (!(await provider.deleteZone(zoneId))) return { code: -1, msg: '删除失败，' + provider.getError() };
     return { code: 0, msg: '站点已删除' };
   });
@@ -3750,12 +3770,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.post('/api/cdn/domains/:id/https', authCdnDomain, async (req: any) => {
     const { id } = req.params as any;
     const { https_enabled, force_redirect } = req.body || {};
+    const toBool = (v: any) => v === true || v === 1 || v === '1' || v === 'true' || v === 'on';
+    const httpsOn = toBool(https_enabled);
+    const forceOn = toBool(force_redirect);
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const provider = await cdnForRow(row);
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
-    if (!(await provider.setHttps(row.name, !!https_enabled, !!force_redirect))) return { code: -1, msg: 'HTTPS 配置更新失败，' + provider.getError() };
-    await query(`UPDATE ${table('cdn_domain')} SET https_enabled = ?, force_redirect = ? WHERE id = ?`, [https_enabled ? 1 : 0, force_redirect ? 1 : 0, id]);
+    if (!(await provider.setHttps(row.name, httpsOn, forceOn))) return { code: -1, msg: 'HTTPS 配置更新失败，' + provider.getError() };
+    await query(`UPDATE ${table('cdn_domain')} SET https_enabled = ?, force_redirect = ? WHERE id = ?`, [httpsOn ? 1 : 0, forceOn ? 1 : 0, id]);
     audit(req, {
       targetType: 'cdn_domain',
       targetId: id,
@@ -3763,7 +3786,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       summary: `修改 HTTPS 配置 ${row.name}`,
       changes: diffFields(
         { https_enabled: row.https_enabled, force_redirect: row.force_redirect },
-        { https_enabled: https_enabled ? 1 : 0, force_redirect: force_redirect ? 1 : 0 },
+        { https_enabled: httpsOn ? 1 : 0, force_redirect: forceOn ? 1 : 0 },
         { https_enabled: 'HTTPS', force_redirect: '强制跳转' },
       ),
     });
@@ -3944,7 +3967,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要申请证书的加速域名' };
     const data = await runCertLink(ids, false, req.user);
-    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply');
+    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply', r.order_id ? [Number(r.order_id)] : []);
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
@@ -3953,7 +3976,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
     const data = await runCertLink(ids, true, req.user);
-    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply');
+    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply', r.order_id ? [Number(r.order_id)] : []);
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
@@ -4096,12 +4119,35 @@ export default async function cdnRoutes(app: FastifyInstance) {
   }
 
   // 记录/切换证书管理方式：切换离开「由本项目管理」时停用其联动部署任务，切回时重新启用
-  async function setCertMode(did: number, mode: string): Promise<void> {
+  async function setCertMode(did: number, mode: string, keepOids: number[] = []): Promise<void> {
     const normalized = ['freecert', 'certapply', 'certlink'].includes(mode) ? mode : null;
-    await query(`UPDATE ${table('cdn_domain')} SET cert_mode = ? WHERE id = ?`, [normalized, did]);
+    const cur: any = await queryOne(`SELECT cert_mode FROM ${table('cdn_domain')} WHERE id = ?`, [did]);
+    const previous = String(cur?.cert_mode || '');
+    // 显式关闭写空串而不是 NULL，列表才能区分「从未配置」与「用户主动关闭」
+    const stored = normalized ?? '';
+    await query(`UPDATE ${table('cdn_domain')} SET cert_mode = ? WHERE id = ?`, [stored, did]);
+    if (normalized === 'certlink') {
+      // 启用：优先使用带 link 的最新订单；旧数据没有 link 时回退到联动日志里最新的 oid。
+      const linked = await findLinkedOrder(did);
+      const fallback: any = linked
+        ? null
+        : (await query(`SELECT oid FROM ${table('cert_link_log')} WHERE did = ? ORDER BY id DESC LIMIT 1`, [did]))[0];
+      const oid = Number(linked?.id || fallback?.oid || 0);
+      if (oid) await query(`UPDATE ${table('cert_deploy')} SET active = 1 WHERE oid = ?`, [oid]);
+      return;
+    }
+    // 只有真正从「证书联动」切换到其他模式时才需要停用旧任务。
+    // certapply 申请成功后也会调用本函数，此时刚创建的部署任务尚未签发，绝不能被误停。
+    if (previous !== 'certlink') return;
     const linked = await findLinkedOrder(did);
-    if (!linked) return;
-    await query(`UPDATE ${table('cert_deploy')} SET active = ? WHERE oid = ?`, [normalized === 'certlink' ? 1 : 0, linked.id]);
+    const keep = keepOids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const keepSql = keep.length ? ` AND oid NOT IN (${keep.map(() => '?').join(',')})` : '';
+    await query(
+      `UPDATE ${table('cert_deploy')} SET active = 0
+        WHERE (oid IN (SELECT oid FROM ${table('cert_link_log')} WHERE did = ?)
+           OR oid = ?)${keepSql}`,
+      [did, Number(linked?.id || 0), ...keep],
+    );
   }
 
   // 显式设置证书管理方式（用于切换为「不使用证书」或已完成的切换）

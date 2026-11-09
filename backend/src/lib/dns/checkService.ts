@@ -2,7 +2,8 @@ import { query, queryOne, table } from '../../db.js';
 import { getDnsProvider } from './factory.js';
 import { localResolve, recordValueMatches } from './localResolve.js';
 import { detectCloudflareProxy } from './cloudflare.js';
-import { getUserPermissions, matchPermission, sameDomain } from '../../auth.js';
+import { matchPermission, sameDomain } from '../../auth.js';
+import { getEffectivePermissions } from '../accounts/visibility.js';
 import { configGet } from '../../config.js';
 import { sendMail } from '../monitor/msgNotice.js';
 import { fmtDateTime } from '../util.js';
@@ -38,12 +39,18 @@ export interface CheckProxied {
 async function fetchAllRecords(provider: any): Promise<any[]> {
   let list: any[] = [];
   let pageSize = 500;
+  let prevPageSig = '';
+  const sigOf = (x: any) => [x?.RecordId ?? '', x?.Name ?? '', x?.Type ?? '', Array.isArray(x?.Value) ? x.Value.join(',') : x?.Value ?? ''].join('|');
   for (let page = 1; page <= 10; page++) {
     const res = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
     if (res === false || !res.list || !res.list.length) break;
+    // 部分厂商忽略分页参数，每次都返回同一份全量列表；页签名一致即视为没有下一页，
+    // 否则会把记录重复拼接 10 次，导致告警数量与外部 DNS 调用被放大。
+    const pageSig = JSON.stringify([res.list.length, sigOf(res.list[0]), sigOf(res.list[res.list.length - 1])]);
+    if (page > 1 && pageSig === prevPageSig) break;
+    prevPageSig = pageSig;
     list = list.concat(res.list);
     if (page === 1) pageSize = res.list.length;
-    // 返回条数不足一页即结束，不依赖厂商 total（部分厂商 total 只代表本页条数，会导致首屏就 break 而漏记录）
     if (res.list.length < pageSize) break;
   }
   return list;
@@ -81,12 +88,15 @@ export async function checkDomainRecords(
   const provider: any = getDnsProvider(acct.type, await loadAccountConfig(acct), d.name, d.thirdid);
   if (!provider) return { total: 0, issues: [], proxied: [], error: '该厂商暂未支持' };
 
-  // 权限范围：未传 uid 视为管理员（默认全量），否则按用户是否为管理员/是否开启检测整个域名决定
+  // 权限范围：未传 uid / uid=0（旧库历史任务）视为管理员，否则按用户是否为管理员/是否开启检测整个域名决定
   let scopeAdmin = true;
+  let userRow: any = null;
   if (uid != null) {
-    const u: any = await queryOne(`SELECT level, check_whole FROM ${table('user')} WHERE id = ?`, [uid]);
-    const isAdmin = Number(u?.level ?? 0) >= 2;
-    const whole = Number(u?.check_whole ?? 0) === 1;
+    userRow = await queryOne(`SELECT id, level, check_whole FROM ${table('user')} WHERE id = ?`, [uid]);
+    // uid=0 或用户已被删除时没有可用的权限主体；这类历史任务按站点级处理，
+    // 否则会得到空权限集合并静默跳过所有记录。
+    const isAdmin = !userRow || Number(uid) === 0 || Number(userRow.level ?? 0) >= 2;
+    const whole = Number(userRow?.check_whole ?? 0) === 1;
     scopeAdmin = isAdmin || whole;
   }
 
@@ -99,7 +109,7 @@ export async function checkDomainRecords(
     if (subNorm) targets = [`${subNorm}.${d.name}`.toLowerCase()];
     else targets = [];
   } else {
-    const perms = await getUserPermissions(uid as number);
+    const perms = await getEffectivePermissions({ uid: Number(uid), level: Number(userRow?.level || 0) });
     const access = perms
       .filter((p) => sameDomain(p.domain, d.name))
       .map((p) => (p.sub ? `${p.sub}.${d.name}` : d.name).toLowerCase());

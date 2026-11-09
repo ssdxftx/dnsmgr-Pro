@@ -13,6 +13,9 @@ function getDnsType(value: string): string {
 /** 配置类错误：重试多少次都不会成功，必须停用任务而不是每分钟打上游接口 */
 class PermanentTaskError extends Error {}
 
+/** 连续失败达到该次数后自动停用，避免普通错误每分钟无限重试 */
+const MAX_TRANSIENT_RETRIES = 5;
+
 import { decryptConfig } from '../secret.js';
 import { loadAccountConfig } from '../accounts/taskConfig.js';
 
@@ -60,7 +63,9 @@ export async function executeAll(): Promise<boolean> {
       await executeOne(row);
       // 单次任务执行完即停用，避免 UI 长期显示“启用中”且不可再次调度
       if (Number(row.type) !== 1) {
-        await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
+        await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0, retry = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
+      } else {
+        await query(`UPDATE ${table('sctask')} SET retry = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
       }
       console.log('定时切换任务' + row.id + '执行成功');
     } catch (e: any) {
@@ -70,8 +75,16 @@ export async function executeAll(): Promise<boolean> {
         await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
         console.log('定时切换任务' + row.id + ' 因配置错误已自动停用：' + e.message);
       } else {
-        // 瞬时失败：延后 60 秒重试，避免失败任务在一分钟内反复冲击上游
-        await query(`UPDATE ${table('sctask')} SET nexttime = ? WHERE id = ?`, [now + 60, row.id]).catch(() => undefined);
+        const retry = Number(row.retry || 0) + 1;
+        if (retry >= MAX_TRANSIENT_RETRIES) {
+          // 瞬时错误连续出现同样可能是配置/权限已失效，达到上限后停用并保留原因，
+          // 由用户重新启用；否则单次任务会永远每分钟打一次上游接口。
+          await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0, retry = ? WHERE id = ?`, [retry, row.id]).catch(() => undefined);
+          console.log(`定时切换任务${row.id} 连续失败 ${retry} 次，已自动停用`);
+        } else {
+          // 瞬时失败：延后 60 秒重试，避免失败任务在一分钟内反复冲击上游
+          await query(`UPDATE ${table('sctask')} SET nexttime = ?, retry = ? WHERE id = ?`, [now + 60, retry, row.id]).catch(() => undefined);
+        }
       }
     }
   }

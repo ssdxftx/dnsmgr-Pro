@@ -303,7 +303,10 @@ export default async function certRoutes(app: FastifyInstance) {
     }
 
     if (!certConfig[type]) return { code: -1, msg: '证书类型不存在' };
-    const provider = getCertProvider(type, merged, null);
+    // 同一证书类型下编辑名称/备注/配置时，必须复用既有 ACME 账户密钥与 kid；
+    // 传 null 会重新注册账户，导致进行中订单签名失败并留下孤儿账户。
+    const existingExt = String(row.type) === String(type) ? decryptConfig(row.ext) : null;
+    const provider = getCertProvider(type, merged, existingExt);
     try {
       const ext = await provider.register();
       await query(`UPDATE ${table('cert_account')} SET type = ?, name = ?, config = ?, remark = ? WHERE id = ?`, [type, name, encryptAccountConfig(merged, isPrivate, dek), remark || '', id]);
@@ -445,7 +448,7 @@ export default async function certRoutes(app: FastifyInstance) {
         expiretime: certInfo.expiretime,
         issuer: certInfo.issuer,
         status: 3,
-        isauto: 1,
+        isauto: 0,
         fullchain,
         privatekey: encryptText(privatekey),
       };
@@ -494,6 +497,7 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
+    if (Number(row.islock) === 1) return reply.code(409).send({ code: -1, msg: '证书订单正在处理中，请稍后再修改' });
     let order: any;
     let domList: string[] = [];
 
@@ -510,7 +514,15 @@ export default async function certRoutes(app: FastifyInstance) {
         expiretime: certInfo.expiretime,
         issuer: certInfo.issuer,
         status: 3,
+        isauto: 0,
         issend: 0,
+        info: null,
+        dns: null,
+        retry: 0,
+        retry2: 0,
+        retrytime: null,
+        processid: null,
+        islock: 0,
         fullchain,
         privatekey: encryptText(privatekey),
       };
@@ -521,9 +533,21 @@ export default async function certRoutes(app: FastifyInstance) {
       domList = (domains || []).map((d: string) => d.trim()).filter(Boolean);
       domList = [...new Set(domList)];
       if (!domList.length) return { code: -1, msg: '绑定域名不能为空' };
-      order = { aid, keytype, keysize, updatetime: new Date() };
+      order = {
+        aid, keytype, keysize, status: 0, isauto: Number(row.isauto || 0), issend: 0, info: null, dns: null,
+        retry: 0, retry2: 0, retrytime: null, processid: null, islock: 0, error: null,
+        updatetime: new Date(),
+      };
       const res = await checkOrder(order, domList);
       if (typeof res === 'object') return res;
+    }
+
+    // 全部校验通过后才重置旧订单：reset 会删除远端挑战 TXT 并清空状态，
+    // 若在参数错误时提前执行，用户只是填错表单也会破坏原订单。
+    try {
+      await new CertOrderService(id).reset();
+    } catch {
+      // 账户缺失/旧订单无法加载时仍然允许修改，后续按新配置重新申请
     }
 
     await withTransaction(async (q) => {
@@ -552,9 +576,15 @@ export default async function certRoutes(app: FastifyInstance) {
     const count = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE oid = ?`, [id]))?.c || 0;
     if (count > 0) return { code: -1, msg: '该证书关联了自动部署任务，无法删除' };
     try {
-      await new CertOrderService(id).cancel();
+      // reset 会先删除该订单写入的 _acme-challenge TXT，再清空状态；
+      // 仅 cancel 会让待验证订单的挑战记录永久残留。
+      await new CertOrderService(id).reset();
     } catch {
-      // ignore
+      try {
+        await new CertOrderService(id).cancel();
+      } catch {
+        // ignore
+      }
     }
     const doms = (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [id])).map((r: any) => r.domain);
     await withTransaction(async (q) => {
@@ -693,7 +723,14 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessCertOrder(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
-    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.headers['x-confirm-password'], req, 'cert.privatekey');
+    const b64 = req.headers['x-confirm-password-b64'];
+    const rawPassword = Array.isArray(b64) ? b64[0] : b64;
+    // 非 ASCII 密码无法直接放进 HTTP 头；前端改用 UTF-8 Base64 传递。
+    // 仍兼容旧客户端的 X-Confirm-Password 明文头。
+    const password = rawPassword
+      ? Buffer.from(String(rawPassword), 'base64').toString('utf8')
+      : req.headers['x-confirm-password'];
+    const passwordErr = await requireLoginPassword(Number(req.user.uid), password, req, 'cert.privatekey');
     if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     const row = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
@@ -740,14 +777,34 @@ export default async function certRoutes(app: FastifyInstance) {
   });
 
   // ============ CNAME 代理 ============
-  app.get('/api/cert/cnames', auth, async () => {
-    const rows = await query(`SELECT A.*, B.name AS cnamedomain FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id ORDER BY A.id DESC`);
-    return { code: 0, data: rows };
+  app.get('/api/cert/cnames', auth, async (req: any) => {
+    const rows: any[] = await query(
+      `SELECT A.*, B.name AS cnamedomain, C.visibility AS account_visibility, C.owner_uid AS account_owner
+         FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id
+         LEFT JOIN ${table('account')} C ON B.aid = C.id ORDER BY A.id DESC`,
+    );
+    return {
+      code: 0,
+      data: rows.filter((r) => r.account_visibility !== 'private' || Number(r.account_owner) === Number(req.user.uid)),
+    };
   });
 
   app.post('/api/cert/cnames', auth, async (req: any) => {
     const { domain, did, rr } = req.body || {};
     if (!domain || !did || !rr) return { code: -1, msg: '必填参数不能为空' };
+    const d: any = await queryOne(
+      `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+      [Number(did)],
+    );
+    if (!d) return { code: -1, msg: '域名不存在' };
+    if (d.visibility === 'private' && Number(d.owner_uid) !== Number(req.user.uid)) {
+      return { code: -1, msg: '无权操作该域名的 CNAME 代理' };
+    }
+    const certDomain = String(domain).trim().toLowerCase().replace(/\.$/, '');
+    const root = String(d.name || '').trim().toLowerCase().replace(/\.$/, '');
+    if (certDomain !== root && !certDomain.endsWith('.' + root)) {
+      return { code: -1, msg: '证书域名必须属于所选 DNS 域名' };
+    }
     // 与原项目一致：新建 CNAME 代理默认「待验证」（status=0），需通过检测后才置为 1
     const dup = await queryOne(`SELECT id FROM ${table('cert_cname')} WHERE domain = ?`, [domain]);
     if (dup) return { code: -1, msg: '域名' + domain + '已存在' };
@@ -761,10 +818,15 @@ export default async function certRoutes(app: FastifyInstance) {
   app.post('/api/cert/cnames/:id/check', auth, async (req: any) => {
     const id = Number((req.params as any).id);
     const row: any = await queryOne(
-      `SELECT A.*, B.name AS cnamedomain FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id WHERE A.id = ?`,
+      `SELECT A.*, B.name AS cnamedomain, C.visibility AS account_visibility, C.owner_uid AS account_owner
+         FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id
+         LEFT JOIN ${table('account')} C ON B.aid = C.id WHERE A.id = ?`,
       [id]
     );
     if (!row) return { code: -1, msg: 'CNAME记录不存在' };
+    if (row.account_visibility === 'private' && Number(row.account_owner) !== Number(req.user.uid)) {
+      return { code: -1, msg: 'CNAME记录不存在' };
+    }
     const checkDomain = '_acme-challenge.' + row.domain;
     const expected = String(row.rr + '.' + (row.cnamedomain || '')).replace(/\.+$/, '').toLowerCase();
     const actual = await localResolve(checkDomain, 'CNAME');
@@ -777,6 +839,16 @@ export default async function certRoutes(app: FastifyInstance) {
 
   app.delete('/api/cert/cnames/:id', auth, async (req: any) => {
     const { id } = req.params as any;
+    const row: any = await queryOne(
+      `SELECT A.id, C.owner_uid, C.visibility FROM ${table('cert_cname')} A
+         LEFT JOIN ${table('domain')} B ON A.did = B.id LEFT JOIN ${table('account')} C ON B.aid = C.id
+        WHERE A.id = ?`,
+      [Number(id)],
+    );
+    if (!row) return { code: -1, msg: 'CNAME记录不存在' };
+    if (row.visibility === 'private' && Number(row.owner_uid) !== Number(req.user.uid)) {
+      return { code: -1, msg: '无权删除该 CNAME 代理' };
+    }
     await query(`DELETE FROM ${table('cert_cname')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });
@@ -838,9 +910,9 @@ export default async function certRoutes(app: FastifyInstance) {
   app.post('/api/deploy/tasks', auth, async (req: any, reply: any) => {
     const { aid, oid, config, remark } = req.body || {};
     if (!aid || !oid || !config) return { code: -1, msg: '必填参数不能为空' };
-    if (!(await getVisibleAccount('cert_account', Number(aid), req.user))) {
-      return reply.code(404).send({ code: -1, msg: '证书账户不存在' });
-    }
+    const deployAcct = await getVisibleAccount('cert_account', Number(aid), req.user);
+    if (!deployAcct) return reply.code(404).send({ code: -1, msg: '证书账户不存在' });
+    if (Number(deployAcct.deploy) !== 1) return { code: -1, msg: '该账户不是自动部署账户，不能用于部署任务' };
     if (!(await canAccessCertOrder(oid, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
@@ -869,9 +941,9 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessDeployTask(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
     }
-    if (!(await getVisibleAccount('cert_account', Number(aid), req.user))) {
-      return reply.code(404).send({ code: -1, msg: '证书账户不存在' });
-    }
+    const deployAcct = await getVisibleAccount('cert_account', Number(aid), req.user);
+    if (!deployAcct) return reply.code(404).send({ code: -1, msg: '证书账户不存在' });
+    if (Number(deployAcct.deploy) !== 1) return { code: -1, msg: '该账户不是自动部署账户，不能用于部署任务' };
     if (!(await canAccessCertOrder(oid, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }

@@ -71,7 +71,10 @@ function collect(req: any, reply: any): void {
   const ok = typeof code === 'number' ? code === 0 : status < 400;
   const msg = String((reply as any).__auditMsg || '');
 
-  const uid = Number(ctx.uid ?? req.user?.uid ?? 0);
+  // audit_log.uid 在 MySQL 中是 unsigned：旧版域名快捷登录用 uid=-did 表示，
+// 直接写入会让严格模式下的整批 INSERT 失败。审计统一记 0（用户名仍保留域名标识）。
+  let uid = Number(ctx.uid ?? req.user?.uid ?? 0);
+  if (!Number.isFinite(uid) || uid < 0) uid = 0;
   const username = clean(ctx.username || req.user?.username || req.body?.username || '', 64);
   const errmsg = ok ? '' : clean(msg, 500);
 

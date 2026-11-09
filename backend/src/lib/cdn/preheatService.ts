@@ -52,7 +52,15 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
       failed.push({ url, msg: 'URL 格式错误' });
       continue;
     }
-    const row: any = await queryOne(`SELECT * FROM ${table('cdn_domain')} WHERE name = ?`, [domain]);
+    const candidates: any[] = await query(
+      `SELECT D.* FROM ${table('cdn_domain')} D
+         JOIN ${table('cdn_account')} A ON D.aid = A.id
+        WHERE D.name = ?
+          AND (A.visibility <> 'private' OR A.owner_uid = ?)
+        ORDER BY CASE WHEN A.visibility = 'private' THEN 0 ELSE 1 END, D.id`,
+      [domain, ownerUid],
+    );
+    const row: any = candidates[0];
     if (!row) {
       failed.push({ url, msg: `未找到加速域名 ${domain}` });
       continue;

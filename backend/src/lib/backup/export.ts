@@ -5,7 +5,7 @@ import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { APP_VERSION } from '../version.js';
 import { fmtDateTime } from '../util.js';
-import { deriveKek, deriveSysKek, KDF_PARAMS, unwrapDek, wrapDek } from '../vault/keys.js';
+import { deriveKek, deriveSysKek, KDF_PARAMS, kdfParamsFromStored, unwrapDek, wrapDek } from '../vault/keys.js';
 import { archiveFileName, backupsDir, ensureDataDirs, writeArchive, type ArchiveStats, type ArchiveTableChunk } from './archive.js';
 import { ensureBackupKey, getBackupKey } from './key.js';
 import { encodeRow, EXCLUDE_COLUMNS, TABLES, type BackupTable } from './manifest.js';
@@ -362,12 +362,8 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
       if (mode === 'passphrase') {
         if (!opts.passphrase) throw new Error('该账户使用口令模式，导出需要输入保险库口令');
         const v = vault[0] || {};
-        let params: any = KDF_PARAMS;
-        try {
-          params = { ...KDF_PARAMS, ...(JSON.parse(String(v.kdf_params || '{}')) || {}) };
-        } catch {
-          params = KDF_PARAMS;
-        }
+        const params = kdfParamsFromStored(v.kdf_params);
+        if (!params) throw new Error('保险库 KDF 参数不受支持，无法导出；请联系管理员检查 kdf_params');
         if (!v.salt || !v.wrapped_dek) throw new Error('保险库密钥缺失，无法导出私有凭证');
         userDek = unwrapDek(
           await deriveKek(String(opts.passphrase), Buffer.from(v.salt), params),

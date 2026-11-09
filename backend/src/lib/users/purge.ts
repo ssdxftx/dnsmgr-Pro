@@ -71,15 +71,24 @@ export async function purgePrivateAssets(
   const taskIds = domainIds.length
     ? await selectIds(q, `SELECT id FROM ${table('dmtask')} WHERE did IN (${marks(domainIds)})`, domainIds)
     : [];
+  // 用户在共享域名上创建的任务不满足 did IN 私有域名，必须再按 owner_uid 收口，
+  // 否则删除账号后这些任务仍会被调度器执行。
+  const ownedTaskIds = uid ? await selectIds(q, `SELECT id FROM ${table('dmtask')} WHERE owner_uid = ?`, [uid]) : [];
+  for (const id of ownedTaskIds) if (!taskIds.includes(id)) taskIds.push(id);
   const backupFiles = await q<any>(`SELECT file_name FROM ${table('backup_job')} WHERE owner_uid = ?`, [uid]);
 
   await delByIds(q, 'dmlog', 'taskid', taskIds);
   await delByIds(q, 'dmtask', 'did', domainIds);
   await delByIds(q, 'optimizeip', 'did', domainIds);
   await delByIds(q, 'sctask', 'did', domainIds);
+  if (uid) {
+    await q(`DELETE FROM ${table('dmtask')} WHERE owner_uid = ?`, [uid]);
+    await q(`DELETE FROM ${table('optimizeip')} WHERE owner_uid = ?`, [uid]);
+    await q(`DELETE FROM ${table('sctask')} WHERE owner_uid = ?`, [uid]);
+    await q(`DELETE FROM ${table('cdn_preheat_task')} WHERE owner_uid = ?`, [uid]);
+  }
   await delByIds(q, 'domain_alias', 'did', domainIds);
   await delByIds(q, 'cert_cname', 'did', domainIds);
-  await delByIds(q, 'cert_link_log', 'did', domainIds);
   await delByIds(q, 'cert_link_log', 'oid', certOrderIds);
   await delByIds(q, 'dns_check_task', 'did', domainIds);
   if (uid && opts.deleteUserTasks) await q(`DELETE FROM ${table('dns_check_task')} WHERE uid = ?`, [uid]);

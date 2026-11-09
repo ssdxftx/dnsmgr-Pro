@@ -110,6 +110,7 @@ export default {
     enabled: '已开启两步验证',
     enabledDesc: '登录时将要求输入动态口令',
     closePasswordPlaceholder: '请输入登录密码以关闭',
+    closeCodePlaceholder: '请输入当前 6 位动态口令',
     close: '关闭两步验证',
     codeRequired: '请输入动态口令',
     passwordRequired: '请输入登录密码以确认',

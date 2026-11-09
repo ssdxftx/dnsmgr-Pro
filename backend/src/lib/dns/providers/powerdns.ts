@@ -107,7 +107,8 @@ export class PowerDns implements DnsProvider {
     let rrsetId = 0;
     for (const row of data.rrsets || []) {
       rrsetId++;
-      const name = row.name === this.domainid ? '@' : String(row.name).replace('.' + this.domainid, '');
+      const fullName = String(row.name || '').replace(/\.$/, '');
+      const name = fullName === this.domainid ? '@' : fullName.replace('.' + this.domainid, '');
       const records: PdnsRecord[] = [];
       const rrset: PdnsRrset = { id: rrsetId, host: name, name: row.name, type: row.type, ttl: row.ttl, records };
       const remark = row.comments?.length ? row.comments[0].content : null;
@@ -125,7 +126,7 @@ export class PowerDns implements DnsProvider {
           }
         }
         list.push({
-          RecordId: `${rrsetId}_${recordId}`,
+          RecordId: this.recordIdOf(String(row.name), row.type, String(record.content)),
           Domain: this.domain,
           Name: name,
           Type: row.type,
@@ -204,15 +205,15 @@ export class PowerDns implements DnsProvider {
       this.error = '记录不存在，请刷新页面重试';
       return false;
     }
-    const [rrsetIdStr, recordIdStr] = RecordId.split('_');
-    const rrsetId = Number(rrsetIdStr);
-    const recordId = Number(recordIdStr);
+    const found = this.findStableRecord(RecordId);
+    if (!found) {
+      this.error = '记录不存在或已变化，请刷新页面重试';
+      return false;
+    }
+    const { rrset, idx } = found;
     let result = false;
     let needAdd = false;
-    for (const rrset of rrsets) {
-      if (rrset.id !== rrsetId) continue;
-      const idx = rrset.records.findIndex((r) => r.id === recordId);
-      if (idx < 0) break;
+    {
       if (rrset.records.some((r, i) => i !== idx && r.content === value)) {
         this.error = '已存在相同记录';
         return false;
@@ -225,7 +226,6 @@ export class PowerDns implements DnsProvider {
       }
       if (rrset.records.length) result = await this.rrsetReplace(rrset.host, rrset.type, TTL, rrset.records, Remark);
       else result = await this.rrsetDelete(rrset.host, rrset.type);
-      break;
     }
     if (needAdd && result) result = (await this.addDomainRecord(Name, Type, Value, _Line, TTL, MX, _Weight, Remark)) !== false;
     return result !== false;
@@ -238,38 +238,59 @@ export class PowerDns implements DnsProvider {
       this.error = '记录不存在，请刷新页面重试';
       return false;
     }
-    const [rrsetIdStr, recordIdStr] = RecordId.split('_');
-    const rrsetId = Number(rrsetIdStr);
-    const recordId = Number(recordIdStr);
-    let result = false;
-    for (const rrset of rrsets) {
-      if (rrset.id !== rrsetId) continue;
-      const idx = rrset.records.findIndex((r) => r.id === recordId);
-      if (idx < 0) break;
-      rrset.records.splice(idx, 1);
-      if (rrset.records.length) result = await this.rrsetReplace(rrset.host, rrset.type, rrset.ttl, rrset.records);
-      else result = await this.rrsetDelete(rrset.host, rrset.type);
-      break;
+    const found = this.findStableRecord(RecordId);
+    if (!found) {
+      this.error = '记录不存在或已变化，请刷新页面重试';
+      return false;
     }
+    const { rrset, idx } = found;
+    let result = false;
+    rrset.records.splice(idx, 1);
+    if (rrset.records.length) result = await this.rrsetReplace(rrset.host, rrset.type, rrset.ttl, rrset.records);
+    else result = await this.rrsetDelete(rrset.host, rrset.type);
     return result !== false;
   }
 
   async setDomainRecordStatus(RecordId: string, Status: string) {
     if (!(await this.ensureRrsets())) return false;
     const rrsets = this.rrsetsCache || [];
-    const [rrsetIdStr, recordIdStr] = RecordId.split('_');
-    const rrsetId = Number(rrsetIdStr);
-    const recordId = Number(recordIdStr);
-    let result = false;
-    for (const rrset of rrsets) {
-      if (rrset.id !== rrsetId) continue;
-      const rec = rrset.records.find((r) => r.id === recordId);
-      if (!rec) break;
-      rec.disabled = Status === '0';
-      result = await this.rrsetReplace(rrset.host, rrset.type, rrset.ttl, rrset.records);
-      break;
+    const found = this.findStableRecord(RecordId);
+    if (!found) {
+      this.error = '记录不存在或已变化，请刷新页面重试';
+      return false;
     }
+    let result = false;
+    found.rrset.records[found.idx].disabled = Status === '0';
+    result = await this.rrsetReplace(found.rrset.host, found.rrset.type, found.rrset.ttl, found.rrset.records);
     return result !== false;
+  }
+
+  /** 稳定记录标识：完整记录名 + 类型 + 记录值，不依赖列表顺序 */
+  private recordIdOf(host: string, type: string, content: string): string {
+    return 'pdns1_' + Buffer.from(JSON.stringify({ h: host, t: type, c: content }), 'utf8').toString('base64url');
+  }
+
+  private parseStableRecordId(recordId: string): { h: string; t: string; c: string } | null {
+    const id = String(recordId || '');
+    if (!id.startsWith('pdns1_')) return null;
+    try {
+      const parsed = JSON.parse(Buffer.from(id.slice(6), 'base64url').toString('utf8'));
+      if (!parsed || typeof parsed.h !== 'string' || typeof parsed.t !== 'string' || typeof parsed.c !== 'string') return null;
+      return parsed;
+    } catch {
+      return null;
+    }
+  }
+
+  private findStableRecord(recordId: string): { rrset: PdnsRrset; idx: number } | null {
+    const parsed = this.parseStableRecordId(recordId);
+    if (!parsed) return null;
+    for (const rrset of this.rrsetsCache || []) {
+      if (rrset.name !== parsed.h || rrset.type !== parsed.t) continue;
+      const idx = rrset.records.findIndex((r) => String(r.content) === parsed.c);
+      if (idx >= 0) return { rrset, idx };
+    }
+    return null;
   }
 
   async getRecordLine() {
@@ -284,14 +305,16 @@ export class PowerDns implements DnsProvider {
   }
 
   private rrsetReplace(host: string, type: string, ttl: number, records: PdnsRecord[], remark: string | null = null) {
-    const name = host === '@' ? this.domainid : host + '.' + this.domainid;
+    const h = String(host || '').replace(/\.$/, '');
+    const name = h === '@' ? this.domainid : h + '.' + this.domainid;
     const rrset: any = { name, type, ttl: Number(ttl), changetype: 'REPLACE', records, comments: [] };
     if (remark) rrset.comments = [{ account: '', content: remark }];
     return this.send('PATCH', `/servers/${this.serverId}/zones/${this.domainid}`, { rrsets: [rrset] });
   }
 
   private rrsetDelete(host: string, type: string) {
-    const name = host === '@' ? this.domainid : host + '.' + this.domainid;
+    const h = String(host || '').replace(/\.$/, '');
+    const name = h === '@' ? this.domainid : h + '.' + this.domainid;
     return this.send('PATCH', `/servers/${this.serverId}/zones/${this.domainid}`, {
       rrsets: [{ name, type, changetype: 'DELETE' }],
     });

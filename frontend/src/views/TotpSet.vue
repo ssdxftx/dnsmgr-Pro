@@ -31,6 +31,7 @@
       <n-result v-if="enabled && step !== 'bind'" status="success" :title="t('totp.enabled')" :description="t('totp.enabledDesc')">
         <template #footer>
           <n-space vertical align="center">
+            <n-input v-model:value="closeCode" :placeholder="t('totp.closeCodePlaceholder')" maxlength="6" style="max-width: 320px" />
             <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.closePasswordPlaceholder')" style="max-width: 320px" />
             <n-button type="error" :loading="loadBusy" @click="close">{{ t('totp.close') }}</n-button>
           </n-space>
@@ -59,6 +60,7 @@ const bindToken = ref('');
 const qrcode = ref('');
 const code = ref('');
 const password = ref('');
+const closeCode = ref('');
 
 const qrDataUrl = ref('');
 
@@ -105,8 +107,10 @@ async function bind() {
 }
 
 function close() {
+  if (!closeCode.value) return message.warning(t('totp.codeRequired'));
   if (!password.value) return message.warning(t('totp.passwordRequired'));
   const pwd = password.value;
+  const curCode = closeCode.value;
   dialog.warning({
     title: t('totp.close'),
     content: t('totp.closeConfirm'),
@@ -115,11 +119,12 @@ function close() {
     onPositiveClick: async () => {
       loadBusy.value = true;
       try {
-        const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd });
+        const res = await api('POST', '/auth/totp-config', { action: 'close', password: pwd, current_code: curCode });
         if (res.code === 0) {
           message.success(res.msg);
           enabled.value = false;
           password.value = '';
+          closeCode.value = '';
         } else message.error(res.msg);
       } catch (e: any) {
         message.error(e?.message || t('common.networkError'));

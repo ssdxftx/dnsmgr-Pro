@@ -257,7 +257,7 @@ if (allowedOrigins.length) {
   await app.register(cors, {
     origin: allowedOrigins,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Request-Id', 'X-Cron-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Confirm-Password', 'X-Confirm-Password-B64', 'X-Request-Id', 'X-Cron-Key'],
     exposedHeaders: ['X-Request-Id', 'X-API-Version', 'X-Idempotency-Replayed', 'Retry-After'],
     maxAge: 86400,
   });
@@ -633,6 +633,17 @@ async function cleanAuditLog(): Promise<void> {
       : await query(
         `DELETE FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
         [days],
+      );
+    if (!res?.affectedRows) break;
+  }
+  // 通知日志只用于近期排障：保留 30 天，避免按监控探测频率无界增长。
+  for (let i = 0; i < 20; i++) {
+    const res: any = getDbType() === 'sqlite'
+      ? await query(
+        `DELETE FROM ${table('notification_log')} WHERE id IN (SELECT id FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000)`,
+      )
+      : await query(
+        `DELETE FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000`,
       );
     if (!res?.affectedRows) break;
   }

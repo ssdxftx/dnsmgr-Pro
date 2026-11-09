@@ -267,7 +267,7 @@ Vue 运行时与 ECharts 拆为独立 chunk，升级业务代码时依赖 chunk 
 | `DB_TYPE` | 数据库类型：`mysql` 或 `sqlite`；SQLite 需要持久化目录 | 全新安装且有持久化卷时 `sqlite`，否则 `mysql` |
 | `DB_FILE` | SQLite 数据文件路径，默认 `DNSMGR_DATA_DIR/dnsmgr.sqlite` | `dnsmgr.sqlite` |
 | `DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PASSWORD` / `DB_NAME` / `DB_PREFIX` | MySQL 连接预置；安装页填写会覆盖 | 空 |
-| `DNSMGR_TRUST_PROXY` | 位于 Nginx/CDN 之后时设为 `true` 或具体 IP/CIDR，使日志与限流使用真实客户端 IP | 关闭 |
+| `DNSMGR_TRUST_PROXY` | 位于 Nginx/CDN 之后时填写可信代理 IP/CIDR，使日志与限流使用真实客户端 IP；不要设为 `true` | 关闭 |
 | `DNSMGR_ALLOWED_ORIGINS` | 允许跨域调用 API 的来源，逗号分隔；不设置则仅同源 | 同源 |
 | `DNSMGR_RATE_LIMIT` | 设为 `0` 关闭敏感接口限流 | 开启 |
 | `DNSMGR_API_KEY_RATE_LIMIT` | 每个 API Key 每分钟请求上限 | `600` |
@@ -285,7 +285,7 @@ Vue 运行时与 ECharts 拆为独立 chunk，升级业务代码时依赖 chunk 
 | `DNSMGR_DATA_DIR` | 安装配置、SQLite 数据文件、备份与审计缓冲目录 | `./data` |
 | `DNSMGR_DATA_PERSISTENT` | 设为 `1`/`0` 显式覆盖持久化检测；用于无法读取容器挂载信息的平台 | 自动检测 |
 
-代理层注意：CDN 需保留 `Cache-Control` 与 `X-Forwarded-For` / `X-Forwarded-Proto`，并遵循源站下发的 `/api/*` 不缓存策略。将 `DNSMGR_TRUST_PROXY=true` 仅用于受信代理之后；生产环境建议填写具体代理 IP 或网段，避免客户端伪造来源 IP 绕过限流。
+代理层注意：CDN 需保留 `Cache-Control` 与 `X-Forwarded-For` / `X-Forwarded-Proto`，并遵循源站下发的 `/api/*` 不缓存策略。`DNSMGR_TRUST_PROXY` 应填写实际代理 IP/CIDR，不要使用 `true`，否则客户端可伪造来源 IP 绕过限流。
 
 ---
 

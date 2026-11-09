@@ -24,25 +24,49 @@ export const newDek = (): Buffer => randomBytes(32);
 export const newSalt = (): Buffer => randomBytes(16);
 
 /**
- * 从 user_vault.kdf_params 解析 scrypt 参数。
- * 解锁路径必须与写入时使用同一组参数，否则 KDF 升级后旧保险库会永久解不开；
- * 同时必须做上限校验，避免写入超大 N 后让每次解锁耗尽内存（DoS）。
+ * 解析 user_vault.kdf_params。
+ *
+ * 注意：这里绝不能把越界参数静默替换成默认参数。解锁/导出时换一组 KDF 参数
+ * 派生出的 KEK 一定解不开原 wrapped_dek，用户会看到“口令错误”，正确口令也会
+ * 累加失败次数并被锁定。因此读取路径使用 parseKdfParams() 的 null 结果报明确
+ * 错误；只有新建保险库时才会用 kdfParamsFromJson() 的默认值。
+ *
+ * legacy=true 时允许旧版本写入过的较大参数（N<=262144、r<=32、p<=8，且内存需求
+ * 不超过 512MB），这样升级前已存在的保险库仍能解锁；导入端仍用默认上限校验，
+ * 避免新归档再写入大参数造成解锁时的内存消耗。
  */
-export function kdfParamsFromJson(raw: any): KdfParams {
+export function parseKdfParams(raw: any, legacy = false): KdfParams | null {
   let parsed: any = null;
   try {
     parsed = typeof raw === 'string' ? JSON.parse(raw || '{}') : raw;
   } catch {
-    parsed = null;
+    return null;
   }
-  if (!parsed || typeof parsed !== 'object') return KDF_PARAMS;
+  if (!parsed || typeof parsed !== 'object') return null;
   const N = Number(parsed.N);
   const r = Number(parsed.r);
   const p = Number(parsed.p);
-  if (!Number.isInteger(N) || N < 16384 || N > 262144 || (N & (N - 1)) !== 0) return KDF_PARAMS;
-  if (!Number.isInteger(r) || r < 1 || r > 32) return KDF_PARAMS;
-  if (!Number.isInteger(p) || p < 1 || p > 8) return KDF_PARAMS;
-  return { N, r, p, maxmem: Math.max(64 * 1024 * 1024, 256 * N * r) };
+  const maxN = legacy ? 262144 : 65536;
+  const maxR = legacy ? 32 : 8;
+  const maxP = legacy ? 8 : 4;
+  if (!Number.isInteger(N) || N < 16384 || N > maxN || (N & (N - 1)) !== 0) return null;
+  if (!Number.isInteger(r) || r < 1 || r > maxR) return null;
+  if (!Number.isInteger(p) || p < 1 || p > maxP) return null;
+  // scrypt 最低要求 128*N*r 字节；旧参数上限也限制在 512MB，避免极端归档把进程内存打满。
+  const required = 128 * N * r;
+  const maxmem = Math.max(64 * 1024 * 1024, 256 * N * r);
+  if (required > 512 * 1024 * 1024 || maxmem > 1024 * 1024 * 1024) return null;
+  return { N, r, p, maxmem };
+}
+
+/** 读取既有保险库：兼容旧上限；参数非法时返回 null 由调用方报错，绝不回退默认值。 */
+export function kdfParamsFromStored(raw: any, legacy = true): KdfParams | null {
+  return parseKdfParams(raw, legacy);
+}
+
+/** 写入/新建场景：非法或缺失时使用安全默认参数。 */
+export function kdfParamsFromJson(raw: any): KdfParams {
+  return parseKdfParams(raw, false) ?? KDF_PARAMS;
 }
 
 export async function deriveKek(passphrase: string, salt: Buffer, params: KdfParams = KDF_PARAMS): Promise<Buffer> {

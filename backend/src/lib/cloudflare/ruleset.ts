@@ -121,7 +121,7 @@ export class CloudflareRulesetService {
   async deleteRule(phase: string, ruleId: string): Promise<boolean> {
     const rsId = await this.resolveRulesetId(phase, false);
     if (!rsId) return false;
-    await this.cf.apiResult('DELETE', `${this.basePath()}/${rsId}/rules/${ruleId}`);
+    await this.cf.apiResult('DELETE', `${this.basePath()}/${idSeg(rsId, 'Ruleset ID')}/rules/${idSeg(ruleId, 'Rule ID')}`);
     return true;
   }
 }

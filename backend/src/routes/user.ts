@@ -7,6 +7,7 @@ import { diffFields } from '../lib/audit/mask.js';
 import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 import { SECRET_MASK } from '../lib/secret.js';
 import { purgeUserData } from '../lib/users/purge.js';
+import { requireLoginPassword } from '../lib/reauth.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -245,6 +246,18 @@ export default async function userRoutes(app: FastifyInstance) {
         code: -1,
         msg: '不能为其他账号设置或启用旧版 API 密钥，请让该用户自行在「偏好设置 → API 密钥」中创建',
       };
+    }
+    // 旧版 apikey 是永久全权凭据，且不随改密/token_version 失效；
+    // 本人设置/启用时也必须二次确认，避免失陷会话静默植入持久化后门。
+    // 密码重置同样是账号接管级操作：API Key 会话必须先证明持有登录密码，
+    // 否则一把泄露的 users:write Key 可以直接改密并持久化控制账号。
+    const passwordReset = !!repwd;
+    if ((apikeyChanging || isApiChanging || passwordReset) && String(req.user.auth_type || '') === 'api_key') {
+      return { code: -1, msg: '该操作仅支持登录会话，请使用账号密码登录后再试' };
+    }
+    if (apikeyChanging || isApiChanging || passwordReset) {
+      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, passwordReset ? 'user.password' : 'user.apikey');
+      if (pwErr) return { code: -1, msg: pwErr };
     }
     if (isApi === 1 && await queryOne(`SELECT id FROM ${table('user')} WHERE apikey = ? AND id <> ? LIMIT 1`, [apikey, id])) return { code: -1, msg: 'API密钥已被使用' };
     const sets: string[] = ['username = ?', 'is_api = ?', 'apikey = ?', 'level = ?'];

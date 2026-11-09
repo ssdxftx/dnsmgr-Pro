@@ -55,7 +55,16 @@ async function findDnsDomain(mainDomain: string, ownerUid = 0): Promise<any> {
     // 国际化域名大小写/编码差异：只在结果唯一时采用
     rows = await query(`${select} WHERE LOWER(A.name) = LOWER(?) ORDER BY A.id ASC`, [mainDomain]);
   }
-  if (rows.length <= 1) return rows[0] ?? null;
+  if (rows.length <= 1) {
+    const only = rows[0];
+    if (!only) return null;
+    // 唯一行也必须校验账户归属：否则管理员/证书任务可以按域名名命中
+    // 其他用户私有账户中的同名 Zone，写入或清理 ACME TXT。
+    if (String(only.visibility || '') === 'private' && Number(only.owner_uid) !== Number(ownerUid)) {
+      throw new Error('域名' + mainDomain + '属于其他用户的私有云账户，无权操作');
+    }
+    return only;
+  }
   if (ownerUid > 0) {
     const mine = rows.filter((r) => Number(r.owner_uid) === ownerUid && String(r.visibility || '') !== 'shared');
     if (mine.length === 1) return mine[0];
@@ -175,6 +184,7 @@ export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname
       }
       if (!cache[row.name]) continue;
       const matched = cache[row.name].list.filter((v: any) => {
+        if (normName(v.Name) !== normName(row.name)) return false;
         const val = Array.isArray(v.Value) ? v.Value.join(',') : v.Value;
         return v.Type === row.type && (val === row.value || String(val).replace(/\.$/, '') === row.value);
       });

@@ -132,7 +132,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, reactive, ref } from 'vue';
+import { computed, h, reactive, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
@@ -182,6 +182,14 @@ const { busy, run } = useAction();
 const linesByDid = ref<Record<number, Record<string, string>>>({});
 const currentDid = ref<number | null>(null);
 const checked = ref<string[]>([]);
+// 服务端分页/筛选后只保留当前页仍存在的选中项，避免跨页残留导致确认数量与提交不一致
+watch(
+  () => props.records,
+  (list) => {
+    const keys = new Set((list || []).map((r: any) => recordKey(r)));
+    checked.value = checked.value.filter((k) => keys.has(k));
+  },
+);
 const showBatch = ref(false);
 const batchAction = ref<'' | 'value' | 'line' | 'remark' | 'group'>('');
 const batchForm = reactive<any>({ type: 'A', value: '', line: '', remark: '', groupid: null });
@@ -210,7 +218,11 @@ const saveRemarkBusy = ref(false);
 const showCheck = ref(false);
 const checkResult = ref<any>({ status: '', name: '', domainName: '', type: '', value: '', actual: [], expected: '' });
 
-const typeOptions = ['A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'REDIRECT_URL', 'FORWARD_URL'].map((v) => ({ label: v, value: v }));
+const typeOptions = [
+  'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV', 'CAA', 'ALIAS', 'ANAME', 'DNAME',
+  'PTR', 'HTTPS', 'SVCB', 'NAPTR', 'TLSA', 'DS', 'DNSKEY', 'SSHFP', 'URI', 'SPF', 'APP',
+  'REDIRECT_URL', 'FORWARD_URL',
+].map((v) => ({ label: v, value: v }));
 
 const lineOptions = computed(() =>
   Object.entries(linesByDid.value[currentDid.value ?? -1] || {}).map(([name, code]) => ({ label: name, value: code })),
@@ -264,16 +276,19 @@ async function runBatch(action: string, extra: Record<string, any> = {}) {
       checked.value = [];
       emit('refresh');
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('record.saveFailed'));
   } finally {
     batchBusy.value = false;
   }
 }
 
 function batchDelete() {
-  if (!checked.value.length) return;
+  const rows = selectedRows();
+  if (!rows.length) return;
   dialog.warning({
     title: t('common.delete'),
-    content: t('record.batchDeleteConfirm', { count: checked.value.length }),
+    content: t('record.batchDeleteConfirm', { count: rows.length }),
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: () => runBatch('delete'),
@@ -305,11 +320,21 @@ const batchLineOptions = computed(() => {
 
 const groupOptions = computed(() => groups.value.map((g) => ({ label: g.name, value: g.id })));
 
+function selectedTypes(): string[] {
+  return [...new Set(selectedRows().map((r: any) => String(r?.Type || '').toUpperCase()).filter(Boolean))];
+}
+
 function onBatchMore(key: string) {
   batchAction.value = key as any;
   const rows = selectedRows();
   const did = rows.length ? rowDid(rows[0]) : null;
   if (did) ensureLines(did);
+  // 批量改值只能作用于同一类型：否则第一行的类型会被套到其它记录上，
+  // 静默把 A 记录写成 AAAA/CNAME。
+  if (key === 'value' && selectedTypes().length > 1) {
+    message.warning(t('record.batchTypeMismatch'));
+    return;
+  }
   batchForm.type = rows[0]?.Type || 'A';
   batchForm.value = '';
   batchForm.line = rows[0]?.Line || '';
@@ -331,6 +356,10 @@ function onBatchMore(key: string) {
 }
 
 function submitBatch() {
+  if (batchAction.value === 'value' && selectedTypes().length > 1) {
+    message.warning(t('record.batchTypeMismatch'));
+    return;
+  }
   showBatch.value = false;
   if (batchAction.value === 'value') runBatch('value', { type: batchForm.type, value: batchForm.value });
   else if (batchAction.value === 'line') runBatch('line', { line: batchForm.line });
@@ -528,13 +557,18 @@ function openRemark(row: any) {
 async function saveRemark() {
   if (!remarkForm.did) return;
   saveRemarkBusy.value = true;
-  const res = await api('POST', `/domains/${remarkForm.did}/records/${remarkForm.recordId}/remark`, { remark: remarkForm.remark || null });
-  saveRemarkBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showRemark.value = false;
-    emit('refresh');
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/domains/${remarkForm.did}/records/${remarkForm.recordId}/remark`, { remark: remarkForm.remark || null });
+    if (res.code === 0) {
+      message.success(res.msg);
+      showRemark.value = false;
+      emit('refresh');
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('record.saveFailed'));
+  } finally {
+    saveRemarkBusy.value = false;
+  }
 }
 
 function openAdd() {
@@ -561,16 +595,21 @@ async function saveRecord() {
   const did = editingId.value ? editingDid.value : props.domainId;
   if (!did) return;
   saveBusy.value = true;
-  const body = { ...form };
-  const res = editingId.value
-    ? await api('PUT', `/domains/${did}/records/${editingId.value}`, body)
-    : await api('POST', `/domains/${did}/records`, body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    emit('refresh');
-  } else message.error(res.msg);
+  try {
+    const body = { ...form };
+    const res = editingId.value
+      ? await api('PUT', `/domains/${did}/records/${editingId.value}`, body)
+      : await api('POST', `/domains/${did}/records`, body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      emit('refresh');
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('record.saveFailed'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 async function checkRecord(row: any) {

@@ -286,7 +286,7 @@ const ready = computed(() => status.value.unlocked || status.value.mode === 'non
 // 各弹窗关闭时清空口令，避免在解锁/降级/升级之间残留明文
 watch(unlockOpen, (v) => { if (!v) unlockPass.value = ''; });
 watch(downgradeOpen, (v) => { if (!v) downgradePass.value = ''; });
-watch(recoveryOpen, (v) => { if (!v) recoveryPass.value = ''; });
+watch(recoveryOpen, (v) => { if (!v) { recoveryPass.value = ''; recoveryCode.value = ''; recoveryAck.value = false; } });
 watch(destroyOpen, (v) => { if (!v) { destroyConfirm.value = ''; destroyLoginPass.value = ''; destroyPass.value = ''; } });
 watch(upgradeOpen, (v) => { if (!v) { upgradePass.value = ''; confirmLoginPass.value = ''; } });
 watch(passOpen, (v) => { if (!v) { passForm.old = ''; passForm.next = ''; } });

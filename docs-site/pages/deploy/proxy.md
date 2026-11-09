@@ -17,16 +17,10 @@ top: 50
 - `X-Forwarded-Proto`
 - `X-Forwarded-Host`
 
-位于受信代理之后时设置：
+位于受信代理之后时设置（推荐直接填写代理 IP/CIDR；`true` 会信任任意来源的 X-Forwarded-For，可能被伪造绕过限流）：
 
 ```bash
-DNSMGR_TRUST_PROXY=true
-```
-
-更安全的做法是填写具体代理 IP 或 CIDR：
-
-```bash
-DNSMGR_TRUST_PROXY=10.0.0.0/8,172.16.0.0/12
+DNSMGR_TRUST_PROXY=127.0.0.1,10.0.0.0/8,172.16.0.0/12
 ```
 
 不要在没有可信代理时开启，否则客户端可以伪造来源 IP 绕过限流。

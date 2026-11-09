@@ -82,19 +82,35 @@ export class CertDeployService {
   }
 
   async process(isManual = false): Promise<void> {
-    await this.load();
+    try {
+      await this.load();
+    } catch (e: any) {
+      // 账户被删除/密钥轮换/厂商不支持等前置失败也必须落到负状态并带 retrytime，
+      // 否则 status 恒为 0，调度器每 5 分钟重复选中且永远不会发失败通知。
+      if (this.task) await this.saveResult(-1, e?.message || '部署任务初始化失败').catch(() => undefined);
+      throw e;
+    }
     if (this.task.status >= 1) return;
-    if (this.task.retry >= 6 && !isManual) throw new Error('已超出最大重试次数(' + this.task.error + ')');
+    if (this.task.retry >= 6 && !isManual) {
+      const msg = '已超出最大重试次数(' + (this.task.error || '未知错误') + ')';
+      await this.saveResult(-1, msg).catch(() => undefined);
+      throw new Error(msg);
+    }
+
+    const fail = async (msg: string): Promise<never> => {
+      await this.saveResult(-1, msg);
+      throw new Error(msg);
+    };
 
     const order = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [this.task.oid]);
-    if (!order) throw new Error('SSL证书订单不存在');
-    if (order.status === 4) throw new Error('SSL证书订单已吊销');
-    if (order.status !== 3) throw new Error('SSL证书订单未完成签发');
-    if (!order.fullchain || !order.privatekey) throw new Error('SSL证书或私钥内容不存在');
+    if (!order) return fail('SSL证书订单不存在');
+    if (order.status === 4) return fail('SSL证书订单已吊销');
+    if (order.status !== 3) return fail('SSL证书订单未完成签发');
+    if (!order.fullchain || !order.privatekey) return fail('SSL证书或私钥内容不存在');
     // 私钥为加密存储，部署前解密（兼容历史明文）；密文解密失败时禁止把密文当私钥部署
     const decryptedKey = decryptText(order.privatekey);
     if (decryptedKey === null && String(order.privatekey).startsWith('enc:')) {
-      throw new ConfigDecryptError('证书私钥无法解密（系统密钥可能已变更），请重新签发或导入证书');
+      return fail('证书私钥无法解密（系统密钥可能已变更），请重新签发或导入证书');
     }
     const privateKey = decryptedKey ?? order.privatekey;
 

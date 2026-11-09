@@ -173,6 +173,8 @@ export default {
     apiAccess: 'API Access',
     apiKey: 'API Key',
     apiKeyRequired: 'API Key cannot be empty',
+    loginPasswordConfirm: 'Confirm Login Password',
+    loginPasswordConfirmHint: 'Enter your current login password to change the legacy API key',
     genApiKey: 'Generate Key',
     apiOn: 'Enabled',
     apiOff: 'Disabled',

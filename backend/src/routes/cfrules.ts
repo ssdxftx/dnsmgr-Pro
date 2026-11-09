@@ -344,7 +344,8 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
       return fail(reply, e);
     }
     try {
-      await ctx.service.deleteRule(phase, ruleId);
+      const deleted = await ctx.service.deleteRule(phase, ruleId);
+      if (!deleted) return { code: -1, msg: '规则集不存在或规则已被删除' };
       await addLog(req.user.uid, ctx.domain.name, '删除 CF 规则', `${phase} ${ruleId}`);
       return { code: 0, msg: '规则删除成功' };
     } catch (e: any) {

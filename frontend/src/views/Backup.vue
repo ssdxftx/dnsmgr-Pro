@@ -424,8 +424,20 @@ async function rotateKey() {
 
 async function download(row: any) {
   // 用统一的 getToken() 读取令牌，避免 localStorage 键名变更后下载 401 且无提示
+  let passwordHeader = '';
+  if (String(row.scope) === 'user') {
+    const pwd = await askPassword(t('backup.downloadTitle'), t('vault.loginPass'));
+    if (pwd === null) return;
+    if (!pwd) return message.warning(t('vault.loginPass'));
+    const bytes = new TextEncoder().encode(pwd);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    passwordHeader = btoa(bin);
+  }
   try {
-    const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers: { Authorization: 'Bearer ' + getToken() } });
+    const headers: Record<string, string> = { Authorization: 'Bearer ' + getToken() };
+    if (passwordHeader) headers['X-Confirm-Password-B64'] = passwordHeader;
+    const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers });
     if (!res.ok) return message.error(t('backup.loadFailed'));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

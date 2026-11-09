@@ -41,7 +41,7 @@
             <span>{{ t('about.updates') }}</span>
           </template>
           <template #header-extra>
-            <n-button size="small" secondary :loading="checkBusy" @click="check(true)">
+            <n-button v-if="isAdmin" size="small" secondary :loading="checkBusy" @click="check(true)">
               <template #icon><n-icon :component="RefreshOutline" /></template>
               {{ t('about.checkUpdate') }}
             </n-button>
@@ -250,8 +250,8 @@ async function check(force = false) {
 
 onMounted(async () => {
   loadBusy.value = true;
-  // 信息加载与更新检查相互独立，并行发起，省一次往返
-  await Promise.all([loadInfo(), check(false)]);
+  // 更新检查是管理员接口；普通用户只加载版本信息，避免每次进入页面都弹“无权限”
+  await Promise.all([loadInfo(), isAdmin.value ? check(false) : Promise.resolve()]);
 });
 </script>
 

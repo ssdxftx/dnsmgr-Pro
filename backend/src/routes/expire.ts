@@ -5,6 +5,8 @@ import { canAccessDomainAccount, getEffectivePermissions } from '../lib/accounts
 import { configGet, configSet } from '../config.js';
 import { expireNoticeTask, updateDomainDate } from '../lib/expire/expireNoticeService.js';
 import { createJob, runJobInBackground } from '../lib/jobs.js';
+import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
+import { isMaintenance } from '../lib/backup/maintenance.js';
 import { audit } from '../lib/audit/context.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 
@@ -33,11 +35,22 @@ export default async function expireRoutes(app: FastifyInstance) {
 
   app.post('/api/expire/scan', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    if (isMaintenance()) return { code: -1, msg: '系统维护中，暂不能扫描域名到期' };
     if (!(await hitRateLimitDistributed(`expire:scan:${req.user.uid}`, 2, 10 * 60_000))) return { code: -1, msg: '扫描过于频繁，请稍后再试' };
-    const jobId = await createJob(Number(req.user.uid), 'expire.scan', 1, { action: 'expire.scan' });
+    // 两个管理员同时点击时，(uid,type) 去重互相不拦；用分布式锁把“判重+建任务”串行化。
+    const created = await withDistributedLockResult('dnsmgr:expire:create', () =>
+      createJob(Number(req.user.uid), 'expire.scan', 1, { action: 'expire.scan' }),
+    );
+    if (!created.locked) return { code: -1, msg: '其他实例正在创建扫描任务，请稍后再试' };
+    const jobId = Number(created.result || 0);
     if (!jobId) return { code: -1, msg: '已有扫描任务在执行，或后台任务已达并发上限，请稍后再试' };
     runJobInBackground(jobId, async (progress) => {
-      await expireNoticeTask();
+      // 手动扫描与定时扫描共用同一把锁，避免并发 whois/RDAP 与重复到期邮件。
+      const outcome = await withDistributedLockResult('dnsmgr:expire', async () => {
+        if (isMaintenance()) throw new Error('系统维护中，暂不能扫描域名到期');
+        await expireNoticeTask();
+      });
+      if (!outcome.locked) throw new Error('已有到期扫描正在执行，请稍后再试');
       await progress(1, 0, { done: true });
       return { done: true };
     });

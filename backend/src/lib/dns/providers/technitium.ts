@@ -7,8 +7,6 @@ export class TechnitiumDns implements DnsProvider {
   private token: string;
   private error = '';
   private domain: string;
-  private recordsCache: any[] = [];
-  private recordsLoaded = false;
 
   constructor(config: Record<string, any>) {
     this.url = String(config.url || '').replace(/\/+$/, '') + '/api';
@@ -18,6 +16,40 @@ export class TechnitiumDns implements DnsProvider {
 
   getError() {
     return this.error;
+  }
+
+  /** 递归排序对象键，保证同一记录每次生成的 ID 完全一致 */
+  private stableStringify(value: any): string {
+    if (Array.isArray(value)) return '[' + value.map((v) => this.stableStringify(v)).join(',') + ']';
+    if (value && typeof value === 'object') {
+      return '{' + Object.keys(value).sort().map((k) => JSON.stringify(k) + ':' + this.stableStringify(value[k])).join(',') + '}';
+    }
+    return JSON.stringify(value ?? null);
+  }
+
+  /**
+   * Technitium 的 records/get 不返回稳定 RecordId，旧实现用数组下标充当 ID。
+   * 列表一旦发生增删（并发写入、批量删除），同一个下标会指向另一条记录，造成越权删改。
+   * 这里把记录的身份（name/type/rData）编码进 ID，写操作直接按 ID 还原目标，
+   * 不再依赖“当前列表的第 N 行”，列表变化时只会失败，绝不会误删其它记录。
+   */
+  private recordIdOf(row: any): string {
+    const payload = { n: String(row?.name || ''), t: String(row?.type || ''), d: row?.rData ?? {} };
+    return 'tn1_' + Buffer.from(this.stableStringify(payload), 'utf8').toString('base64url');
+  }
+
+  private parseRecordId(RecordId: string): { name: string; type: string; rData: any } | null {
+    const id = String(RecordId || '');
+    if (!/^tn1_[A-Za-z0-9_-]+$/.test(id)) return null;
+    try {
+      const raw = Buffer.from(id.slice(4), 'base64url').toString('utf8');
+      const payload = JSON.parse(raw);
+      if (!payload || typeof payload.n !== 'string' || typeof payload.t !== 'string') return null;
+      if (!payload.d || typeof payload.d !== 'object' || Array.isArray(payload.d)) return null;
+      return { name: payload.n, type: payload.t, rData: payload.d };
+    } catch {
+      return null;
+    }
   }
 
   private async sendRequest(method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, any> = {}): Promise<any> {
@@ -105,13 +137,11 @@ export class TechnitiumDns implements DnsProvider {
     const data = await this.sendRequest('GET', '/zones/records/get', { domain: this.domain, listZone: 'true' });
     if (data?.response?.records) {
       const records: any[] = data.response.records;
-      this.recordsCache = records;
-      this.recordsLoaded = true;
-      let list: RecordInfo[] = records.map((row, i) => {
+      let list: RecordInfo[] = records.map((row) => {
         const name = row.name === this.domain ? '@' : String(row.name).replace('.' + this.domain, '');
         const { value, mx } = this.toValue(row.type, row.rData);
         return {
-          RecordId: String(i),
+          RecordId: this.recordIdOf(row),
           Domain: this.domain,
           Name: name,
           Type: row.type,
@@ -189,24 +219,12 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   private getOldRecord(RecordId: string): any | false {
-    const oldRecord = this.recordsCache[Number(RecordId)];
+    const oldRecord = this.parseRecordId(RecordId);
     if (!oldRecord) {
-      this.error = '记录不存在，请刷新页面重试';
+      this.error = '记录标识无效或已过期，请刷新页面重试';
       return false;
     }
     return oldRecord;
-  }
-
-  // RecordId 为记录在缓存数组中的下标，写操作前必须保证缓存已拉取，
-  // 否则「管理员」分支（不预热）会误判记录不存在。
-  private async ensureRecords(): Promise<boolean> {
-    if (this.recordsLoaded) return true;
-    const res = await this.getDomainRecords();
-    if (res === false) {
-      if (!this.error) this.error = '获取域名记录失败，请刷新页面重试';
-      return false;
-    }
-    return true;
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
@@ -224,7 +242,6 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, _Line = 'default', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
-    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const domain = oldRecord.name;
@@ -246,7 +263,6 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async updateDomainRecordRemark(RecordId: string, Remark: string | null): Promise<boolean> {
-    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const params: Record<string, any> = { domain: oldRecord.name, zone: this.domain, type: oldRecord.type, comments: Remark ?? '' };
@@ -255,7 +271,6 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async deleteDomainRecord(RecordId: string) {
-    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const params: Record<string, any> = { domain: oldRecord.name, zone: this.domain, type: oldRecord.type };
@@ -264,7 +279,6 @@ export class TechnitiumDns implements DnsProvider {
   }
 
   async setDomainRecordStatus(RecordId: string, Status: string) {
-    if (!(await this.ensureRecords())) return false;
     const oldRecord = this.getOldRecord(RecordId);
     if (!oldRecord) return false;
     const params: Record<string, any> = {

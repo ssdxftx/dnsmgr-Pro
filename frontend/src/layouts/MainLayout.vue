@@ -155,7 +155,7 @@ watch(
 );
 // 高频列表页缓存：返回列表零请求、零重渲（组件名由 SFC 文件名推断，带参详情页不缓存）
 // CertOrder 不缓存：详情弹窗会持有证书私钥/完整 API Key，keep-alive 会让明文长期留在 JS 堆
-const keepAliveViews = ['DomainList', 'CdnDomain', 'UserList'];
+const keepAliveViews = ['DomainList', 'CdnDomain'];
 
 /* 顶栏实时时钟：直接更新 DOM 文本，避免每秒触发整个布局重渲染 */
 const clockEl = ref<HTMLElement | null>(null);

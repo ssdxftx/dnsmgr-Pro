@@ -91,7 +91,7 @@ async function consumeNonce(nonce: string, uid: number): Promise<boolean> {
   }
   // 时间窗只有 300 秒，顺手清理过期记录（1% 概率触发，避免每次请求都删表）
   if (Math.random() < 0.01) {
-    await query(`DELETE FROM ${table('legacy_nonce')} WHERE created_at < DATE_ADD(NOW(), INTERVAL -1 HOUR)`).catch(() => undefined);
+    await query(`DELETE FROM ${table('legacy_nonce')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 1 HOUR)`).catch(() => undefined);
   }
   return true;
 }

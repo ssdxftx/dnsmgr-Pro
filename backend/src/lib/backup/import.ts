@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
 import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
-import { deriveKek, deriveSysKek, KDF_PARAMS_JSON, kdfParamsFromJson, unwrapDek, wrapDek } from '../vault/keys.js';
+import { deriveKek, deriveSysKek, KDF_PARAMS_JSON, kdfParamsFromStored, unwrapDek, wrapDek } from '../vault/keys.js';
 import { decodeStoredValue, TABLES } from './manifest.js';
 import { ADMIN_ONLY_DNS_TYPES, dnsProviders } from '../dns/factory.js';
 import { cdnConfig } from '../cdn/factory.js';
@@ -269,6 +269,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       const isEmptySite = Number((userCount as any[])[0]?.c || 0) === 0;
       let privateBlocked = false;
       let warnedPrivate = false;
+      const blockedPrivateUsers = new Set<number>();
 
       const colsCache = new Map<string, Set<string>>();
       const cols = async (name: string) => {
@@ -351,28 +352,23 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               const dek = dekBk ? unwrapDek(opts.key, dekBk, origUid) : null;
               let wrappedSys: Buffer | null = null;
               let wrappedPass: Buffer | null = null;
-              if (userSafe && !selfMerge) {
-                // 管理员恢复他人个人备份时，目标用户可能已有保险库；
-                // 直接复用，避免 user_vault 主键冲突导致整次导入回滚。
-                const target = await q(`SELECT uid FROM ${table('user_vault')} WHERE uid = ?`, [uid]);
-                if (target.length) {
-                  rep.reused++;
-                  continue;
-                }
-              }
-              if (selfMerge) {
-                if (!dek) {
-                  privateBlocked = true;
-                  if (!warnedPrivate) {
-                    warnedPrivate = true;
-                    report.warnings.push('无法从备份中读取保险库密钥，私有账户未导入');
+
+              // 任何模式下目标已存在保险库都只复用，绝不覆盖：
+              // 站点 merge 以前会直接 INSERT，导致重复导入主键冲突，也会让归档预置
+              // fail_count/locked_until 或攻击者已知的 DEK 覆盖受害者现有保险库。
+              const targetRow: any = (await q(`SELECT * FROM ${table('user_vault')} WHERE uid = ?`, [uid]))[0];
+              if (targetRow) {
+                if (selfMerge) {
+                  if (!dek) {
+                    privateBlocked = true;
+                    if (!warnedPrivate) {
+                      warnedPrivate = true;
+                      report.warnings.push('无法从备份中读取保险库密钥，私有账户未导入');
+                    }
+                    rep.skipped++;
+                    continue;
                   }
-                  rep.skipped++;
-                  continue;
-                }
-                const target: any = (await q(`SELECT * FROM ${table('user_vault')} WHERE uid = ?`, [uid]))[0];
-                if (target) {
-                  const targetDek = await unwrapTargetDek(target, opts.passphrase);
+                  const targetDek = await unwrapTargetDek(targetRow, opts.passphrase);
                   if (!targetDek || !targetDek.equals(dek)) {
                     privateBlocked = true;
                     if (!warnedPrivate) {
@@ -382,21 +378,93 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                     rep.skipped++;
                     continue;
                   }
-                  rep.reused++;
+                } else {
+                  // 站点合并：目标已有保险库时不能覆盖，但归档私有账户仍使用源 DEK 的 enc:u1 密文。
+                  // DEK 无法证明一致时必须跳过该用户的私有账户，否则会导入一批永远打不开的账户。
+                  const targetDek = await unwrapTargetDek(targetRow, opts.passphrase);
+                  if (!dek || !targetDek || !targetDek.equals(dek)) {
+                    blockedPrivateUsers.add(origUid);
+                    report.warnings.push(`用户 #${origUid} 的现有保险库与归档密钥不一致，已跳过其私有账户`);
+                  }
+                }
+                rep.reused++;
+                continue;
+              }
+
+              // 站点/安装归档中的口令模式保险库没有 __dek_bk（只有个人归档才会附带），
+              // 但当 uid 未变化时，salt+wrapped_dek 本身就是可用的包裹层，必须原样保留。
+              // 旧逻辑把“没有归档 DEK”当成损坏，导致整站恢复后口令模式保险库和全部私有账户被丢弃。
+              if (
+                !dek &&
+                scope !== 'user' &&
+                String(row.mode) === 'passphrase' &&
+                Number(uid) === Number(origUid) &&
+                row.salt &&
+                row.wrapped_dek
+              ) {
+                row.fail_count = 0;
+                row.locked_until = null;
+                delete row.__dek_bk;
+                await insertRow(q, name, row, columns);
+                rep.inserted++;
+                continue;
+              }
+
+              if (!dek) {
+                if (scope === 'site') blockedPrivateUsers.add(origUid);
+                // 缺少归档 DEK 时，口令模式无法重建包裹层；直接跳过，绝不落一条打不开的保险库。
+                if (String(row.mode) === 'passphrase' || selfMerge) {
+                  privateBlocked = true;
+                  if (!warnedPrivate) {
+                    warnedPrivate = true;
+                    report.warnings.push('无法从备份中读取保险库密钥，私有账户未导入');
+                  }
+                }
+                rep.skipped++;
+                continue;
+              }
+
+              // 运行态字段必须清零；恢复码只在 uid 发生变化时失效（包裹层 AAD 绑定 uid）。
+              row.fail_count = 0;
+              row.locked_until = null;
+              if (uid !== origUid) {
+                row.recovery_hash = null;
+                row.salt_recovery = null;
+                row.wrapped_dek_recovery = null;
+              }
+
+              if (String(row.mode) === 'none') {
+                wrappedSys = wrapDek(deriveSysKek(sysKey), dek, uid);
+                row.kdf = 'scrypt';
+                row.kdf_params = KDF_PARAMS_JSON;
+                row.salt = null;
+                row.wrapped_dek = null;
+              } else if (scope === 'user') {
+                // 归档密钥 = scrypt(口令, 归档 salt)；把 salt 同步为归档 salt，解锁时才能得到同一 KEK。
+                // 缺少 salt 的归档视为损坏（而不是保留归档里可能恶意的 kdf_params）。
+                const saltB64 = String(archive.header.kdf?.salt || '');
+                const salt = saltB64 ? Buffer.from(saltB64, 'base64') : null;
+                if (!salt || !salt.length) {
+                  privateBlocked = true;
+                  if (!warnedPrivate) {
+                    warnedPrivate = true;
+                    report.warnings.push('备份缺少保险库 KDF 盐，私有账户未导入');
+                  }
+                  rep.skipped++;
                   continue;
                 }
-              }
-              if (dek) {
-                if (String(row.mode) === 'none') wrappedSys = wrapDek(deriveSysKek(sysKey), dek, uid);
-                else if (scope === 'user') {
-                  // 归档密钥 = scrypt(口令, 归档 salt)；把 salt 同步为归档 salt，解锁时才能得到同一 KEK
-                  const saltB64 = String(archive.header.kdf?.salt || '');
-                  const salt = saltB64 ? Buffer.from(saltB64, 'base64') : null;
-                  if (salt && salt.length) {
-                    row.salt = salt;
-                    row.kdf_params = KDF_PARAMS_JSON;
-                    wrappedPass = wrapDek(opts.key, dek, uid);
-                  }
+                row.salt = salt;
+                row.kdf = 'scrypt';
+                row.kdf_params = KDF_PARAMS_JSON;
+                wrappedPass = wrapDek(opts.key, dek, uid);
+              } else {
+                // 站点/安装归档保留原口令包裹层（uid 变化时下方会因无法迁移而丢弃），
+                // 这里只校验参数可解析，不能静默改写成默认参数：wrapped_dek 仍是旧参数。
+                const params = kdfParamsFromStored(row.kdf_params);
+                if (!params || !row.wrapped_dek) {
+                  rep.dropped++;
+                  report.warnings.push(`用户 #${origUid} 的保险库 KDF 参数或口令包裹层无效，已跳过`);
+                  continue;
                 }
               }
               if (uid !== origUid && !wrappedSys && !wrappedPass) {
@@ -406,7 +474,11 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               row.uid = uid;
               if (wrappedSys) row.wrapped_dek_sys = wrappedSys;
-              if (wrappedPass) row.wrapped_dek = wrappedPass;
+              if (wrappedPass) {
+                row.wrapped_dek = wrappedPass;
+                // 口令模式不应保留归档里的 sys 包裹层，避免模式/包裹层不一致
+                row.wrapped_dek_sys = null;
+              }
               delete row.__dek_bk;
               await insertRow(q, name, row, columns);
               rep.inserted++;
@@ -459,6 +531,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'cdn_account':
             case 'cert_account': {
               const accountType = String(row.type || '');
+              const origOwner = Number(row.owner_uid || 0);
               if (name === 'account') {
                 const meta = dnsProviders[accountType];
                 if (!meta) {
@@ -508,7 +581,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 // 个人备份里的账户一律按私有账户恢复；管理员导入时归属映射到归档中的所有者
                 row.visibility = 'private';
               }
-              if (privateBlocked && row.visibility === 'private') {
+              if ((privateBlocked || blockedPrivateUsers.has(origOwner)) && row.visibility === 'private') {
                 rep.dropped++;
                 continue;
               }
@@ -881,8 +954,10 @@ async function unwrapTargetDek(row: any, passphrase?: string): Promise<Buffer | 
     return unwrapDek(deriveSysKek(await getSysKey()), Buffer.from(row.wrapped_dek_sys), Number(row.uid));
   }
   if (!passphrase || !row.salt || !row.wrapped_dek) return null;
+  const params = kdfParamsFromStored(row.kdf_params);
+  if (!params) return null;
   return unwrapDek(
-    await deriveKek(String(passphrase), Buffer.from(row.salt), kdfParamsFromJson(row.kdf_params)),
+    await deriveKek(String(passphrase), Buffer.from(row.salt), params),
     Buffer.from(row.wrapped_dek),
     Number(row.uid),
   );

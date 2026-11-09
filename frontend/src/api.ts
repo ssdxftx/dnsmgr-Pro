@@ -63,6 +63,9 @@ function evictGetCache(): void {
  *  同时自增 cacheEpoch，用于阻止「写之前发出、写之后返回」的 GET 把旧值写回缓存。 */
 export function invalidateApiCache(prefix?: string): void {
   cacheEpoch++;
+  // 写操作后必须同时丢弃 in-flight：否则写成功后新发起的 GET 仍可能加入
+  // 写之前发出的旧请求并拿到写前数据（虽不写缓存，但会覆盖 UI）。
+  inflight.clear();
   if (!prefix) {
     getCache.clear();
     return;

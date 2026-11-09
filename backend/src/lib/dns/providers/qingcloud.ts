@@ -172,7 +172,7 @@ export class QingcloudDns implements DnsProvider {
         Line: null,
         TTL: null,
         MX: null,
-        Status: row.status === 'enabled' ? '0' : '1',
+        Status: row.status === 'enabled' ? '1' : '0',
         Weight: null,
         Remark: row.description ?? null,
         UpdateTime: row.create_time ?? null,
@@ -217,6 +217,10 @@ export class QingcloudDns implements DnsProvider {
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, Weight: number | null = null, _Remark: string | null = null) {
+    if (!String(RecordId).includes('_')) {
+      this.error = '该记录标识为主机汇总行，请先按子域名筛选后再编辑具体记录';
+      return false;
+    }
     const value = this.buildValue(Type, Value, Number(MX));
     const [domainRecordId, recordValueId] = String(RecordId).split('_');
     const existing = await this.execute('GET', '/v1/dr_id/' + domainRecordId);
@@ -255,9 +259,10 @@ export class QingcloudDns implements DnsProvider {
   }
 
   async deleteDomainRecord(RecordId: string) {
-    if (String(RecordId).includes(this.domainid)) {
-      const param = { domain_names: JSON.stringify([RecordId]), zone_name: this.domainid };
-      return (await this.execute('DELETE', '/v1/domain/', param)) !== false;
+    if (!String(RecordId).includes('_')) {
+      // 主机汇总行的 RecordId 是 FQDN；按它删除会清空该主机下全部记录，必须拒绝。
+      this.error = '该记录标识为主机汇总行，请先按子域名筛选后再删除具体记录';
+      return false;
     }
     const [domainRecordId, recordValueId] = String(RecordId).split('_');
     const existing = await this.execute('GET', '/v1/dr_id/' + domainRecordId);
@@ -294,6 +299,10 @@ export class QingcloudDns implements DnsProvider {
 
   async setDomainRecordStatus(RecordId: string, Status: string) {
     const recordValueId = String(RecordId).split('_')[1];
+    if (!recordValueId) {
+      this.error = '该记录标识为主机汇总行，请先按子域名筛选后再启停具体记录';
+      return false;
+    }
     const param = { ids: JSON.stringify([recordValueId]), target: 'value', action: Status === '0' ? 'stop' : 'enable' };
     return (await this.execute('POST', '/v1/change_record_status/', param)) !== false;
   }

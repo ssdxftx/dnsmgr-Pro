@@ -3,6 +3,7 @@ import { checkLevel, findUserById } from '../auth.js';
 import { query, queryOne, table } from '../db.js';
 import { isMaintenance } from '../lib/backup/maintenance.js';
 import { getInstallState } from '../installer.js';
+import { isTokenRevoked } from '../lib/auth/revocation.js';
 import { clampLimit, clampOffset } from '../lib/util.js';
 
 function line(name: string, value: number, labels?: Record<string, string>): string {
@@ -35,8 +36,11 @@ export default async function observabilityRoutes(app: FastifyInstance): Promise
     if (req.headers?.authorization) {
       try {
         await req.jwtVerify();
-        // 仅 jwtVerify 不够：被降权/封禁/吊销后的旧令牌仍在有效期内。
-        // 必须回查账号状态与 token_version，否则已撤销的管理员仍能读到运行态信息。
+        // 仅 jwtVerify 不够：TOTP 预令牌、已登出令牌同样能通过签名校验。
+        // 必须限定 type=session、校验 jti 吊销，并回查账号状态与 token_version。
+        if (req.user?.type !== 'session') throw new Error('not session');
+        const jti = String(req.user?.jti || '');
+        if (!jti || (await isTokenRevoked(jti))) throw new Error('revoked');
         const dbUser: any = await findUserById(Number(req.user?.uid || 0));
         if (
           dbUser &&

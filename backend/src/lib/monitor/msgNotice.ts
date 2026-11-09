@@ -341,29 +341,48 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
   }
   mailContent += `<br/><font color="grey">${SITENAME}</font><br/><font color="grey">${fmtDateTime()}</font>`;
 
+  let attempted = 0;
+  let delivered = 0;
   if ((await configGet('notice_mail')) === '1') {
     const to = (await configGet('mail_recv')) || (await configGet('mail_name')) || '';
-    if (to) await sendMail(to, mailTitle, mailContent);
+    if (to) {
+      attempted += 1;
+      if ((await sendMail(to, mailTitle, mailContent)) === true) delivered += 1;
+    }
   }
   if ((await configGet('notice_wxtpl')) === '1') {
+    attempted += 1;
     const content = stripTags(mailContent.replace(/<br\/>/g, '\n\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**'));
-    await sendWechat(mailTitle, content);
+    if ((await sendWechat(mailTitle, content)) === true) delivered += 1;
   }
   if ((await configGet('notice_tgbot')) === '1') {
+    attempted += 1;
     const content = stripTags(mailContent.replace(/<br\/>/g, '\n'));
-    await sendTelegram(`<strong>${mailTitle}</strong>\n${content}`);
+    if ((await sendTelegram(`<strong>${mailTitle}</strong>\n${content}`)) === true) delivered += 1;
   }
   if ((await configGet('notice_qqbot')) === '1') {
-    await sendQqbot(mailTitle, mailContent);
+    attempted += 1;
+    if ((await sendQqbot(mailTitle, mailContent)) === true) delivered += 1;
   }
   if ((await configGet('notice_webhook')) === '1') {
+    attempted += 1;
     const content = mailContent.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
-    await sendWebhook(mailTitle, content);
+    if ((await sendWebhook(mailTitle, content)) === true) delivered += 1;
   }
   if ((await configGet('notice_custom_webhook')) === '1') {
-    await sendCustomWebhook(mailTitle, mailContent);
+    attempted += 1;
+    if ((await sendCustomWebhook(mailTitle, mailContent)) === true) delivered += 1;
   }
-  logNotify('monitor', action === 1 ? 'monitor.alert' : 'monitor.recover', true, mailTitle, { domain: task.domain, action });
+  // 没有任何渠道启用时不写通知日志，避免每次探测都插入一条假的“已发送”。
+  // 有渠道但全部失败时记录失败，便于 observability 页面排查。
+  if (attempted > 0) {
+    logNotify('monitor', action === 1 ? 'monitor.alert' : 'monitor.recover', delivered > 0, mailTitle, {
+      domain: task.domain,
+      action,
+      attempted,
+      delivered,
+    });
+  }
 }
 
 export async function sendExpireNotice(day: number, list: { name: string; expiretime: string }[]): Promise<number> {

@@ -234,6 +234,8 @@ async function loadTasks() {
     if (loadAbort !== ac) return;
     if (res.code === 0) {
       tasks.value = res.data.list;
+      const visible = new Set(tasks.value.map((t: any) => Number(t.id)));
+      checkedRowKeys.value = checkedRowKeys.value.filter((k) => visible.has(Number(k)));
       total.value = res.data.total;
       pagination.itemCount = res.data.total;
       pagination.page = page.value;
@@ -248,10 +250,12 @@ async function loadTasks() {
 
 function search() {
   page.value = 1;
+  checkedRowKeys.value = [];
   loadTasks();
 }
 
 function clearSearch() {
+  checkedRowKeys.value = [];
   kw.value = '';
   status.value = null;
   searchType.value = 1;

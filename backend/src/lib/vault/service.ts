@@ -4,7 +4,7 @@ import { getSysKey } from '../../config.js';
 import {
   deriveKek,
   deriveSysKek,
-  kdfParamsFromJson,
+  kdfParamsFromStored,
   KDF_PARAMS_JSON,
   newDek,
   newSalt,
@@ -52,6 +52,13 @@ const MAX_FAIL = 5;
 function buf(v: any): Buffer | null {
   if (v === null || v === undefined) return null;
   return Buffer.isBuffer(v) ? v : Buffer.from(v);
+}
+
+/** 读取既有 KDF 参数时必须使用原始值；非法参数要报明确错误，不能静默换成默认值。 */
+function storedKdf(row: VaultRow) {
+  const params = kdfParamsFromStored(row.kdf_params);
+  if (!params) throw new VaultError('保险库 KDF 参数不受支持，请联系管理员检查 kdf_params', 500);
+  return params;
 }
 
 export async function getVaultRow(uid: number): Promise<VaultRow | null> {
@@ -168,9 +175,10 @@ export async function unlockVault(uid: number, jti: string, passphrase: string):
     if (!dek) throw new VaultError('便捷模式解锁失败，请联系管理员');
     return setVaultSession(uid, jti, dek);
   }
+  const params = storedKdf(row);
   await claimAttempt(uid);
   const dek = unwrapDek(
-    await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+    await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, params),
     buf(row.wrapped_dek) as Buffer,
     uid,
   );
@@ -210,9 +218,10 @@ export async function downgradeVault(uid: number, jti: string, passphrase: strin
   const row = await getVaultRow(uid);
   if (!row) throw new VaultError('保险库未初始化');
   if (row.mode !== 'passphrase') throw new VaultError('当前已是便捷模式');
+  const params = storedKdf(row);
   await claimAttempt(uid);
   const dek = unwrapDek(
-    await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+    await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, params),
     buf(row.wrapped_dek) as Buffer,
     uid,
   );
@@ -230,9 +239,10 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
   const row = await getVaultRow(uid);
   if (!row) throw new VaultError('保险库未初始化');
   if (row.mode !== 'passphrase') throw new VaultError('便捷模式没有口令');
+  const params = storedKdf(row);
   await claimAttempt(uid);
   const dek = unwrapDek(
-    await deriveKek(String(oldPass || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+    await deriveKek(String(oldPass || ''), buf(row.salt) as Buffer, params),
     buf(row.wrapped_dek) as Buffer,
     uid,
   );
@@ -241,11 +251,12 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
   if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   const salt = newSalt();
   const wrapped = wrapDek(await deriveKek(pass, salt), dek, uid);
-  await query(`UPDATE ${table('user_vault')} SET salt = ?, wrapped_dek = ?, fail_count = 0, locked_until = NULL, updated_at = NOW() WHERE uid = ?`, [
-    salt,
-    wrapped,
-    uid,
-  ]);
+  await query(
+    `UPDATE ${table('user_vault')}
+     SET salt = ?, wrapped_dek = ?, kdf = 'scrypt', kdf_params = ?, fail_count = 0, locked_until = NULL, updated_at = NOW()
+     WHERE uid = ?`,
+    [salt, wrapped, KDF_PARAMS_JSON, uid],
+  );
   setVaultSession(uid, jti, dek);
 }
 
@@ -266,9 +277,10 @@ export async function recoverVault(uid: number, jti: string, recovery: string, n
   const salt = newSalt();
   const wrapped = wrapDek(await deriveKek(pass, salt), dek, uid);
   await query(
-    `UPDATE ${table('user_vault')} SET mode = 'passphrase', salt = ?, wrapped_dek = ?, wrapped_dek_sys = NULL,
+    `UPDATE ${table('user_vault')} SET mode = 'passphrase', kdf = 'scrypt', kdf_params = ?, salt = ?, wrapped_dek = ?,
+       wrapped_dek_sys = NULL, salt_recovery = NULL, wrapped_dek_recovery = NULL,
        recovery_hash = NULL, fail_count = 0, locked_until = NULL, updated_at = NOW() WHERE uid = ?`,
-    [salt, wrapped, uid],
+    [KDF_PARAMS_JSON, salt, wrapped, uid],
   );
   setVaultSession(uid, jti, dek);
 }
@@ -297,9 +309,10 @@ export async function destroyVault(uid: number, confirm: string, passphrase?: st
   if (String(confirm || '') !== 'DESTROY') throw new VaultError('请输入 DESTROY 确认销毁');
   const row = await getVaultRow(uid);
   if (row?.mode === 'passphrase') {
+    const params = storedKdf(row);
     await claimAttempt(uid);
     const dek = unwrapDek(
-      await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, kdfParamsFromJson(row.kdf_params)),
+      await deriveKek(String(passphrase || ''), buf(row.salt) as Buffer, params),
       buf(row.wrapped_dek) as Buffer,
       uid,
     );

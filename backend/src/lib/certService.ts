@@ -429,6 +429,9 @@ export class CertOrderService {
 
   async reset() {
     await this.ensureLoaded();
+    // 重试/重置前先清理本订单已写入的 _acme-challenge TXT，避免残留记录
+    // 让下一次申请因重复 TXT 失败，或被厂商拒绝。
+    await this.delDns();
     await query(
       `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
       [this.oid],

@@ -59,13 +59,13 @@ docker logs dnsmgr-pro 2>&1 | grep -i setup
 
 ## 记录的 IP 不是客户端 IP
 
-位于反向代理后时设置：
+位于反向代理后时设置（不要用 `true`，应填实际代理 IP/CIDR，防止 X-Forwarded-For 被伪造）：
 
 ```bash
-DNSMGR_TRUST_PROXY=true
+DNSMGR_TRUST_PROXY=127.0.0.1,10.0.0.0/8,172.16.0.0/12
 ```
 
-或填写具体代理 IP/CIDR。确认代理传递 `X-Forwarded-For` 与 `X-Forwarded-Proto`。
+确认代理传递 `X-Forwarded-For` 与 `X-Forwarded-Proto`。
 
 ## HTTPS 无法访问
 

@@ -1,5 +1,6 @@
 import { createReadStream } from 'node:fs';
-import { stat, unlink } from 'node:fs/promises';
+import { stat, unlink, rename } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
@@ -79,6 +80,12 @@ export default async function backupRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const scope = b.scope === 'user' ? 'user' : 'site';
     if (scope === 'site' && !isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    // 个人备份包含全部私有凭据，且口令模式会用备份口令试解保险库；
+    // 必须二次确认，避免仅凭被盗会话无限次低速爆破口令（绕过保险库失败计数）。
+    if (scope === 'user') {
+      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.export');
+      if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
+    }
     // 恢复/维护期间表数据正在被替换，此时导出会得到不一致快照
     if (isMaintenance()) return reply.code(409).send({ code: -1, msg: '系统维护中，暂不能导出备份' });
     // 跨实例限流：否则 N 个副本会把 5 次/10 分钟放大成 5N 次，
@@ -122,7 +129,10 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.get('/api/backup/jobs', auth, async (req: any) => {
     const admin = isAdmin(req.user);
-    const rows = admin
+    // 管理员默认看到整站任务；个人页传 mine=1，只返回自己的备份，
+    // 避免「我的备份」列出并可删除其他用户的个人备份。
+    const mine = String(req.query?.mine || '') === '1';
+    const rows = admin && !mine
       ? await query(`SELECT * FROM ${table('backup_job')} ORDER BY id DESC LIMIT 200`)
       : await query(`SELECT * FROM ${table('backup_job')} WHERE owner_uid = ? ORDER BY id DESC LIMIT 200`, [req.user.uid]);
     return { code: 0, data: rows };
@@ -132,6 +142,15 @@ export default async function backupRoutes(app: FastifyInstance) {
     const job: any = await queryOne(`SELECT * FROM ${table('backup_job')} WHERE id = ?`, [Number(req.params.id)]);
     if (!job || (!isAdmin(req.user) && Number(job.owner_uid) !== Number(req.user.uid))) {
       return reply.code(404).send({ code: -1, msg: '备份不存在' });
+    }
+    // 个人归档的口令就是保险库口令，归档头校验值可用于离线验证。
+    // 下载接口必须与导出口径一致做二次确认，否则被盗会话可绕过保险库失败锁定。
+    if (String(job.scope) === 'user') {
+      if (!(await hitRateLimitDistributed(`backup:download:${req.user.uid}`, 10, 10 * 60_000))) {
+        return reply.code(429).send({ code: -1, msg: '备份下载过于频繁，请稍后再试' });
+      }
+      const pwErr = await requireLoginPassword(Number(req.user.uid), undefined, req, 'backup.download');
+      if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     }
     let file: string;
     try {
@@ -209,6 +228,11 @@ export default async function backupRoutes(app: FastifyInstance) {
       if (archiveScope === 'site' && !admin) {
         return reply.code(403).send({ code: -1, msg: '无权限导入整站备份' });
       }
+      // 整站 merge 会复用既有用户并写入其 api_key/user_vault，等价于站点接管。
+      // level 2 管理员即使持有备份密钥也不能执行，避免通过归档注入超管 Key。
+      if (archiveScope === 'site' && mode === 'merge' && !superAdmin) {
+        return reply.code(403).send({ code: -1, msg: '整站合并导入仅允许超级管理员执行' });
+      }
       if (
         archiveScope === 'user' &&
         Number(header.ownerUid || 0) !== Number(req.user.uid)
@@ -285,9 +309,10 @@ export default async function backupRoutes(app: FastifyInstance) {
     const b = req.body || {};
     if (String(b.confirm || '') !== 'RESTORE') return { code: -1, msg: '请输入 RESTORE 确认恢复' };
     const restoreMode = b.mode === 'merge' ? 'merge' : 'replace';
-    // 整站替换与导入的 replace 同级危险：必须超管 + 重输登录密码，否则 level 2 管理员可借恢复接管站点
-    if (restoreMode === 'replace' && Number(req.user.is_super || 0) !== 1) {
-      return reply.code(403).send({ code: -1, msg: '整站替换仅允许超级管理员执行' });
+    // 整站替换/合并都会覆盖用户、API Key 与保险库，必须超级管理员执行：
+    // 否则 level 2 管理员可借 merge 给超管注入已知 API Key 或预置保险库完成接管。
+    if (Number(req.user.is_super || 0) !== 1) {
+      return reply.code(403).send({ code: -1, msg: '整站恢复仅允许超级管理员执行' });
     }
     // merge 同样会覆盖用户/API Key/保险库，必须二次确认（会话被盗时攻击者没有密码）
     const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.restore');
@@ -310,30 +335,31 @@ export default async function backupRoutes(app: FastifyInstance) {
       if (!dest) return { code: -1, msg: '备份目的地不存在' };
       await ensureDataDirs();
       localFromRemote = resolveArchivePath(remoteName);
-      // 下载失败只清理本次创建的临时产物；本地同名可用备份必须保留
-      let localExisted = false;
+      // 先下载到同目录临时文件并校验，确认是合法整站归档后再原子替换本地同名文件；
+      // 远端文件损坏/被替换时不能破坏本地原本可用的备份。
+      const tmpRemote = path.join(backupsDir(), `.pull-${randomUUID()}.dnsmgrbk.tmp`);
       try {
-        await stat(localFromRemote);
-        localExisted = true;
-      } catch {
-        // 本地不存在
-      }
-      try {
-        await downloadRemote(destId, remoteName, localFromRemote);
+        await downloadRemote(destId, remoteName, tmpRemote);
       } catch (e: any) {
-        if (!localExisted) await unlink(localFromRemote).catch(() => undefined);
+        await unlink(tmpRemote).catch(() => undefined);
         return { code: -1, msg: `云端备份下载失败：${publicError(e, '下载失败')}` };
       }
       let header: any;
       try {
-        header = (await readArchiveHeader(localFromRemote)).header;
+        header = (await readArchiveHeader(tmpRemote)).header;
       } catch (e: any) {
-        await unlink(localFromRemote).catch(() => undefined);
+        await unlink(tmpRemote).catch(() => undefined);
         return { code: -1, msg: `备份文件无法识别：${publicError(e, '文件无法识别')}` };
       }
       if (String(header.scope) !== 'site') {
-        await unlink(localFromRemote).catch(() => undefined);
+        await unlink(tmpRemote).catch(() => undefined);
         return { code: -1, msg: '仅支持恢复整站备份' };
+      }
+      try {
+        await rename(tmpRemote, localFromRemote);
+      } catch (e: any) {
+        await unlink(tmpRemote).catch(() => undefined);
+        return { code: -1, msg: `备份文件落盘失败：${publicError(e, '落盘失败')}` };
       }
       const st = await stat(localFromRemote);
       const existed: any = await queryOne(`SELECT * FROM ${table('backup_job')} WHERE file_name = ? LIMIT 1`, [remoteName]);
@@ -615,17 +641,13 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (name !== rawName || !name.endsWith('.dnsmgrbk')) return { code: -1, msg: '文件名不合法' };
     await ensureDataDirs();
     const local = path.join(backupsDir(), path.basename(name));
-    let localExisted = false;
+    const tmpLocal = path.join(backupsDir(), `.pull-${randomUUID()}.dnsmgrbk.tmp`);
     try {
-      await stat(local);
-      localExisted = true;
-    } catch {
-      // 本地不存在
-    }
-    try {
-      await downloadRemote(Number(req.params.destId), name, local);
-      const st = await stat(local);
-      const header = (await readArchiveHeader(local)).header;
+      await downloadRemote(Number(req.params.destId), name, tmpLocal);
+      const st = await stat(tmpLocal);
+      const header = (await readArchiveHeader(tmpLocal)).header;
+      // 校验通过后再替换本地同名文件，损坏的远端文件不会删除本地可用备份。
+      await rename(tmpLocal, local);
       const scope = String(header.scope || '') === 'user' ? 'user' : 'site';
       const r: any = await query(
         `INSERT INTO ${table('backup_job')} (kind, scope, status, file_name, file_size, dest, dest_id, include_logs, created_at, finished_at)
@@ -634,7 +656,7 @@ export default async function backupRoutes(app: FastifyInstance) {
       );
       return { code: 0, msg: '已拉回本地', data: { id: r.insertId, file: path.basename(name), size: st.size } };
     } catch (e: any) {
-      if (!localExisted) await unlink(local).catch(() => undefined);
+      await unlink(tmpLocal).catch(() => undefined);
       return { code: -1, msg: publicError(e) };
     }
   });

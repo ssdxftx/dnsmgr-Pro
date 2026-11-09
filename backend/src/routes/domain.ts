@@ -154,6 +154,7 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
     if (provider) {
       ok = true;
       let pageSize = 500;
+      let prevPageSig = '';
       for (let page = 1; page <= 10; page++) {
         const r = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
         if (r === false) {
@@ -162,6 +163,13 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
           break;
         }
         if (!r.list || !r.list.length) break;
+        // 部分厂商不支持分页参数，每次都会返回同一份全量列表。
+        // 以前会把它重复拼接 10 次，导致记录数×10、重复告警和上游调用放大；
+        // 页签名一致即视为「没有下一页」，直接结束。
+        const sigOf = (x: any) => [x?.RecordId ?? '', x?.Name ?? '', x?.Type ?? '', Array.isArray(x?.Value) ? x.Value.join(',') : x?.Value ?? ''].join('|');
+        const pageSig = JSON.stringify([r.list.length, sigOf(r.list[0]), sigOf(r.list[r.list.length - 1])]);
+        if (page > 1 && pageSig === prevPageSig) break;
+        prevPageSig = pageSig;
         list = list.concat(r.list);
         if (page === 1) pageSize = r.list.length;
         // 返回条数不足一页即结束，不依赖厂商 total（部分厂商 total 只代表本页条数）
@@ -405,10 +413,32 @@ async function getDomainWithAccount(domainId: number, user?: any) {
 async function clearDomainPermissions(
   names: string[],
   run: (sql: string, params?: any[]) => Promise<any> = query,
+  excludeDomainIds: number[] = [],
 ): Promise<void> {
   const list = [...new Set(names.map((n) => String(n || '').trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))];
   if (!list.length) return;
+  // 不同账户允许接入同名域名：只有当前名称已无其他域名行时才清理权限，
+  // 否则删除 A 账户的 example.com 会误删 B 账户同名域名的所有授权。
+  const ex = excludeDomainIds.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+  const exSql = ex.length ? ` AND id NOT IN (${ex.map(() => '?').join(',')})` : '';
+  const remain: any = await run(
+    `SELECT COUNT(*) AS c FROM ${table('domain')} WHERE LOWER(TRIM(TRAILING '.' FROM name)) IN (${list.map(() => '?').join(',')})${exSql}`,
+    [...list, ...ex],
+  );
+  if (Number(remain?.[0]?.c || 0) > 0) return;
   await run(`DELETE FROM ${table('permission')} WHERE LOWER(domain) IN (${list.map(() => '?').join(',')})`, list);
+}
+
+/** 该 DNS 域名是否仍被证书订单引用（含通配符/子域名订单） */
+async function certOrdersUsingDomain(name: string): Promise<number[]> {
+  const key = String(name || '').trim().toLowerCase().replace(/\.$/, '');
+  if (!key) return [];
+  const rows: any[] = await query(
+    `SELECT DISTINCT O.id FROM ${table('cert_domain')} CD JOIN ${table('cert_order')} O ON O.id = CD.oid
+      WHERE LOWER(CD.domain) = ? OR LOWER(CD.domain) LIKE ?`,
+    [key, '%.' + key],
+  );
+  return rows.map((r) => Number(r.id)).filter((n) => n > 0);
 }
 
 export default async function domainRoutes(app: FastifyInstance) {
@@ -738,14 +768,17 @@ export default async function domainRoutes(app: FastifyInstance) {
     const privateOwner = info.account.visibility === 'private' && Number(info.account.owner_uid) === Number(req.user.uid);
     if (!checkLevel(req.user, 2) && !privateOwner) return { code: -1, msg: '无权限' };
     const row = info.domain;
+    const certRefs = await certOrdersUsingDomain(String(row?.name || ''));
+    if (certRefs.length) {
+      return { code: -1, msg: `该域名仍被证书订单 #${certRefs.slice(0, 5).join('、#')} 引用，请先删除相关证书订单` };
+    }
     // 与源项目一致：删除域名时级联清理别名与关联任务，避免残留任务引用已删除域名。
     // 权限清理与多表删除必须在同一事务内，否则中途失败会丢失权限或留下孤儿数据。
     await withTransaction(async (q) => {
-      await clearDomainPermissions([row?.name || ''], q);
+      await clearDomainPermissions([row?.name || ''], q, [Number(id)]);
       await q(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
       await q(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('cert_cname')} WHERE did = ?`, [id]);
-      await q(`DELETE FROM ${table('cert_link_log')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('dmtask')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
@@ -814,13 +847,17 @@ export default async function domainRoutes(app: FastifyInstance) {
     const allowedIds = new Set((allowed as any[]).map((r) => Number(r.id)));
     if (ids.some((id) => !allowedIds.has(id))) return { code: -1, msg: '无权操作部分私有账户域名' };
     const names = await query(`SELECT name FROM ${table('domain')} WHERE id IN (${ids.map(() => '?').join(',')})`, ids);
+    const certRefs: number[] = [];
+    for (const r of names as any[]) certRefs.push(...(await certOrdersUsingDomain(String(r.name || ''))));
+    if (certRefs.length) {
+      return { code: -1, msg: `部分域名仍被证书订单 #${[...new Set(certRefs)].slice(0, 5).join('、#')} 引用，请先删除相关证书订单` };
+    }
     const ph = ids.map(() => '?').join(',');
     // 多表级联删除必须原子执行：中途失败会留下「域名已删但任务/别名残留」的孤儿数据
     await withTransaction(async (q) => {
-      await clearDomainPermissions((names as any[]).map((r) => r.name), q);
+      await clearDomainPermissions((names as any[]).map((r) => r.name), q, ids);
       await q(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
       await q(`DELETE FROM ${table('cert_cname')} WHERE did IN (${ph})`, ids);
-      await q(`DELETE FROM ${table('cert_link_log')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('domain_alias')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('dmtask')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);
@@ -862,6 +899,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       q.status || null,
     );
     if (res === false) return { code: -1, msg: provider.getError() };
+    const rawPageCount = Array.isArray(res.list) ? res.list.length : 0;
     if (!acc.admin) {
       res.list = filterRecords(acc, info.domain.name, res.list);
       // 有整域名授权时可见全部记录，provider 的 total 准确且不构成信息泄露，直接沿用；
@@ -870,8 +908,9 @@ export default async function domainRoutes(app: FastifyInstance) {
       // 这里按「页边界」推断占位总数：满页时给出足以启用下一页的值，未满页时按已见数累加。
       const fullAccess = acc.perms.some((p) => sameDomain(p.domain, info.domain.name) && !p.sub);
       if (!fullAccess) {
-        const visible = res.list.length;
-        res.total = visible >= pageSize ? page * pageSize + 1 : (page - 1) * pageSize + visible;
+        // 不能用过滤后的可见条数推断总数：只要当页有一条不可见记录，total 就会被算小，
+        // 后续页永远翻不到。按厂商返回的原始页条数判断是否还有下一页。
+        res.total = rawPageCount >= pageSize ? page * pageSize + 1 : (page - 1) * pageSize + rawPageCount;
       }
     }
     (res as any)._access = buildAccess(acc, info.domain.name);
@@ -1209,8 +1248,16 @@ export default async function domainRoutes(app: FastifyInstance) {
       return { code: 0, msg: `批量修改备注，成功${success}条，失败${fail}条` };
     }
     if (action === 'value' || action === 'line') {
+      if (action === 'value' && b.type) {
+        // 批量改值不能把第一行的类型套到所有记录：混合类型选择必须显式拒绝，
+        // 否则会把 A 记录的值按 AAAA/CNAME 写入，造成静默改型。
+        const wanted = String(b.type).trim().toUpperCase();
+        if (records.some((r: any) => String(r.Type || '').trim().toUpperCase() !== wanted)) {
+          return { code: -1, msg: '批量修改记录值要求所选记录类型一致' };
+        }
+      }
       const results = await runPool(records, 8, async (r: any) => {
-        const type = action === 'value' ? String(b.type || r.Type) : r.Type;
+        const type = action === 'value' ? String(r.Type || b.type) : r.Type;
         const value = action === 'value' ? String(b.value ?? '') : (Array.isArray(r.Value) ? r.Value.join(',') : r.Value);
         const line = action === 'line' ? String(b.line ?? '') : r.Line;
         const name = String(r.Name ?? '').trim();
@@ -1898,7 +1945,10 @@ function detectType(value: string): string {
 
 // 服务端记录写入校验：类型白名单 + 名称/值长度与控制字符。
 // 不能把「前端下拉框」当作唯一约束——直连 API 可以写任意类型/超长值。
-const RECORD_TYPE_RE = /^(A|AAAA|CNAME|TXT|MX|NS|SRV|CAA|ALIAS|REDIRECT_URL|FORWARD_URL)$/;
+// 覆盖各厂商常见记录类型；PTR/HTTPS/SVCB 等也要允许编辑既有记录，
+// 否则前端原样提交 row.Type 时会被白名单拒绝。
+const RECORD_TYPE_RE =
+  /^(A|AAAA|CNAME|TXT|MX|NS|SRV|CAA|ALIAS|ANAME|DNAME|PTR|HTTPS|SVCB|NAPTR|TLSA|DS|DNSKEY|SSHFP|URI|SPF|APP|REDIRECT_URL|FORWARD_URL)$/;
 function validateRecordInput(type: any, name: any, value: any): string | null {
   const t = String(type ?? '').trim().toUpperCase();
   if (!RECORD_TYPE_RE.test(t)) return '不支持的记录类型';

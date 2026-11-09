@@ -332,6 +332,10 @@ async function loadDomains() {
       showRecords.value = false;
     }
     domains.value = list;
+    // 搜索/刷新后必须清理已不可见的选中项：否则批量删除/通知会作用到
+    // 当前列表根本看不到的域名（旧 checked 残留）。
+    const visibleIds = new Set(list.map((d: any) => Number(d.id)));
+    checked.value = checked.value.filter((id) => visibleIds.has(Number(id)));
     lastLoadedAt = Date.now();
   } catch (e: any) {
     if (e?.name !== 'AbortError') loadError.value = true;
@@ -357,6 +361,9 @@ async function loadAccounts() {
 }
 
 async function loadPullDomains(aid: number) {
+  // 切换账户后旧账户的勾选项不能再提交，否则会把 A 账户的 thirdid 写到 B 账户
+  checkedDomains.value = [];
+  pullDomains.value = [];
   const res = await api<any>('GET', `/dns/accounts/${aid}/pull`);
   if (res.code === 0) pullDomains.value = res.data;
   else {
@@ -558,13 +565,18 @@ function batchDelete() {
       const ids = checked.value.map(Number);
       const snapshot = [...domains.value];
       domains.value = domains.value.filter((d) => !ids.includes(Number(d.id)));
-      const res = await api('POST', '/domains/batch-del', { ids });
-      if (res.code === 0) {
-        message.success(res.msg);
-        checked.value = [];
-      } else {
-        domains.value = snapshot; // 失败回滚：整体还原，保持原有顺序
-        message.error(res.msg);
+      try {
+        const res = await api('POST', '/domains/batch-del', { ids });
+        if (res.code === 0) {
+          message.success(res.msg);
+          checked.value = [];
+        } else {
+          domains.value = snapshot; // 失败回滚：整体还原，保持原有顺序
+          message.error(res.msg);
+        }
+      } catch (e: any) {
+        domains.value = snapshot;
+        message.error(e?.message || t('common.networkError'));
       }
     },
   });
@@ -580,14 +592,19 @@ function delDomain(row: any) {
       const idx = domains.value.findIndex((d) => Number(d.id) === Number(row.id));
       const removed = idx >= 0 ? domains.value[idx] : null;
       if (idx >= 0) domains.value.splice(idx, 1);
-      const res = await api('DELETE', `/domains/${row.id}`);
-      if (res.code === 0) {
-        // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
-        checked.value = checked.value.filter((k) => Number(k) !== Number(row.id));
-        message.success(t('domain.deleteSuccess'));
-      } else {
-        if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
-        message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/domains/${row.id}`);
+        if (res.code === 0) {
+          // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
+          checked.value = checked.value.filter((k) => Number(k) !== Number(row.id));
+          message.success(t('domain.deleteSuccess'));
+        } else {
+          if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
+          message.error(res.msg);
+        }
+      } catch (e: any) {
+        if (removed) domains.value.splice(idx, 0, removed);
+        message.error(e?.message || t('common.networkError'));
       }
     },
   });

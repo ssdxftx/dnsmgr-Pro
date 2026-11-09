@@ -16,9 +16,12 @@
     <n-card :bordered="false">
       <template #header>{{ t('myBackup.exportTitle') }}</template>
       <p class="text-dim">{{ t('myBackup.exportHint') }}</p>
-      <n-form v-if="vault.mode === 'passphrase'" label-placement="top">
-        <n-form-item :label="t('myBackup.passphraseLabel')">
+      <n-form label-placement="top">
+        <n-form-item v-if="vault.mode === 'passphrase'" :label="t('myBackup.passphraseLabel')">
           <n-input v-model:value="exportPass" type="password" show-password-on="click" :placeholder="t('myBackup.passphraseHint')" />
+        </n-form-item>
+        <n-form-item :label="t('myBackup.loginPassword')">
+          <n-input v-model:value="exportLoginPass" type="password" show-password-on="click" :placeholder="t('myBackup.loginPasswordHint')" />
         </n-form-item>
       </n-form>
       <n-button type="primary" :loading="exporting" :disabled="vault.initialized === false" @click="doExport">
@@ -66,7 +69,7 @@
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { NButton, NSpace, useDialog, useMessage } from 'naive-ui';
+import { NButton, NInput, NSpace, useDialog, useMessage } from 'naive-ui';
 import { api, getToken } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
@@ -84,6 +87,7 @@ const loading = ref(false);
 const exporting = ref(false);
 const importing = ref(false);
 const exportPass = ref('');
+const exportLoginPass = ref('');
 const importPass = ref('');
 const importLoginPass = ref('');
 const fileEl = ref<HTMLInputElement | null>(null);
@@ -134,7 +138,7 @@ async function load() {
   loading.value = true;
   loadError.value = false;
   try {
-    const [v, j] = await Promise.all([api<any>('GET', '/vault/status'), api<any>('GET', '/backup/jobs')]);
+    const [v, j] = await Promise.all([api<any>('GET', '/vault/status'), api<any>('GET', '/backup/jobs?mine=1')]);
     if (v.code !== 0 || j.code !== 0) throw new Error(v.msg || j.msg || 'load failed');
     vault.value = v?.data || {};
     jobs.value = (j?.data || []).filter((x: any) => x.scope === 'user');
@@ -146,12 +150,17 @@ async function load() {
 }
 
 async function doExport() {
+  if (!exportLoginPass.value) {
+    message.warning(t('myBackup.loginPasswordHint'));
+    return;
+  }
   exporting.value = true;
   try {
     const res = await api<any>('POST', '/backup/export', {
       scope: 'user',
       include_logs: true,
       passphrase: exportPass.value || undefined,
+      password: exportLoginPass.value || undefined,
     });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
@@ -210,10 +219,56 @@ async function doImport(dryRun: boolean, confirmed = false) {
   }
 }
 
+function askPassword(title: string, placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let value = '';
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    dialog.warning({
+      title,
+      content: () =>
+        h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          placeholder,
+          onUpdateValue: (v: string) => {
+            value = v;
+          },
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => finish(value),
+      onNegativeClick: () => finish(null),
+      onClose: () => finish(null),
+      onMaskClick: () => finish(null),
+    });
+  });
+}
+
 async function download(row: any) {
-  // 下载同样可能断网/401/非 JSON 响应：必须捕获异常并提示，否则点击后毫无反馈
+  // 下载同样可能断网/401/非 JSON 响应：必须捕获异常并提示，否则点击后毫无反馈。
+  // 个人归档口令就是保险库口令，服务端要求重新确认登录密码；这里用 UTF-8 Base64
+  // 头传递，避免中文/emoji 密码触发 Fetch 的 ByteString 限制。
+  const password = await askPassword(t('myBackup.downloadTitle'), t('myBackup.loginPasswordHint'));
+  if (password === null) return;
+  if (!password) {
+    message.warning(t('myBackup.loginPasswordHint'));
+    return;
+  }
   try {
-    const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers: { Authorization: 'Bearer ' + getToken() } });
+    const bytes = new TextEncoder().encode(password);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    const res = await fetch(`/api/backup/jobs/${row.id}/download`, {
+      headers: {
+        Authorization: 'Bearer ' + getToken(),
+        'X-Confirm-Password-B64': btoa(bin),
+      },
+    });
     if (!res.ok) return message.error(t('backup.loadFailed'));
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

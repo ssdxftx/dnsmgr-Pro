@@ -1,4 +1,4 @@
-import { query, table, getDbType, columnExists, indexExists, uniqueIndexExists } from './db.js';
+import { query, table, getDbType, columnExists, indexExists, uniqueIndexExists, listColumns } from './db.js';
 import { sqliteIndexName } from './db/sqlite-dialect.js';
 import { setCdnDomainIdColumnAvailable } from './lib/cert/cdnDomainIdColumn.js';
 
@@ -17,6 +17,7 @@ export async function migrate(): Promise<void> {
   await ensureColumn('user', 'totp_locked_until', 'datetime DEFAULT NULL');
   await ensureColumn('dmtask', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
   await ensureColumn('sctask', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
+  await ensureColumn('sctask', 'retry', "int(11) NOT NULL DEFAULT '0'");
   await ensureColumn('optimizeip', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
   await ensureColumn('cdn_preheat_task', 'owner_uid', "int(11) NOT NULL DEFAULT '0'");
   await ensureColumn('permission', 'readonly', "tinyint(1) NOT NULL DEFAULT '0'");
@@ -40,6 +41,8 @@ export async function migrate(): Promise<void> {
   // 幂等键必须绑定请求内容：只绑定 method+path 时，同一 Key 换 body/query 会拿到旧响应。
   // 必须放在 migrateApiGovernance 之后：幂等表由它创建，新库首次启动时表还不存在。
   await ensureColumn('idempotency_key', 'request_hash', 'char(64) DEFAULT NULL');
+  await ensureColumn('async_job', 'worker_id', "varchar(128) NOT NULL DEFAULT ''");
+  await ensureColumn('async_job', 'heartbeat_at', 'datetime DEFAULT NULL');
   await migrateLegacyNonce();
 
   await query(
@@ -383,6 +386,72 @@ async function ensureCompositeUniqueIndex(tableName: string, columns: string[], 
   }
 }
 
+/**
+ * 任务表 recordid 从 varchar(60) 放宽到 text，并把唯一键改为 (did, recordid)。
+ * 第六轮 Technitium 稳定 RecordId 后长度普遍超过 60，MySQL strict 模式会直接拒绝写入。
+ * MySQL 的 TEXT 不能整列做唯一索引，使用 191 字符前缀；应用层同时按 did 判重。
+ */
+async function migrateTaskRecordIds(): Promise<void> {
+  const sqlite = getDbType() === 'sqlite';
+  if (!sqlite) {
+    for (const col of ['frequency', 'timeout', 'cycle']) {
+      try {
+        const cols = await listColumns(table('dmtask'));
+        const def = cols.find((c) => String(c.Field) === col);
+        if (def && /tinyint/i.test(String(def.Type || ''))) {
+          const fallback = col === 'frequency' ? '' : col === 'cycle' ? ' DEFAULT 3' : ' DEFAULT 2';
+          await query(`ALTER TABLE ${table('dmtask')} MODIFY COLUMN ${col} INT(11) NOT NULL${fallback}`);
+        }
+      } catch (e: any) {
+        console.log(`[migrate] 放宽 dmtask.${col} 失败（跳过）：${e?.message || e}`);
+      }
+    }
+  }
+  for (const name of ['dmtask', 'sctask']) {
+    const oldIndexes = name === 'dmtask' ? ['uniq_recordid'] : ['uniq_record_switch'];
+    const newIndex = name === 'dmtask' ? 'uniq_did_recordid' : 'uniq_did_record_switch';
+    // 必须先删旧索引，再改列类型：MySQL 不允许把被索引的 varchar 直接改成无前缀的 TEXT。
+    for (const idx of [...oldIndexes, newIndex]) {
+      const actual = sqlite ? sqliteIndexName(table(name), idx) : idx;
+      try {
+        if (!(await indexExists(table(name), actual))) continue;
+        if (sqlite) await query(`DROP INDEX \`${actual}\``);
+        else await query(`ALTER TABLE ${table(name)} DROP INDEX ${idx}`);
+      } catch (e: any) {
+        console.log(`[migrate] 删除索引 ${name}.${idx} 失败（跳过）：${e?.message || e}`);
+      }
+    }
+    if (!sqlite) {
+      try {
+        const cols = await listColumns(table(name));
+        const rec = cols.find((c) => String(c.Field) === 'recordid');
+        const type = String(rec?.Type || '').toLowerCase();
+        if (/^(?:var)?char\(\d+\)$/.test(type)) {
+          await query(`ALTER TABLE ${table(name)} MODIFY COLUMN recordid TEXT NOT NULL`);
+          console.log(`[migrate] ${name}.recordid 已放宽为 TEXT`);
+        }
+      } catch (e: any) {
+        console.log(`[migrate] 放宽 ${name}.recordid 失败（跳过）：${e?.message || e}`);
+      }
+    }
+    try {
+      if (sqlite) {
+        const actual = sqliteIndexName(table(name), newIndex);
+        const cols = name === 'dmtask' ? '(`did`, `recordid`)' : '(`did`, `recordid`, `switchtype`, `switchtime`)';
+        await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actual}\` ON ${table(name)} ${cols}`);
+      } else {
+        const cols =
+          name === 'dmtask'
+            ? '(`did`, `recordid`(255))'
+            : '(`did`, `recordid`(255), `switchtype`, `switchtime`)';
+        await query(`ALTER TABLE ${table(name)} ADD UNIQUE INDEX ${newIndex} ${cols}`);
+      }
+    } catch (e: any) {
+      console.log(`[migrate] 创建任务唯一索引 ${name}.${newIndex} 失败（可能存在重复数据）：${e?.message || e}`);
+    }
+  }
+}
+
 async function ensureColumn(tableName: string, column: string, definition: string): Promise<void> {
   if (await columnExists(table(tableName), column)) return;
   try {
@@ -464,6 +533,8 @@ async function migrateApiGovernance(): Promise<void> {
       detail text DEFAULT NULL,
       result mediumtext DEFAULT NULL,
       error varchar(500) DEFAULT NULL,
+      worker_id varchar(128) NOT NULL DEFAULT '',
+      heartbeat_at datetime DEFAULT NULL,
       created_at datetime NOT NULL,
       started_at datetime DEFAULT NULL,
       finished_at datetime DEFAULT NULL,
@@ -619,9 +690,8 @@ async function migrateBackupAndVault(): Promise<void> {
   // 同一账户下域名/加速域名唯一：并发提交会绕过应用层「先查后插」创建重复记录
   await ensureCompositeUniqueIndex('domain', ['aid', 'name'], 'uniq_aid_name');
   await ensureCompositeUniqueIndex('cdn_domain', ['aid', 'name'], 'uniq_cdn_aid_name');
-  // 任务去重：与创建接口的「先查后插」判重条件保持一致，避免并发双击产生重复任务
-  await ensureCompositeUniqueIndex('dmtask', ['recordid'], 'uniq_recordid');
-  await ensureCompositeUniqueIndex('sctask', ['recordid', 'switchtype', 'switchtime'], 'uniq_record_switch');
+  // 任务去重：键必须包含 did（不同域名可能复用同一厂商内的局部 RecordId）
+  await migrateTaskRecordIds();
 
   // 单会话令牌吊销：登出后 jti 落库，令牌在过期前立即失效
   await query(

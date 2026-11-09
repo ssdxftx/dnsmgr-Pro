@@ -51,6 +51,8 @@ export class HuaweiDeploy implements DeployProvider {
     } else if (config.product == 'upload') {
       const certId = await this.getCertId(fullchain, privatekey);
       info.cert_id = certId;
+    } else {
+      throw new Error('未知的产品类型：' + String(config.product || '(空)'));
     }
   }
 

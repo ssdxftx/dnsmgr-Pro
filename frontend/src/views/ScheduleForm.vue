@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('schedule.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainChange" style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('schedule.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainSelect" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -134,6 +134,14 @@ async function loadDomains(kw = '') {
   } finally {
     domainLoadBusy.value = false;
   }
+}
+
+function onDomainSelect() {
+  // 切换主域名后旧记录 ID 已无意义，必须清空，避免定时切换操作到其他域名的同号记录。
+  form.recordid = null;
+  form.recordinfo = '';
+  recordOptions.value = [];
+  onDomainChange();
 }
 
 function onDomainChange() {

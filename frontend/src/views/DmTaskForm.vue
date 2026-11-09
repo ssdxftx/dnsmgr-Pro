@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('dm.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('dm.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainChange" style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('dm.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainSelect" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -159,6 +159,15 @@ async function loadDomains(kw = '') {
   } finally {
     domainLoadBusy.value = false;
   }
+}
+
+function onDomainSelect() {
+  // 切换主域名后旧记录 ID 已无意义，必须清空，避免把 A 域名的记录写到 B 域名。
+  form.recordid = null;
+  form.recordinfo = '';
+  form.main_value = '';
+  recordOptions.value = [];
+  onDomainChange();
 }
 
 function onDomainChange() {

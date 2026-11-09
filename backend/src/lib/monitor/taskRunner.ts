@@ -52,6 +52,16 @@ async function handle(row: any): Promise<void> {
   let action = 0;
   let result: CheckResult = { status: false, errmsg: null, usetime: 0 };
   const now = Math.floor(Date.now() / 1000);
+  const prevStatus = Number(row.status || 0);
+
+  if (![1, 2, 3].includes(Number(row.type))) {
+    // 非法类型不会命中任何 DNS 操作分支，但旧逻辑仍会把 status 改掉并记录“切换成功”，
+    // 实际 DNS 未变。直接停用并记录原因，避免每个 tick 空转。
+    await query(`UPDATE ${table('dmtask')} SET active = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
+    await insertLog(row.id, 0, '任务类型非法，已自动停用').catch(() => undefined);
+    console.warn(`[dmtask] 任务 ${row.id} 类型非法(${row.type})，已自动停用`);
+    return;
+  }
 
   if (row.type === 3) {
     // 条件开启解析
@@ -115,18 +125,20 @@ async function handle(row: any): Promise<void> {
     }
   }
 
+  let opHandled = false;
   let drow: any = null;
-  if (action > 0) {
-    drow = await queryOne(
-      `SELECT A.*, B.type AS account_type, B.config AS account_config, B.owner_uid AS account_owner FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
-      [row.did]
-    );
-    if (!drow) {
-      console.log('域名不存在（ID：' + row.did + '）');
-      return;
+  try {
+    if (action > 0) {
+      drow = await queryOne(
+        `SELECT A.*, B.type AS account_type, B.config AS account_config, B.owner_uid AS account_owner FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
+        [row.did]
+      );
+      if (!drow) {
+        console.log('域名不存在（ID：' + row.did + '）');
+        return;
+      }
+      row.domain = row.rr + '.' + drow.name;
     }
-    row.domain = row.rr + '.' + drow.name;
-  }
 
   const accountConfig = drow ? await loadAccountConfig({ config: drow.account_config, owner_uid: drow.account_owner }) : {};
 
@@ -187,11 +199,21 @@ async function handle(row: any): Promise<void> {
   }
 
   if (!opOk) {
-    // 回滚为切换前状态：action=1（切到备用）回滚为 0；action=2（切回主）回滚为 1
-    await query(`UPDATE ${table('dmtask')} SET status = ?, errcount = 0 WHERE id = ?`, [action === 1 ? 0 : 1, row.id]);
     await insertLog(row.id, action, opErr || 'DNS 操作失败');
-    console.warn(`[dmtask] 任务 ${row.id} DNS 操作失败，已回滚状态：${opErr || '未知错误'}`);
+    console.warn(`[dmtask] 任务 ${row.id} DNS 操作失败，将回滚状态：${opErr || '未知错误'}`);
     return;
+  }
+    // DNS 已成功变更：此后即使审计/通知失败也不能回滚状态，否则会出现
+    //「DNS 已切换但状态仍是旧值」的下一次重复切换。
+    opHandled = true;
+  } finally {
+    if (!opHandled && action > 0) {
+      // 域名缺失、配置解密失败、厂商不支持、DNS 操作失败等所有异常路径
+      // 都恢复为本次尝试前的状态，避免状态已变而 DNS 未变。
+      await query(`UPDATE ${table('dmtask')} SET status = ?, errcount = 0 WHERE id = ?`, [prevStatus, row.id]).catch((e: any) => {
+        console.error(`[dmtask] 任务 ${row.id} 状态回滚失败:`, e?.message || e);
+      });
+    }
   }
 
   await insertLog(row.id, action, row.type !== 3 && result ? (result.status ? null : result.errmsg) : null);
@@ -227,7 +249,9 @@ async function handle(row: any): Promise<void> {
     });
   }
 
-  if (row.type !== 3) {
+  // 只在状态真正发生迁移时通知：action=0 表示本轮没有切换，
+  // 包括稳定运行和 cycle 确认窗口内的首次失败，不能发“恢复正常”通知。
+  if (action > 0 && row.type !== 3) {
     await sendNotice(action, row, { status: result.status, errmsg: result.errmsg });
   }
   if (action > 0 && drow) {

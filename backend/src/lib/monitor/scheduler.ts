@@ -44,6 +44,12 @@ async function tick(): Promise<void> {
     count = 0;
     day = today;
   }
+  // 心跳必须在执行任务前写：单轮探测可能超过 90 秒，放到末尾会让概览页/外部监控误报调度器挂掉。
+  const tickStarted = Date.now();
+  if (tickStarted - lastWriteAt >= 30_000) {
+    await configSet('run_time', fmtDateTime());
+    lastWriteAt = tickStarted;
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const rows = await query(
@@ -64,11 +70,14 @@ async function tick(): Promise<void> {
       // running 被清零后下一轮会与旧 worker 并发处理同一批任务。
       try {
         await runMonitorTask(row);
-        // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期
+        // 用任务完成时刻推进下一次检查，避免单轮耗时超过 frequency 时立刻再次到期。
+        // 历史数据可能有 0/负数/非整数 frequency，必须兜底，否则会制造 5 秒热循环。
         const doneAt = Math.floor(Date.now() / 1000);
+        const rawFreq = Number(row.frequency);
+        const interval = Number.isInteger(rawFreq) && rawFreq >= 1 ? rawFreq : 60;
         await query(`UPDATE ${table('dmtask')} SET checktime = ?, checknexttime = ? WHERE id = ?`, [
           doneAt,
-          doneAt + (row.frequency || 60),
+          doneAt + interval,
           row.id,
         ]);
         count++;
@@ -79,12 +88,9 @@ async function tick(): Promise<void> {
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, rows.length) }, worker));
 
-  // 心跳写库降频：仅在计数变化或距上次写入超过 30s 时落库，避免每秒 2 次无条件写
-  const nowMs = Date.now();
-  if (count !== lastWrittenCount || nowMs - lastWriteAt >= 30_000) {
-    await configSet('run_time', fmtDateTime());
+  // 心跳已在 tick 开始时写入；这里只更新计数，避免慢 tick 期间心跳时间被延后。
+  if (count !== lastWrittenCount) {
     await configSet('run_count', String(count));
     lastWrittenCount = count;
-    lastWriteAt = nowMs;
   }
 }

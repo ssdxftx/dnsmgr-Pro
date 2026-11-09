@@ -110,6 +110,7 @@ export default {
     enabled: 'Two-factor verification is enabled',
     enabledDesc: 'A dynamic passcode will be required when you sign in',
     closePasswordPlaceholder: 'Enter your login password to disable',
+    closeCodePlaceholder: 'Enter the current 6-digit passcode',
     close: 'Disable Two-Factor Verification',
     codeRequired: 'Please enter the dynamic passcode',
     passwordRequired: 'Please enter your login password to confirm',

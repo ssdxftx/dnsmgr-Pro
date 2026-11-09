@@ -172,10 +172,12 @@ export class GoEdgeDns implements DnsProvider {
       return false;
     }
     const hasLocalFilter = !!SubDomain || !!Value || !!Status;
+    const offset = hasLocalFilter ? 0 : Math.max(0, (PageNumber - 1) * PageSize);
+    const pageSize = hasLocalFilter ? 1000 : Math.max(1, PageSize);
     const payload: Record<string, any> = {
       nsDomainId: Number(this.domainid),
-      offset: hasLocalFilter ? 0 : Math.max(0, (PageNumber - 1) * PageSize),
-      size: hasLocalFilter ? 1000 : Math.max(1, PageSize),
+      offset,
+      size: pageSize,
     };
     if (KeyWord) payload.keyword = KeyWord;
     if (_Type) payload.type = _Type;
@@ -190,10 +192,21 @@ export class GoEdgeDns implements DnsProvider {
         if (Status && row.Status !== Status) continue;
         list.push(row);
       }
-      const total = list.length;
-      if (hasLocalFilter) {
-        const offset = Math.max(0, (PageNumber - 1) * PageSize);
-        list = list.slice(offset, offset + Math.max(1, PageSize));
+      let total = list.length;
+      if (!hasLocalFilter) {
+        // 当前页长度不是总数：必须查 count，否则 page*pageSize>=total 会在第一页就结束索引。
+        total = offset + list.length + (list.length >= pageSize ? 1 : 0);
+        try {
+          const countData = await this.request('/NSRecordService/countNSRecords', { nsDomainId: Number(this.domainid) });
+          const n = Number(countData?.count);
+          if (Number.isFinite(n) && n >= 0) total = Math.max(n, offset + list.length);
+        } catch {
+          // count 接口不可用时保留“满页则至少还有下一页”的下界语义
+        }
+      } else {
+        const offsetLocal = Math.max(0, (PageNumber - 1) * PageSize);
+        total = list.length;
+        list = list.slice(offsetLocal, offsetLocal + Math.max(1, PageSize));
       }
       return { total, list };
     } catch (e: any) {

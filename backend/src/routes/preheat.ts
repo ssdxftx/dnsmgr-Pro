@@ -9,11 +9,20 @@ const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authe
 
 export default async function preheatRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
+  const isSuper = (req: any) => Number(req.user?.is_super || 0) === 1;
+  const loadTask = async (req: any, id: number): Promise<any | null> => {
+    const row: any = await queryOne(`SELECT * FROM ${table('cdn_preheat_task')} WHERE id = ?`, [id]);
+    if (!row) return null;
+    if (!isSuper(req) && Number(row.owner_uid) !== Number(req.user.uid)) return null;
+    return row;
+  };
 
   // 任务列表
   app.get('/api/cdn/preheat-tasks', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
-    const rows = await query(`SELECT * FROM ${table('cdn_preheat_task')} ORDER BY id DESC`);
+    const rows = isSuper(req)
+      ? await query(`SELECT * FROM ${table('cdn_preheat_task')} ORDER BY id DESC`)
+      : await query(`SELECT * FROM ${table('cdn_preheat_task')} WHERE owner_uid = ? ORDER BY id DESC`, [Number(req.user.uid)]);
     return { code: 0, data: rows };
   });
 
@@ -40,19 +49,21 @@ export default async function preheatRoutes(app: FastifyInstance) {
   app.put('/api/cdn/preheat-tasks/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row: any = await queryOne(`SELECT * FROM ${table('cdn_preheat_task')} WHERE id = ?`, [id]);
+    const row: any = await loadTask(req, id);
     if (!row) return { code: -1, msg: '任务不存在' };
     const b = req.body || {};
     const urls = String(b.urls ?? row.urls).trim();
     if (!urls) return { code: -1, msg: '请填写需要预热的链接' };
-    const cycle = b.cycle === 'interval' ? 'interval' : 'daily';
-    const intervalMin = b.cycle === 'interval' ? Number(b.interval_min) || 0 : 0;
-    const runTime = cycle === 'daily' ? String(b.run_time || '00:00') : null;
-    const op = b.op === 'purge' ? 'purge' : 'preheat';
+    const cycle = b.cycle === undefined ? String(row.cycle || 'daily') : b.cycle === 'interval' ? 'interval' : 'daily';
+    const intervalMin = cycle === 'interval' ? Number(b.interval_min ?? row.interval_min) || 0 : 0;
+    const runTime = cycle === 'daily' ? String(b.run_time ?? row.run_time ?? '00:00') : null;
+    const op = b.op === undefined ? (row.op === 'purge' ? 'purge' : 'preheat') : b.op === 'purge' ? 'purge' : 'preheat';
+    const active = b.active === undefined ? Number(row.active || 0) : b.active == 0 ? 0 : 1;
     if (cycle === 'interval' && intervalMin <= 0) return { code: -1, msg: '请填写预热间隔的分钟数' };
+    const nextRun = fmtDateTime(calcNextRun(cycle, intervalMin, runTime));
     await query(
-      `UPDATE ${table('cdn_preheat_task')} SET name = ?, urls = ?, op = ?, cycle = ?, interval_min = ?, run_time = ?, active = ? WHERE id = ?`,
-      [String(b.name || ''), urls, op, cycle, intervalMin, runTime, b.active == 0 ? 0 : 1, id],
+      `UPDATE ${table('cdn_preheat_task')} SET name = ?, urls = ?, op = ?, cycle = ?, interval_min = ?, run_time = ?, active = ?, next_run = ? WHERE id = ?`,
+      [String(b.name ?? row.name ?? ''), urls, op, cycle, intervalMin, runTime, active, nextRun, id],
     );
     return { code: 0, msg: '保存成功' };
   });
@@ -61,6 +72,8 @@ export default async function preheatRoutes(app: FastifyInstance) {
   app.post('/api/cdn/preheat-tasks/:id/toggle', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
+    const row = await loadTask(req, id);
+    if (!row) return { code: -1, msg: '任务不存在' };
     const active = (req.body || {}).active == 1 ? 1 : 0;
     await query(`UPDATE ${table('cdn_preheat_task')} SET active = ? WHERE id = ?`, [active, id]);
     return { code: 0, msg: active ? '已启用' : '已停用' };
@@ -70,7 +83,7 @@ export default async function preheatRoutes(app: FastifyInstance) {
   app.post('/api/cdn/preheat-tasks/:id/run', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
-    const row: any = await queryOne(`SELECT * FROM ${table('cdn_preheat_task')} WHERE id = ?`, [id]);
+    const row: any = await loadTask(req, id);
     if (!row) return { code: -1, msg: '任务不存在' };
     let result: { success: number; failed: number } | null = null;
     const locked = await withDistributedLock('dnsmgr:preheat', async () => {
@@ -87,6 +100,8 @@ export default async function preheatRoutes(app: FastifyInstance) {
   app.delete('/api/cdn/preheat-tasks/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
     const id = Number(req.params.id);
+    const row = await loadTask(req, id);
+    if (!row) return { code: -1, msg: '任务不存在' };
     await query(`DELETE FROM ${table('cdn_preheat_task')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };
   });

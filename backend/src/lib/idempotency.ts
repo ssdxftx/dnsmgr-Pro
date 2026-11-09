@@ -88,7 +88,16 @@ export async function beginIdempotent(req: any, reply: any): Promise<any> {
 
   req.idempotency = { uid, hash, method, path };
   if (Math.random() < 0.05) {
-    query(`DELETE FROM ${table('idempotency_key')} WHERE expires_at < NOW() LIMIT 200`).catch(() => undefined);
+    // SQLite 不支持 DELETE ... LIMIT；改用可移植的派生表子查询。
+    query(
+      `DELETE FROM ${table('idempotency_key')}
+        WHERE id IN (
+          SELECT id FROM (
+            SELECT id FROM ${table('idempotency_key')} WHERE expires_at < ? ORDER BY id LIMIT 200
+          ) AS expired
+        )`,
+      [new Date()],
+    ).catch(() => undefined);
   }
   return undefined;
 }

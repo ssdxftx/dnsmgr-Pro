@@ -3,6 +3,8 @@ import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 import { checkLevel } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
+import { getDnsProvider } from '../lib/dns/factory.js';
+import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
 import { executeOne, updateNexttime } from '../lib/schedule/scheduleService.js';
 
 // 定时切换解析接口仅管理员可用
@@ -16,6 +18,28 @@ const authenticate = (app: FastifyInstance) => ({
 
 function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';
+}
+
+async function validateTaskRecord(did: number, recordid: string): Promise<string | null> {
+  const d: any = await queryOne(
+    `SELECT D.name, D.thirdid, A.type, A.config, A.owner_uid FROM ${table('domain')} D JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    [Number(did)],
+  );
+  if (!d) return '域名不存在';
+  let provider: any = null;
+  try {
+    provider = getDnsProvider(d.type, await loadAccountConfig({ config: d.config, owner_uid: d.owner_uid }), d.name, d.thirdid);
+  } catch {
+    return '账户配置无法解密';
+  }
+  if (!provider) return '该 DNS 厂商暂不支持';
+  if (typeof provider.getDomainRecordInfo !== 'function') return null;
+  const info = await Promise.resolve()
+    .then(() => provider.getDomainRecordInfo(String(recordid)))
+    .catch(() => false);
+  if (!info) return '所选解析记录不属于当前域名，请重新选择';
+  if (!info.Type || info.Value === null || info.Value === undefined) return '请选择具体解析记录（主机汇总行不可用）';
+  return null;
 }
 
 export default async function scheduleRoutes(app: FastifyInstance) {
@@ -111,9 +135,11 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     }
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };
     if (!(await canAccessDomainAccount(val.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    const recordErr = await validateTaskRecord(val.did, val.recordid);
+    if (recordErr) return { code: -1, msg: recordErr };
     const exists = await queryOne(
-      `SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ?`,
-      [val.recordid, val.switchtype, val.switchtime]
+      `SELECT id FROM ${table('sctask')} WHERE did = ? AND recordid = ? AND switchtype = ? AND switchtime = ?`,
+      [val.did, val.recordid, val.switchtype, val.switchtime]
     );
     if (exists) return { code: -1, msg: '当前定时切换策略已存在' };
 
@@ -126,7 +152,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
       if (isDuplicateError(e)) return { code: -1, msg: '当前定时切换策略已存在' };
       throw e;
     }
-    const idRow = await queryOne(`SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ? ORDER BY id DESC LIMIT 1`, [val.recordid, val.switchtype, val.switchtime]);
+    const idRow = await queryOne(`SELECT id FROM ${table('sctask')} WHERE did = ? AND recordid = ? AND switchtype = ? AND switchtime = ? ORDER BY id DESC LIMIT 1`, [val.did, val.recordid, val.switchtype, val.switchtime]);
     if (idRow) {
       const row = await queryOne(`SELECT * FROM ${table('sctask')} WHERE id = ?`, [idRow.id]);
       if (row) await updateNexttime(row);
@@ -149,9 +175,11 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     }
     if (!val.did || !val.rr || !val.recordid) return { code: -1, msg: '必填项不能为空' };
     if (!(await canAccessDomainAccount(val.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    const recordErr = await validateTaskRecord(val.did, val.recordid);
+    if (recordErr) return { code: -1, msg: recordErr };
     const exists = await queryOne(
-      `SELECT id FROM ${table('sctask')} WHERE recordid = ? AND switchtype = ? AND switchtime = ? AND id <> ?`,
-      [val.recordid, val.switchtype, val.switchtime, id]
+      `SELECT id FROM ${table('sctask')} WHERE did = ? AND recordid = ? AND switchtype = ? AND switchtime = ? AND id <> ?`,
+      [val.did, val.recordid, val.switchtype, val.switchtime, id]
     );
     if (exists) return { code: -1, msg: '当前定时切换策略已存在' };
 
@@ -171,6 +199,7 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     try {
       await executeOne(task);
+      await query(`UPDATE ${table('sctask')} SET retry = 0 WHERE id = ?`, [id]);
       await updateNexttime(task);
       return { code: 0, msg: '已执行一次定时切换' };
     } catch (e: any) {
@@ -184,7 +213,13 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     if (!task) return { code: -1, msg: '切换策略不存在' };
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     const active = Number((req.body || {}).active) === 1 ? 1 : 0;
-    await query(`UPDATE ${table('sctask')} SET active = ? WHERE id = ?`, [active, id]);
+    // 重新启用等同于给任务一次干净的重试机会；否则之前累计的失败次数会在下一次
+    // 失败时立刻把它再次停用。
+    if (active) {
+      await query(`UPDATE ${table('sctask')} SET active = 1, retry = 0 WHERE id = ?`, [id]);
+    } else {
+      await query(`UPDATE ${table('sctask')} SET active = 0 WHERE id = ?`, [id]);
+    }
     return { code: 0, msg: '设置成功' };
   });
 
@@ -212,7 +247,11 @@ export default async function scheduleRoutes(app: FastifyInstance) {
       const res: any = await query(`DELETE FROM ${table('sctask')} WHERE id IN (${ph})`, list);
       success = Number(res?.affectedRows ?? list.length);
     } else if (act === 'open' || act === 'close') {
-      await query(`UPDATE ${table('sctask')} SET active = ? WHERE id IN (${ph})`, [act === 'open' ? 1 : 0, ...list]);
+      if (act === 'open') {
+        await query(`UPDATE ${table('sctask')} SET active = 1, retry = 0 WHERE id IN (${ph})`, list);
+      } else {
+        await query(`UPDATE ${table('sctask')} SET active = 0 WHERE id IN (${ph})`, list);
+      }
       // UPDATE 在目标值本就相同时 affectedRows 为 0，未报错即视为成功
       success = list.length;
     }

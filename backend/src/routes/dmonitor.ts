@@ -3,6 +3,8 @@ import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { configGet } from '../config.js';
 import { checkLevel } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
+import { getDnsProvider } from '../lib/dns/factory.js';
+import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
 import { runMonitorTask } from '../lib/monitor/taskRunner.js';
 import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 
@@ -24,6 +26,28 @@ const RUN_STATE_STALE_MS = 90000;
 
 function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';
+}
+
+async function validateTaskRecord(did: number, recordid: string): Promise<string | null> {
+  const d: any = await queryOne(
+    `SELECT D.name, D.thirdid, A.type, A.config, A.owner_uid FROM ${table('domain')} D JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    [Number(did)],
+  );
+  if (!d) return '域名不存在';
+  let provider: any = null;
+  try {
+    provider = getDnsProvider(d.type, await loadAccountConfig({ config: d.config, owner_uid: d.owner_uid }), d.name, d.thirdid);
+  } catch {
+    return '账户配置无法解密';
+  }
+  if (!provider) return '该 DNS 厂商暂不支持';
+  if (typeof provider.getDomainRecordInfo !== 'function') return null;
+  const info = await Promise.resolve()
+    .then(() => provider.getDomainRecordInfo(String(recordid)))
+    .catch(() => false);
+  if (!info) return '所选解析记录不属于当前域名，请重新选择';
+  if (!info.Type || info.Value === null || info.Value === undefined) return '请选择具体解析记录（主机汇总行不可用）';
+  return null;
 }
 
 export default async function dmonitorRoutes(app: FastifyInstance) {
@@ -155,6 +179,18 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.recordid || !task.main_value || !task.frequency || !task.cycle) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (![1, 2, 3].includes(task.type)) return { code: -1, msg: '任务类型不合法' };
+    if (![0, 1, 2].includes(task.checktype)) return { code: -1, msg: '检测方式不合法' };
+    if (!Number.isInteger(task.cycle) || task.cycle < 1 || task.cycle > 100) return { code: -1, msg: '确认次数需为 1-100' };
+    if (!Number.isInteger(task.frequency) || task.frequency < 1 || task.frequency > 86400) {
+      return { code: -1, msg: '检测间隔需为 1-86400 秒' };
+    }
+    if (!Number.isInteger(task.timeout) || task.timeout < 1 || task.timeout > 3600) {
+      return { code: -1, msg: '超时时间需为 1-3600 秒' };
+    }
+    if (task.tcpport !== null && (!Number.isInteger(task.tcpport) || task.tcpport < 1 || task.tcpport > 65535)) {
+      return { code: -1, msg: 'TCP 端口需为 1-65535' };
+    }
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.checktype > 0 && task.timeout > task.frequency) {
       return { code: -1, msg: '为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔' };
@@ -162,7 +198,9 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (task.type === 2 && task.backup_value === task.main_value) {
       return { code: -1, msg: '主备地址不能相同' };
     }
-    const exists = await queryOne(`SELECT id FROM ${table('dmtask')} WHERE recordid = ?`, [task.recordid]);
+    const recordErr = await validateTaskRecord(task.did, task.recordid);
+    if (recordErr) return { code: -1, msg: recordErr };
+    const exists = await queryOne(`SELECT id FROM ${table('dmtask')} WHERE did = ? AND recordid = ?`, [task.did, task.recordid]);
     if (exists) return { code: -1, msg: '当前容灾切换策略已存在' };
 
     try {
@@ -206,6 +244,18 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.recordid || !task.main_value || !task.frequency || !task.cycle) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (![1, 2, 3].includes(task.type)) return { code: -1, msg: '任务类型不合法' };
+    if (![0, 1, 2].includes(task.checktype)) return { code: -1, msg: '检测方式不合法' };
+    if (!Number.isInteger(task.cycle) || task.cycle < 1 || task.cycle > 100) return { code: -1, msg: '确认次数需为 1-100' };
+    if (!Number.isInteger(task.frequency) || task.frequency < 1 || task.frequency > 86400) {
+      return { code: -1, msg: '检测间隔需为 1-86400 秒' };
+    }
+    if (!Number.isInteger(task.timeout) || task.timeout < 1 || task.timeout > 3600) {
+      return { code: -1, msg: '超时时间需为 1-3600 秒' };
+    }
+    if (task.tcpport !== null && (!Number.isInteger(task.tcpport) || task.tcpport < 1 || task.tcpport > 65535)) {
+      return { code: -1, msg: 'TCP 端口需为 1-65535' };
+    }
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.checktype > 0 && task.timeout > task.frequency) {
       return { code: -1, msg: '为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔' };
@@ -213,7 +263,9 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (task.type === 2 && task.backup_value === task.main_value) {
       return { code: -1, msg: '主备地址不能相同' };
     }
-    const exists = await queryOne(`SELECT id FROM ${table('dmtask')} WHERE recordid = ? AND id <> ?`, [task.recordid, id]);
+    const recordErr = await validateTaskRecord(task.did, task.recordid);
+    if (recordErr) return { code: -1, msg: recordErr };
+    const exists = await queryOne(`SELECT id FROM ${table('dmtask')} WHERE did = ? AND recordid = ? AND id <> ?`, [task.did, task.recordid, id]);
     if (exists) return { code: -1, msg: '当前容灾切换策略已存在' };
 
     await query(

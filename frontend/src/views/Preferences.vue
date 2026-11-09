@@ -114,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import {
   NAlert, NButton, NCard, NDatePicker, NEmpty, NForm, NFormItem, NInput, NModal,
@@ -152,6 +152,9 @@ const submitting = ref(false);
 const createdKey = ref('');
 const reauthPassword = ref('');
 const pending = reactive<{ action: 'rotate' | 'revoke' | 'legacy' | 'revokeAll'; id: number }>({ action: 'revoke', id: 0 });
+watch(secretShow, (v) => { if (!v) createdKey.value = ''; });
+watch(createShow, (v) => { if (!v) createForm.password = ''; });
+watch(reauthShow, (v) => { if (!v) reauthPassword.value = ''; });
 const createForm = reactive({
   name: '',
   scopes: ['*'] as string[],

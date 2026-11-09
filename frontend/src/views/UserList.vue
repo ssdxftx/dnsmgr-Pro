@@ -72,6 +72,9 @@
             <n-button @click="genApikey">{{ t('userList.genApiKey') }}</n-button>
           </n-input-group>
         </n-form-item>
+        <n-form-item v-if="reauthNeeded" :label="t('userList.loginPasswordConfirm')" required>
+          <n-input v-model:value="form.confirmPassword" type="password" show-password-on="click" :placeholder="t('userList.loginPasswordConfirmHint')" />
+        </n-form-item>
         <n-form-item :label="t('userList.level')">
           <n-select v-model:value="form.level" :options="levelOptions" style="width: 160px" />
         </n-form-item>
@@ -112,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
 import { NButton, NDatePicker, NTag, useMessage, useDialog } from 'naive-ui';
@@ -146,7 +149,24 @@ const editingId = ref<number | null>(null);
 // 请求序号：慢网下先后打开两个用户时，旧响应不得覆盖新弹窗表单
 let editSeq = 0;
 const saveBusy = ref(false);
-const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [] });
+const form = reactive<any>({ username: '', password: '', repwd: '', is_api: 0, apikey: '', level: 1, check_whole: false, stat_cache: false, permission: [], confirmPassword: '' });
+watch(showEdit, (v) => {
+  if (!v) {
+    form.password = '';
+    form.repwd = '';
+    form.apikey = '';
+    form.confirmPassword = '';
+  }
+});
+const origApi = reactive({ is_api: 0, apikey: '' });
+const legacyKeyChanged = computed(
+  () =>
+    !!editingId.value &&
+    editingId.value === currentUid.value &&
+    (Number(form.is_api) !== Number(origApi.is_api) || String(form.apikey) !== String(origApi.apikey)),
+);
+// 改密与旧版 API Key 变更都属于账号接管级操作，编辑时必须重输当前管理员密码。
+const reauthNeeded = computed(() => !!editingId.value && (legacyKeyChanged.value || !!form.repwd));
 const domainOptions = ref<any[]>([]);
 const domainLoadBusy = ref(false);
 
@@ -344,6 +364,9 @@ function openAdd() {
   form.check_whole = false;
   form.stat_cache = false;
   form.permission = [];
+  form.confirmPassword = '';
+  origApi.is_api = 0;
+  origApi.apikey = '';
   showEdit.value = true;
 }
 
@@ -361,6 +384,9 @@ async function openEdit(row: any) {
       form.repwd = '';
       form.is_api = res.data.is_api;
       form.apikey = res.data.apikey || '';
+      origApi.is_api = Number(res.data.is_api || 0);
+      origApi.apikey = String(res.data.apikey || '');
+      form.confirmPassword = '';
       form.level = res.data.level;
       form.check_whole = res.data.check_whole == 1;
       form.stat_cache = res.data.stat_cache == 1;
@@ -379,8 +405,10 @@ async function openEdit(row: any) {
 async function save() {
   if (!form.username) return message.warning(t('userList.usernameRequired'));
   if (form.is_api === 1 && !form.apikey) return message.warning(t('userList.apiKeyRequired'));
+  if (reauthNeeded.value && !form.confirmPassword) return message.warning(t('userList.loginPasswordConfirmHint'));
   saveBusy.value = true;
   const body: any = { username: form.username, is_api: form.is_api, apikey: form.apikey, level: form.level };
+  if (reauthNeeded.value) body.password = form.confirmPassword;
   if (form.level !== 2) body.stat_cache = form.stat_cache ? 1 : 0;
   if (form.level === 1) {
     body.permission = form.permission;

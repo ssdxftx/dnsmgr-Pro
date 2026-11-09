@@ -11,20 +11,9 @@ import {
 } from '../lib/cloudflare/enhance.js';
 import { fmtDateTime } from '../lib/util.js';
 import { getVisibleAccount } from '../lib/accounts/visibility.js';
+import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
-
-import { ConfigDecryptError, decryptConfig, encryptConfig, isEncryptedConfig } from '../lib/secret.js';
-
-function safeJson(s: any): Record<string, any> {
-  if (s && typeof s === 'object') return s as Record<string, any>;
-  const cfg = decryptConfig(s);
-  if (cfg) return cfg;
-  if (isEncryptedConfig(s)) {
-    throw new ConfigDecryptError('账户配置无法解密（系统密钥可能已变更），请重新填写账户凭证');
-  }
-  return {};
-}
 
 interface DomainCtx {
   domain: any;
@@ -33,9 +22,17 @@ interface DomainCtx {
   service: CloudflareEnhanceService;
 }
 
+async function enhanceConfig(acct: any): Promise<Record<string, any>> {
+  try {
+    return await loadAccountConfig(acct);
+  } catch (e: any) {
+    throw new EnhanceError(e?.message || '账户配置无法解密', 400);
+  }
+}
+
 async function getCloudflareDomainContext(domainId: number, user: any): Promise<DomainCtx> {
   const row: any = await queryOne(
-    `SELECT A.*, B.type AS account_type, B.config AS account_config, B.name AS account_name, B.remark AS account_remark
+    `SELECT A.*, B.type AS account_type, B.config AS account_config, B.name AS account_name, B.remark AS account_remark, B.owner_uid AS account_owner
      FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id WHERE A.id = ?`,
     [domainId],
   );
@@ -45,7 +42,7 @@ async function getCloudflareDomainContext(domainId: number, user: any): Promise<
   if (row.account_type !== 'cloudflare') throw new EnhanceError('仅支持 Cloudflare 域名');
   if (!row.thirdid) throw new EnhanceError('当前域名缺少 Cloudflare Zone ID');
 
-  const config = safeJson(row.account_config) || {};
+  const config = await enhanceConfig({ config: row.account_config, owner_uid: row.account_owner });
   return { domain: row, account: null as any, config, service: new CloudflareEnhanceService(config) };
 }
 
@@ -66,7 +63,7 @@ async function getCloudflareAccountContext(
   if (!account) throw new EnhanceError('域名账户不存在', 404);
   if (account.type !== 'cloudflare') throw new EnhanceError('仅支持 Cloudflare 账户');
 
-  const config = safeJson(account.config) || {};
+  const config = await enhanceConfig(account);
   let service = new CloudflareEnhanceService(config);
   if (requireTunnelApiToken && !service.isApiTokenAuth()) {
     throw new EnhanceError('Cloudflare Tunnels 仅支持 API 令牌认证，请将当前账户的认证方式切换为 API令牌');
@@ -76,9 +73,9 @@ async function getCloudflareAccountContext(
   if (requireAccountId && !resolvedAccountId) {
     resolvedAccountId = await service.getDefaultAccountId();
     if (resolvedAccountId) {
+      // 不要在 GET 中回写账户配置：只读接口的 read-modify-write 会覆盖
+      // 用户在另一个页面并发保存的其它字段。解析结果仅用于本次请求。
       config.account_id = resolvedAccountId;
-      await query(`UPDATE ${table('account')} SET config = ? WHERE id = ?`, [encryptConfig(config), account.id]);
-      account.config = encryptConfig(config);
       service = new CloudflareEnhanceService(config);
     }
   }

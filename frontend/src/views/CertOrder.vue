@@ -27,7 +27,7 @@
     </n-card>
 
     <!-- 添加/编辑弹窗 -->
-    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('certOrder.editTitle') : t('certOrder.applyTitle')" class="modal-md" :mask-closable="false">
+    <n-modal v-model:show="showEdit" preset="card" :title="editingId ? t('certOrder.editTitle') : t('certOrder.applyTitle')" class="modal-md" :mask-closable="false" @after-leave="clearCertForm">
       <n-tabs v-model:value="tab" type="line">
         <n-tab-pane name="apply" :tab="t('certOrder.tabApply')">
           <n-form label-placement="left" label-width="110">
@@ -68,7 +68,7 @@
     </n-modal>
 
     <!-- 证书详情 -->
-    <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" class="modal-lg" :mask-closable="false">
+    <n-modal v-model:show="showInfo" preset="card" :title="t('certOrder.infoTitle')" class="modal-lg" :mask-closable="false" @after-leave="clearInfo">
       <n-spin :show="infoBusy">
         <template v-if="info">
           <n-descriptions bordered :column="1" label-placement="left" class="mb-4">
@@ -96,7 +96,7 @@
     </n-modal>
 
     <!-- 日志 -->
-    <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" class="modal-lg" :mask-closable="false">
+    <n-modal v-model:show="showLog" preset="card" :title="t('certOrder.logTitle')" class="modal-lg" :mask-closable="false" @after-leave="logText = ''">
       <n-spin :show="logBusy">
         <n-input v-model:value="logText" type="textarea" :rows="18" readonly />
       </n-spin>
@@ -417,14 +417,22 @@ async function viewInfo(row: any) {
   showInfo.value = true; // 先开弹窗，立即给出视觉响应
   infoBusy.value = true;
   try {
+    // Fetch 的 header 只接受 ByteString，直接放中文/emoji 密码会抛错；
+    // 统一用 UTF-8 Base64 传递，服务端兼容旧的明文头。
+    const bytes = new TextEncoder().encode(password);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
     const res = await api<any>('GET', `/cert/orders/${row.id}/info`, undefined, {
-      headers: { 'X-Confirm-Password': password },
+      headers: { 'X-Confirm-Password-B64': btoa(bin) },
     });
     if (res.code === 0) info.value = res.data;
     else {
       showInfo.value = false;
       message.error(res.msg);
     }
+  } catch (e: any) {
+    showInfo.value = false;
+    message.error(e?.message || t('common.networkError'));
   } finally {
     infoBusy.value = false;
   }
@@ -490,6 +498,16 @@ function del(row: any) {
       } else message.error(res.msg);
     },
   });
+}
+
+function clearInfo() {
+  // 私钥/证书明文不能随弹窗关闭继续留在 JS 内存中
+  info.value = null;
+}
+
+function clearCertForm() {
+  form.privatekey = '';
+  form.fullchain = '';
 }
 
 onMounted(() => {

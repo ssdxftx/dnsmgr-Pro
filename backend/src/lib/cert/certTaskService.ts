@@ -40,7 +40,7 @@ export function inRunWindow(hour: number, start: number, end: number): boolean {
 export async function findRenewOrders(days: number, q: QueryFn = query): Promise<any[]> {
   return q(
     `SELECT id FROM ${table('cert_order')}
-      WHERE isauto = 1 AND status = 3 AND islock = 0
+      WHERE isauto = 1 AND status = 3 AND islock = 0 AND aid > 0
         AND expiretime IS NOT NULL AND expiretime <= DATE_ADD(NOW(), INTERVAL ? DAY)
       ORDER BY expiretime ASC LIMIT ?`,
     [days, RENEW_LIMIT],

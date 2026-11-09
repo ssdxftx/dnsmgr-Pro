@@ -173,6 +173,8 @@ export default {
     apiAccess: 'API接口',
     apiKey: 'API密钥',
     apiKeyRequired: 'API密钥不能为空',
+    loginPasswordConfirm: '登录密码确认',
+    loginPasswordConfirmHint: '修改旧版 API 密钥需要输入当前登录密码',
     genApiKey: '生成密钥',
     apiOn: '开启',
     apiOff: '关闭',
