@@ -418,6 +418,23 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 continue;
               }
 
+              // 便捷模式没有 __dek_bk：整站替换/安装时 sys_key 不变，wrapped_dek_sys 仍然有效，
+              // 必须原样保留；否则恢复后用户保险库整个丢失（交叉备份测试也依赖该行为）。
+              if (
+                !dek &&
+                scope !== 'user' &&
+                String(row.mode) === 'none' &&
+                Number(uid) === Number(origUid)
+              ) {
+                if (!row.wrapped_dek_sys) blockedPrivateUsers.add(origUid);
+                row.fail_count = 0;
+                row.locked_until = null;
+                delete row.__dek_bk;
+                await insertRow(q, name, row, columns);
+                rep.inserted++;
+                continue;
+              }
+
               if (!dek) {
                 if (scope === 'site') blockedPrivateUsers.add(origUid);
                 // 缺少归档 DEK 时，口令模式无法重建包裹层；直接跳过，绝不落一条打不开的保险库。
