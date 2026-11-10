@@ -70,6 +70,11 @@ export default async function systemRoutes(app: FastifyInstance) {
       if (passwordErr) return { code: -1, msg: passwordErr };
     }
     delete b.password;
+    if ('qqbot_bind_code' in b) {
+      const code = String(b.qqbot_bind_code ?? '').trim();
+      if (code && code.length < 8) return { code: -1, msg: 'QQ 机器人绑定口令至少 8 位' };
+      b.qqbot_bind_code = code;
+    }
     const before = await loadConfig();
     const changed: string[] = [];
     if (b.mail_type !== undefined && b.mail_name2 !== undefined && Number(b.mail_type) > 0) {

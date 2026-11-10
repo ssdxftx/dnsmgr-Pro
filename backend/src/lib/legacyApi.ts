@@ -1,6 +1,7 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { configGet } from '../config.js';
 import { isDuplicateError, query, queryOne, table } from '../db.js';
+import { hitRateLimitDistributed } from './rateLimit.js';
 
 /** v2：HMAC 绑定 method+path+参数+nonce，不可重放；v1：历史 md5(uid+timestamp+apikey)，需显式开启 */
 export type LegacyAuthScheme = 'v1' | 'v2';
@@ -114,37 +115,37 @@ export async function legacyApiAuth(req: any): Promise<LegacyAuthResult> {
   const sign = scalar(body.sign);
   const sign2 = scalar(body.sign2);
   const nonce = scalar(body.nonce);
-  if (!Number.isInteger(uid) || uid <= 0 || !timestamp || (!sign && !sign2)) {
-    return { ok: false, status: 403, msg: '认证参数不能为空' };
-  }
+  // 统一失败文案：验签前按 uid 回查用户会暴露「用户不存在/已封禁/未开 API/未设密钥」
+  // 等状态，uid 自增即可批量枚举。所有认证失败一律返回同一句。
+  const AUTH_FAIL = { ok: false as const, status: 403, msg: '认证失败' };
+  if (!Number.isInteger(uid) || uid <= 0 || !timestamp || (!sign && !sign2)) return AUTH_FAIL;
   const ts = Number(timestamp);
   const now = Math.floor(Date.now() / 1000);
-  if (!Number.isFinite(ts) || ts < now - 300 || ts > now + 300) {
-    return { ok: false, status: 403, msg: '时间戳不合法' };
+  if (!Number.isFinite(ts) || ts < now - 300 || ts > now + 300) return AUTH_FAIL;
+  if (!(await hitRateLimitDistributed(`legacy-api:${req.ip || 'unknown'}`, 300, 60_000))) {
+    return { ok: false, status: 429, msg: '请求过于频繁，请稍后再试' };
   }
   const user: any = await queryOne(`SELECT * FROM ${table('user')} WHERE id = ? LIMIT 1`, [uid]);
-  if (!user) return { ok: false, status: 403, msg: '用户不存在' };
-  if (Number(user.status) === 0) return { ok: false, status: 403, msg: '该用户已被封禁' };
-  if (Number(user.is_api) !== 1) return { ok: false, status: 403, msg: '该用户未开启API权限' };
-  if (!user.apikey) return { ok: false, status: 403, msg: '该用户未设置API密钥' };
+  if (!user) return AUTH_FAIL;
+  if (Number(user.status) === 0) return AUTH_FAIL;
+  if (Number(user.is_api) !== 1) return AUTH_FAIL;
+  if (!user.apikey) return AUTH_FAIL;
 
   let scheme: LegacyAuthScheme;
   if (sign2) {
-    if (!nonce) return { ok: false, status: 403, msg: 'v2 签名必须携带 nonce' };
-    if (nonce.length < 16 || nonce.length > 64) return { ok: false, status: 403, msg: 'nonce 格式不合法' };
+    if (!nonce) return AUTH_FAIL;
+    if (nonce.length < 16 || nonce.length > 64) return AUTH_FAIL;
     const method = String(req.method || 'POST');
     const path = String(req.url || req.raw?.url || '').split('?')[0];
     const expected = signV2(String(user.apikey), method, path, uid, timestamp, nonce, body);
-    if (!safeEqual(expected, sign2.toLowerCase())) return { ok: false, status: 403, msg: '签名错误' };
-    if (!(await consumeNonce(nonce, uid))) return { ok: false, status: 403, msg: '重复的 nonce，请重新生成签名' };
+    if (!safeEqual(expected, sign2.toLowerCase())) return AUTH_FAIL;
+    if (!(await consumeNonce(nonce, uid))) return AUTH_FAIL;
     scheme = 'v2';
   } else {
     // 历史 md5 签名不绑定请求路径与参数，可在时间窗内重放；默认关闭，需要旧版客户端时显式开启
-    if (!(await legacyV1Enabled())) {
-      return { ok: false, status: 403, msg: '旧版签名已停用，请使用 v2 签名（sign2 + nonce）或开启 legacy_api_v1_enable' };
-    }
+    if (!(await legacyV1Enabled())) return AUTH_FAIL;
     const expected = createHash('md5').update(String(uid) + timestamp + String(user.apikey)).digest('hex');
-    if (!safeEqual(expected, sign.toLowerCase())) return { ok: false, status: 403, msg: '签名错误' };
+    if (!safeEqual(expected, sign.toLowerCase())) return AUTH_FAIL;
     scheme = 'v1';
   }
 

@@ -152,13 +152,18 @@ async function submit() {
     return message.warning(t('optimize.requiredEmpty'));
   }
   saveBusy.value = true;
-  const body = { ...form, ip_type: ipTypeSelect.value.join(',') };
-  const res = isEdit.value ? await api('PUT', `/optimize/tasks/${editId.value}`, body) : await api('POST', '/optimize/tasks', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    router.push('/optimize-tasks');
-  } else message.error(res.msg);
+  try {
+    const body = { ...form, ip_type: ipTypeSelect.value.join(',') };
+    const res = isEdit.value ? await api('PUT', `/optimize/tasks/${editId.value}`, body) : await api('POST', '/optimize/tasks', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      router.push('/optimize-tasks');
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 onMounted(async () => {

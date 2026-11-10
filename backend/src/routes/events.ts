@@ -26,6 +26,7 @@ function shape(row: any): any {
 async function validateUrl(value: any): Promise<string> {
   const url = String(value || '').trim();
   if (!url) throw new Error('回调地址不能为空');
+  if (url.length > 500) throw new Error('回调地址过长（最多 500 字符）');
   await assertUrlAllowed(url);
   return url;
 }
@@ -50,16 +51,19 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
     try {
       url = await validateUrl(req.body?.url);
       events = normalizeEventNames(req.body?.events);
+      if (!events.length) return { code: -1, msg: '请至少选择一个事件；订阅全部事件请显式填写 *' };
     } catch (e: any) {
       return { code: -1, msg: e.message || '参数错误' };
     }
     const name = String(req.body?.name || 'Webhook').trim().slice(0, 100) || 'Webhook';
-    const secret = String(req.body?.secret || '').trim().slice(0, 128) || newEventSecret();
+    const secret = String(req.body?.secret || '').trim();
+    // secret 会先加密再写入 varchar(128)：明文超过 48 字符时密文必然溢出。
+    if (secret.length > 48) return { code: -1, msg: '事件密钥最多 48 个字符' };
     const active = req.body?.active === false || Number(req.body?.active) === 0 ? 0 : 1;
     const res: any = await query(
       `INSERT INTO ${table('event_subscription')}
         (name, url, secret, events, active, created_at) VALUES (?, ?, ?, ?, ?, NOW())`,
-      [name, url, encryptText(secret), JSON.stringify(events), active],
+      [name, url, encryptText(secret || newEventSecret()), JSON.stringify(events), active],
     );
     audit(req, {
       targetType: 'event_subscription',
@@ -94,12 +98,16 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
         params.push(await validateUrl(req.body.url));
       }
       if (req.body?.events !== undefined) {
+        const nextEvents = normalizeEventNames(req.body.events);
+        if (!nextEvents.length) return { code: -1, msg: '请至少选择一个事件；订阅全部事件请显式填写 *' };
         sets.push('events = ?');
-        params.push(JSON.stringify(normalizeEventNames(req.body.events)));
+        params.push(JSON.stringify(nextEvents));
       }
       if (req.body?.secret !== undefined) {
+        const secret = String(req.body.secret || '').trim();
+        if (secret.length > 48) return { code: -1, msg: '事件密钥最多 48 个字符' };
         sets.push('secret = ?');
-        params.push(encryptText(String(req.body.secret || '').trim().slice(0, 128) || newEventSecret()));
+        params.push(encryptText(secret || newEventSecret()));
       }
       if (req.body?.active !== undefined) {
         sets.push('active = ?');

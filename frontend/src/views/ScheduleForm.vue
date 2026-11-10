@@ -153,17 +153,22 @@ async function getRecordList() {
   if (!form.did) return message.warning(t('schedule.selectDomainFirst'));
   if (!form.rr) return message.warning(t('schedule.hostRequired'));
   recordsLoadBusy.value = true;
-  const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
-  recordsLoadBusy.value = false;
-  if (res.code === 0) {
-    const list = res.data.list || [];
-    recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
-    message.success(t('schedule.gotRecords', { count: list.length }));
-    if (form.recordid) {
-      const found = list.find((r: any) => r.RecordId === form.recordid);
-      if (found) fillRecord(found);
-    }
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
+    if (res.code === 0) {
+      const list = res.data.list || [];
+      recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
+      message.success(t('schedule.gotRecords', { count: list.length }));
+      if (form.recordid) {
+        const found = list.find((r: any) => r.RecordId === form.recordid);
+        if (found) fillRecord(found);
+      }
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    recordsLoadBusy.value = false;
+  }
 }
 
 function fillRecord(record: any) {
@@ -206,12 +211,17 @@ async function submit() {
   const body: any = { ...form };
   if (form.type === 1 && form.cycle === 2) body.switchdate = String(switchdateNum.value ?? 1);
   saveBusy.value = true;
-  const res = isEdit.value ? await api('PUT', `/schedule/tasks/${editId.value}`, body) : await api('POST', '/schedule/tasks', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    router.push('/schedule-tasks');
-  } else message.error(res.msg);
+  try {
+    const res = isEdit.value ? await api('PUT', `/schedule/tasks/${editId.value}`, body) : await api('POST', '/schedule/tasks', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      router.push('/schedule-tasks');
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 onMounted(async () => {

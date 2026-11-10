@@ -170,7 +170,19 @@ export default async function registerRoutes(app: FastifyInstance) {
 
     // 凭据有效（未消耗）时才检查用户名：既能防止无凭据枚举账号，又不会在撞名时烧掉注册码
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ? LIMIT 1`, [username]);
-    if (exists) return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
+    if (exists) {
+      // 撞名也消耗一次验证码尝试：否则同一张有效验证码可被用来无限探测用户名是否存在。
+      if (verifyId) {
+        await query(
+          `UPDATE ${table('reg_verify')}
+              SET used = CASE WHEN attempts + 1 >= ? THEN 1 ELSE used END,
+                  attempts = attempts + 1
+            WHERE id = ? AND used = 0`,
+          [MAX_VERIFY_ATTEMPTS, verifyId],
+        );
+      }
+      return { code: -1, msg: '该用户名或邮箱不可用，请更换后重试' };
+    }
 
     const hash = await bcrypt.hash(password, 10);
     let newId = 0;

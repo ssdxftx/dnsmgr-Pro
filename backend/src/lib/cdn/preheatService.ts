@@ -65,6 +65,11 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
       failed.push({ url, msg: `未找到加速域名 ${domain}` });
       continue;
     }
+    // 同名加速域名可能存在于多个账户；没有账户上下文时宁可失败，避免提交到错误站点。
+    if (candidates.length > 1) {
+      failed.push({ url, msg: `加速域名 ${domain} 存在于多个账户，无法确定刷新目标` });
+      continue;
+    }
     const key = `${row.route}#${row.aid}#${row.zone_id || ''}`;
     if (!(key in providers)) providers[key] = await cdnForZone(row.aid, row.zone_id);
     const provider = providers[key];

@@ -21,7 +21,8 @@ export function normalizeEventNames(input: any): string[] {
     if (!/^[A-Za-z0-9_.:-]{1,96}$/.test(name)) throw new Error(`无效的事件名：${name}`);
     out.add(name);
   }
-  return out.size ? [...out] : ['*'];
+  // 空列表必须保持为空：调用方清空选择时不能被静默解释为订阅全部事件。
+  return [...out];
 }
 
 function subscriptionEvents(value: any): string[] {
@@ -43,7 +44,9 @@ export async function deliverToSubscription(sub: EventSubscription, event: strin
   let status = 0;
   let error = '';
   try {
-    const secret = decryptText(String(sub.secret || '')) ?? String(sub.secret || '');
+    const secret = decryptText(String(sub.secret || ''));
+    // 解密失败时绝不能把密文当 HMAC 密钥：接收端永远无法用配置的 secret 校验成功。
+    if (!secret) throw new Error('事件密钥无法解密，请重新保存订阅密钥');
     const signature = createHmac('sha256', secret).update(body).digest('hex');
     const res = await safeFetch(
       sub.url,

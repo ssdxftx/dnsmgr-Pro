@@ -751,10 +751,23 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               if (row.link) {
                 try {
                   const link = typeof row.link === 'string' ? JSON.parse(row.link) : row.link;
-                  if (link && typeof link === 'object' && !Array.isArray(link) && link.cdnDomainId !== undefined) {
-                    const mapped = cdidMap.get(Number(link.cdnDomainId));
-                    if (mapped) link.cdnDomainId = mapped;
-                    else delete link.cdnDomainId;
+                  if (link && typeof link === 'object' && !Array.isArray(link)) {
+                    const mappedIds: number[] = [];
+                    if (Array.isArray(link.cdnDomainIds)) {
+                      for (const oldId of link.cdnDomainIds) {
+                        const mapped = cdidMap.get(Number(oldId));
+                        if (mapped && !mappedIds.includes(mapped)) mappedIds.push(mapped);
+                      }
+                    }
+                    const primary = cdidMap.get(Number(link.cdnDomainId));
+                    if (primary && !mappedIds.includes(primary)) mappedIds.unshift(primary);
+                    if (mappedIds.length) {
+                      link.cdnDomainId = mappedIds[0];
+                      link.cdnDomainIds = mappedIds;
+                    } else {
+                      delete link.cdnDomainId;
+                      delete link.cdnDomainIds;
+                    }
                     row.link = typeof row.link === 'string' ? JSON.stringify(link) : link;
                   }
                 } catch {

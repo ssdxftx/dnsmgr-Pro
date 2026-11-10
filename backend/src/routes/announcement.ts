@@ -30,6 +30,9 @@ function formatDate(d: Date): string {
 function normalizeDate(value: any): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null || value === '') return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : formatDate(value);
+  }
   if (typeof value === 'number') {
     const d = new Date(value);
     return Number.isNaN(d.getTime()) ? undefined : formatDate(d);
@@ -165,7 +168,8 @@ export default async function announcementRoutes(app: FastifyInstance) {
     const before: any = await queryOne(`SELECT * FROM ${table('announcement')} WHERE id = ? LIMIT 1`, [id]);
     if (!before) return { code: -1, msg: '公告不存在' };
 
-    const parsed = parseBody(req.body || {});
+    // PUT 允许局部更新：未提交的字段沿用数据库原值，避免只改标题就重新启用公告/清空时间窗。
+    const parsed = parseBody({ ...before, ...(req.body || {}) });
     if (parsed.error || !parsed.value) return { code: -1, msg: parsed.error || '参数错误' };
     const v = parsed.value;
     await query(

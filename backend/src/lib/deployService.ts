@@ -66,19 +66,32 @@ export class CertDeployService {
     if (err) this.saveLog('[Error] ' + err);
   }
 
-  private async lockTask() {
-    if (!safeProcessId(this.task.processid)) this.task.processid = genSid();
-    // 原子加锁：仅当未锁或锁已超时（1 小时）时才成功，避免并发重复部署
+  private async takeTaskLock(): Promise<string> {
+    // 每次加锁生成新租约令牌，超时抢占后旧 worker 无法匹配并释放新锁。
+    const token = genSid();
     const res: any = await query(
       `UPDATE ${table('cert_deploy')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
-      [this.task.processid, this.tid],
+      [token, this.tid],
     );
     if (!res || !res.affectedRows) throw new Error('该部署任务正在处理中，请稍后再试');
+    if (this.task) this.task.processid = token;
+    return token;
+  }
+
+  private async releaseTaskLock(token: string): Promise<void> {
+    await query(
+      `UPDATE ${table('cert_deploy')} SET islock = 0, processid = NULL WHERE id = ? AND processid = ? AND islock = 1`,
+      [this.tid, token],
+    );
+  }
+
+  private async lockTask() {
+    await this.takeTaskLock();
   }
 
   private async unlockTask() {
-    // 仅释放自己持有的锁：锁超时被他人抢占后，避免误释放他人的锁导致重复部署
-    await query(`UPDATE ${table('cert_deploy')} SET islock = 0 WHERE id = ? AND processid = ?`, [this.tid, this.task.processid]);
+    const token = safeProcessId(this.task.processid);
+    if (token) await this.releaseTaskLock(token);
   }
 
   async process(isManual = false): Promise<void> {
@@ -153,6 +166,15 @@ export class CertDeployService {
   }
 
   async reset(): Promise<void> {
-    await query(`UPDATE ${table('cert_deploy')} SET status = 0, retry = 0, retrytime = NULL, issend = 0, islock = 0 WHERE id = ?`, [this.tid]);
+    // 重置必须与调度器互斥：运行中的部署不能被管理员清锁后又被调度器/手工再次执行。
+    const token = await this.takeTaskLock();
+    try {
+      await query(
+        `UPDATE ${table('cert_deploy')} SET status = 0, retry = 0, retrytime = NULL, issend = 0, islock = 0, processid = NULL WHERE id = ? AND processid = ?`,
+        [this.tid, token],
+      );
+    } finally {
+      await this.releaseTaskLock(token).catch(() => undefined);
+    }
   }
 }

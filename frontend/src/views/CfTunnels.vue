@@ -46,7 +46,7 @@
     </n-modal>
 
     <!-- Token -->
-    <n-modal v-model:show="showToken" preset="card" :title="t('cfTunnels.tokenTitle')" class="modal-md" :mask-closable="false">
+    <n-modal v-model:show="showToken" preset="card" :title="t('cfTunnels.tokenTitle')" class="modal-md" :mask-closable="false" @after-leave="clearToken">
       <n-spin :show="tokenBusy">
         <n-form label-placement="left" label-width="110">
           <n-form-item label="Tunnel"><n-input :value="tokenName" disabled /></n-form-item>
@@ -280,6 +280,12 @@ async function showTokenOf(row: any) {
   } finally {
     tokenBusy.value = false;
   }
+}
+
+function clearToken() {
+  tokenValue.value = '';
+  tokenCommand.value = '';
+  tokenName.value = '';
 }
 
 function copy(text: string) {

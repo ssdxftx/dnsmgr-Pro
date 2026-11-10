@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { existsSync, writeFileSync, chmodSync, realpathSync, lstatSync } from 'node:fs';
+import { closeSync, constants, existsSync, fchmodSync, fstatSync, lstatSync, openSync, realpathSync, writeFileSync, writeSync, chmodSync } from 'node:fs';
 import { dirname, normalize, sep, basename, join, win32 } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { commandArgv } from '../commandGuard.js';
@@ -148,6 +148,37 @@ function isProtectedDataPath(resolved: string): boolean {
   return first === 'backups' || first === 'tmp';
 }
 
+/**
+ * 以 O_NOFOLLOW 打开目标后写入，并在已打开的 fd 上校验 inode：
+ * - 防止 safeTargetPath 校验后、写入前目标被替换为符号链接（TOCTOU）；
+ * - 拒绝硬链接（nlink > 1），避免目录内指向数据库/配置的硬链接绕过 basename 保护。
+ * Windows 不支持 O_NOFOLLOW，退化为普通写入（该平台另有 realpath/junction 校验）。
+ */
+function writeFileNoFollow(file: string, data: Buffer | string, mode = 0o600): void {
+  if (process.platform === 'win32') {
+    writeFileSync(file, data, { mode });
+    try { chmodSync(file, mode); } catch { /* ignore */ }
+    return;
+  }
+  let fd = -1;
+  try {
+    fd = openSync(file, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, mode);
+  } catch (e: any) {
+    if (e?.code === 'ELOOP') throw new Error('目标文件为符号链接，禁止写入：' + file);
+    throw e;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new Error('目标路径不是普通文件，禁止写入：' + file);
+    if (Number(st.nlink) > 1) throw new Error('目标文件存在硬链接，禁止写入：' + file);
+    fchmodSync(fd, mode);
+    if (typeof data === 'string') writeSync(fd, data, undefined, 'utf8');
+    else writeSync(fd, data);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export class LocalDeploy implements DeployProvider {
   private logger: ((txt: string) => void) | null = null;
 
@@ -167,12 +198,10 @@ export class LocalDeploy implements DeployProvider {
       const keyDir = dirname(keyFile);
       if (!existsSync(certDir)) throw new Error(certDir + ' 目录不存在');
       if (!existsSync(keyDir)) throw new Error(keyDir + ' 目录不存在');
-      writeFileSync(certFile, fullchain);
+      writeFileNoFollow(certFile, fullchain, 0o644);
       this.log('证书已保存到：' + certFile);
       // 私钥显式以 0600 写入，避免按进程 umask 落盘为全局可读
-      writeFileSync(keyFile, privatekey, { mode: 0o600 });
-      // 文件已存在时 mode 不生效，显式收紧权限
-      try { chmodSync(keyFile, 0o600); } catch { /* 忽略：部分文件系统不支持 */ }
+      writeFileNoFollow(keyFile, privatekey, 0o600);
       this.log('私钥已保存到：' + keyFile);
     } else if (config.format === 'pfx') {
       const pfxFile = safeTargetPath(config.pfx_file);
@@ -180,8 +209,7 @@ export class LocalDeploy implements DeployProvider {
       if (!existsSync(dir)) throw new Error(dir + ' 目录不存在');
       const pfx = await buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
       // PFX 内含私钥，显式以 0600 写入，避免按进程 umask 落盘为全局可读
-      writeFileSync(pfxFile, pfx, { mode: 0o600 });
-      try { chmodSync(pfxFile, 0o600); } catch { /* 忽略：部分文件系统不支持 */ }
+      writeFileNoFollow(pfxFile, pfx, 0o600);
       this.log('PFX证书已保存到：' + pfxFile);
     } else {
       throw new Error('未知的证书格式：' + String(config.format || '(空)'));

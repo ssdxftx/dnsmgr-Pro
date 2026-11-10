@@ -161,7 +161,7 @@ async function doExport() {
       include_logs: true,
       passphrase: exportPass.value || undefined,
       password: exportLoginPass.value || undefined,
-    });
+    }, { timeout: 0 });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
     await load();

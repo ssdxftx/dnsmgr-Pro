@@ -1,5 +1,5 @@
-import { Client, ConnectConfig } from 'ssh2';
-import { createHash, X509Certificate } from 'node:crypto';
+import { Client, ConnectConfig, type SFTPWrapper } from 'ssh2';
+import { createHash, randomBytes, X509Certificate } from 'node:crypto';
 import { posix } from 'node:path';
 import { buildPfx } from '../../cert/utils.js';
 import { assertCommandAllowed } from '../commandGuard.js';
@@ -14,7 +14,10 @@ import { redactCommand } from '../redact.js';
 const SSH_DENY_PREFIXES = [
   '/etc/passwd',
   '/etc/shadow',
+  '/etc/group',
+  '/etc/gshadow',
   '/etc/sudoers',
+  '/etc/sudoers.d',
   '/etc/crontab',
   '/etc/cron.d',
   '/etc/cron.daily',
@@ -25,6 +28,9 @@ const SSH_DENY_PREFIXES = [
   '/etc/cron.minutely',
   '/etc/ssh',
   '/etc/ld.so.preload',
+  '/etc/ld.so.conf',
+  '/etc/ld.so.conf.d',
+  '/etc/ld.so.cache',
   '/etc/systemd',
   '/etc/init.d',
   '/etc/rc.local',
@@ -37,13 +43,48 @@ const SSH_DENY_PREFIXES = [
   '/etc/rc5.d',
   '/etc/rc6.d',
   '/etc/rcS.d',
+  '/etc/profile',
   '/etc/profile.d',
+  '/etc/bash.bashrc',
+  '/etc/bashrc',
+  '/etc/environment',
+  '/etc/zsh',
+  '/etc/csh',
+  '/etc/security',
+  '/etc/pam.d',
+  '/etc/skel',
+  '/etc/xdg/autostart',
   '/var/spool/cron',
+  '/var/spool/at',
   '/boot',
   '/sys',
   '/proc',
   '/dev',
 ];
+
+// 任何位置的 shell 启动脚本都等同于持久化执行入口；即使不在 /etc 下也不能写。
+const SHELL_RC_NAMES = new Set([
+  '.bashrc',
+  '.bash_profile',
+  '.bash_login',
+  '.bash_logout',
+  '.profile',
+  '.zshrc',
+  '.zprofile',
+  '.zshenv',
+  '.zlogin',
+  '.cshrc',
+  '.tcshrc',
+  '.kshrc',
+  'config.fish',
+]);
+
+function isShellStartupPath(low: string): boolean {
+  const base = posix.basename(low);
+  if (SHELL_RC_NAMES.has(base)) return true;
+  if (base === 'config.fish' && low.includes('/.config/fish/')) return true;
+  return false;
+}
 
 function safeRemotePath(p: any): string {
   const raw = String(p || '').trim();
@@ -65,6 +106,7 @@ function safeRemotePath(p: any): string {
   const low = normalized.toLowerCase();
   const denied =
     SSH_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
+    isShellStartupPath(low) ||
     low.includes('/.ssh/') ||
     low.endsWith('/.ssh') ||
     low.endsWith('/authorized_keys') ||
@@ -120,26 +162,67 @@ export class SshDeploy implements DeployProvider {
     conn.end();
   }
 
-  private writeFile(conn: Client, remotePath: string, data: Buffer, mode = 0o644): Promise<void> {
+  private sftp(conn: Client): Promise<SFTPWrapper> {
     return new Promise((resolve, reject) => {
-      conn.sftp((err, sftp) => {
-        if (err) return reject(new Error('无法创建证书文件：' + err.message));
-        let path: string;
-        try {
-          path = safeRemotePath(remotePath);
-        } catch (e: any) {
-          return reject(e);
+      conn.sftp((err, sftp) => (err ? reject(new Error('无法创建证书文件：' + err.message)) : resolve(sftp)));
+    });
+  }
+
+  private static realpath(sftp: SFTPWrapper, path: string): Promise<string | null> {
+    return new Promise((resolve) => {
+      sftp.realpath(path, (err: any, resolved: string) => (err ? resolve(null) : resolve(String(resolved || '') || null)));
+    });
+  }
+
+  private static lstat(sftp: SFTPWrapper, path: string): Promise<any | null> {
+    return new Promise((resolve, reject) => {
+      sftp.lstat(path, (err: any, stats: any) => {
+        if (err) {
+          // 目标不存在是允许的；其他错误（权限/路径异常）直接失败
+          if (String(err.code || '') === 'ENOENT' || /no such file/i.test(String(err.message || ''))) return resolve(null);
+          return reject(new Error('无法检查远端文件 ' + path + '：' + err.message));
         }
-        sftp.writeFile(path, data, (e) => {
-          if (e) return reject(new Error('无法写入文件 ' + remotePath + '：' + e.message));
-          // 显式设置权限（尤其是私钥 0600），避免依赖远端 umask 落成全局可读
-          sftp.chmod(path, mode, (ce) => {
-            if (ce) reject(new Error('无法设置文件权限 ' + remotePath + '：' + ce.message));
-            else resolve();
-          });
-        });
+        resolve(stats);
       });
     });
+  }
+
+  /**
+   * 远端写入采用「同目录临时文件 + rename」：
+   * 1) 目标若是符号链接，SFTP WRITE 默认会跟随链接写穿到任意位置；rename 替换链接本身，不跟随。
+   * 2) 临时文件创建时即带 0600，避免私钥先以 0644 落盘再 chmod 的窗口。
+   * 3) rename 是原子的，目标文件不会出现半写状态。
+   */
+  private async writeFile(conn: Client, remotePath: string, data: Buffer, mode = 0o644): Promise<void> {
+    const requested = safeRemotePath(remotePath);
+    const sftp = await this.sftp(conn);
+    // 解析父目录真实路径，防止父目录本身是指向白名单外的符号链接；
+    // 目标文件不存在时 realpath 会失败，此时仍使用词法路径。
+    const parentReal = await SshDeploy.realpath(sftp, posix.dirname(requested));
+    const path = parentReal ? safeRemotePath(posix.join(parentReal, posix.basename(requested))) : requested;
+    const st = await SshDeploy.lstat(sftp, path);
+    if (st && st.isSymbolicLink?.()) throw new Error('远端目标文件是符号链接，禁止写入：' + remotePath);
+    if (st && st.isDirectory?.()) throw new Error('远端目标路径是目录，禁止写入：' + remotePath);
+
+    const dir = posix.dirname(path);
+    const tmp = posix.join(dir, `.dnsmgr-${randomBytes(8).toString('hex')}.tmp`);
+    try {
+      await new Promise<void>((resolve, reject) => {
+        sftp.writeFile(tmp, data, { mode: 0o600 }, (e: any) => {
+          if (e) return reject(new Error('无法写入临时文件 ' + tmp + '：' + e.message));
+          resolve();
+        });
+      });
+      await new Promise<void>((resolve, reject) => {
+        sftp.chmod(tmp, mode, (e: any) => (e ? reject(new Error('无法设置文件权限 ' + tmp + '：' + e.message)) : resolve()));
+      });
+      await new Promise<void>((resolve, reject) => {
+        sftp.rename(tmp, path, (e: any) => (e ? reject(new Error('无法替换目标文件 ' + remotePath + '：' + e.message)) : resolve()));
+      });
+    } catch (e) {
+      await new Promise<void>((resolve) => sftp.unlink(tmp, () => resolve()));
+      throw e;
+    }
   }
 
   private exec(conn: Client, cmd: string, display?: string): Promise<string> {

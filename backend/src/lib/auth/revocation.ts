@@ -41,10 +41,18 @@ export async function revokeToken(jti: string, uid: number, expireAt?: Date): Pr
 
 export async function isTokenRevoked(jti: string): Promise<boolean> {
   const id = String(jti || '').trim();
-  if (!id) return false;
+  // 缺少 jti 的旧令牌无法被精确吊销，按已吊销处理（fail-closed）。
+  if (!id) return true;
   const hit = cache.get(id);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.revoked;
-  const row = await queryOne(`SELECT jti FROM ${table('token_revocation')} WHERE jti = ? LIMIT 1`, [id]).catch(() => undefined);
+  let row: any;
+  try {
+    row = await queryOne(`SELECT jti FROM ${table('token_revocation')} WHERE jti = ? LIMIT 1`, [id]);
+  } catch (e: any) {
+    // 吊销表不可用时不能放行：否则已登出令牌在数据库抖动期间可继续使用。
+    console.error('[auth] 吊销状态查询失败，按已吊销处理:', e?.message || e);
+    return true;
+  }
   const revoked = !!row;
   cache.set(id, { revoked, at: Date.now() });
   prune();

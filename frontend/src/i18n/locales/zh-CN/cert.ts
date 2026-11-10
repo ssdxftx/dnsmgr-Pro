@@ -75,6 +75,7 @@ export default {
     noLog: '暂无日志',
     noCert: '无可下载的证书',
     noKey: '无可下载的私钥',
+    pfxPass: 'PFX 口令',
     noPfx: '无可下载的 PFX',
     deleteTitle: '删除订单',
     deleteConfirm: '确定删除该证书订单吗？',

@@ -179,9 +179,9 @@ async function getRecordList() {
   if (!form.did) return message.warning(t('dm.selectDomainFirst'));
   if (!form.rr) return message.warning(t('dm.hostRequired'));
   recordsLoadBusy.value = true;
-  const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
-  recordsLoadBusy.value = false;
-  if (res.code === 0) {
+  try {
+    const res = await api<any>('GET', `/domains/${form.did}/records`, { subdomain: form.rr, pagesize: 100 });
+    if (res.code === 0) {
     const list = res.data.list || [];
     recordOptions.value = list.map((r: any) => ({ label: `${r.Value} (${r.Type})`, value: r.RecordId, record: r }));
     message.success(t('dm.gotRecords', { count: list.length }));
@@ -189,8 +189,13 @@ async function getRecordList() {
       const found = list.find((r: any) => r.RecordId === form.recordid);
       if (found) fillRecord(found);
     }
-  } else {
-    message.error(res.msg);
+    } else {
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    recordsLoadBusy.value = false;
   }
 }
 
@@ -247,7 +252,8 @@ async function submit() {
     return message.warning(t('dm.sameValue'));
   }
   saveBusy.value = true;
-  const body = {
+  try {
+    const body = {
     did: form.did,
     rr: form.rr,
     recordid: form.recordid,
@@ -266,12 +272,16 @@ async function submit() {
     recordinfo: form.recordinfo,
   };
   const res = isEdit.value ? await api('PUT', `/dmonitor/tasks/${editId.value}`, body) : await api('POST', '/dmonitor/tasks', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    router.push('/dm-tasks');
-  } else {
-    message.error(res.msg);
+    if (res.code === 0) {
+      message.success(res.msg);
+      router.push('/dm-tasks');
+    } else {
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
   }
 }
 

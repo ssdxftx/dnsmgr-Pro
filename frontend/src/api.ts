@@ -42,6 +42,8 @@ export interface ApiOptions {
   force?: boolean;
   /** 额外请求头（如二次确认密码） */
   headers?: Record<string, string>;
+  /** 超时毫秒数；0 表示不超时（备份导出/恢复等长任务） */
+  timeout?: number;
 }
 
 // 默认 GET 缓存 15s：写操作会整体失效，跨页读取全量列表时减少重复请求
@@ -107,12 +109,14 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
 
   const doFetch = async (): Promise<T> => {
     const controller = new AbortController();
-    // 避免后端僵死时 fetch 永不 settle，导致各页 loading 永久转圈
-    const timer = setTimeout(() => controller.abort(), 120000);
+    // 避免后端僵死时 fetch 永不 settle，导致各页 loading 永久转圈。
+    // 备份导出/恢复可能超过 2 分钟，调用方显式传 timeout: 0 关闭超时。
+    const timeoutMs = opts.timeout === 0 ? 0 : (opts.timeout ?? 120000);
+    const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
     const onAbort = () => controller.abort();
     if (opts.signal) {
       if (opts.signal.aborted) {
-        clearTimeout(timer);
+        if (timer) clearTimeout(timer);
         throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       }
       opts.signal.addEventListener('abort', onAbort);
@@ -127,7 +131,7 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
       }
       throw e;
     } finally {
-      clearTimeout(timer);
+      if (timer) clearTimeout(timer);
       opts.signal?.removeEventListener('abort', onAbort);
     }
     if (res.status === 401) {

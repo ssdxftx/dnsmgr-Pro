@@ -109,19 +109,55 @@ export class CertOrderService {
     }
   }
 
-  private async lockOrder() {
-    if (!safeProcessId(this.order.processid)) this.order.processid = genSid();
-    // 原子加锁：仅当当前未锁、或锁已超时（1 小时）时才更新成功，避免并发重复处理同一订单
+  private async takeLock(): Promise<string> {
+    // 每次加锁都必须换新租约令牌。若沿用数据库里旧 worker 的 processid，
+    // 超时抢占后旧 worker 的 unlock 仍能匹配并释放新锁，导致第三个 worker 再次处理同一订单。
+    const token = genSid();
     const res: any = await query(
       `UPDATE ${table('cert_order')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
-      [this.order.processid, this.oid],
+      [token, this.oid],
     );
     if (!res || !res.affectedRows) throw new Error('订单正在处理中，请稍后再试');
+    if (this.order) this.order.processid = token;
+    return token;
+  }
+
+  private async releaseLock(token: string): Promise<void> {
+    // 只释放仍属于本次租约的锁；已被超时抢占/已被重置时不再误释放他人锁。
+    await query(
+      `UPDATE ${table('cert_order')} SET islock = 0, processid = NULL WHERE id = ? AND processid = ? AND islock = 1`,
+      [this.oid, token],
+    );
+  }
+
+  private async lockOrder() {
+    await this.takeLock();
   }
 
   private async unlockOrder() {
-    // 仅释放自己持有的锁：锁超时被他人抢占后，避免误释放他人的锁导致重复处理
-    await query(`UPDATE ${table('cert_order')} SET islock = 0 WHERE id = ? AND processid = ?`, [this.oid, this.order.processid]);
+    const token = safeProcessId(this.order.processid);
+    if (token) await this.releaseLock(token);
+  }
+
+  /**
+   * 编辑/删除/手工重置与调度器共用同一把租约锁。
+   * 调用方在回调内完成 reset/UPDATE/DELETE，锁一直持有到事务结束，避免“检查 islock 后
+   * 调度器刚好抢锁，reset 又把锁清掉”的竞态。
+   */
+  async withMutationLock<T>(fn: () => Promise<T>): Promise<T> {
+    const token = await this.takeLock();
+    try {
+      // 清理本订单写入的挑战记录；账户缺失/旧订单无法加载时仍允许管理员修正配置。
+      try {
+        await this.ensureLoaded();
+        await this.delDns();
+      } catch {
+        /* ignore */
+      }
+      return await fn();
+    } finally {
+      await this.releaseLock(token).catch(() => undefined);
+    }
   }
 
   private async checkDomains() {
@@ -428,18 +464,17 @@ export class CertOrderService {
   }
 
   async reset() {
-    await this.ensureLoaded();
-    // 重试/重置前先清理本订单已写入的 _acme-challenge TXT，避免残留记录
-    // 让下一次申请因重复 TXT 失败，或被厂商拒绝。
-    await this.delDns();
-    await query(
-      `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
-      [this.oid],
-    );
-    const pid = safeProcessId(this.order.processid);
-    if (pid) {
-      const f = join(LOG_DIR, pid + '.log');
-      if (existsSync(f)) unlinkSync(f);
-    }
+    // 与调度器共用租约锁：正在签发/验证的订单不能被管理员重置清锁。
+    await this.withMutationLock(async () => {
+      await query(
+        `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
+        [this.oid],
+      );
+      const pid = safeProcessId(this.order?.processid);
+      if (pid) {
+        const f = join(LOG_DIR, pid + '.log');
+        if (existsSync(f)) unlinkSync(f);
+      }
+    });
   }
 }

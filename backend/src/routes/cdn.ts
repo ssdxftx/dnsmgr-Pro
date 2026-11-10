@@ -7,7 +7,6 @@ import { configGet, configSet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
-import { isCdnDomainIdColumnAvailable } from '../lib/cert/cdnDomainIdColumn.js';
 import { getCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
 import {
   ensureWildcardOrder,
@@ -21,6 +20,9 @@ import {
   linkLog,
   DEFAULT_LE_EMAIL,
   removeCertOrdersLinkedToCdnDomain,
+  assertCertOrdersRemovable,
+  cdnLinkIds,
+  linkOrderToCdnDomain,
 } from '../lib/cdn/certLink.js';
 import { CertDeployService } from '../lib/deployService.js';
 import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
@@ -506,24 +508,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
     // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
     const linkedDids = new Set<number>();
-    // cdn_domain_id 为 link 的生成列 + 索引，避免 link LIKE '%cdnDomainId%' 的前缀通配全表扫描；
-    // 生成列不可用时降级为 LIKE 粗筛 + 解析，保证功能可用
-    if (isCdnDomainIdColumnAvailable()) {
-      for (const o of await query(`SELECT DISTINCT cdn_domain_id FROM ${table('cert_order')} WHERE cdn_domain_id IS NOT NULL`)) {
-        const did = Number((o as any).cdn_domain_id);
-        if (did) linkedDids.add(did);
-      }
-    } else {
-      const lrows = await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%']);
-      for (const o of lrows as any[]) {
-        let did = 0;
-        try {
-          did = Number(JSON.parse(o.link)?.cdnDomainId || 0);
-        } catch {
-          did = 0;
-        }
-        if (did) linkedDids.add(did);
-      }
+    // link 可能保存多个 cdnDomainIds；生成列只覆盖主关联，必须解析完整列表。
+    const lrows = await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%']);
+    for (const o of lrows as any[]) {
+      for (const did of cdnLinkIds(o.link)) linkedDids.add(did);
     }
     const data = rows.map((r: any) => ({
       ...r,
@@ -3546,21 +3534,30 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const recordName = calcRecordName(name, dnsDomain.name);
     let dnsRecord: string | null = null;
     let dnsError = '';
+    let dnsProvider: any = null;
     const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
     if (dnsAcct) {
-      const dns = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
-      if (dns) {
-        const recordId = await dns.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
+      dnsProvider = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
+      if (dnsProvider) {
+        const recordId = await dnsProvider.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
         if (recordId) dnsRecord = String(recordId);
-        else dnsError = dns.getError();
+        else dnsError = dnsProvider.getError();
       } else dnsError = 'DNS模块不存在';
     } else dnsError = 'DNS账户不存在';
 
-    const insertRes: any = await query(
-      `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, cert_mode, addtime)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
-      [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort, service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
-    );
+    let insertRes: any;
+    try {
+      insertRes = await query(
+        `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, cert_mode, addtime)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
+        [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort, service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
+      );
+    } catch (e: any) {
+      // 云端加速域名和 CNAME 已经创建，本地写库失败必须补偿删除，否则重试会再建一份。
+      await provider.deleteDomain(name).catch(() => undefined);
+      if (dnsProvider && dnsRecord) await dnsProvider.deleteDomainRecord(dnsRecord).catch(() => undefined);
+      return { code: -1, msg: '保存加速域名失败，已回滚云端资源：' + (e?.message || String(e)) };
+    }
     const newId = Number(insertRes?.insertId || 0);
 
     let msg = dnsRecord
@@ -3607,6 +3604,12 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!row) return { code: -1, msg: '加速域名不存在' };
 
     if (deleteCloud) {
+      // 先做证书联动预检：无权限的订单应在删除云端域名之前就阻止，避免云端已删而本地无法清理。
+      try {
+        await assertCertOrdersRemovable(Number(id), req.user);
+      } catch (e: any) {
+        return { code: -1, msg: e?.message || '存在无权处理的联动证书' };
+      }
       const provider = await cdnForRow(row);
       if (!provider) return { code: -1, msg: 'CDN账户不存在，无法删除云端加速域名' };
       if (!(await provider.deleteDomain(row.name))) {
@@ -3811,6 +3814,23 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!dns) return 'DNS模块不存在，请手动添加验证记录';
     const rel = calcRecordName(row.name, dnsDomain.name);
     const name = rel === '@' ? rec.name : `${rec.name}.${rel}`;
+    const norm = (v: any) => String(v ?? '').trim().toLowerCase().replace(/\.$/, '').replace(/^"|"$/g, '');
+    // 幂等：pending 期间反复点“检查”会重复调用本函数；已存在同值同类型记录时不再新增。
+    if (typeof (dns as any).getDomainRecords === 'function') {
+      const existing: any = await Promise.resolve()
+        .then(() => (dns as any).getDomainRecords(1, 500, name, null, rec.value, rec.type))
+        .catch(() => null);
+      const list: any[] = Array.isArray(existing?.list) ? existing.list : [];
+      const hit = list.some(
+        (item: any) =>
+          norm(item?.Value ?? item?.value) === norm(rec.value) &&
+          String(item?.Type ?? item?.type ?? '').toUpperCase() === String(rec.type).toUpperCase() &&
+          (norm(item?.Name ?? item?.name) === norm(name) ||
+            norm(item?.Name ?? item?.name).endsWith('.' + norm(name)) ||
+            norm(item?.Name ?? item?.name).endsWith('.' + norm(rel))),
+      );
+      if (hit) return `验证解析已存在 ${name} ${rec.type} ${rec.value}`;
+    }
     const recordId = await dns.addDomainRecord(name, rec.type, rec.value, undefined, 600);
     if (recordId) return `已自动添加验证解析 ${name} ${rec.type} ${rec.value}`;
     return `自动添加验证解析失败（${dns.getError()}），请手动添加 ${name} ${rec.type} ${rec.value}`;
@@ -4009,8 +4029,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (Number(order.status) !== 3 || !order.fullchain || !order.privatekey) return { status: 'failed', message: '所选证书尚未签发完成' };
       const exact = await queryOne(`SELECT id FROM ${table('cert_domain')} WHERE oid = ? AND LOWER(domain) = ?`, [orderId, need]);
       if (!exact) return { status: 'failed', message: `所选证书未精确包含 ${row.name}，不能用于该域名` };
-      // 记录联动，续签后仍自动更新
-      await query(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [JSON.stringify({ cdnDomainId: domainId }), orderId]);
+      // 记录联动，续签后仍自动更新；合并而不是覆盖，避免切断该证书与此前 CDN 域名的联动。
+      await linkOrderToCdnDomain(orderId, domainId);
       await linkLog(domainId, orderId, 'issue', 'ok', `已选用项目内已签发证书 #${orderId}`);
       const task: any = await ensureCertDeploy(provider, row, scope, orderId).catch(() => false);
       if (!task) return { status: 'failed', message: '创建自动部署任务失败' };
@@ -4097,23 +4117,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { code: r.status === 'failed' ? -1 : 0, msg: r.message, data: { ...r, domain_id: Number(id) } };
   });
 
-  // 查找该加速域名已绑定的联动证书订单（按 link 中的 cdnDomainId 精确匹配）
+  // 查找该加速域名已绑定的联动证书订单（link 可能包含多个 cdnDomainIds）
   async function findLinkedOrder(did: number): Promise<any | null> {
-    // 走 cdn_domain_id 生成列索引精确匹配；生成列不可用时降级为 LIKE 粗筛 + 解析
-    if (isCdnDomainIdColumnAvailable()) {
-      const rows = await query(`SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE cdn_domain_id = ? ORDER BY id DESC LIMIT 1`, [did]);
-      return (rows as any[])[0] || null;
-    }
     const candidates = await query(
-      `SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ? ORDER BY id DESC LIMIT 50`,
+      `SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ? ORDER BY id DESC LIMIT 200`,
       ['%"cdnDomainId"%'],
     );
     for (const r of candidates as any[]) {
-      try {
-        if (Number(JSON.parse(r.link)?.cdnDomainId) === did) return r;
-      } catch {
-        /* 非法 JSON 忽略 */
-      }
+      if (cdnLinkIds(r.link).includes(Number(did))) return r;
     }
     return null;
   }
@@ -4213,10 +4224,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
     const did = Number(id);
-    const logs = await query(
-      `SELECT node, status, message, addtime FROM ${table('cert_link_log')} WHERE did = ? ORDER BY id ASC LIMIT 200`,
+    const logs: any[] = await query(
+      `SELECT node, status, message, addtime FROM ${table('cert_link_log')} WHERE did = ? ORDER BY id DESC LIMIT 200`,
       [did],
     );
+    logs.reverse(); // 取最近 200 条后恢复时间顺序，避免只看到最早的日志
     const order = await findLinkedOrder(did);
     if (order && !(await canAccessCertOrder(Number(order.id), req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书不存在' });
@@ -4790,7 +4802,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const rows = domains.length
       ? await query(`SELECT * FROM ${table('cdn_domain')} WHERE name IN (${domains.map(() => '?').join(',')})`, domains)
       : [];
-    const rowByName = new Map((rows as any[]).map((r) => [String(r.name), r]));
+    const rowsByName = new Map<string, any[]>();
+    for (const r of rows as any[]) {
+      const key = String(r.name);
+      const list = rowsByName.get(key) || [];
+      list.push(r);
+      rowsByName.set(key, list);
+    }
     const visibleCache = new Map<number, boolean>();
 
     for (const url of urls) {
@@ -4799,19 +4817,26 @@ export default async function cdnRoutes(app: FastifyInstance) {
         failed.push({ url, msg: 'URL 格式错误' });
         continue;
       }
-      const row: any = rowByName.get(domain);
-      if (!row) {
+      const candidates = (rowsByName.get(domain) || []).filter((r) => Number(r?.id) > 0);
+      const visible: any[] = [];
+      for (const candidate of candidates) {
+        const aid = Number(candidate.aid);
+        if (!visibleCache.has(aid)) {
+          visibleCache.set(aid, !!(await getVisibleAccount('cdn_account', aid, user)));
+        }
+        if (visibleCache.get(aid)) visible.push(candidate);
+      }
+      if (!visible.length) {
         failed.push({ url, msg: `未找到加速域名 ${domain}` });
         continue;
       }
-      const aid = Number(row.aid);
-      if (!visibleCache.has(aid)) {
-        visibleCache.set(aid, !!(await getVisibleAccount('cdn_account', aid, user)));
-      }
-      if (!visibleCache.get(aid)) {
-        failed.push({ url, msg: `未找到加速域名 ${domain}` });
+      // 同名加速域名可能存在于多个账户（唯一键是 aid+name）；没有账户上下文时
+      // 直接失败比随机挑一个更安全，避免把刷新/预热打到错误的厂商站点。
+      if (visible.length > 1) {
+        failed.push({ url, msg: `加速域名 ${domain} 存在于多个账户，请在对应账户的域名详情中操作` });
         continue;
       }
+      const row: any = visible[0];
       const provider: any = await cdnForRow(row);
       if (!provider) {
         failed.push({ url, msg: 'CDN 账户不存在' });

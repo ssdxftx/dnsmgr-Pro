@@ -372,7 +372,7 @@ async function loadAll() {
 async function startExport() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/backup/export', { scope: 'site', include_logs: includeLogs.value, dest_id: destId.value });
+    const res = await api<any>('POST', '/backup/export', { scope: 'site', include_logs: includeLogs.value, dest_id: destId.value }, { timeout: 0 });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
     await loadAll();
@@ -416,10 +416,14 @@ function askPassword(title: string, placeholder: string): Promise<string | null>
 async function rotateKey() {
   const password = await askPassword(t('backup.keyTitle'), t('vault.loginPass'));
   if (password === null) return;
-  const res = await api<any>('POST', '/backup/key', { password });
-  if (res.code !== 0) return message.error(res.msg);
-  message.success(res.msg);
-  keyReady.value = true;
+  try {
+    const res = await api<any>('POST', '/backup/key', { password });
+    if (res.code !== 0) return message.error(res.msg);
+    message.success(res.msg);
+    keyReady.value = true;
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
+  }
 }
 
 async function download(row: any) {
@@ -523,7 +527,7 @@ async function doRestore() {
     } else {
       body.jobId = restoreTarget.value.id;
     }
-    const res = await api<any>('POST', '/backup/restore', body);
+    const res = await api<any>('POST', '/backup/restore', body, { timeout: 0 });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.restoreDone'));
     showRestore.value = false;
@@ -595,6 +599,8 @@ async function saveDest() {
     message.success(t('backup.saved'));
     showDest.value = false;
     await loadAll();
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
   } finally {
     saving.value = false;
   }
@@ -655,6 +661,8 @@ async function saveSched() {
     message.success(t('backup.saved'));
     showSched.value = false;
     await loadAll();
+  } catch (e: any) {
+    message.error(e?.message || t('backup.loadFailed'));
   } finally {
     saving.value = false;
   }

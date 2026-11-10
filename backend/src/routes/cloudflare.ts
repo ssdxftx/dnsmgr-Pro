@@ -12,6 +12,8 @@ import {
 import { fmtDateTime } from '../lib/util.js';
 import { getVisibleAccount } from '../lib/accounts/visibility.js';
 import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
+import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
+import { assertNotMetadataHost } from '../lib/netGuard.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -493,6 +495,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
 
       let addedCount = 0;
       const failedHostnames: string[] = [];
+      const warnings: string[] = [];
       for (const hostname of hostnames) {
         if (!checkDomainFormat(hostname)) {
           failedHostnames.push(`${hostname}（格式不正确）`);
@@ -501,15 +504,26 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         try {
           await ctx.service.createCustomHostname(ctx.domain.thirdid, hostname, origin || null, sslMethod, minTlsVersion);
           addedCount++;
-          await addLog(req.user.uid, ctx.domain.name, '批量添加自定义主机名', `${hostname}${origin ? ' -> ' + origin : ''} (验证: ${sslMethod}, TLS: ${minTlsVersion})`);
         } catch (e: any) {
           failedHostnames.push(`${hostname}（${e?.message || '失败'}）`);
+          continue;
+        }
+        // 审计日志失败不能反向把已创建成功的主机名计为创建失败。
+        try {
+          await addLog(req.user.uid, ctx.domain.name, '批量添加自定义主机名', `${hostname}${origin ? ' -> ' + origin : ''} (验证: ${sslMethod}, TLS: ${minTlsVersion})`);
+        } catch (e: any) {
+          warnings.push(`${hostname}（日志写入失败：${e?.message || '未知错误'}）`);
         }
       }
 
-      let message = `批量添加成功，共添加 ${addedCount} 个自定义主机名`;
+      let message = `批量添加完成：成功 ${addedCount} 个`;
       if (failedHostnames.length) message += `，失败 ${failedHostnames.length} 个：${failedHostnames.join('; ')}`;
-      return { code: 0, msg: message };
+      if (warnings.length) message += `，警告 ${warnings.length} 条：${warnings.join('; ')}`;
+      return {
+        code: failedHostnames.length ? -1 : 0,
+        msg: message,
+        data: { success: addedCount, failed: failedHostnames.length, warnings: warnings.length },
+      };
     } catch (e: any) {
       return unwrap(e);
     }
@@ -589,18 +603,38 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       if (hostnameIds.length > 100) throw new EnhanceError('单次最多删除 100 个自定义主机名');
 
       let deletedCount = 0;
+      const failures: string[] = [];
+      const warnings: string[] = [];
       for (const hostnameId of hostnameIds) {
         const id = String(hostnameId ?? '').trim();
-        if (!id) continue;
+        if (!id) {
+          failures.push('(空 ID)');
+          continue;
+        }
+        let hostname = '';
         try {
           const info = await ctx.service.getCustomHostname(ctx.domain.thirdid, id);
-          const hostname = String(info?.hostname ?? '').trim();
+          hostname = String(info?.hostname ?? '').trim();
           await ctx.service.deleteCustomHostname(ctx.domain.thirdid, id);
           deletedCount++;
+        } catch (e: any) {
+          failures.push(`${id}${hostname ? '（' + hostname + '）' : ''}：${e?.message || '删除失败'}`);
+          continue;
+        }
+        try {
           await addLog(req.user.uid, ctx.domain.name, '批量删除自定义主机名', hostname);
-        } catch {}
+        } catch (e: any) {
+          warnings.push(`${hostname || id}（日志写入失败）`);
+        }
       }
-      return { code: 0, msg: `批量删除成功，共删除 ${deletedCount} 个自定义主机名` };
+      let message = `批量删除完成：成功 ${deletedCount} 个`;
+      if (failures.length) message += `，失败 ${failures.length} 个：${failures.join('; ')}`;
+      if (warnings.length) message += `，警告 ${warnings.length} 条`;
+      return {
+        code: failures.length ? -1 : 0,
+        msg: message,
+        data: { success: deletedCount, failed: failures.length, warnings: warnings.length },
+      };
     } catch (e: any) {
       return unwrap(e);
     }
@@ -627,25 +661,42 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       if (origin) validateCustomOrigin(origin);
 
       let updatedCount = 0;
+      const failures: string[] = [];
+      const warnings: string[] = [];
       for (const hostnameId of hostnameIds) {
+        let hostname = '';
         try {
           const current = await ctx.service.getCustomHostname(ctx.domain.thirdid, hostnameId);
-          const hostname = String(current?.hostname ?? '').trim();
+          hostname = String(current?.hostname ?? '').trim();
           const payload: any = { custom_origin_server: origin || null };
           if (sslMethod || minTlsVersion) {
             payload.ssl = extractCustomHostnameSslPayload(current, sslMethod, minTlsVersion);
           }
           await ctx.service.updateCustomHostname(ctx.domain.thirdid, hostnameId, payload);
           updatedCount++;
+        } catch (e: any) {
+          failures.push(`${hostnameId}${hostname ? '（' + hostname + '）' : ''}：${e?.message || '修改失败'}`);
+          continue;
+        }
+        try {
           await addLog(
             req.user.uid,
             ctx.domain.name,
             '批量修改自定义主机名',
             `${hostname} -> ${origin || '清空源站'} (验证: ${sslMethod || '保持不变'}, TLS: ${minTlsVersion || '保持不变'})`,
           );
-        } catch {}
+        } catch {
+          warnings.push(`${hostname || hostnameId}（日志写入失败）`);
+        }
       }
-      return { code: 0, msg: `批量修改成功，共修改 ${updatedCount} 个自定义主机名` };
+      let message = `批量修改完成：成功 ${updatedCount} 个`;
+      if (failures.length) message += `，失败 ${failures.length} 个：${failures.join('; ')}`;
+      if (warnings.length) message += `，警告 ${warnings.length} 条`;
+      return {
+        code: failures.length ? -1 : 0,
+        msg: message,
+        data: { success: updatedCount, failed: failures.length, warnings: warnings.length },
+      };
     } catch (e: any) {
       return unwrap(e);
     }
@@ -808,42 +859,79 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       const path = String(b.path ?? '').trim();
       if (!tunnelId || !hostname || !serviceValue) throw new EnhanceError('Tunnel、主机名、服务地址不能为空');
       if (!checkDomainFormat(hostname)) throw new EnhanceError('主机名格式不正确');
+      // cloudflared 会把公网 hostname 反代到 service；至少阻断 file: 与云元数据/链路本地地址，
+      // 本机/内网服务（localhost、10.x）属于 Tunnel 的正常用法，仍允许。
+      if (/^file:/i.test(serviceValue)) throw new EnhanceError('不支持 file: 类型的 Tunnel 服务地址');
+      const svcMatch = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]+)/i.exec(serviceValue);
+      if (svcMatch) {
+        const hostPart = svcMatch[1].replace(/^\[|\]$/g, '').replace(/:\d+$/, '');
+        if (hostPart) {
+          try {
+            await assertNotMetadataHost(hostPart);
+          } catch {
+            throw new EnhanceError('Tunnel 服务地址不能指向云元数据/链路本地地址');
+          }
+        }
+      }
 
       const zone = await findBestMatchingDomain(Number(ctx.account.id), hostname);
       if (!zone || !zone.thirdid) {
         throw new EnhanceError('未找到匹配的本地域名，请先在当前 Cloudflare 账户下导入该主机名所属主域');
       }
 
-      const config = extractTunnelConfigObject(await ctx.service.getTunnelConfig(ctx.accountId, tunnelId));
-      const oldConfig = JSON.parse(JSON.stringify(config));
-      const ingress = Array.isArray(config?.ingress) ? [...config.ingress] : [];
-      const rule: any = { hostname, service: serviceValue };
-      if (path) rule.path = path;
+      // 同一 tunnel 的 ingress 是「读整份 → 改一条 → 写整份」，必须串行化，
+      // 否则两个 hostname 并发添加会互相覆盖。锁按账户+tunnel 维度，跨实例生效。
+      const outcome = await withDistributedLockResult(
+        `dnsmgr:cf-tunnel:${Number(ctx.account.id)}:${tunnelId}`,
+        async () => {
+          const config = extractTunnelConfigObject(await ctx.service.getTunnelConfig(ctx.accountId, tunnelId));
+          const ingress = Array.isArray(config?.ingress) ? [...config.ingress] : [];
+          const rule: any = { hostname, service: serviceValue };
+          if (path) rule.path = path;
 
-      const existingIndex = findPublicHostnameIndex(ingress, hostname, path);
-      if (existingIndex >= 0) {
-        const next = { ...ingress[existingIndex], ...rule };
-        if (!path && 'path' in next) delete next.path;
-        ingress[existingIndex] = next;
-      } else {
-        const fallbackIndex = findFallbackIngressIndex(ingress);
-        if (fallbackIndex >= 0) {
-          ingress.splice(fallbackIndex, 0, rule);
-        } else {
-          ingress.push(rule);
-        }
-      }
+          let previousRule: any = null;
+          const existingIndex = findPublicHostnameIndex(ingress, hostname, path);
+          if (existingIndex >= 0) {
+            previousRule = { ...ingress[existingIndex] };
+            const next = { ...ingress[existingIndex], ...rule };
+            if (!path && 'path' in next) delete next.path;
+            ingress[existingIndex] = next;
+          } else {
+            const fallbackIndex = findFallbackIngressIndex(ingress);
+            if (fallbackIndex >= 0) {
+              ingress.splice(fallbackIndex, 0, rule);
+            } else {
+              ingress.push(rule);
+            }
+          }
 
-      config.ingress = ensureFallbackIngress(ingress);
-      await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, config);
+          config.ingress = ensureFallbackIngress(ingress);
+          await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, config);
 
-      try {
-        const dns = await ctx.service.upsertTunnelCnameRecord(zone.thirdid, hostname, tunnelId);
-        await addLog(req.user.uid, formatAccountDisplayName(ctx.account), '配置 Tunnel 公网主机名', `${hostname} -> ${serviceValue} [${dns?.action ?? '-'}]`);
-      } catch (e: any) {
-        await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, oldConfig);
-        throw new EnhanceError('Public Hostname 已回滚：' + (e?.message || ''), 400);
-      }
+          try {
+            const dns = await ctx.service.upsertTunnelCnameRecord(zone.thirdid, hostname, tunnelId);
+            await addLog(req.user.uid, formatAccountDisplayName(ctx.account), '配置 Tunnel 公网主机名', `${hostname} -> ${serviceValue} [${dns?.action ?? '-'}]`);
+          } catch (e: any) {
+            // 定向回滚：只撤销本次规则，不再用旧整份配置覆盖并发新增的其它规则。
+            try {
+              const latest = extractTunnelConfigObject(await ctx.service.getTunnelConfig(ctx.accountId, tunnelId));
+              const latestIngress = Array.isArray(latest?.ingress) ? [...latest.ingress] : [];
+              const idx = findPublicHostnameIndex(latestIngress, hostname, path);
+              if (idx >= 0 && String(latestIngress[idx]?.service ?? '') === serviceValue) {
+                if (previousRule) latestIngress[idx] = previousRule;
+                else latestIngress.splice(idx, 1);
+                latest.ingress = ensureFallbackIngress(latestIngress);
+                await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, latest);
+              }
+            } catch {
+              // 回滚失败时保留原始错误，提示用户手动检查
+            }
+            throw new EnhanceError('Public Hostname 已回滚：' + (e?.message || ''), 400);
+          }
+        },
+        5,
+      );
+      if (!outcome.locked) throw new EnhanceError('该 Tunnel 正在被其他操作修改，请稍后重试', 409);
       return { code: 0, msg: '配置 Public Hostname 成功' };
     } catch (e: any) {
       return unwrap(e);
@@ -859,28 +947,54 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       const path = String(req.query.path ?? '').trim();
       if (!tunnelId || !hostname) throw new EnhanceError('缺少 tunnel_id 或 hostname');
 
-      const config = extractTunnelConfigObject(await ctx.service.getTunnelConfig(ctx.accountId, tunnelId));
-      const oldConfig = JSON.parse(JSON.stringify(config));
-      const ingress = Array.isArray(config?.ingress) ? [...config.ingress] : [];
-      const nextIngress = ingress.filter(
-        (row: any) =>
-          !(row && typeof row === 'object' && normalizeHostname(row.hostname) === normalizeHostname(hostname) && String(row.path ?? '').trim() === path),
+      const outcome = await withDistributedLockResult(
+        `dnsmgr:cf-tunnel:${Number(ctx.account.id)}:${tunnelId}`,
+        async () => {
+          const config = extractTunnelConfigObject(await ctx.service.getTunnelConfig(ctx.accountId, tunnelId));
+          const ingress = Array.isArray(config?.ingress) ? [...config.ingress] : [];
+          const removed: any[] = [];
+          const nextIngress = ingress.filter((row: any) => {
+            const hit =
+              row && typeof row === 'object' &&
+              normalizeHostname(row.hostname) === normalizeHostname(hostname) &&
+              String(row.path ?? '').trim() === path;
+            if (hit) removed.push({ ...row });
+            return !hit;
+          });
+
+          config.ingress = ensureFallbackIngress(nextIngress);
+          await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, config);
+
+          const zone = await findBestMatchingDomain(Number(ctx.account.id), hostname);
+          if (zone?.thirdid) {
+            try {
+              await ctx.service.deleteTunnelCnameRecordIfMatch(zone.thirdid, hostname, tunnelId);
+            } catch (e: any) {
+              // 定向回滚：只把本次删除的规则放回去，避免旧整份配置覆盖并发新增。
+              try {
+                const latest = extractTunnelConfigObject(await ctx.service.getTunnelConfig(ctx.accountId, tunnelId));
+                const latestIngress = Array.isArray(latest?.ingress) ? [...latest.ingress] : [];
+                const idx = findFallbackIngressIndex(latestIngress);
+                for (const rule of removed) {
+                  if (findPublicHostnameIndex(latestIngress, rule.hostname, String(rule.path ?? '')) < 0) {
+                    if (idx >= 0) latestIngress.splice(idx, 0, rule);
+                    else latestIngress.push(rule);
+                  }
+                }
+                latest.ingress = ensureFallbackIngress(latestIngress);
+                await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, latest);
+              } catch {
+                // ignore
+              }
+              throw new EnhanceError('删除 Public Hostname 时已回滚：' + (e?.message || ''), 400);
+            }
+          }
+
+          await addLog(req.user.uid, formatAccountDisplayName(ctx.account), '删除 Tunnel 公网主机名', hostname + (path ? ` [${path}]` : ''));
+        },
+        5,
       );
-
-      config.ingress = ensureFallbackIngress(nextIngress);
-      await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, config);
-
-      const zone = await findBestMatchingDomain(Number(ctx.account.id), hostname);
-      if (zone?.thirdid) {
-        try {
-          await ctx.service.deleteTunnelCnameRecordIfMatch(zone.thirdid, hostname, tunnelId);
-        } catch (e: any) {
-          await ctx.service.updateTunnelConfig(ctx.accountId, tunnelId, oldConfig);
-          throw new EnhanceError('删除 Public Hostname 时已回滚：' + (e?.message || ''), 400);
-        }
-      }
-
-      await addLog(req.user.uid, formatAccountDisplayName(ctx.account), '删除 Tunnel 公网主机名', hostname + (path ? ` [${path}]` : ''));
+      if (!outcome.locked) throw new EnhanceError('该 Tunnel 正在被其他操作修改，请稍后重试', 409);
       return { code: 0, msg: '删除 Public Hostname 成功' };
     } catch (e: any) {
       return unwrap(e);

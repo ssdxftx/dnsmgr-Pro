@@ -2,6 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { configGet, configSet } from '../config.js';
 import { QqBot } from '../lib/monitor/qqbot.js';
 import { audit } from '../lib/audit/context.js';
+import { hitRateLimitDistributed } from '../lib/rateLimit.js';
+import { consumeOneTimeTicket } from '../lib/legacyApi.js';
 
 const BIND_REPLY = '# 绑定成功\n\n您已成功绑定QQ机器人消息通知，聚合DNS管理系统通知将通过本机器人发送。';
 const UNBIND_NOTICE = '# 绑定已变更\n\n您的QQ机器人消息通知绑定已被其他账号替换。若非本人操作，请立即检查系统账号安全。';
@@ -16,17 +18,11 @@ const UNBIND_NOTICE = '# 绑定已变更\n\n您的QQ机器人消息通知绑定�
  * 否则公开的 op=13 会退化为「对任意 event_ts+plain_token 签名」的预言机，
  * 攻击者可借此伪造任意 Webhook 事件（如改写 qqbot_openid 劫持通知）。
  */
-// 回调消息去重：签名合法但内容相同的请求在 5 分钟内可被原样重放，
-// 这里按消息 ID 记录已处理事件（多副本场景下每个副本各记一份，已足够阻止重复改绑）。
-const qqSeenMessages = new Map<string, number>();
-const QQ_SEEN_TTL = 10 * 60_000;
-function qqMessageFresh(id: string): boolean {
-  if (!id) return true;
-  const now = Date.now();
-  for (const [k, at] of qqSeenMessages) if (now - at > QQ_SEEN_TTL) qqSeenMessages.delete(k);
-  if (qqSeenMessages.has(id)) return false;
-  qqSeenMessages.set(id, now);
-  return true;
+// 回调消息去重必须跨副本/跨重启生效：使用数据库一次性 nonce 表（legacy_nonce），
+// 同一消息 ID 只能成功消费一次。数据库不可用时 fail-closed（外层返回 500）。
+async function qqMessageFresh(id: string): Promise<boolean> {
+  if (!id) return false;
+  return consumeOneTimeTicket(`qq:${id}`, 0);
 }
 
 export default async function qqbotRoutes(app: FastifyInstance) {
@@ -62,10 +58,13 @@ export default async function qqbotRoutes(app: FastifyInstance) {
         return reply.code(401).send('stale signature timestamp');
       }
 
-      // 同一消息 ID 只处理一次，避免重放已通过验签的旧回调
-      if (!qqMessageFresh(String(payload?.d?.id || payload?.id || ''))) return reply.send('');
-
       const op = Number(payload.op || 0);
+      // op=13 是无状态签名验证，无需去重；业务回调必须带消息 ID 且只能消费一次。
+      if (op !== 13) {
+        const messageId = String(payload?.d?.id || payload?.id || '').trim();
+        if (!messageId) return reply.code(400).send('missing message id');
+        if (!(await qqMessageFresh(messageId))) return reply.send('');
+      }
       if (op === 13) {
         const d = payload.d && typeof payload.d === 'object' ? payload.d : {};
         return reply.send(bot.signValidation(String(d.event_ts || ''), String(d.plain_token || '')));
@@ -79,8 +78,16 @@ export default async function qqbotRoutes(app: FastifyInstance) {
         const bindCode = String((await configGet('qqbot_bind_code', '')) || '').trim();
         const content = String(d.content || '').trim();
         if (bindCode === '' || content !== bindCode) {
+          // 绑定口令不允许弱口令；尝试次数按全局桶限流，避免攻击者用不同 QQ 号分摊爆破。
+          if (bindCode.length > 0 && bindCode.length < 8) return reply.send('');
+          if (bindCode !== '') {
+            const ok = await hitRateLimitDistributed('qqbot:bind-attempt', 20, 10 * 60_000);
+            if (!ok) return reply.send('');
+          }
           return reply.send('');
         }
+        // 口令一次性使用：绑定成功后立即清空，换绑必须由管理员重新生成。
+        await configSet('qqbot_bind_code', '');
         if (openid !== '' && old !== openid) {
           await configSet('qqbot_openid', openid);
           console.warn('[qqbot] 通知绑定 openid 变更：' + (old || '(空)') + ' -> ' + openid);

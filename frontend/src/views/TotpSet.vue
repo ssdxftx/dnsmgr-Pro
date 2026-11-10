@@ -22,7 +22,7 @@
           <n-input v-model:value="code" :placeholder="t('totp.codePlaceholder')" maxlength="6" style="max-width: 380px" @keyup.enter="bind" />
           <n-input v-model:value="password" type="password" show-password-on="click" :placeholder="t('totp.passwordPlaceholder')" style="max-width: 380px" />
           <n-space justify="start" style="width: 100%">
-            <n-button @click="step = ''">{{ t('common.cancel') }}</n-button>
+            <n-button @click="cancelBind">{{ t('common.cancel') }}</n-button>
             <n-button type="primary" :loading="loadBusy" @click="bind">{{ t('totp.confirmBind') }}</n-button>
           </n-space>
         </n-space>
@@ -97,6 +97,11 @@ async function bind() {
       message.success(res.msg);
       enabled.value = true;
       step.value = '';
+      secret.value = '';
+      bindToken.value = '';
+      qrcode.value = '';
+      qrDataUrl.value = '';
+      code.value = '';
       password.value = '';
       if (res.data?.token) {
         setToken(res.data.token);
@@ -129,6 +134,8 @@ function close() {
           enabled.value = false;
           password.value = '';
           closeCode.value = '';
+          secret.value = '';
+          bindToken.value = '';
           if (res.data?.token) {
             setToken(res.data.token);
             setUser({ ...(getUser() || {}), totp_open: 0 });
@@ -141,6 +148,16 @@ function close() {
       }
     },
   });
+}
+
+function cancelBind() {
+  step.value = '';
+  secret.value = '';
+  bindToken.value = '';
+  qrcode.value = '';
+  qrDataUrl.value = '';
+  code.value = '';
+  password.value = '';
 }
 
 function copySecret() {

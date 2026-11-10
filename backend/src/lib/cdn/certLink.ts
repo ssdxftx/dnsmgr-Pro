@@ -1,7 +1,7 @@
 import { domainToASCII } from 'node:url';
+import { createHash } from 'node:crypto';
 import { query, queryOne, table } from '../../db.js';
 import { certConfig } from '../cert/factory.js';
-import { isCdnDomainIdColumnAvailable } from '../cert/cdnDomainIdColumn.js';
 import { getCdnProvider } from './factory.js';
 import type { CertDeployPlan } from './types.js';
 
@@ -12,6 +12,7 @@ import { decryptConfig, encryptConfig } from '../secret.js';
 import { CertOrderService } from '../certService.js';
 import { canAccessCertOrder } from '../accounts/visibility.js';
 import { loadAccountConfig } from '../accounts/taskConfig.js';
+import { withDistributedLockResult } from '../scheduler/distLock.js';
 
 // 证书联动阶段：order=证书订单、issue=签发、account=部署账户、task=部署任务、deploy=部署到 CDN
 export type LinkNode = 'order' | 'issue' | 'account' | 'task' | 'deploy';
@@ -138,6 +139,69 @@ export async function findOrderByDomains(aid: number, domains: string[], q: Quer
   return null;
 }
 
+/** 解析 link：兼容旧的单值 cdnDomainId 与新的 cdnDomainIds 数组。 */
+export function cdnLinkIds(link: any): number[] {
+  let value: any = link;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
+  if (!value || typeof value !== 'object') return [];
+  const out: number[] = [];
+  const push = (v: any) => {
+    const n = Number(v);
+    if (Number.isInteger(n) && n > 0 && !out.includes(n)) out.push(n);
+  };
+  if (Array.isArray(value.cdnDomainIds)) for (const v of value.cdnDomainIds) push(v);
+  push(value.cdnDomainId);
+  return out;
+}
+
+/**
+ * 把订单与一个或多个 CDN 域名关联。
+ * link 字段保留 cdnDomainId 作为主关联（兼容生成列/旧数据），同时用 cdnDomainIds 保存全部关联，
+ * 避免同一张证书被第二个域名复用时覆盖第一个域名的续签联动。
+ */
+export async function addOrderCdnLinks(orderId: number, cdnDomainIds: number[], q: QueryFn = query): Promise<number[]> {
+  const oid = Number(orderId);
+  const dids = [...new Set((cdnDomainIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+  if (!oid || !dids.length) return [];
+  const rows: any = await q(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [oid]);
+  if (!rows[0]) return [];
+  const ids = cdnLinkIds(rows[0].link);
+  let changed = false;
+  for (const did of dids) {
+    if (!ids.includes(did)) {
+      ids.push(did);
+      changed = true;
+    }
+  }
+  if (changed) {
+    const link = JSON.stringify({ cdnDomainId: ids[0], cdnDomainIds: ids });
+    await q(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [link, oid]);
+  }
+  return ids;
+}
+
+/** 兼容旧调用：把订单关联到单个 CDN 域名 */
+export async function linkOrderToCdnDomain(orderId: number, cdnDomainId: number, q: QueryFn = query): Promise<void> {
+  await addOrderCdnLinks(orderId, [cdnDomainId], q);
+}
+
+// 跨实例互斥：进程内 Map 只能约束单副本，多副本会各自先查后建。
+function lockKey(prefix: string, value: string): string {
+  return prefix + createHash('sha256').update(value).digest('hex').slice(0, 32);
+}
+
+async function withNamedLock<T>(prefix: string, value: string, fn: () => Promise<T>): Promise<T> {
+  const outcome = await withDistributedLockResult(lockKey(prefix, value), fn, 10);
+  if (!outcome.locked) throw new Error('该证书联动操作正在处理中，请稍后再试');
+  return outcome.result as T;
+}
+
 // 按「账户 + 域名集合」串行化订单创建：避免并发（CDN 联动/连点）下 findOrderByDomains
 // 先查后建竞态生成同域名多张订单，导致重复消耗 CA 配额与 TXT 记录互相删除
 const orderLocks = new Map<string, Promise<unknown>>();
@@ -154,8 +218,10 @@ function withOrderLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
 
 // 新建证书订单并绑定域名（可指定 link 联动信息）
 export async function createOrder(aid: number, domains: string[], link: string | null = null, q: QueryFn = query): Promise<any> {
+  const linkIds = cdnLinkIds(link);
+  const normalizedLink = linkIds.length ? JSON.stringify({ cdnDomainId: linkIds[0], cdnDomainIds: linkIds }) : link;
   const res: any = await q(`INSERT INTO ${table('cert_order')} SET ?`, [
-    { aid, keytype: 'RSA', keysize: 2048, addtime: new Date(), updatetime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date(), link },
+    { aid, keytype: 'RSA', keysize: 2048, addtime: new Date(), updatetime: new Date(), issuer: '', status: 0, isauto: 1, retrytime: new Date(), link: normalizedLink },
   ]);
   const id = Number(res?.insertId || 0);
   if (domains.length) {
@@ -171,33 +237,37 @@ export async function createOrder(aid: number, domains: string[], link: string |
 // 站点级通配符订单：存在即复用，不存在则创建，交由证书调度器完成签发
 export async function ensureWildcardOrder(aid: number, domains: string[], q: QueryFn = query): Promise<any> {
   const key = aid + '|' + [...domains].sort().join(',');
-  return withOrderLock(key, async () => {
-    const existing = await findOrderByDomains(aid, domains, q);
-    if (existing) return existing;
-    return await createOrder(aid, domains, null, q);
-  });
+  return withNamedLock('dnsmgr:cert-wildcard:', key, () =>
+    withOrderLock(key, async () => {
+      const existing = await findOrderByDomains(aid, domains, q);
+      if (existing) return existing;
+      return await createOrder(aid, domains, null, q);
+    }),
+  );
 }
 
 // 精确子域名订单：只绑定目标子域名，不含根域/通配符/额外 SAN
 export async function ensureExactOrder(aid: number, domain: string, link: string | null = null, q: QueryFn = query): Promise<any> {
   const key = aid + '|' + domain;
-  return withOrderLock(key, async () => {
+  return withNamedLock('dnsmgr:cert-exact:', key, () => withOrderLock(key, async () => {
     const existing = await findOrderByDomains(aid, [domain], q);
     if (existing) {
-      // 复用已有订单时也要补写联动信息，否则签发成功后不会创建部署任务
-      if (link && existing.link !== link) {
-        await q(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [link, existing.id]);
-        existing.link = link;
+      // 复用已有订单时合并联动信息：不能覆盖此前域名，否则前一个域名的续签部署被静默切断。
+      const ids = cdnLinkIds(link);
+      if (ids.length) {
+        const merged = await addOrderCdnLinks(Number(existing.id), ids, q);
+        existing.link = JSON.stringify({ cdnDomainId: merged[0], cdnDomainIds: merged });
       }
       return existing;
     }
     return await createOrder(aid, [domain], link, q);
-  });
+  }));
 }
 
 // 复用 CDN 账户密钥：按（类型 + 配置）查找或创建自动部署账户
 export async function ensureDeployAccount(plan: CertDeployPlan, q: QueryFn = query): Promise<number> {
   const cfg = JSON.stringify(plan.accountConfig || {});
+  return withNamedLock('dnsmgr:cert-deploy-account:', plan.accountType + '|' + cfg, async () => {
   // 加密存储使用随机 IV，无法按密文比较，改为按类型取出后解密比对
   const rows: any = await q(`SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = 1`, [plan.accountType]);
   const hit = (rows as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === cfg);
@@ -207,6 +277,7 @@ export async function ensureDeployAccount(plan: CertDeployPlan, q: QueryFn = que
     [plan.accountType, plan.accountName || 'CDN 证书联动（' + plan.accountType + '）', encryptConfig(plan.accountConfig || {}), '由 CDN 证书联动自动创建'],
   );
   return Number(res?.insertId || 0);
+  });
 }
 
 // 按（部署账户 + 证书订单 + 配置）去重创建自动部署任务，保证续签后自动更新
@@ -217,6 +288,7 @@ export async function ensureDeployTask(
   q: QueryFn = query,
 ): Promise<{ taskId: number; created: boolean }> {
   const cfg = JSON.stringify(config);
+  return withNamedLock('dnsmgr:cert-deploy-task:', aid + '|' + oid + '|' + cfg, async () => {
   const rows: any = await q(`SELECT id, active, config FROM ${table('cert_deploy')} WHERE aid = ? AND oid = ?`, [aid, oid]);
   // 加密存储使用随机 IV，需解密后比较配置
   const hit = (rows as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === cfg);
@@ -229,6 +301,7 @@ export async function ensureDeployTask(
     [aid, oid, encryptConfig(config), 'CDN 证书联动自动部署'],
   );
   return { taskId: Number(res?.insertId || 0), created: true };
+  });
 }
 
 // 由已构造的 provider + 加速域名行，生成部署计划并创建自动部署任务
@@ -306,29 +379,19 @@ export async function ensureCertDeployForDomain(cdnDomainId: number, orderId: nu
 export async function processOrderLink(orderId: number): Promise<void> {
   const order = await queryOne(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [orderId]);
   if (!order?.link) return;
-  let link: any;
-  try {
-    link = JSON.parse(order.link);
-  } catch {
-    return;
+  for (const did of cdnLinkIds(order.link)) {
+    await linkLog(did, orderId, 'issue', 'ok', '证书已签发，开始创建 CDN 自动部署任务');
+    await ensureCertDeployForDomain(did, orderId);
   }
-  if (!link?.cdnDomainId) return;
-  await linkLog(Number(link.cdnDomainId), orderId, 'issue', 'ok', '证书已签发，开始创建 CDN 自动部署任务');
-  await ensureCertDeployForDomain(Number(link.cdnDomainId), orderId);
 }
 
 // 证书订单处理失败时写入联动阶段日志（仅针对带 CDN 联动的订单，成功由 processOrderLink 记录）
 export async function logOrderFailure(orderId: number, error?: string): Promise<void> {
   const order = await queryOne(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [orderId]);
   if (!order?.link) return;
-  let link: any;
-  try {
-    link = JSON.parse(order.link);
-  } catch {
-    return;
+  for (const did of cdnLinkIds(order.link)) {
+    await linkLog(did, orderId, 'issue', 'fail', '证书签发失败：' + (error || '未知错误'));
   }
-  if (!link?.cdnDomainId) return;
-  await linkLog(Number(link.cdnDomainId), orderId, 'issue', 'fail', '证书签发失败：' + (error || '未知错误'));
 }
 
 // 部署任务执行完成后，把结果写入联动阶段日志（仅针对带 CDN 联动的订单）
@@ -338,19 +401,30 @@ export async function logDeployResult(taskId: number, status: number, error?: st
   if (!oid) return;
   const order = await queryOne(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [oid]);
   if (!order?.link) return;
-  let link: any;
-  try {
-    link = JSON.parse(order.link);
-  } catch {
-    return;
+  for (const did of cdnLinkIds(order.link)) {
+    if (status === 1) {
+      await linkLog(did, oid, 'deploy', 'ok', '证书已上传并绑定到 CDN 加速域名，部署完成');
+      await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [did]);
+    } else if (status < 0) {
+      await linkLog(did, oid, 'deploy', 'fail', '部署失败：' + (error || '未知错误，可在自动部署任务中重试'));
+    }
   }
-  if (!link?.cdnDomainId) return;
-  const did = Number(link.cdnDomainId);
-  if (status === 1) {
-    await linkLog(did, oid, 'deploy', 'ok', '证书已上传并绑定到 CDN 加速域名，部署完成');
-    await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [did]);
-  } else if (status < 0) {
-    await linkLog(did, oid, 'deploy', 'fail', '部署失败：' + (error || '未知错误，可在自动部署任务中重试'));
+}
+
+/** 删除云端加速域名前的预检：存在无权处理的联动证书时提前失败，避免云端删完本地卡住。 */
+export async function assertCertOrdersRemovable(cdnDomainId: number, user?: any): Promise<void> {
+  const did = Number(cdnDomainId || 0);
+  if (!did || !user) return;
+  const candidates: any[] = await query(
+    `SELECT id, status, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`,
+    ['%"cdnDomainId"%'],
+  );
+  const denied: number[] = [];
+  for (const o of candidates.filter((r) => cdnLinkIds(r.link).includes(did))) {
+    if (!(await canAccessCertOrder(Number(o.id), user))) denied.push(Number(o.id));
+  }
+  if (denied.length) {
+    throw new Error(`存在无权处理的联动证书 #${denied.slice(0, 5).join('、#')}${denied.length > 5 ? ' 等' : ''}，请先由证书所有者解除联动`);
   }
 }
 
@@ -359,39 +433,34 @@ export async function logDeployResult(taskId: number, status: number, error?: st
 export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, user?: any): Promise<{ orders: number; deployTasks: number }> {
   const did = Number(cdnDomainId || 0);
   if (!did) return { orders: 0, deployTasks: 0 };
-  // 走 cdn_domain_id 生成列索引精确匹配；生成列不可用时降级为 link LIKE 粗筛 + 解析
-  let targets: any[];
-  if (isCdnDomainIdColumnAvailable()) {
-    targets = await query(`SELECT id, status, link FROM ${table('cert_order')} WHERE cdn_domain_id = ?`, [did]);
-  } else {
-    const candidates = await query(
-      `SELECT id, status, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`,
-      ['%"cdnDomainId"%'],
-    );
-    targets = (candidates as any[]).filter((r) => {
-      try {
-        return Number(JSON.parse(r.link)?.cdnDomainId) === did;
-      } catch {
-        return false;
-      }
-    });
-  }
+  // link 现在可能保存多个 cdnDomainIds；生成列只覆盖主关联，不能只按 cdn_domain_id 查，
+  // 否则第二域名解除联动时会漏掉订单。证书订单表规模有限，这里统一按 link 粗筛 + 解析。
+  const candidates: any[] = await query(
+    `SELECT id, status, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`,
+    ['%"cdnDomainId"%'],
+  );
+  const targets = candidates.filter((r) => cdnLinkIds(r.link).includes(did));
 
-  // 只处理调用者有权访问的订单：普通用户删除自己的 CDN 域名时，
-  // 不能吊销/删除管理员或其他用户挂接的证书订单。
+  // 不能静默跳过无权访问的订单：否则管理员删除共享 CDN 域名后，私有账户下的证书/部署任务
+  // 会永久悬挂且没有任何提示。这里明确中止并给出订单号，要求先移交/清理。
   if (user) {
-    const allowed: any[] = [];
+    const denied: number[] = [];
     for (const o of targets) {
-      if (await canAccessCertOrder(Number(o.id), user)) allowed.push(o);
+      if (!(await canAccessCertOrder(Number(o.id), user))) denied.push(Number(o.id));
     }
-    targets = allowed;
+    if (denied.length) {
+      throw new Error(`存在无权处理的联动证书 #${denied.slice(0, 5).join('、#')}${denied.length > 5 ? ' 等' : ''}，请先由证书所有者解除联动`);
+    }
   }
 
   // 阶段一：先吊销所有已签发（status=3）的联动证书，任一失败则整体中止
   for (const o of targets) {
     if (Number(o.status) !== 3) continue;
     try {
-      await new CertOrderService(Number(o.id)).revoke();
+      const svc = new CertOrderService(Number(o.id));
+      await svc.withMutationLock(async () => {
+        await svc.revoke();
+      });
     } catch (e: any) {
       throw new Error(`联动证书 #${o.id} 吊销失败：${e?.message || e}，已中止删除`);
     }
@@ -401,19 +470,22 @@ export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, use
   let deployTasks = 0;
   for (const o of targets) {
     const oid = Number(o.id);
-    if (Number(o.status) !== 3) {
-      try {
-        await new CertOrderService(oid).cancel();
-      } catch {
-        // ignore
+    const service = new CertOrderService(oid);
+    await service.withMutationLock(async () => {
+      if (Number(o.status) !== 3) {
+        try {
+          await service.cancel();
+        } catch {
+          // ignore
+        }
       }
-    }
-    const taskRows: any[] = await query(`SELECT id FROM ${table('cert_deploy')} WHERE oid = ?`, [oid]);
-    deployTasks += taskRows.length;
-    await query(`DELETE FROM ${table('cert_deploy')} WHERE oid = ?`, [oid]);
-    await query(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [oid]);
-    await query(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [oid]);
-    await query(`DELETE FROM ${table('cert_link_log')} WHERE oid = ?`, [oid]);
+      const taskRows: any[] = await query(`SELECT id FROM ${table('cert_deploy')} WHERE oid = ?`, [oid]);
+      deployTasks += taskRows.length;
+      await query(`DELETE FROM ${table('cert_deploy')} WHERE oid = ?`, [oid]);
+      await query(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [oid]);
+      await query(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [oid]);
+      await query(`DELETE FROM ${table('cert_link_log')} WHERE oid = ?`, [oid]);
+    });
   }
   return { orders: targets.length, deployTasks };
 }

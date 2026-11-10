@@ -9,7 +9,7 @@ import {
   X509Certificate,
   type KeyObject,
 } from 'node:crypto';
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ACMEv2 } from './ACMEv2.js';
@@ -339,7 +339,9 @@ export class ACMECert extends ACMEv2 {
       csr = this.generateCSR(pem, domains);
     } else {
       this.log('Using provided CSR');
-      csr = pem.startsWith('file://') ? readFileSync(pem.slice(7), 'utf8') : pem;
+      // 不接受 file://：一旦允许调用方传路径，即可读取服务器任意文件并作为 CSR 提交给 ACME
+      if (pem.startsWith('file://')) throw new Error('不支持 file:// 形式的 CSR，请直接提交 PEM 内容');
+      csr = pem;
     }
 
     this.log('Finalizing Order');

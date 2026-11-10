@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { createPrivateKey, X509Certificate } from 'node:crypto';
+import { createPrivateKey, randomBytes, X509Certificate } from 'node:crypto';
 import { domainToASCII } from 'node:url';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -9,7 +9,7 @@ import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { certConfig, certClassConfig } from '../lib/cert/factory.js';
 import { getCertProvider } from '../lib/cert/factory.js';
-import { getMainDomain } from '../lib/cert/utils.js';
+import { assertStrictCertPem, assertStrictKeyPem, getMainDomain } from '../lib/cert/utils.js';
 import { CertOrderService, buildPfx, STATUS_LABEL } from '../lib/certService.js';
 import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import { processOrderLink } from '../lib/cdn/certLink.js';
@@ -67,16 +67,18 @@ async function canAccessDeployTask(id: any, user: any): Promise<boolean> {
 
 function parseCertKey(fullchain: string, privatekey: string) {
   let cert: X509Certificate;
-  try {
-    cert = new X509Certificate(fullchain);
-  } catch {
-    return { code: -1, msg: '证书内容填写错误' };
-  }
   let key;
   try {
-    key = createPrivateKey(privatekey);
-  } catch {
-    return { code: -1, msg: '私钥内容填写错误' };
+    // 必须在解析前严格校验：Node 的 X509Certificate/createPrivateKey 会忽略尾部任意文本，
+    // 不能让带 shell 片段的输入进入 fullchain 并随后被部署到远端配置文件。
+    const certPem = assertStrictCertPem(String(fullchain ?? ''));
+    const keyPem = assertStrictKeyPem(String(privatekey ?? ''));
+    cert = new X509Certificate(certPem);
+    key = createPrivateKey(keyPem);
+  } catch (e: any) {
+    const msg = String(e?.message || '');
+    if (msg.startsWith('私钥')) return { code: -1, msg };
+    return { code: -1, msg: msg.startsWith('证书') ? msg : '证书或私钥内容填写错误' };
   }
   try {
     if (!cert.checkPrivateKey(key)) return { code: -1, msg: 'SSL证书与私钥不匹配' };
@@ -542,22 +544,25 @@ export default async function certRoutes(app: FastifyInstance) {
       if (typeof res === 'object') return res;
     }
 
-    // 全部校验通过后才重置旧订单：reset 会删除远端挑战 TXT 并清空状态，
-    // 若在参数错误时提前执行，用户只是填错表单也会破坏原订单。
+    // 全部校验通过后才重置旧订单；整个 reset + 改单过程持有与调度器相同的租约锁，
+    // 避免“读到 islock=0 后调度器刚好抢锁、reset 又清锁”的竞态。
     try {
-      await new CertOrderService(id).reset();
-    } catch {
-      // 账户缺失/旧订单无法加载时仍然允许修改，后续按新配置重新申请
-    }
-
-    await withTransaction(async (q) => {
-      await q(`UPDATE ${table('cert_order')} SET ? WHERE id = ?`, [order, id]);
-      await q(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
-      let i = 1;
-      for (const domain of domList) {
-        await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
+      await new CertOrderService(id).withMutationLock(async () => {
+        await withTransaction(async (q) => {
+          await q(`UPDATE ${table('cert_order')} SET ? WHERE id = ?`, [order, id]);
+          await q(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
+          let i = 1;
+          for (const domain of domList) {
+            await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES (?, ?, ?)`, [id, domainToASCII(domain), i++]);
+          }
+        });
+      });
+    } catch (e: any) {
+      if (/正在处理中/.test(String(e?.message || ''))) {
+        return reply.code(409).send({ code: -1, msg: '证书订单正在处理中，请稍后再修改' });
       }
-    });
+      throw e;
+    }
     audit(req, {
       targetType: 'cert_order',
       targetId: id,
@@ -575,22 +580,23 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     const count = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE oid = ?`, [id]))?.c || 0;
     if (count > 0) return { code: -1, msg: '该证书关联了自动部署任务，无法删除' };
+    let doms: string[] = [];
     try {
-      // reset 会先删除该订单写入的 _acme-challenge TXT，再清空状态；
-      // 仅 cancel 会让待验证订单的挑战记录永久残留。
-      await new CertOrderService(id).reset();
-    } catch {
-      try {
-        await new CertOrderService(id).cancel();
-      } catch {
-        // ignore
+      // 删除期间持有同一把租约锁：运行中的签发 worker 不能再把证书写回已删除的订单。
+      await new CertOrderService(id).withMutationLock(async () => {
+        // 仅 cancel 会让待验证订单的挑战记录永久残留；withMutationLock 已负责清理 DNS。
+        doms = (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [id])).map((r: any) => r.domain);
+        await withTransaction(async (q) => {
+          await q(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [id]);
+          await q(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
+        });
+      });
+    } catch (e: any) {
+      if (/正在处理中/.test(String(e?.message || ''))) {
+        return reply.code(409).send({ code: -1, msg: '证书订单正在处理中，请稍后再删除' });
       }
+      throw e;
     }
-    const doms = (await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [id])).map((r: any) => r.domain);
-    await withTransaction(async (q) => {
-      await q(`DELETE FROM ${table('cert_order')} WHERE id = ?`, [id]);
-      await q(`DELETE FROM ${table('cert_domain')} WHERE oid = ?`, [id]);
-    });
     audit(req, {
       targetType: 'cert_order',
       targetId: id,
@@ -738,6 +744,7 @@ export default async function certRoutes(app: FastifyInstance) {
     // 私钥为加密存储，读取时解密（兼容历史明文）
     const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
     let pfx = null;
+    let pfxPassOut: string | null = null;
     if (row.fullchain && privateKey) {
       try {
         // PFX 口令不能放 URL query（会进入访问日志/浏览器历史），改用请求头。
@@ -750,7 +757,12 @@ export default async function certRoutes(app: FastifyInstance) {
           : plain
             ? String(plain)
             : '';
-        pfx = (await buildPfx(row.fullchain, privateKey, pfxPass)).toString('base64');
+        // 空口令 PKCS#12 等同于明文私钥；调用方未提供口令时生成强随机口令并随响应返回，
+        // 由前端提示用户，绝不生成无口令 PFX。
+        const actualPass = pfxPass || randomBytes(12).toString('base64url');
+        if (actualPass.length < 8) throw new Error('PFX 口令至少 8 位');
+        if (!pfxPass) pfxPassOut = actualPass;
+        pfx = (await buildPfx(row.fullchain, privateKey, actualPass)).toString('base64');
       } catch (e: any) {
         // 记录失败原因（如容器缺少 openssl），避免同类环境问题无声失败难以排查
         console.error('[cert] 生成 PFX 失败 order=' + id + '：', e?.message || e);
@@ -764,6 +776,7 @@ export default async function certRoutes(app: FastifyInstance) {
         crt: row.fullchain,
         key: privateKey,
         pfx,
+        pfx_pass: pfxPassOut,
         issuetime: row.issuetime,
         expiretime: row.expiretime,
         domains: domains.map((d: any) => d.domain),

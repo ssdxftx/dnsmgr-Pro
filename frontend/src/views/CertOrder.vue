@@ -271,19 +271,28 @@ const columns = computed(() => [
 
 async function loadOrders() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/cert/orders', { limit: 200 });
-  if (res.code === 0) {
-    orders.value = res.data;
-    statusLabel.value = res.status_label || {};
-  } else orders.value = [];
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/cert/orders', { limit: 200 });
+    if (res.code === 0) {
+      orders.value = res.data;
+      statusLabel.value = res.status_label || {};
+    } else orders.value = [];
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function loadAccounts() {
-  const res = await api<any>('GET', '/cert/accounts', { limit: 200 });
-  if (res.code === 0) {
-    accounts.value = res.data;
-    accountOptions.value = res.data.map((r: any) => ({ label: r.name + (r.remark ? '（' + r.remark + '）' : '') + ' [' + (r.typename || r.type) + ']', value: r.id }));
+  try {
+    const res = await api<any>('GET', '/cert/accounts', { limit: 200 });
+    if (res.code === 0) {
+      accounts.value = res.data;
+      accountOptions.value = res.data.map((r: any) => ({ label: r.name + (r.remark ? '（' + r.remark + '）' : '') + ' [' + (r.typename || r.type) + ']', value: r.id }));
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -320,6 +329,8 @@ async function save() {
       showEdit.value = false;
       loadOrders();
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     saveBusy.value = false;
   }
@@ -480,6 +491,9 @@ function downloadKey() {
 
 function downloadPfx() {
   if (!info.value?.pfx) return message.warning(t('certOrder.noPfx'));
+  if (info.value.pfx_pass) {
+    dialog.info({ title: t('certOrder.pfxPass'), content: String(info.value.pfx_pass), positiveText: t('common.confirm') });
+  }
   const bytes = Uint8Array.from(atob(info.value.pfx), (c) => c.charCodeAt(0));
   downloadBlob('cert.pfx', new Blob([bytes], { type: 'application/x-pkcs12' }));
 }

@@ -259,11 +259,16 @@ async function toggleActive(row: any) {
   const prev = row.active ? 1 : 0;
   const target = prev ? 0 : 1;
   row.active = target; // 乐观更新
-  const res = await api('POST', `/schedule/tasks/${row.id}/active`, { active: target });
-  if (res.code === 0) message.success(t('common.success'));
-  else {
-    row.active = prev; // 失败回滚
-    message.error(res.msg);
+  try {
+    const res = await api('POST', `/schedule/tasks/${row.id}/active`, { active: target });
+    if (res.code === 0) message.success(t('common.success'));
+    else {
+      row.active = prev; // 失败回滚
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    row.active = prev; // 网络异常同样回滚
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -277,7 +282,14 @@ function del(row: any) {
       const idx = tasks.value.findIndex((x: any) => Number(x.id) === Number(row.id));
       const removed = idx >= 0 ? tasks.value[idx] : null;
       if (idx >= 0) tasks.value.splice(idx, 1);
-      const res = await api('DELETE', `/schedule/tasks/${row.id}`);
+      let res: any;
+      try {
+        res = await api('DELETE', `/schedule/tasks/${row.id}`);
+      } catch (e: any) {
+        if (removed) tasks.value.splice(idx, 0, removed); // 网络异常回滚
+        message.error(e?.message || t('common.networkError'));
+        return;
+      }
       if (res.code === 0) {
         message.success(t('schedule.deleteSuccess'));
         // 同步分页总数，避免「共 N 条」偏大、末页删空后停在空白页

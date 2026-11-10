@@ -7,6 +7,7 @@ import { encryptAccountConfig, isSecretKey, maskConfig, mergeMaskedConfig, readA
 import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { getDekForWrite } from '../lib/vault/service.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
+import { cdnLinkIds } from '../lib/cdn/certLink.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { asText } from '../lib/util.js';
@@ -291,13 +292,7 @@ export default async function accountRoutes(app: FastifyInstance) {
         `SELECT id, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`,
         ['%"cdnDomainId"%'],
       );
-      const hasLinked = (linked as any[]).some((o) => {
-        try {
-          return cdnDomainIds.includes(Number(JSON.parse(String(o.link)).cdnDomainId));
-        } catch {
-          return false;
-        }
-      });
+      const hasLinked = (linked as any[]).some((o) => cdnLinkIds(o.link).some((did) => cdnDomainIds.includes(did)));
       if (hasLinked) {
         return { code: -1, msg: '该 CDN 账户下存在证书联动订单，请先在对应加速域名中解除证书联动后再删除账户' };
       }

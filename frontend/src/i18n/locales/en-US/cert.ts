@@ -75,6 +75,7 @@ export default {
     noLog: 'No logs',
     noCert: 'No certificate available to download',
     noKey: 'No private key available to download',
+    pfxPass: 'PFX Password',
     noPfx: 'No PFX available to download',
     deleteTitle: 'Delete Order',
     deleteConfirm: 'Delete this certificate order?',

@@ -524,7 +524,7 @@ export default async function authRoutes(app: FastifyInstance) {
       'Content-Security-Policy',
       `default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'nonce-${nonce}'; connect-src 'self'; worker-src 'self' blob:`,
     );
-    return reply.type('text/html; charset=utf-8').send(`<!doctype html><html><head><meta charset="utf-8"><title>正在登录</title></head><body><script nonce="${nonce}">localStorage.setItem('dnsmgr_token', ${js(session)});localStorage.setItem('dnsmgr_user', ${js(user)});location.replace(${js(target)});</script>正在登录…</body></html>`);
+    return reply.type('text/html; charset=utf-8').send(`<!doctype html><html><head><meta charset="utf-8"><title>正在登录</title></head><body><script nonce="${nonce}">localStorage.setItem('dnsmgr_token', ${js(session)});localStorage.setItem('dnsmgr_user', ${js(user)});history.replaceState(null,'',${js(target)});location.replace(${js(target)});</script>正在登录…</body></html>`);
   });
 
   app.get('/api/auth/me', { preHandler: (app as any).authenticate }, async (req: any) => {
