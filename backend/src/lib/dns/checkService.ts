@@ -41,7 +41,8 @@ async function fetchAllRecords(provider: any): Promise<any[]> {
   let pageSize = 500;
   let prevPageSig = '';
   const sigOf = (x: any) => [x?.RecordId ?? '', x?.Name ?? '', x?.Type ?? '', Array.isArray(x?.Value) ? x.Value.join(',') : x?.Value ?? ''].join('|');
-  for (let page = 1; page <= 10; page++) {
+  // 10 页会在小页厂商（如京东云 99 条/页）下截断到 990 条；放宽到 200 页并优先用 total 终止。
+  for (let page = 1; page <= 200; page++) {
     const res = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
     if (res === false || !res.list || !res.list.length) break;
     // 部分厂商忽略分页参数，每次都返回同一份全量列表；页签名一致即视为没有下一页，
@@ -50,6 +51,8 @@ async function fetchAllRecords(provider: any): Promise<any[]> {
     if (page > 1 && pageSig === prevPageSig) break;
     prevPageSig = pageSig;
     list = list.concat(res.list);
+    const total = Number((res as any).total);
+    if (Number.isFinite(total) && total > 0 && list.length >= total) break;
     if (page === 1) pageSize = res.list.length;
     if (res.list.length < pageSize) break;
   }

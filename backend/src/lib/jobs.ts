@@ -1,5 +1,6 @@
 import os from 'node:os';
-import { query, queryOne, table } from '../db.js';
+import { createHash } from 'node:crypto';
+import { query, queryOne, table, withDistributedLockResult } from '../db.js';
 
 /** 当前进程标识：多副本部署时便于排查任务归属 */
 const WORKER_ID = `${os.hostname()}:${process.pid}`;
@@ -37,26 +38,32 @@ async function failStaleJobs(): Promise<void> {
  * 去重是必要的：连点按钮 / 脚本刷接口会各自起一个 worker，每个 worker 都在跑证书签发或到期扫描。
  */
 export async function createJob(uid: number, type: string, total: number, detail?: any): Promise<number> {
-  // 先清理失联任务，避免旧行永久占用同类任务去重名额和全局并发额度。
-  await failStaleJobs();
-  const existing: any = await queryOne(
-    `SELECT id FROM ${table('async_job')} WHERE uid = ? AND type = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1`,
-    [uid, type],
-  );
-  if (existing) return 0;
-  const active: any = await queryOne(
-    `SELECT COUNT(*) AS c FROM ${table('async_job')} WHERE status IN ('pending', 'running')`,
-  );
-  if (Number(active?.c || 0) >= MAX_ACTIVE_JOBS) return 0;
-  const res: any = await query(
-    `INSERT INTO ${table('async_job')}
-      (uid, type, status, total, done, failed, detail, result, error, worker_id, heartbeat_at, created_at)
-     VALUES (?, ?, 'pending', ?, 0, 0, ?, NULL, NULL, ?, NOW(), NOW())`,
-    [uid, type, Math.max(0, Number(total) || 0), detail ? JSON.stringify(detail) : null, WORKER_ID],
-  );
-  // 顺带清理历史任务：表无上限增长会让「我的任务」列表越查越慢
-  if (Math.random() < 0.05) void cleanupOldJobs();
-  return Number(res?.insertId || 0);
+  // 「查重 + 全局并发上限 + 插入」必须串行，否则双击/多副本会在 SELECT 与 INSERT 之间各插一行。
+  // MySQL GET_LOCK 名称上限 64 字符，uid+type 可能超长，使用哈希固定长度。
+  const lockName = 'dnsmgr:job:create:' + createHash('sha256').update(`${uid}:${type}`).digest('hex').slice(0, 32);
+  const outcome = await withDistributedLockResult(lockName, async () => {
+    // 先清理失联任务，避免旧行永久占用同类任务去重名额和全局并发额度。
+    await failStaleJobs();
+    const existing: any = await queryOne(
+      `SELECT id FROM ${table('async_job')} WHERE uid = ? AND type = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1`,
+      [uid, type],
+    );
+    if (existing) return 0;
+    const active: any = await queryOne(
+      `SELECT COUNT(*) AS c FROM ${table('async_job')} WHERE status IN ('pending', 'running')`,
+    );
+    if (Number(active?.c || 0) >= MAX_ACTIVE_JOBS) return 0;
+    const res: any = await query(
+      `INSERT INTO ${table('async_job')}
+        (uid, type, status, total, done, failed, detail, result, error, worker_id, heartbeat_at, created_at)
+       VALUES (?, ?, 'pending', ?, 0, 0, ?, NULL, NULL, ?, NOW(), NOW())`,
+      [uid, type, Math.max(0, Number(total) || 0), detail ? JSON.stringify(detail) : null, WORKER_ID],
+    );
+    // 顺带清理历史任务：表无上限增长会让「我的任务」列表越查越慢
+    if (Math.random() < 0.05) void cleanupOldJobs();
+    return Number(res?.insertId || 0);
+  });
+  return outcome.locked ? Number(outcome.result || 0) : 0;
 }
 
 /** 删除超过保留期的已结束任务 */
@@ -81,7 +88,7 @@ export async function resetStaleJobs(): Promise<void> {
 export async function updateJob(
   id: number,
   patch: { status?: JobStatus; done?: number; failed?: number; result?: any; error?: string | null },
-): Promise<void> {
+): Promise<boolean> {
   const sets: string[] = [];
   const params: any[] = [];
   if (patch.status) {
@@ -105,16 +112,25 @@ export async function updateJob(
     params.push(patch.error == null ? null : String(patch.error).slice(0, 500));
   }
   if (!sets.length) {
-    await query(`UPDATE ${table('async_job')} SET heartbeat_at = NOW() WHERE id = ?`, [id]);
-    return;
+    const res: any = await query(
+      `UPDATE ${table('async_job')} SET heartbeat_at = NOW() WHERE id = ? AND worker_id = ? AND status IN ('pending','running')`,
+      [id, WORKER_ID],
+    );
+    return Number(res?.affectedRows || 0) > 0;
   }
   sets.push('heartbeat_at = NOW()');
   if (patch.status === 'running') sets.push('started_at = COALESCE(started_at, NOW())');
   if (patch.status === 'success' || patch.status === 'partial' || patch.status === 'failed') {
     sets.push('finished_at = NOW()');
   }
-  params.push(id);
-  await query(`UPDATE ${table('async_job')} SET ${sets.join(', ')} WHERE id = ?`, params);
+  params.push(id, WORKER_ID);
+  // fencing：只有仍持有该任务且状态未终态的 worker 才能写入；被 failStaleJobs 标记 failed 后
+  // 原 worker 不能再把状态改回 success。
+  const res: any = await query(
+    `UPDATE ${table('async_job')} SET ${sets.join(', ')} WHERE id = ? AND worker_id = ? AND status IN ('pending','running')`,
+    params,
+  );
+  return Number(res?.affectedRows || 0) > 0;
 }
 
 export function runJobInBackground(
@@ -123,7 +139,9 @@ export function runJobInBackground(
 ): void {
   setImmediate(() => {
     void (async () => {
-      await updateJob(id, { status: 'running' }).catch(() => undefined);
+      const started = await updateJob(id, { status: 'running' }).catch(() => false);
+      // 任务已被清理/抢占时不要再执行 worker，避免失联任务复活或重复操作。
+      if (!started) return;
       // 长任务可能很久才调用一次 progress；独立心跳避免被其他副本的启动清理误判为失联。
       const heartbeat = setInterval(() => {
         updateJob(id, {}).catch(() => undefined);

@@ -1,4 +1,4 @@
-type Entry = { dek: Buffer; ttl: number; exp: number; abs: number };
+type Entry = { dek: Buffer; ttl: number; exp: number; abs: number; epoch: number };
 
 const sessions = new Map<string, Entry>();
 const keyOf = (uid: number, jti: string) => `${uid}:${jti}`;
@@ -31,14 +31,14 @@ function sweep(now: number): void {
 }
 
 /** 保险库会话必须绑定令牌 jti：否则同一用户的不同会话（含管理员冒充登录）会共用内存 DEK */
-export function setVaultSession(uid: number, jti: string, dek: Buffer, ttlMs = IDLE_TTL_MS): number {
+export function setVaultSession(uid: number, jti: string, dek: Buffer, ttlMs = IDLE_TTL_MS, epoch = 0): number {
   const now = Date.now();
   const key = keyOf(uid, jti);
   const prev = sessions.get(key);
   // 绝对上限按「首次解锁」计算，后续 set 不重置，避免长期在线把解锁状态永久续下去
   const abs = prev ? Math.min(prev.abs, now + ABS_TTL_MS) : now + ABS_TTL_MS;
   const exp = Math.min(now + ttlMs, abs);
-  sessions.set(key, { dek, ttl: ttlMs, exp, abs });
+  sessions.set(key, { dek, ttl: ttlMs, exp, abs, epoch: Number(epoch) || 0 });
   if (prev && prev.dek !== dek) {
     try {
       prev.dek.fill(0);
@@ -56,11 +56,15 @@ export function setVaultSession(uid: number, jti: string, dek: Buffer, ttlMs = I
   return exp;
 }
 
-export function getVaultDek(uid: number, jti?: string): Buffer | null {
+export function getVaultDek(uid: number, jti?: string, epoch?: number): Buffer | null {
   if (!jti) return null;
   const k = keyOf(uid, jti);
   const e = sessions.get(k);
   if (!e) return null;
+  if (epoch !== undefined && Number(e.epoch) !== Number(epoch)) {
+    // 旧请求可能携带递增前的 epoch：只拒绝，不删除当前新会话，否则会把刚完成改密的会话踢掉。
+    return null;
+  }
   const now = Date.now();
   if (e.exp <= now || e.abs <= now) {
     drop(k);
@@ -71,13 +75,22 @@ export function getVaultDek(uid: number, jti?: string): Buffer | null {
   return e.dek;
 }
 
-export function vaultSessionExpiry(uid: number, jti?: string): number | null {
+export function vaultSessionExpiry(uid: number, jti?: string, epoch?: number): number | null {
   if (!jti) return null;
   const e = sessions.get(keyOf(uid, jti));
   if (!e) return null;
+  if (epoch !== undefined && Number(e.epoch) !== Number(epoch)) return null;
   const now = Date.now();
   if (e.exp <= now || e.abs <= now) return null;
   return e.exp;
+}
+
+/** 清除该用户除当前 jti 之外的所有保险库会话（改口令/恢复/升级时使用，保留当前会话继续工作）。 */
+export function clearOtherVaultSessions(uid: number, jti: string): void {
+  const keep = keyOf(uid, jti);
+  for (const k of [...sessions.keys()]) {
+    if (k.startsWith(`${uid}:`) && k !== keep) drop(k);
+  }
 }
 
 export function clearVaultSession(uid: number, jti?: string): void {

@@ -291,7 +291,9 @@ function remove(row: any) {
     positiveText: t('myBackup.delete'),
     negativeText: t('backup.cancel'),
     onPositiveClick: async () => {
-      const res = await api<any>('DELETE', `/backup/jobs/${row.id}`);
+      const password = await askPassword(t('myBackup.delete'), t('myBackup.loginPasswordHint'));
+      if (password === null) return false;
+      const res = await api<any>('DELETE', `/backup/jobs/${row.id}`, { password });
       if (res.code !== 0) return message.error(res.msg);
       await load();
     },

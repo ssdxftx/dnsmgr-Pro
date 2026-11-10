@@ -95,8 +95,15 @@ async function handle(row: any): Promise<void> {
     }
 
     action = 0;
-    // 先计入本次结果再比较，否则 cycle=2 实际要连续 3 次失败才切换
-    const confirmCount = Number(row.errcount || 0) + 1;
+    // 先原子计入本次结果再比较，否则并发执行会互相覆盖 errcount；cycle=2 实际要连续 3 次失败才切换。
+    const inc: any = await query(
+      `UPDATE ${table('dmtask')} SET errcount = errcount + 1 WHERE id = ? AND status = ?`,
+      [row.id, Number(row.status || 0)],
+    );
+    // 状态已被其他执行者迁移时，本次结果不再参与计数/切换。
+    if (!Number(inc?.affectedRows || 0)) return;
+    const fresh: any = await queryOne(`SELECT errcount FROM ${table('dmtask')} WHERE id = ?`, [row.id]);
+    const confirmCount = Number(fresh?.errcount || 0);
     const needConfirm = Number(row.cycle || 1);
     if (result.status && row.status === 1) {
       if (needConfirm <= 1 || confirmCount >= needConfirm) {
@@ -106,8 +113,6 @@ async function handle(row: any): Promise<void> {
         );
         if (!claimed) return;
         action = 2;
-      } else {
-        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ? AND status = 1`, [confirmCount, row.id]);
       }
     } else if (!result.status && row.status === 0) {
       if (needConfirm <= 1 || confirmCount >= needConfirm) {
@@ -117,10 +122,8 @@ async function handle(row: any): Promise<void> {
         );
         if (!claimed) return;
         action = 1;
-      } else {
-        await query(`UPDATE ${table('dmtask')} SET errcount = ? WHERE id = ? AND status = 0`, [confirmCount, row.id]);
       }
-    } else if (row.errcount > 0) {
+    } else if (Number(fresh?.errcount || 0) > 0) {
       await query(`UPDATE ${table('dmtask')} SET errcount = 0 WHERE id = ? AND status = ?`, [row.id, Number(row.status || 0)]);
     }
   }
@@ -210,7 +213,11 @@ async function handle(row: any): Promise<void> {
     if (!opHandled && action > 0) {
       // 域名缺失、配置解密失败、厂商不支持、DNS 操作失败等所有异常路径
       // 都恢复为本次尝试前的状态，避免状态已变而 DNS 未变。
-      await query(`UPDATE ${table('dmtask')} SET status = ?, errcount = 0 WHERE id = ?`, [prevStatus, row.id]).catch((e: any) => {
+      const expected = action === 1 ? 1 : 0;
+      await query(
+        `UPDATE ${table('dmtask')} SET status = ?, errcount = 0 WHERE id = ? AND status = ?`,
+        [prevStatus, row.id, expected],
+      ).catch((e: any) => {
         console.error(`[dmtask] 任务 ${row.id} 状态回滚失败:`, e?.message || e);
       });
     }

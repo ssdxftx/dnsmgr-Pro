@@ -79,7 +79,9 @@ export async function buildPfx(fullchain: string, privatekey: string, pwd: strin
     await writeFile(certFile, fullchain);
     await writeFile(keyFile, privatekey, { mode: 0o600 });
     try {
-      await execFileAsync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', `pass:${pwd}`]);
+      await execFileAsync('openssl', ['pkcs12', '-export', '-out', pfxFile, '-inkey', keyFile, '-in', certFile, '-passout', 'env:PFX_PASS'], {
+        env: { ...process.env, PFX_PASS: pwd },
+      });
     } catch (e: any) {
       // 区分「未安装 openssl」与「openssl 执行失败」，避免环境问题被误判为证书内容问题
       if (e && e.code === 'ENOENT') {

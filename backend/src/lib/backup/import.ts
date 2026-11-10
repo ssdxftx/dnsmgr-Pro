@@ -24,6 +24,8 @@ export interface ImportOptions {
   trusted?: boolean;
   /** 调用方显式指定的 scope，用于管理员兼容无 scope 的旧归档 */
   scopeOverride?: string;
+  /** replace 恢复时在导入事务内自增全部 token_version，保证数据替换与会话失效原子提交 */
+  invalidateSessions?: boolean;
 }
 
 export interface TableReport {
@@ -402,6 +404,12 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
                 row.salt &&
                 row.wrapped_dek
               ) {
+                // 该快捷分支也会把 kdf_params 原样写库；必须用严格上限校验，避免导入后永远无法解锁。
+                if (!kdfParamsFromStored(row.kdf_params, false)) {
+                  rep.dropped++;
+                  report.warnings.push(`用户 #${origUid} 的保险库 KDF 参数超出导入上限，已跳过`);
+                  continue;
+                }
                 row.fail_count = 0;
                 row.locked_until = null;
                 delete row.__dek_bk;
@@ -460,7 +468,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               } else {
                 // 站点/安装归档保留原口令包裹层（uid 变化时下方会因无法迁移而丢弃），
                 // 这里只校验参数可解析，不能静默改写成默认参数：wrapped_dek 仍是旧参数。
-                const params = kdfParamsFromStored(row.kdf_params);
+                const params = kdfParamsFromStored(row.kdf_params, false);
                 if (!params || !row.wrapped_dek) {
                   rep.dropped++;
                   report.warnings.push(`用户 #${origUid} 的保险库 KDF 参数或口令包裹层无效，已跳过`);
@@ -840,6 +848,10 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             }
           }
         }
+      }
+      if (opts.invalidateSessions) {
+        // 与数据替换同事务：恢复提交即旧 JWT 失效，不会出现“数据已换、会话未失效”的窗口。
+        await q(`UPDATE ${table('user')} SET token_version = token_version + 1`);
       }
     });
 

@@ -69,6 +69,14 @@ function isSuper(req: any): boolean {
   return Number(req.user.is_super) === 1;
 }
 
+// 用户管理写操作是账号接管级能力：API Key 是长期自动化凭据，不能用于创建/提升/封禁/删除账号。
+// 否则一把带 users:write 的 Key 可在不知道登录密码、不经过 TOTP 的情况下铸造持久化管理员。
+function apiKeyWriteBlocked(req: any): string | null {
+  return String(req.user?.auth_type || '') === 'api_key'
+    ? '该操作仅支持登录会话，请使用账号密码登录后再试'
+    : null;
+}
+
 // 普通管理员不得管理其他管理员、也不得创建/提升管理员，避免管理员间互相降级或提权
 function adminManageBlocked(req: any, target: { id: number; level?: any }, nextLevel?: number): string | null {
   if (isSuper(req)) return null;
@@ -143,6 +151,8 @@ export default async function userRoutes(app: FastifyInstance) {
   // 添加用户
   app.post('/api/users', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const apiBlocked = apiKeyWriteBlocked(req);
+    if (apiBlocked) return { code: -1, msg: apiBlocked };
     const b = req.body || {};
     const username = String(b.username ?? '').trim();
     const password = String(b.password ?? '');
@@ -160,6 +170,17 @@ export default async function userRoutes(app: FastifyInstance) {
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     if (apikey.length > 256) return { code: -1, msg: 'API密钥长度不能超过 256 位' };
     if (isApi === 1 && await queryOne(`SELECT id FROM ${table('user')} WHERE apikey = ? LIMIT 1`, [apikey])) return { code: -1, msg: 'API密钥已被使用' };
+    // 创建管理员、启用旧版全权 Key 都属于账号接管级操作，必须重输当前登录密码。
+    // 新用户密码字段是 password，管理员自己的确认密码用 confirm_password，避免两者冲突。
+    if (level >= 2 || isApi === 1) {
+      const pwErr = await requireLoginPassword(
+        Number(req.user.uid),
+        b.confirm_password ?? b.login_password,
+        req,
+        'user.create',
+      );
+      if (pwErr) return { code: -1, msg: pwErr };
+    }
     const exists = await queryOne(`SELECT id FROM ${table('user')} WHERE username = ?`, [username]);
     if (exists) return { code: -1, msg: '用户名已存在' };
 
@@ -192,6 +213,8 @@ export default async function userRoutes(app: FastifyInstance) {
   // 编辑用户
   app.put('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const apiBlocked = apiKeyWriteBlocked(req);
+    if (apiBlocked) return { code: -1, msg: apiBlocked };
     const id = Number(req.params.id);
     const row: any = await queryOne(
       `SELECT id, is_super, level, username, status, email, remark, apikey, is_api, check_whole, stat_cache FROM ${table('user')} WHERE id = ?`,
@@ -224,6 +247,11 @@ export default async function userRoutes(app: FastifyInstance) {
     if (id === req.user.uid && level < 2) level = 2;
     const levelBlocked = adminManageBlocked(req, row as any, level);
     if (levelBlocked) return { code: -1, msg: levelBlocked };
+    // 等级变更等同于授予/收回管理员权限，必须重输当前登录密码。
+    if (Number(level) !== Number(row.level)) {
+      const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'user.level');
+      if (pwErr) return { code: -1, msg: pwErr };
+    }
 
     // check_whole / stat_cache 仅在请求体显式携带时才更新，避免「编辑用户」这一独立接口
     // 因前端未提交该字段而把授权静默重置为 0（与 /users/:id/stat-cache 互相覆盖）
@@ -343,6 +371,8 @@ export default async function userRoutes(app: FastifyInstance) {
   // 状态切换
   app.post('/api/users/:id/status', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const apiBlocked = apiKeyWriteBlocked(req);
+    if (apiBlocked) return { code: -1, msg: apiBlocked };
     const id = Number(req.params.id);
     // 仅允许 1=正常、0=封禁，避免 -1/2 等值绕过 authenticate 的封禁判断
     const status = Number((req.body || {}).status) === 1 ? 1 : 0;
@@ -352,6 +382,8 @@ export default async function userRoutes(app: FastifyInstance) {
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法修改状态' };
     const statusBlocked = adminManageBlocked(req, { id, level: (row as any).level });
     if (statusBlocked) return { code: -1, msg: statusBlocked };
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'user.status');
+    if (pwErr) return { code: -1, msg: pwErr };
     await query(`UPDATE ${table('user')} SET status = ? WHERE id = ?`, [status, id]);
     audit(req, {
       targetType: 'user',
@@ -366,6 +398,8 @@ export default async function userRoutes(app: FastifyInstance) {
   // 开关用户的 CDN 统计缓存查看权限（仅管理员）
   app.post('/api/users/:id/stat-cache', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const apiBlocked = apiKeyWriteBlocked(req);
+    if (apiBlocked) return { code: -1, msg: apiBlocked };
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT id, is_super, username FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
@@ -385,6 +419,8 @@ export default async function userRoutes(app: FastifyInstance) {
   // 删除用户
   app.delete('/api/users/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const apiBlocked = apiKeyWriteBlocked(req);
+    if (apiBlocked) return { code: -1, msg: apiBlocked };
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT is_super, level, username FROM ${table('user')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '用户不存在' };
@@ -392,6 +428,8 @@ export default async function userRoutes(app: FastifyInstance) {
     if (id === req.user.uid) return { code: -1, msg: '当前登录用户无法删除' };
     const deleteBlocked = adminManageBlocked(req, { id, level: (row as any).level });
     if (deleteBlocked) return { code: -1, msg: deleteBlocked };
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'user.delete');
+    if (pwErr) return { code: -1, msg: pwErr };
     await purgeUserData(id);
     audit(req, {
       targetType: 'user',

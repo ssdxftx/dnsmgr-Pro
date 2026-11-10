@@ -77,7 +77,14 @@ async function runRestore(opts: RunOptions): Promise<any> {
     // 使用归档头匹配当前/历史密钥，避免轮换后旧备份无法在线恢复并卡在维护模式
     const key = opts.key ?? (await keyForArchive(archivePath));
     if (!key) throw new Error('未设置备份密钥，无法恢复');
-    const report = await importArchive(archivePath, { key, mode: opts.mode, actor: opts.actor, actorIsAdmin: true, trusted: true });
+    const report = await importArchive(archivePath, {
+      key,
+      mode: opts.mode,
+      actor: opts.actor,
+      actorIsAdmin: true,
+      trusted: true,
+      invalidateSessions: opts.mode === 'replace',
+    });
     if (opts.mode === 'replace') {
       // 整站替换后，旧站点的所有备份都属于上一套数据；仅保留本次恢复前的快照，避免旧数据继续可下载。
       const keepJobId = Number(snapshot.jobId || 0);
@@ -109,11 +116,6 @@ async function runRestore(opts: RunOptions): Promise<any> {
 
     setRestoreStatus({ stage: 'cleanup', message: '正在刷新缓存' });
     await loadConfig(true);
-    if (opts.mode === 'replace') {
-      // 恢复后强制所有会话重新登录，避免旧权限缓存与旧令牌继续生效
-      await query(`UPDATE ${table('user')} SET token_version = token_version + 1`);
-    }
-
     setRestoreStatus({
       running: false,
       stage: 'done',

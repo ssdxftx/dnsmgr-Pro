@@ -1,6 +1,7 @@
 import { query, table, getDbType, columnExists, indexExists, uniqueIndexExists, listColumns } from './db.js';
 import { sqliteIndexName } from './db/sqlite-dialect.js';
 import { setCdnDomainIdColumnAvailable } from './lib/cert/cdnDomainIdColumn.js';
+import { decryptText, encryptText, isSecretKey } from './lib/secret.js';
 
 // 启动时幂等迁移：为多用户注册系统补齐表结构与字段，已存在则跳过。
 export async function migrate(): Promise<void> {
@@ -217,6 +218,8 @@ export async function migrate(): Promise<void> {
       UNIQUE KEY aid (aid)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+
+  await migrateLegacyEncV1();
 
   // 唯一超级管理员：全新安装由安装向导标记；旧库无标记时回填
   // （优先 id=1000 的原创始人，否则取最小 id 的管理员），保证恰好一人为超级管理员
@@ -671,6 +674,7 @@ async function migrateBackupAndVault(): Promise<void> {
       wrapped_dek_recovery varbinary(128) DEFAULT NULL,
       recovery_hash char(64) DEFAULT NULL,
       hint varchar(100) DEFAULT NULL,
+      vault_epoch int(11) NOT NULL DEFAULT '0',
       exclude_from_site_backup tinyint(1) NOT NULL DEFAULT '0',
       fail_count int(11) NOT NULL DEFAULT '0',
       locked_until datetime DEFAULT NULL,
@@ -680,6 +684,8 @@ async function migrateBackupAndVault(): Promise<void> {
       KEY idx_mode (mode)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+
+  await ensureColumn('user_vault', 'vault_epoch', "int(11) NOT NULL DEFAULT '0'");
 
   for (const t of ['account', 'cdn_account', 'cert_account']) {
     await ensureColumn(t, 'owner_uid', "int(11) unsigned NOT NULL DEFAULT '0'");
@@ -704,4 +710,64 @@ async function migrateBackupAndVault(): Promise<void> {
       KEY idx_expire (expire_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+}
+
+
+/**
+ * 历史 enc:v1 只用 sys_key 派生密钥。配置了 DNSMGR_CONFIG_KEY 后，旧数据仍可被拖库的
+ * sys_key 解出，v2 的“数据库泄露无法解密”目标对历史数据不成立。启动时把常见密文字段
+ * 重加密为 v2；解不开的行保持原样并告警，不阻塞启动。
+ */
+async function migrateLegacyEncV1(): Promise<void> {
+  if (!process.env.DNSMGR_CONFIG_KEY) return;
+  const specs: Array<{ table: string; column: string; keyColumn?: string }> = [
+    { table: 'user', column: 'totp_secret' },
+    { table: 'account', column: 'config' },
+    { table: 'cdn_account', column: 'config' },
+    { table: 'cert_account', column: 'config' },
+    { table: 'cert_order', column: 'privatekey' },
+    { table: 'cert_order', column: 'info' },
+    { table: 'cert_deploy', column: 'config' },
+    { table: 'cf_rule_credential', column: 'config' },
+    { table: 'event_subscription', column: 'secret' },
+    { table: 'backup_destination', column: 'config' },
+  ];
+  let migrated = 0;
+  for (const spec of specs) {
+    try {
+      const col = spec.column;
+      const keyCol = spec.keyColumn || 'id';
+      const rows = await query<any>(
+        `SELECT ${keyCol} AS rid, ${col} AS val FROM ${table(spec.table)} WHERE ${col} LIKE 'enc:v1:%' LIMIT 5000`,
+      );
+      for (const row of rows) {
+        const plain = decryptText(String(row.val || ''));
+        if (plain === null) {
+          console.warn(`[migrate] ${spec.table}.${col} 的 enc:v1 密文无法解密，保持原样`);
+          continue;
+        }
+        await query(`UPDATE ${table(spec.table)} SET ${col} = ? WHERE ${keyCol} = ?`, [encryptText(plain), row.rid]);
+        migrated++;
+      }
+    } catch (e: any) {
+      console.warn(`[migrate] 迁移 ${spec.table}.${spec.column} 的 enc:v1 失败（跳过）：${e?.message || e}`);
+    }
+  }
+  // config 表以 key 为主键，单独处理；只迁移敏感键，避免把普通配置误加密。
+  try {
+    const rows = await query<any>(`SELECT \`key\` AS k, value AS val FROM ${table('config')} WHERE value LIKE 'enc:v1:%' LIMIT 5000`);
+    for (const row of rows) {
+      if (!isSecretKey(String(row.k || ''))) continue;
+      const plain = decryptText(String(row.val || ''));
+      if (plain === null) {
+        console.warn(`[migrate] config.${row.k} 的 enc:v1 密文无法解密，保持原样`);
+        continue;
+      }
+      await query(`UPDATE ${table('config')} SET value = ? WHERE \`key\` = ?`, [encryptText(plain), row.k]);
+      migrated++;
+    }
+  } catch (e: any) {
+    console.warn('[migrate] 迁移 config 的 enc:v1 失败（跳过）：' + (e?.message || e));
+  }
+  if (migrated > 0) console.log(`[migrate] 已将 ${migrated} 条历史 enc:v1 密文迁移为 enc:v2`);
 }

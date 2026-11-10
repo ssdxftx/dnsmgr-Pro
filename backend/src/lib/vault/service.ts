@@ -13,6 +13,7 @@ import {
 } from './keys.js';
 import { purgePrivateAssets, removeBackupFiles } from '../users/purge.js';
 import {
+  clearOtherVaultSessions,
   clearVaultSession,
   getVaultDek,
   setVaultSession,
@@ -43,6 +44,7 @@ interface VaultRow {
   recovery_hash: string | null;
   hint: string | null;
   exclude_from_site_backup: number;
+  vault_epoch: number;
   fail_count: number;
   locked_until: string | null;
 }
@@ -103,7 +105,7 @@ export async function initVault(
        VALUES (?, 'none', 'scrypt', ?, ?, ?, NOW(), NOW())`,
       [uid, KDF_PARAMS_JSON, wrapDek(deriveSysKek(await getSysKey()), dek, uid), String(opts.hint || '').slice(0, 100)],
     );
-    setVaultSession(uid, jti, dek);
+    setVaultSession(uid, jti, dek, undefined, 0);
     return {};
   }
 
@@ -130,7 +132,7 @@ export async function initVault(
       String(opts.hint || '').slice(0, 100),
     ],
   );
-  setVaultSession(uid, jti, dek);
+  setVaultSession(uid, jti, dek, undefined, 0);
   return recovery ? { recoveryCode: recovery.code } : {};
 }
 
@@ -173,7 +175,7 @@ export async function unlockVault(uid: number, jti: string, passphrase: string):
   if (row.mode !== 'passphrase') {
     const dek = await sysDek(row);
     if (!dek) throw new VaultError('便捷模式解锁失败，请联系管理员');
-    return setVaultSession(uid, jti, dek);
+    return setVaultSession(uid, jti, dek, undefined, row.vault_epoch);
   }
   const params = storedKdf(row);
   await claimAttempt(uid);
@@ -184,7 +186,7 @@ export async function unlockVault(uid: number, jti: string, passphrase: string):
   );
   if (!dek) return await failAttempt(uid);
   await query(`UPDATE ${table('user_vault')} SET fail_count = 0, locked_until = NULL WHERE uid = ?`, [uid]);
-  return setVaultSession(uid, jti, dek);
+  return setVaultSession(uid, jti, dek, undefined, row.vault_epoch);
 }
 
 export async function upgradeVault(
@@ -206,11 +208,13 @@ export async function upgradeVault(
   await query(
     `UPDATE ${table('user_vault')}
      SET mode = 'passphrase', kdf = 'scrypt', kdf_params = ?, salt = ?, wrapped_dek = ?,
-         wrapped_dek_sys = NULL, salt_recovery = ?, wrapped_dek_recovery = ?, recovery_hash = NULL, updated_at = NOW()
+         wrapped_dek_sys = NULL, salt_recovery = ?, wrapped_dek_recovery = ?, recovery_hash = NULL,
+         vault_epoch = vault_epoch + 1, updated_at = NOW()
      WHERE uid = ?`,
     [KDF_PARAMS_JSON, salt, wrapped, rec?.salt ?? null, rec?.wrapped ?? null, uid],
   );
-  setVaultSession(uid, jti, dek);
+  clearOtherVaultSessions(uid, jti);
+  setVaultSession(uid, jti, dek, undefined, Number(row.vault_epoch || 0) + 1);
   return rec ? { recoveryCode: rec.code } : {};
 }
 
@@ -228,11 +232,13 @@ export async function downgradeVault(uid: number, jti: string, passphrase: strin
   if (!dek) return await failAttempt(uid);
   await query(
     `UPDATE ${table('user_vault')}
-     SET mode = 'none', salt = NULL, wrapped_dek = NULL, wrapped_dek_sys = ?, updated_at = NOW()
+     SET mode = 'none', salt = NULL, wrapped_dek = NULL, wrapped_dek_sys = ?,
+         vault_epoch = vault_epoch + 1, updated_at = NOW()
      WHERE uid = ?`,
     [wrapDek(deriveSysKek(await getSysKey()), dek, uid), uid],
   );
-  setVaultSession(uid, jti, dek);
+  clearOtherVaultSessions(uid, jti);
+  setVaultSession(uid, jti, dek, undefined, Number(row.vault_epoch || 0) + 1);
 }
 
 export async function changePassphrase(uid: number, jti: string, oldPass: string, nextPass: string): Promise<void> {
@@ -253,11 +259,13 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
   const wrapped = wrapDek(await deriveKek(pass, salt), dek, uid);
   await query(
     `UPDATE ${table('user_vault')}
-     SET salt = ?, wrapped_dek = ?, kdf = 'scrypt', kdf_params = ?, fail_count = 0, locked_until = NULL, updated_at = NOW()
+     SET salt = ?, wrapped_dek = ?, kdf = 'scrypt', kdf_params = ?, fail_count = 0, locked_until = NULL,
+         vault_epoch = vault_epoch + 1, updated_at = NOW()
      WHERE uid = ?`,
     [salt, wrapped, KDF_PARAMS_JSON, uid],
   );
-  setVaultSession(uid, jti, dek);
+  clearOtherVaultSessions(uid, jti);
+  setVaultSession(uid, jti, dek, undefined, Number(row.vault_epoch || 0) + 1);
 }
 
 export async function recoverVault(uid: number, jti: string, recovery: string, nextPass: string): Promise<void> {
@@ -279,10 +287,12 @@ export async function recoverVault(uid: number, jti: string, recovery: string, n
   await query(
     `UPDATE ${table('user_vault')} SET mode = 'passphrase', kdf = 'scrypt', kdf_params = ?, salt = ?, wrapped_dek = ?,
        wrapped_dek_sys = NULL, salt_recovery = NULL, wrapped_dek_recovery = NULL,
-       recovery_hash = NULL, fail_count = 0, locked_until = NULL, updated_at = NOW() WHERE uid = ?`,
+       recovery_hash = NULL, fail_count = 0, locked_until = NULL, vault_epoch = vault_epoch + 1,
+       updated_at = NOW() WHERE uid = ?`,
     [KDF_PARAMS_JSON, salt, wrapped, uid],
   );
-  setVaultSession(uid, jti, dek);
+  clearOtherVaultSessions(uid, jti);
+  setVaultSession(uid, jti, dek, undefined, Number(row.vault_epoch || 0) + 1);
 }
 
 export async function setRecovery(uid: number, jti: string, recovery: string): Promise<{ recoveryCode?: string }> {
@@ -325,12 +335,12 @@ export async function destroyVault(uid: number, confirm: string, passphrase?: st
 
 export async function vaultStatus(uid: number, jti?: string) {
   const row = await getVaultRow(uid);
-  const sessionDek = getVaultDek(uid, jti);
+  const sessionDek = getVaultDek(uid, jti, row?.vault_epoch);
   let unlocked = !!sessionDek;
   if (!unlocked && row?.mode === 'none' && jti) {
     const dek = await sysDek(row);
     if (dek) {
-      setVaultSession(uid, jti, dek);
+      setVaultSession(uid, jti, dek, undefined, row.vault_epoch);
       unlocked = true;
     }
   }
@@ -338,7 +348,7 @@ export async function vaultStatus(uid: number, jti?: string) {
     initialized: !!row,
     mode: row?.mode || 'none',
     unlocked,
-    expiresAt: vaultSessionExpiry(uid, jti),
+    expiresAt: vaultSessionExpiry(uid, jti, row?.vault_epoch),
     hasRecovery: !!row?.wrapped_dek_recovery,
     hint: row?.hint || '',
     excludeFromSiteBackup: Number(row?.exclude_from_site_backup || 0) === 1,
@@ -350,7 +360,7 @@ export async function autoUnlockConvenient(uid: number, jti: string): Promise<vo
   const row = await getVaultRow(uid);
   if (!row || row.mode !== 'none') return;
   const dek = await sysDek(row);
-  if (dek) setVaultSession(uid, jti, dek);
+  if (dek) setVaultSession(uid, jti, dek, undefined, row.vault_epoch);
 }
 
 /** 写私有凭证前取 DEK：便捷模式自动解 sys 包裹，口令模式必须已有会话 */
@@ -358,7 +368,7 @@ export async function getDekForWrite(uid: number, jti?: string): Promise<Buffer 
   const row = await getVaultRow(uid);
   if (!row) return null;
   if (row.mode === 'none') return sysDek(row);
-  return getVaultDek(uid, jti);
+  return getVaultDek(uid, jti, row.vault_epoch);
 }
 
 /**
@@ -384,5 +394,5 @@ export async function findVaultDekForRequest(uid: number, jti?: string): Promise
   if (row.mode === 'none') return sysDek(row);
   const sessionJti = jti || currentRequestContext()?.jti || '';
   if (!sessionJti) return null;
-  return getVaultDek(uid, sessionJti);
+  return getVaultDek(uid, sessionJti, row.vault_epoch);
 }

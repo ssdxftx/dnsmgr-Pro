@@ -134,6 +134,8 @@ export default async function authRoutes(app: FastifyInstance) {
     // 锁定检查与名额占用合并为一条原子 UPDATE：
     // 并发请求只有前 MAX_AUTH_FAILURES 个能继续校验口令，其余直接拒绝。
     if (!(await reserveLoginAttempt(Number(user.id)))) {
+      // 锁定分支也要执行一次等代价的 bcrypt，避免「锁定/不存在用户」响应时间差成为用户名枚举侧信道。
+      await verifyPassword(DUMMY_PASSWORD_HASH, password);
       audit(req, {
         module: 'auth',
         action: 'auth.login',
@@ -389,12 +391,33 @@ export default async function authRoutes(app: FastifyInstance) {
         return { code: -1, msg: '动态口令已被使用，请稍后再试' };
       }
       await query(`UPDATE ${table('user')} SET totp_open = 1, totp_secret = ?, token_version = token_version + 1 WHERE id = ?`, [encryptText(bindSecret), req.user.uid]);
-      return { code: 0, msg: 'TOTP 二次验证绑定成功' };
+      // token_version 已自增：为当前会话补发新令牌，避免用户刚启用 2FA 就被下一次请求踢下线。
+      const nextVersion = Number(user.token_version || 0) + 1;
+      const sessionToken = (app as any).jwt.sign({
+        uid: user.id,
+        username: user.username,
+        level: user.level,
+        totp_open: 1,
+        token_version: nextVersion,
+        type: 'session',
+        jti: String(req.user.jti || '') || randomUUID(),
+      });
+      return { code: 0, msg: 'TOTP 二次验证绑定成功', data: { token: sessionToken } };
     }
     const closeErr = await requireCurrentTotp();
     if (closeErr) return { code: -1, msg: closeErr };
     await query(`UPDATE ${table('user')} SET totp_open = 0, totp_secret = NULL, token_version = token_version + 1 WHERE id = ?`, [req.user.uid]);
-    return { code: 0, msg: '已关闭 TOTP 二次验证' };
+    const nextVersion = Number(user.token_version || 0) + 1;
+    const sessionToken = (app as any).jwt.sign({
+      uid: user.id,
+      username: user.username,
+      level: user.level,
+      totp_open: 0,
+      token_version: nextVersion,
+      type: 'session',
+      jti: String(req.user.jti || '') || randomUUID(),
+    });
+    return { code: 0, msg: '已关闭 TOTP 二次验证', data: { token: sessionToken } };
   });
 
   app.post('/api/auth/reauth', { preHandler: (app as any).authenticate }, async (req: any) => {
@@ -470,8 +493,17 @@ export default async function authRoutes(app: FastifyInstance) {
     const ha = createHash('sha256').update(expected).digest();
     const hb = createHash('sha256').update(sign).digest();
     if (!timingSafeEqual(ha, hb)) return reply.code(400).type('text/plain').send('签名错误');
-    const row: any = await queryOne(`SELECT id, name, is_sso FROM ${table('domain')} WHERE name = ? LIMIT 1`, [domain]);
-    if (!row) return reply.code(404).type('text/plain').send('该域名不存在');
+    // 签名只覆盖域名名称，没有 domain id。若库中存在同名行（历史/导入数据只保证 aid+name 唯一），
+    // LIMIT 1 会把会话绑定到任意账户（含他人私有账户）；这里要求名称全局唯一，否则 fail-closed。
+    const rows: any[] = await query(
+      `SELECT id, name, is_sso FROM ${table('domain')} WHERE name = ? LIMIT 2`,
+      [domain],
+    );
+    if (!rows.length) return reply.code(404).type('text/plain').send('该域名不存在');
+    if (rows.length > 1) {
+      return reply.code(409).type('text/plain').send('该域名存在多条同名记录，无法安全快捷登录，请联系管理员处理');
+    }
+    const row: any = rows[0];
     if (Number(row.is_sso) !== 1) return reply.code(403).type('text/plain').send('该域名不支持快捷登录');
     // 一次性消费：sign 唯一对应一组 (domain, timestamp, token, ro)，重放同一链接直接拒绝
     if (!(await consumeOneTimeTicket(`ql:${sign}`, Number(row.id)))) {

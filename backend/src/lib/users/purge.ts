@@ -1,6 +1,7 @@
 import { unlink } from 'node:fs/promises';
 import { table, withTransaction } from '../../db.js';
 import { resolveArchivePath } from '../backup/archive.js';
+import { deleteRemote } from '../backup/destinations.js';
 
 type Q = <R = any>(sql: string, params?: any[]) => Promise<R[]>;
 
@@ -18,8 +19,16 @@ async function selectIds(q: Q, sql: string, params: any[]): Promise<number[]> {
   return (rows as any[]).map((r) => Number(r.id)).filter((n) => Number.isFinite(n) && n > 0);
 }
 
-export async function removeBackupFiles(files: string[]): Promise<void> {
-  for (const name of files) {
+export async function removeBackupFiles(files: Array<string | { file_name: string; dest_id?: number }>): Promise<void> {
+  for (const item of files) {
+    const name = typeof item === 'string' ? item : item.file_name;
+    const destId = typeof item === 'string' ? 0 : Number(item.dest_id || 0);
+    if (destId > 0) {
+      // 先尽力删除远端副本；失败时仍清理本地并记录，避免本地文件残留。
+      await deleteRemote(destId, name).catch((e: any) => {
+        console.error(`[purge] 删除远端备份 ${name} 失败：`, e?.message || e);
+      });
+    }
     try {
       await unlink(resolveArchivePath(name));
     } catch {
@@ -37,7 +46,7 @@ export async function purgePrivateAssets(
   q: Q,
   uid: number,
   opts: { deleteUserTasks?: boolean } = {},
-): Promise<string[]> {
+): Promise<Array<{ file_name: string; dest_id: number }>> {
   const accountIds = await selectIds(
     q,
     `SELECT id FROM ${table('account')} WHERE owner_uid = ? AND visibility = 'private'`,
@@ -75,7 +84,7 @@ export async function purgePrivateAssets(
   // 否则删除账号后这些任务仍会被调度器执行。
   const ownedTaskIds = uid ? await selectIds(q, `SELECT id FROM ${table('dmtask')} WHERE owner_uid = ?`, [uid]) : [];
   for (const id of ownedTaskIds) if (!taskIds.includes(id)) taskIds.push(id);
-  const backupFiles = await q<any>(`SELECT file_name FROM ${table('backup_job')} WHERE owner_uid = ?`, [uid]);
+  const backupFiles = await q<any>(`SELECT file_name, dest_id FROM ${table('backup_job')} WHERE owner_uid = ?`, [uid]);
 
   await delByIds(q, 'dmlog', 'taskid', taskIds);
   await delByIds(q, 'dmtask', 'did', domainIds);
@@ -111,7 +120,9 @@ export async function purgePrivateAssets(
   // 刷新/预热历史不属于业务资产，但保存了用户站点 URL，删除用户时必须一并清理
   await q(`DELETE FROM ${table('cdn_cache_task')} WHERE owner_uid = ?`, [uid]);
   await q(`DELETE FROM ${table('user_vault')} WHERE uid = ?`, [uid]);
-  return (backupFiles as any[]).map((r) => String(r.file_name || '')).filter(Boolean);
+  return (backupFiles as any[])
+    .map((r) => ({ file_name: String(r.file_name || ''), dest_id: Number(r.dest_id || 0) }))
+    .filter((r) => !!r.file_name);
 }
 
 /**

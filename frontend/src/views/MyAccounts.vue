@@ -234,9 +234,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useMessage } from 'naive-ui';
+import { NInput, useDialog, useMessage } from 'naive-ui';
 import { api } from '../api';
 import { useAuthStore } from '../stores/auth';
 import { isAdminUser } from '../lib/admin';
@@ -253,6 +253,7 @@ const auth = useAuthStore();
 const admin = computed(() => isAdminUser(auth.user));
 
 const { t } = useI18n();
+const dialog = useDialog();
 const message = useMessage();
 
 const status = ref<any>({});
@@ -432,14 +433,56 @@ async function generateRecovery() {
 
 async function toggleExclude(v: boolean) {
   const prev = status.value.excludeFromSiteBackup;
+  // 关闭站点备份会让私有凭证失去兜底恢复介质，服务端要求重输登录密码；
+  // 关闭排除（重新纳入备份）不需要密码。
+  let password = '';
+  if (v) {
+    const pwd = await askPassword(t('vault.excludeBackup'), t('vault.loginPass'));
+    if (pwd === null) return;
+    if (!pwd) return message.warning(t('vault.loginPass'));
+    password = pwd;
+  }
   status.value.excludeFromSiteBackup = v;
-  const res = await api<any>('POST', '/vault/backup-exclude', { exclude: v });
+  const body: any = { exclude: v };
+  if (v) body.password = password;
+  const res = await api<any>('POST', '/vault/backup-exclude', body);
   if (res.code !== 0) {
     status.value.excludeFromSiteBackup = prev;
     message.error(res.msg || t('common.loadFailed'));
     return;
   }
   await load();
+}
+
+function askPassword(title: string, placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let value = '';
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    dialog.warning({
+      title,
+      content: () =>
+        h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          placeholder,
+          onUpdateValue: (v: string) => {
+            value = v;
+          },
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => {
+        finish(value);
+      },
+      onNegativeClick: () => finish(null),
+      onClose: () => finish(null),
+    });
+  });
 }
 
 async function destroy() {

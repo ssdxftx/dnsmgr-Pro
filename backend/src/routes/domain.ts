@@ -155,7 +155,8 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
       ok = true;
       let pageSize = 500;
       let prevPageSig = '';
-      for (let page = 1; page <= 10; page++) {
+      // 小页厂商会把 500 钳制成 99；10 页会漏掉后续记录，放宽并优先用 total 终止。
+      for (let page = 1; page <= 200; page++) {
         const r = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
         if (r === false) {
           // 云端返回失败：标记失败且不写缓存
@@ -171,6 +172,8 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
         if (page > 1 && pageSig === prevPageSig) break;
         prevPageSig = pageSig;
         list = list.concat(r.list);
+        const total = Number((r as any).total);
+        if (Number.isFinite(total) && total > 0 && list.length >= total) break;
         if (page === 1) pageSize = r.list.length;
         // 返回条数不足一页即结束，不依赖厂商 total（部分厂商 total 只代表本页条数）
         if (r.list.length < pageSize) break;
@@ -197,14 +200,15 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
 async function fetchProviderRecordMap(provider: any): Promise<Map<string, any> | null> {
   const map = new Map<string, any>();
   let pageSize = 500;
-  for (let page = 1; page <= 10; page++) {
+  for (let page = 1; page <= 200; page++) {
     const r = await provider.getDomainRecords(page, 500, null, null, null, null, null, null).catch(() => false);
     if (r === false) return null;
     if (!r.list || !r.list.length) return map;
     for (const item of r.list) map.set(String(item.RecordId), item);
+    const total = Number((r as any).total);
+    if (Number.isFinite(total) && total > 0 && map.size >= total) break;
     if (page === 1) pageSize = r.list.length;
     if (r.list.length < pageSize) break;
-    if (typeof (r as any).total === 'number' && page * pageSize >= Number((r as any).total)) break;
   }
   return map;
 }

@@ -740,8 +740,16 @@ export default async function certRoutes(app: FastifyInstance) {
     let pfx = null;
     if (row.fullchain && privateKey) {
       try {
-        // PFX 密码由调用方指定，默认不设置密码（不再使用内置弱口令）
-        const pfxPass = String(req.query?.pfx_pass || '');
+        // PFX 口令不能放 URL query（会进入访问日志/浏览器历史），改用请求头。
+        const rawB64 = req.headers['x-pfx-pass-b64'];
+        const rawPlain = req.headers['x-pfx-pass'];
+        const b64 = Array.isArray(rawB64) ? rawB64[0] : rawB64;
+        const plain = Array.isArray(rawPlain) ? rawPlain[0] : rawPlain;
+        const pfxPass = b64
+          ? Buffer.from(String(b64), 'base64').toString('utf8')
+          : plain
+            ? String(plain)
+            : '';
         pfx = (await buildPfx(row.fullchain, privateKey, pfxPass)).toString('base64');
       } catch (e: any) {
         // 记录失败原因（如容器缺少 openssl），避免同类环境问题无声失败难以排查
@@ -1101,6 +1109,9 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     const row: any = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '证书订单不存在' };
+    // 旧版 API 同样可以导出明文私钥，必须与 UI 路径一致做二次确认，避免长期 apikey 泄露直接拖走私钥。
+    const pwErr = await requireLoginPassword(Number(req.user.uid), auth.body.password, req, 'cert.privatekey');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     // PFX 口令由调用方指定且不得为空，避免用固定弱口令导出等同于无口令的 PKCS#12
     const pfxPass = String(auth.body.pfx_pass ?? '').trim();
     if (pfxPass.length < 8) {

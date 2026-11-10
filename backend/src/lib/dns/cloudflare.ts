@@ -110,9 +110,10 @@ export async function detectCloudflareProxy(
   actual: string[],
 ): Promise<{ proxied: boolean; actual: string[] }> {
   const recordType = String(type ?? '').toUpperCase();
-  if (recordType !== 'A' && recordType !== 'AAAA' && recordType !== 'CNAME') {
-    return { proxied: false, actual };
-  }
+  // 只有 CNAME 才可能因 Cloudflare 代理而解析到 CF IP。
+  // A/AAAA 记录如果配置值与实际值不一致，即使实际值是 CF IP 也应作为异常上报，
+  // 否则攻击者只要把被劫持域名指向任意 Cloudflare IP 就能规避告警。
+  if (recordType !== 'CNAME') return { proxied: false, actual };
   if (isCloudflareProxyValues(actual)) return { proxied: true, actual };
   if (recordType === 'CNAME') {
     const [v4, v6] = await Promise.all([localResolve(fullDomain, 'A'), localResolve(fullDomain, 'AAAA')]);

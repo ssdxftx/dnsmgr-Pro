@@ -14,6 +14,37 @@ import {
   parseScopes,
 } from '../lib/apiKeys.js';
 
+// API Key 只能派生「不超过自身」的 Key：否则 apikeys:write 可签出 * Key 完成提权。
+function scopeCoveredBy(requested: string[], allowed: string[]): boolean {
+  if (allowed.includes('*')) return true;
+  const has = (s: string) => allowed.includes(s);
+  for (const scope of requested) {
+    if (scope === '*') return false;
+    if (scope === 'read' || scope === 'write') {
+      if (!has(scope)) return false;
+      continue;
+    }
+    const [mod, action = '*'] = scope.split(':');
+    if (has(mod) || has(`${mod}:*`)) continue;
+    if (action === '*') {
+      if (has(`${mod}:read`) && has(`${mod}:write`)) continue;
+      return false;
+    }
+    if (action === 'read' && (has(`${mod}:read`) || has('read'))) continue;
+    if (action === 'write' && (has(`${mod}:write`) || has('write'))) continue;
+    return false;
+  }
+  return true;
+}
+
+function apiKeyScopeError(req: any, scopes: string[]): string | null {
+  if (String(req.user?.auth_type || '') !== 'api_key') return null;
+  const allowed = Array.isArray(req.user?.api_key_scopes) ? req.user.api_key_scopes : [];
+  return scopeCoveredBy(scopes, allowed)
+    ? null
+    : 'API Key 不能创建或修改出超过自身作用域的新 Key';
+}
+
 function fmtDateOnly(value: any): string | null {
   if (value === undefined) return undefined as any;
   if (value === null || value === '') return null;
@@ -99,6 +130,8 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
       // 空作用域不再是「全权限」的另一种写法：必须显式选 '*'，否则拒绝创建，
       // 避免用户在界面上清空勾选后拿到一把看起来能用、实际全禁的 Key（或反过来提权）。
       if (!scopes.length) return { code: -1, msg: '至少选择一个权限范围；如需全权限请显式选择 *' };
+      const scopeErr = apiKeyScopeError(req, scopes);
+      if (scopeErr) return { code: -1, msg: scopeErr };
       ipList = normalizeIpAllowlist(req.body?.ip_allowlist);
       expiresAt = fmtDateOnly(req.body?.expires_at);
     } catch (e: any) {
@@ -150,6 +183,8 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
         const nextScopes = normalizeScopes(req.body.scopes);
         // 清空作用域不再等于 '*'：要停用请用 active=0 或吊销，避免「收权」被当成提权
         if (!nextScopes.length) return { code: -1, msg: '至少选择一个权限范围；如需全权限请显式选择 *' };
+        const scopeErr = apiKeyScopeError(req, nextScopes);
+        if (scopeErr) return { code: -1, msg: scopeErr };
         sets.push('scopes = ?');
         params.push(JSON.stringify(nextScopes));
       }
@@ -189,6 +224,9 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
     const row: any = await queryOne(`SELECT * FROM ${table('api_key')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: 'API Key 不存在' };
     if (!(await canManageKey(req, row))) return { code: -1, msg: '无权限' };
+    // rotate 会返回目标 Key 的新明文：scoped Key 不能轮换出比自己权限更大的 Key。
+    const rotateScopeErr = apiKeyScopeError(req, parseScopes(row.scopes));
+    if (rotateScopeErr) return { code: -1, msg: rotateScopeErr };
     const pwErr = await requireWriteReauth(req);
     if (pwErr) return { code: -1, msg: pwErr };
     const key = generateApiKey();

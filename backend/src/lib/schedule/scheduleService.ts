@@ -36,15 +36,19 @@ async function addLog(domain: string, action: string, data: string) {
 
 export async function executeAll(): Promise<boolean> {
   const now = Math.floor(Date.now() / 1000);
-  // 启动补偿：认领时会把 nexttime 置 0，若进程在 updateNexttime 前退出，
-  // 任务会永久不再被选中。这里把「已认领但长时间未推进」的周期任务重新排期。
+  // 启动补偿：认领时会把 nexttime 置 0，若进程在 updateNexttime 前退出，任务会永久不再被选中。
+  // 周期任务重新排期；单次任务无法安全重算时间，直接停用并保留记录，避免 UI 永久显示“启用中”。
   const stale: any[] = await query(
-    `SELECT * FROM ${table('sctask')} WHERE nexttime = 0 AND active = 1 AND type = 1
+    `SELECT * FROM ${table('sctask')} WHERE nexttime = 0 AND active = 1
        AND (updatetime IS NULL OR updatetime < ?)`,
     [now - 600]
   );
   for (const row of stale) {
-    await updateNexttime(row).catch(() => undefined);
+    if (Number(row.type) !== 1) {
+      await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0, retry = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
+    } else {
+      await updateNexttime(row).catch(() => undefined);
+    }
   }
   const list = await query(
     `SELECT * FROM ${table('sctask')} WHERE nexttime > 0 AND nexttime <= ? AND active = 1`,

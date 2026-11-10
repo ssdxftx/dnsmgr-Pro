@@ -169,6 +169,9 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (!job || (!isAdmin(req.user) && Number(job.owner_uid) !== Number(req.user.uid))) {
       return reply.code(404).send({ code: -1, msg: '备份不存在' });
     }
+    // 删除备份会同时移除本地与远端恢复介质，属于敏感操作：必须重输登录密码。
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.delete');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     if (job.file_name) {
       if (job.dest_id) await deleteRemote(Number(job.dest_id), String(job.file_name));
       await unlink(resolveArchivePath(String(job.file_name))).catch(() => undefined);
@@ -412,7 +415,15 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (getRestoreStatus().running) {
       return reply.code(409).send({ code: -1, msg: '恢复任务正在执行，无法退出维护模式' });
     }
-    await setMaintenance(false);
+    // 恢复运行态是进程内变量；多副本下必须用与恢复相同的数据库锁判断是否真的没有恢复在跑。
+    const outcome = await withDistributedLockResult('dnsmgr:backup:mutate', async () => {
+      if (getRestoreStatus().running) return false;
+      await setMaintenance(false);
+      return true;
+    });
+    if (!outcome.locked || outcome.result === false) {
+      return reply.code(409).send({ code: -1, msg: '恢复任务正在执行，无法退出维护模式' });
+    }
     audit(req, { module: 'backup', action: 'backup.maintenance.exit', summary: '管理员手动退出维护模式' });
     return { code: 0, msg: '已退出维护模式' };
   });

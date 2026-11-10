@@ -157,8 +157,14 @@ export default async function vaultRoutes(app: FastifyInstance) {
     }
   });
 
-  app.post('/api/vault/backup-exclude', auth, async (req: any) => {
-    await setExcludeFromSiteBackup(Number(req.user.uid), req.body?.exclude === true);
+  app.post('/api/vault/backup-exclude', auth, async (req: any, reply: any) => {
+    const exclude = req.body?.exclude === true;
+    // 关闭站点备份会让私有凭证失去兜底恢复介质，必须重输登录密码。
+    if (exclude) {
+      const pwErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.backup_exclude');
+      if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
+    }
+    await setExcludeFromSiteBackup(Number(req.user.uid), exclude);
     return { code: 0, msg: '设置已保存' };
   });
 

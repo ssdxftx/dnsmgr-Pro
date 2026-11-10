@@ -45,7 +45,7 @@
 import { onMounted, ref } from 'vue';
 import { useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
-import { api } from '../api';
+import { api, setToken, setUser, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import QRCode from 'qrcode';
 
@@ -98,6 +98,10 @@ async function bind() {
       enabled.value = true;
       step.value = '';
       password.value = '';
+      if (res.data?.token) {
+        setToken(res.data.token);
+        setUser({ ...(getUser() || {}), totp_open: 1 });
+      }
     } else message.error(res.msg);
   } catch (e: any) {
     message.error(e?.message || t('common.networkError'));
@@ -125,6 +129,10 @@ function close() {
           enabled.value = false;
           password.value = '';
           closeCode.value = '';
+          if (res.data?.token) {
+            setToken(res.data.token);
+            setUser({ ...(getUser() || {}), totp_open: 0 });
+          }
         } else message.error(res.msg);
       } catch (e: any) {
         message.error(e?.message || t('common.networkError'));

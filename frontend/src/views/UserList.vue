@@ -118,7 +118,7 @@
 import { computed, h, onMounted, reactive, ref, watch } from 'vue';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
-import { NButton, NDatePicker, NTag, useMessage, useDialog } from 'naive-ui';
+import { NButton, NDatePicker, NInput, NTag, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, SearchOutline, RefreshOutline, PeopleOutline, ShieldCheckmarkOutline, KeyOutline } from '@vicons/ionicons5';
 import { api, getUser } from '../api';
 import PageHeader from '../components/PageHeader.vue';
@@ -159,6 +159,8 @@ watch(showEdit, (v) => {
   }
 });
 const origApi = reactive({ is_api: 0, apikey: '' });
+// 编辑前的等级：等级变更需要重输当前管理员密码（服务端会强制校验）
+const origLevel = ref(1);
 const legacyKeyChanged = computed(
   () =>
     !!editingId.value &&
@@ -166,7 +168,11 @@ const legacyKeyChanged = computed(
     (Number(form.is_api) !== Number(origApi.is_api) || String(form.apikey) !== String(origApi.apikey)),
 );
 // 改密与旧版 API Key 变更都属于账号接管级操作，编辑时必须重输当前管理员密码。
-const reauthNeeded = computed(() => !!editingId.value && (legacyKeyChanged.value || !!form.repwd));
+const levelChanged = computed(() => !!editingId.value && Number(form.level) !== Number(origLevel.value));
+const sensitiveCreate = computed(() => !editingId.value && (Number(form.level) >= 2 || Number(form.is_api) === 1));
+const reauthNeeded = computed(
+  () => sensitiveCreate.value || (!!editingId.value && (legacyKeyChanged.value || !!form.repwd || levelChanged.value)),
+);
 const domainOptions = ref<any[]>([]);
 const domainLoadBusy = ref(false);
 
@@ -367,6 +373,7 @@ function openAdd() {
   form.confirmPassword = '';
   origApi.is_api = 0;
   origApi.apikey = '';
+  origLevel.value = 1;
   showEdit.value = true;
 }
 
@@ -388,6 +395,7 @@ async function openEdit(row: any) {
       origApi.apikey = String(res.data.apikey || '');
       form.confirmPassword = '';
       form.level = res.data.level;
+      origLevel.value = Number(res.data.level || 1);
       form.check_whole = res.data.check_whole == 1;
       form.stat_cache = res.data.stat_cache == 1;
       form.permission = (res.data.permission || []).map((p: any) =>
@@ -408,7 +416,11 @@ async function save() {
   if (reauthNeeded.value && !form.confirmPassword) return message.warning(t('userList.loginPasswordConfirmHint'));
   saveBusy.value = true;
   const body: any = { username: form.username, is_api: form.is_api, apikey: form.apikey, level: form.level };
-  if (reauthNeeded.value) body.password = form.confirmPassword;
+  // 编辑时的确认密码沿用 password；新建时 password 是新用户密码，确认密码必须用独立字段
+  if (reauthNeeded.value) {
+    if (editingId.value) body.password = form.confirmPassword;
+    else body.confirm_password = form.confirmPassword;
+  }
   if (form.level !== 2) body.stat_cache = form.stat_cache ? 1 : 0;
   if (form.level === 1) {
     body.permission = form.permission;
@@ -436,12 +448,44 @@ async function save() {
 }
 
 // 状态与统计缓存开关：互斥由 useAction 的 busy 键保证，按钮同时展示转圈与禁用
+function askPassword(title: string, placeholder: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    let value = '';
+    let settled = false;
+    const finish = (result: string | null) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    dialog.warning({
+      title,
+      content: () =>
+        h(NInput, {
+          type: 'password',
+          showPasswordOn: 'click',
+          placeholder,
+          onUpdateValue: (v: string) => {
+            value = v;
+          },
+        }),
+      positiveText: t('common.confirm'),
+      negativeText: t('common.cancel'),
+      onPositiveClick: () => finish(value),
+      onNegativeClick: () => finish(null),
+      onClose: () => finish(null),
+    });
+  });
+}
+
 async function toggleStatus(row: any) {
   const prev = row.status ? 1 : 0;
   const target = prev ? 0 : 1;
+  const password = await askPassword(t('userList.loginPasswordConfirm'), t('userList.loginPasswordConfirmHint'));
+  if (password === null) return;
+  if (!password) return message.warning(t('userList.loginPasswordConfirmHint'));
   row.status = target; // 乐观更新：立即反馈，避免整表重拉
   try {
-    const res = await api('POST', `/users/${row.id}/status`, { status: target });
+    const res = await api('POST', `/users/${row.id}/status`, { status: target, password });
     if (res.code !== 0) {
       row.status = prev; // 失败回滚
       message.error(res.msg);
@@ -476,11 +520,14 @@ function del(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
+      const password = await askPassword(t('userList.deleteTitle'), t('userList.loginPasswordConfirmHint'));
+      if (password === null) return false;
+      if (!password) return message.warning(t('userList.loginPasswordConfirmHint'));
       const idx = users.value.findIndex((u: any) => Number(u.id) === Number(row.id));
       const removed = idx >= 0 ? users.value[idx] : null;
       if (idx >= 0) users.value.splice(idx, 1);
       try {
-        const res = await api('DELETE', `/users/${row.id}`);
+        const res = await api('DELETE', `/users/${row.id}`, { password });
         if (res.code === 0) {
           message.success(t('userList.deleteSuccess'));
           if (pagination.itemCount > 0) pagination.itemCount--;

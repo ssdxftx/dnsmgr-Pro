@@ -197,12 +197,33 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     const task: any = await queryOne(`SELECT * FROM ${table('sctask')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '切换策略不存在' };
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
+    if (!Number(task.active)) return { code: -1, msg: '任务未启用，请先启用' };
+    // 与调度 tick 共用 nexttime 认领：立即执行也不能绕过 CAS，否则会和定时执行并发打同一记录。
+    const claim: any = await query(
+      `UPDATE ${table('sctask')} SET nexttime = 0 WHERE id = ? AND active = 1 AND nexttime > 0`,
+      [id],
+    );
+    if (!Number(claim?.affectedRows || 0)) return { code: -1, msg: '任务正在执行，请稍后再试' };
     try {
       await executeOne(task);
       await query(`UPDATE ${table('sctask')} SET retry = 0 WHERE id = ?`, [id]);
-      await updateNexttime(task);
+      // 单次任务执行完必须停用，否则界面长期显示“启用中”且 nexttime=0 永不调度；
+      // 周期任务的 nexttime 已由 executeOne 内的 updateNexttime 推进，无需重复计算。
+      if (Number(task.type) !== 1) {
+        await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0, retry = 0 WHERE id = ?`, [id]);
+      }
       return { code: 0, msg: '已执行一次定时切换' };
     } catch (e: any) {
+      // 失败后按瞬时错误处理：延后 60 秒重试，连续 5 次失败自动停用，避免每分钟打上游。
+      const retry = Number(task.retry || 0) + 1;
+      if (retry >= 5) {
+        await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0, retry = ? WHERE id = ?`, [retry, id]).catch(() => undefined);
+      } else {
+        await query(
+          `UPDATE ${table('sctask')} SET nexttime = ?, retry = ? WHERE id = ?`,
+          [Math.floor(Date.now() / 1000) + 60, retry, id],
+        ).catch(() => undefined);
+      }
       return { code: -1, msg: e?.message || '执行失败' };
     }
   });
