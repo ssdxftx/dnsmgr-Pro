@@ -115,10 +115,11 @@ export class TencentEdgeOne implements CdnProvider {
     // 这类多标签公共后缀被「取末两段」错误解析为 com.cn / co.uk
     let bestId = '';
     let bestLen = -1;
+    const target = String(domain || '').toLowerCase();
     for (const zone of zones) {
-      const zn = String(zone?.ZoneName || '');
+      const zn = String(zone?.ZoneName || '').toLowerCase();
       if (!zn || !zone?.ZoneId) continue;
-      if (domain === zn || domain.endsWith('.' + zn)) {
+      if (target === zn || target.endsWith('.' + zn)) {
         if (zn.length > bestLen) {
           bestLen = zn.length;
           bestId = String(zone.ZoneId);
@@ -169,12 +170,18 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   async getDomainCname(domain: string): Promise<string | false> {
+    // 先清掉上一次调用残留的错误，避免调用方把“未找到”误判成接口失败
+    this.error = '';
     const zoneId = await this.findZone(domain);
     if (!zoneId) return false;
     const list = await this.listAllAccelerationDomains(zoneId);
     if (list === false) return false;
+    const target = String(domain || '').toLowerCase();
     for (const d of list) {
-      if (d.DomainName === domain && d.Cname) return d.Cname;
+      if (String(d.DomainName || '').toLowerCase() !== target) continue;
+      if (d.Cname) return d.Cname;
+      this.error = '目标站点同名加速域名尚未分配 CNAME，请稍后重试';
+      return false;
     }
     return false;
   }
@@ -346,7 +353,7 @@ export class TencentEdgeOne implements CdnProvider {
     // EdgeOne 要求域名处于停用状态才能删除：在线时先停用再删除
     const list = await this.listAllAccelerationDomains(zoneId);
     if (list !== false) {
-      const cur = list.find((d: any) => d.DomainName === domain);
+      const cur = list.find((d: any) => String(d.DomainName || '').toLowerCase() === String(domain || '').toLowerCase());
       if (cur && cur.DomainStatus === 'online') {
         const stopped = await this.send('ModifyAccelerationDomainStatuses', { ZoneId: zoneId, DomainNames: [domain], Status: 'offline' });
         if (stopped === false) return false;
@@ -648,7 +655,7 @@ export class TencentEdgeOne implements CdnProvider {
     if (!zoneId) return false;
     const list = await this.listAllAccelerationDomains(zoneId);
     if (list === false) return false;
-    const item = list.find((d: any) => d.DomainName === domain);
+    const item = list.find((d: any) => String(d.DomainName || '').toLowerCase() === String(domain || '').toLowerCase());
     if (!item) return false;
     const cert = item.Certificate || {};
     const mode = String(cert.Mode || 'disable');

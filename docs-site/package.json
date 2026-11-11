@@ -1,6 +1,6 @@
 {
   "name": "dnsmgr-pro-docs",
-  "version": "1.35.1",
+  "version": "1.35.2",
   "private": true,
   "type": "module",
   "description": "彩虹 DNS Pro 使用文档",

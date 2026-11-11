@@ -101,17 +101,19 @@ export class AliyunESA implements CdnProvider {
     let page = 1;
     const size = 100;
     let best: any = null;
+    const target = String(domain || '').toLowerCase();
     while (page < 50) {
       const data = await this.call({ Action: 'ListSites', PageNumber: page, PageSize: size });
       if (!data) break;
       for (const s of data.Sites || []) {
-        const siteName = s.SiteName || '';
+        const siteName = String(s.SiteName || '');
         if (!siteName) continue;
-        if (domain === siteName) {
+        const siteLower = siteName.toLowerCase();
+        if (target === siteLower) {
           this.siteId = String(s.SiteId);
           return this.siteId;
         }
-        if (domain.endsWith('.' + siteName)) {
+        if (target.endsWith('.' + siteLower)) {
           if (!best || siteName.length > (best.SiteName || '').length) best = s;
         }
       }
@@ -138,8 +140,9 @@ export class AliyunESA implements CdnProvider {
     // ESA 的 ListRecords.RecordName 过滤与返回均为完整域名（FQDN），非主机前缀
     const data = await this.call({ Action: 'ListRecords', SiteId: siteId, PageNumber: 1, PageSize: 100, RecordName: domain });
     if (!data) return false;
+    const target = String(domain || '').toLowerCase();
     for (const r of data.Records || []) {
-      if (r.RecordName === domain) return { siteId, siteName, record: r };
+      if (String(r.RecordName || '').toLowerCase() === target) return { siteId, siteName, record: r };
     }
     return false;
   }
@@ -177,9 +180,22 @@ export class AliyunESA implements CdnProvider {
   }
 
   async getDomainCname(domain: string): Promise<string | false> {
+    // 先清掉上一次调用残留的错误，避免调用方把“未找到”误判成接口失败
+    this.error = '';
     const found = await this.findRecord(domain);
     if (!found) return false;
-    return found.record.RecordCname || false;
+    // 未开启代理加速的同名记录不是可复用的加速域名。显式报错，避免切换流程
+    // 先把它当成目标域名，或后续 CreateRecord 因同名记录冲突而给出含糊错误。
+    const proxied = found.record.Proxied === true || String(found.record.Proxied).toLowerCase() === 'true';
+    if (!proxied) {
+      this.error = '目标站点存在同名解析记录，但未开启代理加速';
+      return false;
+    }
+    if (!found.record.RecordCname) {
+      this.error = '目标站点同名加速记录尚未分配 CNAME，请稍后重试';
+      return false;
+    }
+    return found.record.RecordCname;
   }
 
   async listDomains(): Promise<CdnDomainItem[] | false> {
@@ -219,6 +235,8 @@ export class AliyunESA implements CdnProvider {
           // 注意：ESA 的站点/记录列表无法反映「域名级 HTTPS 开关」与「强制跳转」的真实状态，
           // 这里刻意不返回 https_enabled / force_redirect，避免云端同步（syncFromCloud）把它们回写成
           // false 从而清空本地已启用的 HTTPS 状态（其真实值由证书联动/HTTPS 规则维护）。
+          // 回源 HOST/协议/端口同样无法从 ListRecords 可靠还原：HostPolicy 只是策略枚举，
+          // 协议/端口由站点 OriginRule 承载。这里不返回这些字段，调用方应保留本地值而不是写入假默认值。
           out.push({
             domain,
             cname: r.RecordCname || '',
@@ -226,10 +244,6 @@ export class AliyunESA implements CdnProvider {
             zoneId: siteId,
             origin,
             origin_type: originType,
-            origin_host: r.HostPolicy || '',
-            origin_protocol: 'follow',
-            http_port: 80,
-            https_port: 443,
           });
         }
         const rtotal = Number(rr.TotalCount || 0);
@@ -259,13 +273,19 @@ export class AliyunESA implements CdnProvider {
     const proxied = status !== 'offline';
     // UpdateRecord 必填 Data（RecordId 亦必填）；回填原有 Type/Data，避免类型被重置
     const rec = found.record;
-    return (await this.call({
+    const param: Record<string, any> = {
       Action: 'UpdateRecord',
       RecordId: rec.RecordId,
       Type: rec.RecordType ?? rec.Type,
       Data: typeof rec.Data === 'string' ? rec.Data : JSON.stringify(rec.Data ?? {}),
       Proxied: proxied,
-    })) !== false;
+    };
+    // 开启代理时同样需要业务场景；优先保留原值
+    if (proxied) {
+      const bizName = String(rec.BizName || '').trim();
+      if (bizName) param.BizName = bizName;
+    }
+    return (await this.call(param)) !== false;
   }
 
   async updateOrigin(domain: string, origin: string, originType: string, originHost: string, originProtocol: string, httpPort: number, httpsPort: number) {
@@ -276,7 +296,9 @@ export class AliyunESA implements CdnProvider {
     }
     const originVal = origin.split(';')[0].trim();
     const type = originType === 'ipaddr' ? 'A/AAAA' : 'CNAME';
-    // 记录级：改写解析目标（Type/Data）；SourceType / HostPolicy 亦为 UpdateRecord 的合法参数
+    // 记录级：改写解析目标（Type/Data）。HostPolicy 是 follow_hostname /
+    // follow_origin_domain 的策略枚举，不能把自定义 HOST 填进去；自定义 HOST
+    // 由下方 OriginRule 的 OriginHost 承载。
     const param: Record<string, any> = {
       Action: 'UpdateRecord',
       RecordId: found.record.RecordId,
@@ -284,7 +306,14 @@ export class AliyunESA implements CdnProvider {
       Data: JSON.stringify({ value: originVal }),
     };
     if (originType === 'domain') param.SourceType = 'Domain';
-    if (originHost) param.HostPolicy = originHost;
+    // 更新已代理记录时保留原业务场景，避免与 CreateRecord 一样触发
+    // “business type is empty or incorrect”。
+    const proxied = found.record.Proxied === true || String(found.record.Proxied).toLowerCase() === 'true';
+    if (proxied) {
+      param.Proxied = true;
+      const bizName = String(found.record.BizName || '').trim();
+      if (bizName) param.BizName = bizName;
+    }
     if ((await this.call(param)) === false) return false;
 
     // 回源协议与端口不属于 UpdateRecord（官方该接口无 HttpPorts/HttpsPorts 参数，

@@ -222,7 +222,16 @@ const partner = computed(() => String(props.providerCaps?.[props.row?.route]?.sw
 const targetRouteName = computed(() => props.providerCaps?.[partner.value]?.name || partner.value || '-');
 const currentRouteName = computed(() => props.providerCaps?.[props.row?.route]?.name || props.row?.routename || props.row?.route || '-');
 const targetAccounts = computed(() => props.accounts.filter((a) => props.accountTypes[a.value] === partner.value));
-const siteOptions = computed(() => zones.value.map((z: any) => ({ label: z.zoneName, value: z.zoneId, desc: z.planName || z.area || '' })));
+const siteOptions = computed(() =>
+  zones.value.map((z: any) => {
+    const blocked = z.paused || ['paused', 'offline', 'disabled', 'suspended', 'inactive'].includes(String(z.status || '').toLowerCase());
+    return {
+      label: z.zoneName,
+      value: z.zoneId,
+      desc: [z.planName || z.area, blocked ? t('cdnDomain.statusStopped') : ''].filter(Boolean).join(' · ') || undefined,
+    };
+  }),
+);
 const originCaps = computed<any>(() => props.providerCaps?.[partner.value]?.addFlow?.origin || { protocol: true, ports: true, host: true });
 
 const certModeOptions = computed(() => {
@@ -423,7 +432,14 @@ function certExtra(): Record<string, any> {
 async function submit() {
   if (!props.row?.id || !targetAid.value || !targetZoneId.value) return;
   if (step.value === 'cert' && certMode.value === 'certlink' && !certChoice.value) return;
-  const host = originForm.origin_host_mode === 'accelerate' ? props.row.name : originForm.origin_host_mode === 'custom' ? originForm.origin_host_custom : '';
+  const host =
+    originForm.origin_host_mode === 'accelerate'
+      ? props.row.name
+      : originForm.origin_host_mode === 'custom'
+        ? originForm.origin_host_custom
+        : originForm.origin_type === 'domain'
+          ? originForm.origin
+          : '';
   const payload: Record<string, any> = {
     aid: targetAid.value,
     zone_id: targetZoneId.value,

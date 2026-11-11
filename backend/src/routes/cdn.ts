@@ -145,8 +145,12 @@ async function assertDnsDomainUsable(user: any, did: number, accelName: string):
 }
 
 function calcRecordName(accelDomain: string, dnsDomain: string): string {
-  if (accelDomain === dnsDomain) return '@';
-  return accelDomain.slice(0, accelDomain.length - dnsDomain.length - 1);
+  const accel = normalizeHost(accelDomain);
+  const base = normalizeHost(dnsDomain);
+  if (!accel || !base) return '';
+  if (accel === base) return '@';
+  if (!accel.endsWith('.' + base)) return '';
+  return accel.slice(0, -(base.length + 1));
 }
 
 // 删除接入 CDN 域名时联动创建的 DNS 解析记录（CNAME）。
@@ -155,6 +159,8 @@ function calcRecordName(accelDomain: string, dnsDomain: string): string {
 async function removeLinkedDnsRecord(row: any, user: any): Promise<{ ok: boolean; message: string }> {
   const dnsDomain: any = await assertDnsDomainUsable(user, Number(row.did), String(row.name));
   if (!dnsDomain) return { ok: false, message: '未找到联动域名或无权限，解析记录需手动处理' };
+  const linkedName = calcRecordName(row.name, dnsDomain.name);
+  if (!linkedName) return { ok: false, message: '加速域名不属于关联的 DNS 域名，解析记录需手动处理' };
   const dnsAcct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
   if (!dnsAcct) return { ok: false, message: 'DNS账户不存在，解析记录需手动处理' };
   const dns: any = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
@@ -163,12 +169,11 @@ async function removeLinkedDnsRecord(row: any, user: any): Promise<{ ok: boolean
   const norm = (v: any) => String(Array.isArray(v) ? v[0] : v ?? '').trim().toLowerCase();
   let recordId = row.dns_record ? String(row.dns_record) : '';
   if (!recordId && row.cname) {
-    const recName = calcRecordName(row.name, dnsDomain.name);
     const res = await dns.getDomainRecords(1, 500);
     const hit = (res && res.list ? res.list : []).find(
       (r: any) =>
         String(r.Type).toUpperCase() === 'CNAME' &&
-        norm(r.Name) === norm(recName) &&
+        norm(r.Name) === norm(linkedName) &&
         norm(r.Value).replace(/\.+$/, '') === norm(row.cname).replace(/\.+$/, ''),
     );
     if (hit) recordId = String(hit.RecordId);
@@ -188,7 +193,7 @@ async function removeLinkedDnsRecord(row: any, user: any): Promise<{ ok: boolean
     if (s.endsWith('.' + base)) s = s.slice(0, -(base.length + 1));
     return s;
   };
-  if (shortName(current.Name) !== shortName(calcRecordName(row.name, dnsDomain.name))) {
+  if (shortName(current.Name) !== shortName(linkedName)) {
     return { ok: false, message: '联动记录名称已变化，需手动处理' };
   }
   if (current.Domain && norm(current.Domain).replace(/\.+$/, '') !== norm(dnsDomain.name).replace(/\.+$/, '')) {
@@ -235,6 +240,8 @@ interface SwitchDnsResult {
   updated: boolean;
   added: boolean;
   warning: string;
+  /** 原记录是否处于暂停状态；写库失败回滚时需要恢复 */
+  wasPaused: boolean;
 }
 
 /**
@@ -247,6 +254,7 @@ interface SwitchDnsResult {
  */
 async function switchLinkedDnsRecord(row: any, dnsDomain: any, dns: any, newCname: string): Promise<SwitchDnsResult> {
   const expectedName = calcRecordName(String(row.name), String(dnsDomain.name));
+  if (!expectedName) throw new Error('加速域名不属于关联的 DNS 域名，无法自动切换解析');
   const expectedShort = shortRecordName(expectedName, dnsDomain.name);
   const invalid = (msg: string) => {
     throw new Error(msg);
@@ -292,8 +300,14 @@ async function switchLinkedDnsRecord(row: any, dnsDomain: any, dns: any, newCnam
   if (rec) {
     const recordId = String(rec.RecordId || row.dns_record || '');
     if (!recordId) invalid('解析记录缺少记录 ID，无法自动切换');
+    const wasPaused = String(rec.Status ?? '') === '0';
+    const enableIfPaused = async (): Promise<string> => {
+      if (!wasPaused) return '';
+      const enabled = await dns.setDomainRecordStatus(recordId, '1').catch(() => false);
+      return enabled ? '' : '解析记录原为暂停状态，自动启用失败（' + (dns.getError?.() || '该 DNS 类型不支持记录级启用') + '），请手动启用';
+    };
     if (cnameEquals(rec.Value, newCname)) {
-      return { recordId, updated: false, added: false, warning: '' };
+      return { recordId, updated: false, added: false, warning: await enableIfPaused(), wasPaused };
     }
     if (!fromStoredId && !cnameEquals(rec.Value, row.cname)) {
       invalid('同名 CNAME 当前值与原线路不一致，已拒绝自动覆盖，请手动处理');
@@ -305,7 +319,7 @@ async function switchLinkedDnsRecord(row: any, dnsDomain: any, dns: any, newCnam
       rec.Name,
       'CNAME',
       newCname,
-      rec.Line || 'default',
+      rec.Line ?? 'default',
       ttl,
       rec.MX ?? null,
       rec.Weight ?? null,
@@ -313,18 +327,14 @@ async function switchLinkedDnsRecord(row: any, dnsDomain: any, dns: any, newCnam
     );
     if (!updated) invalid('修改解析记录失败：' + (dns.getError?.() || '未知错误'));
 
-    let warning = '';
     // 记录被暂停时即使值已更新也不会生效；尽力恢复启用，失败明确提示
-    if (String(rec.Status ?? '') === '0') {
-      const enabled = await dns.setDomainRecordStatus(recordId, '1').catch(() => false);
-      if (!enabled) warning = '解析记录原为暂停状态，自动启用失败（' + (dns.getError?.() || '该 DNS 类型不支持记录级启用') + '），请手动启用';
-    }
-    return { recordId, updated: true, added: false, warning };
+    const warning = await enableIfPaused();
+    return { recordId, updated: true, added: false, warning, wasPaused };
   }
 
   const addedId = await dns.addDomainRecord(expectedName, 'CNAME', newCname, undefined, 600);
   if (!addedId) invalid('新增解析记录失败：' + (dns.getError?.() || '未知错误'));
-  return { recordId: String(addedId), updated: true, added: true, warning: '' };
+  return { recordId: String(addedId), updated: true, added: true, warning: '', wasPaused: false };
 }
 
 /** 复用目标站点已有域名时，尽力读取云端回源/状态，用于同步本地展示 */
@@ -332,10 +342,11 @@ async function readCloudDomainInfo(provider: any, name: string, zoneId: string):
   if (typeof provider.listDomains !== 'function') return null;
   const list = await provider.listDomains().catch(() => false);
   if (!Array.isArray(list)) return null;
+  const target = normalizeHost(name);
   return (
     list.find(
       (d: any) =>
-        String(d?.domain || '').toLowerCase() === String(name).toLowerCase() &&
+        normalizeHost(d?.domain) === target &&
         (!zoneId || String(d?.zoneId || '') === String(zoneId)),
     ) || null
   );
@@ -344,15 +355,38 @@ async function readCloudDomainInfo(provider: any, name: string, zoneId: string):
 /** 读取目标域名当前证书/HTTPS 状态（只读，失败返回 null） */
 async function readCdnCertState(provider: any, name: string): Promise<any | null> {
   if (typeof provider.getDomainCertInfo !== 'function') return null;
-  return (await provider.getDomainCertInfo(name).catch(() => false)) || null;
+  const target = normalizeHost(name) || String(name || '');
+  try {
+    return (await provider.getDomainCertInfo(target)) || null;
+  } catch {
+    return null;
+  }
 }
 
 /** 证书详情是否真的覆盖该加速域名（ESA 返回的是站点证书列表，不能只看 httpsEnabled） */
 function certInfoCoversDomain(info: any, name: string): boolean {
   if (!info || !info.httpsEnabled) return false;
   const certs = Array.isArray(info.certs) ? info.certs : [];
-  const withSan = certs.filter((c: any) => Array.isArray(c.san) && c.san.length);
-  if (!withSan.length) return true;
+  // EO 平台免费证书只返回 httpsEnabled、不返回证书列表，视为平台已覆盖；
+  // 一旦有证书列表，就必须有可用的 SAN 覆盖才算数。
+  if (!certs.length) return info.source === 'platform';
+  const now = Date.now();
+  const certDate = (v: any): number | null => {
+    if (v === null || v === undefined || v === '') return null;
+    const t = Date.parse(String(v));
+    return Number.isNaN(t) ? null : t;
+  };
+  const usable = certs.filter((c: any) => {
+    const notAfter = certDate(c?.notAfter);
+    if (notAfter !== null && notAfter <= now) return false;
+    const notBefore = certDate(c?.notBefore);
+    if (notBefore !== null && notBefore > now) return false;
+    return true;
+  });
+  const withSan = usable.filter((c: any) => Array.isArray(c.san) && c.san.length);
+  // EO 免费证书可能只返回证书 ID、不返回 SAN；平台证书可按 httpsEnabled 信任。
+  // 自定义证书的 SAN 读取失败时必须判为不可用，避免把不覆盖域名的证书当成可用。
+  if (!withSan.length) return !!(usable.length && info.source === 'platform');
   const target = normalizeHost(name);
   if (!target) return false;
   return withSan.some((c: any) =>
@@ -396,6 +430,14 @@ function zoneSettingDiff(current: Record<string, any>, target: Record<string, an
 }
 
 const areaMap: Record<string, string> = { mainland: 'mainland_china', domestic: 'mainland_china', overseas: 'overseas', global: 'global' };
+
+/** 站点 area/coverage -> 本地 service_area 值 */
+function normalizeServiceArea(value: any): string {
+  const s = String(value || '').trim().toLowerCase();
+  if (!s) return '';
+  if (s === 'mainland_china') return s;
+  return areaMap[s] || '';
+}
 
 function parseIds(raw: any): number[] {
   return [
@@ -646,6 +688,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return String(cdnConfig[type]?.switchPartner || '');
   }
 
+  /** 目标站点是否处于不可切换状态（暂停/离线/禁用） */
+  function switchZoneBlockReason(zone: any): string {
+    const status = String(zone?.status || '').trim().toLowerCase();
+    const paused = zone?.paused === true || String(zone?.paused ?? '').toLowerCase() === 'true';
+    if (paused || ['paused', 'offline', 'disabled', 'suspended', 'inactive'].includes(status)) {
+      return `目标站点 ${zone?.zoneName || zone?.zoneId || ''} 当前为暂停/离线状态，切换后流量可能无法加速，请先在目标线路启用`;
+    }
+    return '';
+  }
+
   /** 切换目标账户 + 当前 DNS 写权限校验（站点校验由 resolveSwitchTarget 继续完成） */
   async function resolveSwitchAccount(req: any, row: any, aid: number) {
     const partner = switchPartnerOf(String(row?.route || ''));
@@ -655,6 +707,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (String(acct.type) !== partner) throw new Error('目标账户与目标线路不匹配');
     const dnsDomain: any = await assertDnsDomainUsable(req.user, Number(row.did), String(row.name));
     if (!dnsDomain) throw new Error('该加速域名未关联可写的 DNS 域名，无法自动切换解析');
+    const accel = normalizeHost(row.name);
+    const base = normalizeHost(dnsDomain.name);
+    if (!accel || !base || (accel !== base && !accel.endsWith('.' + base))) {
+      throw new Error('加速域名不属于关联的 DNS 域名，无法自动切换解析');
+    }
     return { partner, acct, dnsDomain };
   }
 
@@ -670,6 +727,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
     const zone = zones.find((z: any) => String(z.zoneId) === String(zoneId));
     if (!zone) throw new Error('目标站点不存在或不属于该账户');
+    // ESA 的 ListSites 不返回暂停状态，需要单独查询；EO 列表通常已带 paused。
+    if (typeof zone.paused !== 'boolean' && typeof provider.getZonePaused === 'function') {
+      try {
+        zone.paused = (await provider.getZonePaused(String(zoneId))) === true;
+      } catch {
+        // 状态查询失败时不让切换流程直接崩溃；后续仍会校验域名状态并给出告警
+      }
+    }
+    const blocked = switchZoneBlockReason(zone);
+    if (blocked) throw new Error(blocked);
     if (!siteCoversDomain(row.name, zone.zoneName, base.dnsDomain.name)) {
       throw new Error(`目标站点 ${zone.zoneName} 与当前域名不属于同一主域名，已拒绝切换`);
     }
@@ -3703,10 +3770,26 @@ export default async function cdnRoutes(app: FastifyInstance) {
           zoneId: String(z.zoneId || ''),
           zoneName: String(z.zoneName || ''),
           status: z.status || '',
+          paused: z.paused === true,
           area: z.area || '',
           planName: z.planName || '',
         }))
         .filter((z: any) => !!z.zoneId);
+      // ESA 的 ListSites 不返回暂停状态；补齐后前端才能在站点选项里提示。
+      if (typeof provider.getZonePaused === 'function') {
+        await runPool(
+          matched
+            .filter((z: any) => typeof z.paused !== 'boolean')
+            .map((z: any) => async () => {
+              try {
+                z.paused = (await provider.getZonePaused(String(z.zoneId))) === true;
+              } catch {
+                z.paused = false;
+              }
+            }),
+          4,
+        );
+      }
       return {
         code: 0,
         data: {
@@ -3732,9 +3815,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!aid || !zoneId) return { code: -1, msg: '请选择目标账户和站点' };
     try {
       const { provider, dnsDomain, zone } = await resolveSwitchTarget(req, row, aid, zoneId);
-      const cname = await provider.getDomainCname(row.name);
+      const targetHost = normalizeHost(row.name) || String(row.name);
+      const cname = await provider.getDomainCname(targetHost);
       const err = provider.getError?.() || '';
       if (!cname && err) return { code: -1, msg: '检查目标域名失败：' + err };
+      const targetInfo = cname ? await readCloudDomainInfo(provider, targetHost, zoneId) : null;
+      if (targetInfo?.status === 'offline') {
+        return { code: -1, msg: '目标加速域名当前处于关闭状态，切换后流量可能无法加速，请先在目标线路启用' };
+      }
       return {
         code: 0,
         data: {
@@ -3744,6 +3832,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
           recordName: calcRecordName(String(row.name), String(dnsDomain.name)),
           zoneId,
           zoneName: zone.zoneName,
+          zoneStatus: zone.status || '',
+          zonePaused: zone.paused === true,
+          targetStatus: targetInfo?.status || '',
         },
       };
     } catch (e: any) {
@@ -3773,18 +3864,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
         } catch (e: any) {
           return { code: -1, msg: e?.message || String(e) };
         }
-        const { partner, acct, dnsDomain, provider } = ctx;
+        const { acct, dnsDomain, provider, zone } = ctx;
+        const targetHost = normalizeHost(row.name) || String(row.name);
 
-        // 证书模式先校验，避免创建云端域名后才发现参数不允许
+        // 证书模式先解析；是否允许配置要等确认目标域名是否已存在后再判断。
+        // 复用已有域名时必须完全忽略证书设置，只改 DNS。
         const certModeRaw = b.cert_mode === undefined ? null : String(b.cert_mode);
-        const requestedCertMode = certModeRaw === null ? null : ['freecert', 'certapply', 'certlink'].includes(certModeRaw) ? certModeRaw : 'none';
-        if (requestedCertMode && requestedCertMode !== 'none') {
-          if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '仅管理员可配置证书' });
-          if (!cdnCertModeSupported(acct.type, requestedCertMode)) return { code: -1, msg: '目标线路不支持所选证书方式' };
-          if (requestedCertMode === 'certlink' && !b.cert_order_id && !b.cert_aid && !b.cert_use_default) {
-            return { code: -1, msg: '请选择证书来源' };
-          }
-        }
+        let requestedCertMode =
+          certModeRaw === null ? null : ['freecert', 'certapply', 'certlink'].includes(certModeRaw) ? certModeRaw : 'none';
 
         const dnsAcct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
         if (!dnsAcct) return { code: -1, msg: 'DNS 账户不存在，无法自动切换解析' };
@@ -3803,9 +3890,25 @@ export default async function cdnRoutes(app: FastifyInstance) {
         const httpPort = Number(b.http_port) > 0 ? Number(b.http_port) : 80;
         const httpsPort = Number(b.https_port) > 0 ? Number(b.https_port) : 443;
         const originHost = String(b.origin_host || '');
+        const targetServiceArea = normalizeServiceArea(zone?.area) || String(row.service_area || 'mainland_china');
 
-        let cname = await provider.getDomainCname(row.name);
+        let cname = await provider.getDomainCname(targetHost);
+        const lookupError = cname ? '' : provider.getError?.() || '';
+        if (!cname && lookupError) return { code: -1, msg: '检查目标域名失败：' + lookupError };
         const reused = !!cname;
+        let certModeIgnored = false;
+        if (reused && requestedCertMode) {
+          // 目标站点已有同名域名：不创建、不修改，只改 DNS；证书设置全部忽略。
+          certModeIgnored = requestedCertMode !== 'none';
+          requestedCertMode = null;
+        }
+        if (!reused && requestedCertMode && requestedCertMode !== 'none') {
+          if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '仅管理员可配置证书' });
+          if (!cdnCertModeSupported(acct.type, requestedCertMode)) return { code: -1, msg: '目标线路不支持所选证书方式' };
+          if (requestedCertMode === 'certlink' && !b.cert_order_id && !b.cert_aid && !b.cert_use_default) {
+            return { code: -1, msg: '请选择证书来源' };
+          }
+        }
         let created = false;
         // 仅当创建接口明确返回成功时才允许失败回滚删除，
         // 避免把「创建返回失败但复查发现已存在」的既有域名误删。
@@ -3815,14 +3918,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
         if (!cname) {
           if (!origin) return { code: -1, msg: '目标站点没有同名域名，请填写回源地址' };
-          const createdCname = await provider.createDomain(row.name, origin, originType, 'mainland_china', zoneId);
+          const createdCname = await provider.createDomain(targetHost, origin, originType, targetServiceArea, zoneId);
           if (createdCname) {
             cname = createdCname;
             created = true;
             createdByUs = true;
           } else {
             // 创建接口超时/轮询失败时域名可能已经创建，再查一次避免重复创建
-            cname = await provider.getDomainCname(row.name);
+            cname = await provider.getDomainCname(targetHost);
             if (!cname) {
               return { code: -1, msg: '在目标站点创建加速域名失败：' + (provider.getError?.() || '未知错误') };
             }
@@ -3831,27 +3934,38 @@ export default async function cdnRoutes(app: FastifyInstance) {
           const needOriginUpdate = !!(originHost || originProtocol !== 'follow' || httpPort !== 80 || httpsPort !== 443);
           if (needOriginUpdate) {
             const ok = await provider
-              .updateOrigin(row.name, origin, originType, originHost, originProtocol, httpPort, httpsPort)
+              .updateOrigin(targetHost, origin, originType, originHost, originProtocol, httpPort, httpsPort)
               .catch(() => false);
             if (!ok) originWarning = '回源协议/端口/HOST 应用失败（' + (provider.getError?.() || '未知错误') + '），可在详情页重试';
           }
         } else {
           // 复用已有域名：按要求不修改目标回源/规则，仅尽力读取云端信息同步本地展示
-          cloudInfo = await readCloudDomainInfo(provider, row.name, zoneId);
+          cloudInfo = await readCloudDomainInfo(provider, targetHost, zoneId);
+        }
+        if (!created && cloudInfo?.status === 'offline') {
+          return { code: -1, msg: '目标加速域名当前处于关闭状态，切换后流量可能无法加速，请先在目标线路启用' };
         }
 
         let dnsResult: SwitchDnsResult;
         try {
           dnsResult = await switchLinkedDnsRecord(row, dnsDomain, dns, String(cname));
         } catch (e: any) {
-          if (createdByUs) await provider.deleteDomain(row.name).catch(() => undefined);
-          return { code: -1, msg: '切换 DNS 解析失败：' + (e?.message || String(e)) + (createdByUs ? '（已回滚本次新建的云端域名）' : '') };
+          let rollback = '';
+          if (createdByUs) {
+            const removed = await provider.deleteDomain(targetHost).catch(() => false);
+            rollback = removed ? '（已回滚本次新建的云端域名）' : '（云端域名回滚失败，请手动删除）';
+          }
+          return { code: -1, msg: '切换 DNS 解析失败：' + (e?.message || String(e)) + rollback };
         }
 
-        const certStateBefore = await readCdnCertState(provider, row.name);
+        const certStateBefore = await readCdnCertState(provider, targetHost);
         const certBeforeUsable = certInfoCoversDomain(certStateBefore, row.name);
         let nextCertMode = requestedCertMode;
-        if (nextCertMode === null) {
+        if (reused) {
+          // 复用目标域名不继承旧线路的证书管理方式；只按目标站点实际平台证书做展示推断。
+          nextCertMode =
+            certBeforeUsable && certStateBefore?.source === 'platform' && cdnConfig[acct.type]?.freecert ? 'freecert' : '';
+        } else if (nextCertMode === null) {
           nextCertMode = String(row.cert_mode || '');
           if (nextCertMode && !cdnCertModeSupported(acct.type, nextCertMode)) nextCertMode = '';
           if (!nextCertMode && certBeforeUsable && certStateBefore?.source === 'platform' && cdnConfig[acct.type]?.freecert) {
@@ -3860,35 +3974,41 @@ export default async function cdnRoutes(app: FastifyInstance) {
         }
         if (nextCertMode === 'none') nextCertMode = '';
 
-        // 旧线路的「与项目联动」自动部署任务必须停用，避免切换后仍按旧 provider 部署证书
-        let certCleanupWarning = '';
-        if (String(row.cert_mode || '') === 'certlink') {
-          try {
-            await setCertMode(id, '');
-          } catch (e: any) {
-            certCleanupWarning = '旧证书自动部署任务停用失败：' + (e?.message || String(e));
-          }
-        }
-
         const nextOrigin = created
           ? { origin, origin_type: originType, origin_host: originHost, origin_protocol: originProtocol, http_port: httpPort, https_port: httpsPort }
           : {
               origin: cloudInfo?.origin || row.origin || '',
               origin_type: cloudInfo?.origin_type || row.origin_type || 'ipaddr',
-              origin_host: cloudInfo?.origin_host ?? row.origin_host ?? '',
+              origin_host:
+                cloudInfo && Object.prototype.hasOwnProperty.call(cloudInfo, 'origin_host')
+                  ? String(cloudInfo.origin_host ?? '')
+                  : String(row.origin_host ?? ''),
               origin_protocol: cloudInfo?.origin_protocol || row.origin_protocol || 'follow',
-              http_port: Number(cloudInfo?.http_port || row.http_port || 80),
-              https_port: Number(cloudInfo?.https_port || row.https_port || 443),
+              http_port: Number(cloudInfo?.http_port) > 0 ? Number(cloudInfo.http_port) : Number(row.http_port) || 80,
+              https_port: Number(cloudInfo?.https_port) > 0 ? Number(cloudInfo.https_port) : Number(row.https_port) || 443,
             };
         const nextStatus = created ? 'online' : cloudInfo ? (cloudInfo.status === 'offline' ? 'offline' : 'online') : row.status || 'online';
-        const nextHttps = certStateBefore ? (certBeforeUsable ? 1 : 0) : created ? 0 : Number(row.https_enabled) || 0;
-        const nextForce = cloudInfo ? (cloudInfo.force_redirect ? 1 : 0) : Number(row.force_redirect) || 0;
+        const nextHttps = certStateBefore
+          ? certBeforeUsable
+            ? 1
+            : 0
+          : created || reused
+            ? 0
+            : Number(row.https_enabled) || 0;
+        const nextForce = created
+          ? 0
+          : cloudInfo && typeof cloudInfo.force_redirect === 'boolean'
+            ? cloudInfo.force_redirect
+              ? 1
+              : 0
+            : Number(row.force_redirect) || 0;
+        const nextServiceArea = targetServiceArea;
 
         try {
           await query(
             `UPDATE ${table('cdn_domain')}
                 SET aid = ?, route = ?, zone_id = ?, cname = ?, dns_record = ?, origin = ?, origin_type = ?, origin_host = ?,
-                    origin_protocol = ?, http_port = ?, https_port = ?, status = ?, https_enabled = ?, force_redirect = ?, cert_mode = ?
+                    origin_protocol = ?, http_port = ?, https_port = ?, service_area = ?, status = ?, https_enabled = ?, force_redirect = ?, cert_mode = ?
               WHERE id = ?`,
             [
               acct.id,
@@ -3902,6 +4022,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
               nextOrigin.origin_protocol,
               nextOrigin.http_port,
               nextOrigin.https_port,
+              nextServiceArea,
               nextStatus,
               nextHttps,
               nextForce,
@@ -3925,16 +4046,40 @@ export default async function cdnRoutes(app: FastifyInstance) {
             ).catch(() => false);
             if (!reverted) rollbackDns = '；DNS 回滚失败，请手动改回 ' + row.cname;
           }
+          if (dnsResult.wasPaused && !dnsResult.added) {
+            const paused = await dns.setDomainRecordStatus(dnsResult.recordId, '0').catch(() => false);
+            if (!paused) rollbackDns += '；原解析记录的暂停状态恢复失败，请手动暂停';
+          }
           let rollbackCloud = '';
           if (createdByUs) {
-            const removed = await provider.deleteDomain(row.name).catch(() => false);
+            const removed = await provider.deleteDomain(targetHost).catch(() => false);
             if (!removed) rollbackCloud = '；云端域名回滚失败，请手动删除';
           }
-          // 旧线路证书联动任务已在上方停用；本地写库失败时恢复原证书方式
-          if (String(row.cert_mode || '') === 'certlink') {
-            await setCertMode(id, 'certlink').catch(() => undefined);
-          }
           return { code: -1, msg: '保存切换结果失败：' + (e?.message || String(e)) + rollbackDns + rollbackCloud };
+        }
+
+        // 旧线路的「与项目联动」自动部署任务在本地库更新成功后再停用：
+        // 如果写库失败，旧线路仍保持原状，不需要恢复任务。
+        // certapply 使用站点级通配符任务，可能仍服务旧站点上的其他域名，不能在这里
+        // 无条件停用；certlink 是精确到本域名的绑定，可以安全停用。
+        let certCleanupWarning = '';
+        let oldCertlink = String(row.cert_mode || '') === 'certlink';
+        if (!oldCertlink && !row.cert_mode) {
+          // 兼容历史数据：cert_mode 为空但已存在联动订单时，列表页会按 certlink 展示，
+          // 切换时也应停用旧部署任务。
+          try {
+            oldCertlink = !!(await findLinkedOrder(id));
+          } catch (e: any) {
+            oldCertlink = false;
+            certCleanupWarning = '检查旧证书自动部署任务失败：' + (e?.message || String(e));
+          }
+        }
+        if (oldCertlink) {
+          try {
+            await deactivateCertDeployForDomain(id);
+          } catch (e: any) {
+            certCleanupWarning = '旧证书自动部署任务停用失败：' + (e?.message || String(e));
+          }
         }
 
         // 证书：只有用户在切换时显式选择或在新建域名时传入才自动处理；复用已有域名默认不动证书
@@ -3968,19 +4113,31 @@ export default async function cdnRoutes(app: FastifyInstance) {
           }
         }
 
-        const certStateAfter = await readCdnCertState(provider, row.name);
+        const certStateAfter = await readCdnCertState(provider, targetHost);
         const certAfterUsable = certInfoCoversDomain(certStateAfter, row.name);
         const certPending = certResult?.status === 'pending';
         const certApplied = certResult?.status === 'applied' || certAfterUsable;
-        // 证书状态读不到时也提示（文案是“暂未检测到”），避免 HTTPS 不可用却静默通过
-        const needsCert = certResult?.status === 'failed' || (!certApplied && !certPending);
+        // 证书状态读不到时也提示（文案是“暂未检测到”），避免 HTTPS 不可用却静默通过。
+        // 若本次证书操作失败但目标域名已有可用证书，不需要再弹补配提醒。
+        const needsCert = (!certApplied && !certPending) || (certResult?.status === 'failed' && !certAfterUsable);
 
         const warnings: string[] = [];
         if (originWarning) warnings.push(originWarning);
         if (dnsResult.warning) warnings.push(dnsResult.warning);
         if (certCleanupWarning) warnings.push(certCleanupWarning);
+        if (certModeIgnored) warnings.push('目标站点已有同名域名，已忽略证书设置，仅切换 DNS');
         if (!created && !cloudInfo) warnings.push('未能读取目标线路的回源信息，本地展示可能仍为原线路配置');
-        if (!created && cloudInfo?.status === 'offline') warnings.push('目标加速域名当前处于关闭状态，切换解析后流量可能无法加速，请到目标线路启用');
+        if (
+          !created &&
+          cloudInfo &&
+          (cloudInfo.origin_protocol === undefined ||
+            cloudInfo.origin_host === undefined ||
+            cloudInfo.http_port === undefined ||
+            cloudInfo.https_port === undefined ||
+            cloudInfo.force_redirect === undefined)
+        ) {
+          warnings.push('目标线路未返回完整回源/跳转信息，本地展示可能保留原线路配置');
+        }
         if (certResult?.status === 'failed' && certResult.message) warnings.push('证书配置失败：' + certResult.message);
         if (needsCert) warnings.push('目标域名暂未检测到可用证书，HTTPS 可能不可用');
 
@@ -4018,6 +4175,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
             dns_updated: dnsResult.updated,
             dns_added: dnsResult.added,
             cert_mode: requestedCertMode,
+            cert_mode_ignored: certModeIgnored,
             cert_status: certResult?.status || null,
             needs_cert: needsCert,
             warnings,
@@ -4045,6 +4203,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
             old_cname: row.cname,
             old_kept: true,
             cert_mode: requestedCertMode,
+            cert_mode_ignored: certModeIgnored,
             cert: certResult,
             cert_pending: !!certPending,
             needs_cert: needsCert,
@@ -4718,6 +4877,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return null;
   }
 
+  /** 停用该加速域名关联的证书自动部署任务（不修改 cdn_domain.cert_mode） */
+  async function deactivateCertDeployForDomain(did: number, keepOids: number[] = []): Promise<void> {
+    const linked = await findLinkedOrder(did);
+    const keep = keepOids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const keepSql = keep.length ? ` AND oid NOT IN (${keep.map(() => '?').join(',')})` : '';
+    await query(
+      `UPDATE ${table('cert_deploy')} SET active = 0
+        WHERE (oid IN (SELECT oid FROM ${table('cert_link_log')} WHERE did = ?)
+           OR oid = ?)${keepSql}`,
+      [did, Number(linked?.id || 0), ...keep],
+    );
+  }
+
   // 记录/切换证书管理方式：切换离开「由本项目管理」时停用其联动部署任务，切回时重新启用
   async function setCertMode(did: number, mode: string, keepOids: number[] = []): Promise<void> {
     const normalized = ['freecert', 'certapply', 'certlink'].includes(mode) ? mode : null;
@@ -4739,15 +4911,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     // 只有真正从「证书联动」切换到其他模式时才需要停用旧任务。
     // certapply 申请成功后也会调用本函数，此时刚创建的部署任务尚未签发，绝不能被误停。
     if (previous !== 'certlink') return;
-    const linked = await findLinkedOrder(did);
-    const keep = keepOids.map(Number).filter((n) => Number.isInteger(n) && n > 0);
-    const keepSql = keep.length ? ` AND oid NOT IN (${keep.map(() => '?').join(',')})` : '';
-    await query(
-      `UPDATE ${table('cert_deploy')} SET active = 0
-        WHERE (oid IN (SELECT oid FROM ${table('cert_link_log')} WHERE did = ?)
-           OR oid = ?)${keepSql}`,
-      [did, Number(linked?.id || 0), ...keep],
-    );
+    await deactivateCertDeployForDomain(did, keepOids);
   }
 
   // 显式设置证书管理方式（用于切换为「不使用证书」或已完成的切换）
