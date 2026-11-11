@@ -262,6 +262,16 @@
       </template>
     </n-modal>
 
+    <!-- 线路切换：选择目标账户/站点 -> 复用或创建 -> 回源/证书 -> 改 DNS -->
+    <CdnSwitchRouteModal
+      v-model:show="showSwitch"
+      :row="switchRow"
+      :accounts="accountOptions"
+      :account-types="accountTypes"
+      :provider-caps="providerCaps"
+      @done="onSwitchDone"
+    />
+
     <!-- 证书弹窗（平台免费证书 / 证书申请联动） -->
     <n-modal v-model:show="showCert" preset="card" :title="certMode === 'link' ? t('cdnDomain.certLink') : t('cdnDomain.freeCert')" class="modal-md" :mask-closable="false">
       <n-spin :show="certRunBusy">
@@ -531,6 +541,7 @@ import PageHeader from '../components/PageHeader.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
+import CdnSwitchRouteModal from '../components/cdn/CdnSwitchRouteModal.vue';
 import EmptyState from '../components/EmptyState.vue';
 import OverviewStats from '../components/OverviewStats.vue';
 import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
@@ -560,6 +571,8 @@ const serviceAreaOptions = computed(() => [
 
 const showAdd = ref(false);
 const showSync = ref(false);
+const showSwitch = ref(false);
+const switchRow = ref<any>(null);
 const saveBusy = ref(false);
 const domainChecking = ref(false);
 const syncBusy = ref(false);
@@ -984,11 +997,14 @@ const columns = computed<any[]>(() => [
   {
     title: t('common.actions'),
     key: 'actions',
-    width: 400,
+    width: 470,
     render(row: any) {
       const btns: any[] = [];
       if (row.can_freecert || row.can_certapply || row.can_certlink) {
         btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'info', onClick: () => openCertMgr(row) }, { default: () => t('cdnDomain.certMgrTitle') }));
+      }
+      if (providerCaps.value[row.route]?.switchPartner) {
+        btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'warning', onClick: () => openSwitch(row) }, { default: () => t('cdnDomain.switchRoute') }));
       }
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'primary', onClick: () => router.push(`/cdn-domains/${row.id}/setting`) }, { default: () => t('cdnDomain.config') }));
       btns.push(h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => del(row) }, { default: () => t('common.delete') }));
@@ -1136,6 +1152,31 @@ function openAdd() {
   zoneOptions.value = [];
   addStep.value = 1;
   showAdd.value = true;
+}
+
+function openSwitch(row: any) {
+  switchRow.value = row;
+  showSwitch.value = true;
+}
+
+/** 切换完成：刷新列表；目标域名没有证书时提醒去现有证书管理弹窗配置 */
+async function onSwitchDone(data: any) {
+  await loadDomains();
+  const row = domains.value.find((d: any) => Number(d.id) === Number(data?.id));
+  if (!row) return;
+  if (data?.needs_cert) {
+    dialog.info({
+      title: t('cdnDomain.switchCertTitle'),
+      content: t('cdnDomain.switchCertContent', { name: row.name }),
+      positiveText: t('cdnDomain.switchCertGo'),
+      negativeText: t('cdnDomain.switchLater'),
+      onPositiveClick: () => {
+        void openCertMgr(row);
+      },
+    });
+  } else if (data?.cert_pending) {
+    void openCertMgr(row);
+  }
 }
 
 /** 返回 true 表示已存在（调用方应阻止下一步） */
@@ -1491,6 +1532,7 @@ async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
 onMounted(() => {
   loadDomains();
   loadAccounts();
+  loadProviders();
 });
 
 onDeactivated(() => {

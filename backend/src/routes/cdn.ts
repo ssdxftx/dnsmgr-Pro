@@ -5,6 +5,7 @@ import { hitRateLimit, hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
 import { configGet, configSet } from '../config.js';
 import { getCdnProvider, cdnConfig } from '../lib/cdn/factory.js';
+import { cnameEquals, normalizeHost, shortRecordName, siteCoversDomain } from '../lib/cdn/switchRoute.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
 import { getCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
@@ -203,6 +204,171 @@ async function removeLinkedDnsRecord(row: any, user: any): Promise<{ ok: boolean
   const ok = await dns.deleteDomainRecord(recordId);
   if (!ok) return { ok: false, message: (dns.getError?.() || '删除解析记录失败') + '，需手动处理' };
   return { ok: true, message: '已删除联动解析记录' };
+}
+
+/** 目标线路是否支持某种证书方式 */
+function cdnCertModeSupported(type: string, mode: string): boolean {
+  if (!mode || mode === 'none') return true;
+  const meta = cdnConfig[type] || {};
+  if (mode === 'freecert') return !!meta.freecert;
+  if (mode === 'certapply') return !!meta.certapply;
+  if (mode === 'certlink') return !!meta.certlink;
+  return false;
+}
+
+/** 拉取 DNS 域名下全部解析记录（最多 5000 条），用于按名称兜底定位联动记录 */
+async function listAllDnsRecords(dns: any): Promise<any[] | false> {
+  const all: any[] = [];
+  for (let page = 1; page <= 10; page++) {
+    const res = await dns.getDomainRecords(page, 500);
+    if (!res) return false;
+    const list = Array.isArray(res.list) ? res.list : [];
+    all.push(...list);
+    const total = Number(res.total || 0);
+    if (list.length < 500 || (total > 0 && all.length >= total)) break;
+  }
+  return all;
+}
+
+interface SwitchDnsResult {
+  recordId: string;
+  updated: boolean;
+  added: boolean;
+  warning: string;
+}
+
+/**
+ * 把联动 DNS 的 CNAME 记录切到新目标值。
+ *
+ * 安全约束：
+ * - 优先使用 cdn_domain.dns_record 记录 ID，但仍校验域名/记录名/类型；
+ * - 没有记录 ID 时只接受「记录名 + 原 CNAME 值」唯一匹配，多条同名记录直接拒绝；
+ * - 更新时保留线路、TTL、MX、权重、备注，只替换 Value。
+ */
+async function switchLinkedDnsRecord(row: any, dnsDomain: any, dns: any, newCname: string): Promise<SwitchDnsResult> {
+  const expectedName = calcRecordName(String(row.name), String(dnsDomain.name));
+  const expectedShort = shortRecordName(expectedName, dnsDomain.name);
+  const invalid = (msg: string) => {
+    throw new Error(msg);
+  };
+
+  const verify = (rec: any): boolean => {
+    if (!rec) return false;
+    if (shortRecordName(rec.Name, dnsDomain.name) !== expectedShort) return false;
+    if (rec.Domain && normalizeHost(rec.Domain) !== normalizeHost(dnsDomain.name)) return false;
+    if (String(rec.Type || '').toUpperCase() !== 'CNAME') return false;
+    return true;
+  };
+
+  let rec: any = null;
+  let fromStoredId = false;
+  let storedIdUnreadable = false;
+  if (row.dns_record) {
+    const info = await dns.getDomainRecordInfo(String(row.dns_record)).catch(() => false);
+    if (info) {
+      if (!verify(info)) invalid('联动解析记录的名称/类型/所属域名已变化，无法自动切换，请手动处理');
+      rec = info;
+      fromStoredId = true;
+    } else {
+      storedIdUnreadable = true;
+    }
+  }
+
+  if (!rec) {
+    const list = await listAllDnsRecords(dns);
+    if (list === false) invalid('读取解析记录失败：' + (dns.getError?.() || '未知错误'));
+    const sameName = (list as any[]).filter((r: any) => verify(r));
+    // 兜底匹配必须同时满足记录名与旧 CNAME 值，避免误改用户后来新建的同名记录
+    const hits = sameName.filter((r: any) => cnameEquals(r.Value, row.cname));
+    if (hits.length > 1) invalid('存在多条同名且同值的 CNAME 记录，无法确定要切换的记录，请手动处理');
+    if (!hits.length && sameName.length) {
+      invalid('存在同名 CNAME 但当前值与系统记录的原线路不一致，已拒绝自动覆盖，请手动处理');
+    }
+    if (hits.length === 1) rec = hits[0];
+    // 记录 ID 存在却查不到，且按名称也找不到：宁可中止，也不要在原记录可能仍存在时新增重复 CNAME
+    if (!rec && storedIdUnreadable) invalid('原联动解析记录不存在或无法读取，请到 DNS 记录页手动确认后重试');
+  }
+
+  if (rec) {
+    const recordId = String(rec.RecordId || row.dns_record || '');
+    if (!recordId) invalid('解析记录缺少记录 ID，无法自动切换');
+    if (cnameEquals(rec.Value, newCname)) {
+      return { recordId, updated: false, added: false, warning: '' };
+    }
+    if (!fromStoredId && !cnameEquals(rec.Value, row.cname)) {
+      invalid('同名 CNAME 当前值与原线路不一致，已拒绝自动覆盖，请手动处理');
+    }
+    const rawTtl = rec.TTL;
+    const ttl = rawTtl === null || rawTtl === undefined || rawTtl === '' || Number.isNaN(Number(rawTtl)) ? 600 : Number(rawTtl);
+    const updated = await dns.updateDomainRecord(
+      recordId,
+      rec.Name,
+      'CNAME',
+      newCname,
+      rec.Line || 'default',
+      ttl,
+      rec.MX ?? null,
+      rec.Weight ?? null,
+      rec.Remark ?? null,
+    );
+    if (!updated) invalid('修改解析记录失败：' + (dns.getError?.() || '未知错误'));
+
+    let warning = '';
+    // 记录被暂停时即使值已更新也不会生效；尽力恢复启用，失败明确提示
+    if (String(rec.Status ?? '') === '0') {
+      const enabled = await dns.setDomainRecordStatus(recordId, '1').catch(() => false);
+      if (!enabled) warning = '解析记录原为暂停状态，自动启用失败（' + (dns.getError?.() || '该 DNS 类型不支持记录级启用') + '），请手动启用';
+    }
+    return { recordId, updated: true, added: false, warning };
+  }
+
+  const addedId = await dns.addDomainRecord(expectedName, 'CNAME', newCname, undefined, 600);
+  if (!addedId) invalid('新增解析记录失败：' + (dns.getError?.() || '未知错误'));
+  return { recordId: String(addedId), updated: true, added: true, warning: '' };
+}
+
+/** 复用目标站点已有域名时，尽力读取云端回源/状态，用于同步本地展示 */
+async function readCloudDomainInfo(provider: any, name: string, zoneId: string): Promise<any | null> {
+  if (typeof provider.listDomains !== 'function') return null;
+  const list = await provider.listDomains().catch(() => false);
+  if (!Array.isArray(list)) return null;
+  return (
+    list.find(
+      (d: any) =>
+        String(d?.domain || '').toLowerCase() === String(name).toLowerCase() &&
+        (!zoneId || String(d?.zoneId || '') === String(zoneId)),
+    ) || null
+  );
+}
+
+/** 读取目标域名当前证书/HTTPS 状态（只读，失败返回 null） */
+async function readCdnCertState(provider: any, name: string): Promise<any | null> {
+  if (typeof provider.getDomainCertInfo !== 'function') return null;
+  return (await provider.getDomainCertInfo(name).catch(() => false)) || null;
+}
+
+/** 证书详情是否真的覆盖该加速域名（ESA 返回的是站点证书列表，不能只看 httpsEnabled） */
+function certInfoCoversDomain(info: any, name: string): boolean {
+  if (!info || !info.httpsEnabled) return false;
+  const certs = Array.isArray(info.certs) ? info.certs : [];
+  const withSan = certs.filter((c: any) => Array.isArray(c.san) && c.san.length);
+  if (!withSan.length) return true;
+  const target = normalizeHost(name);
+  if (!target) return false;
+  return withSan.some((c: any) =>
+    c.san.some((raw: any) => {
+      const san = String(raw || '')
+        .trim()
+        .toLowerCase()
+        .replace(/\.+$/, '');
+      if (!san) return false;
+      if (san.startsWith('*.')) {
+        const suffix = san.slice(1);
+        return target.endsWith(suffix) && target.split('.').length === san.split('.').length;
+      }
+      return san === target;
+    }),
+  );
 }
 
 function normalizeSetting(v: any): any {
@@ -472,6 +638,42 @@ export default async function cdnRoutes(app: FastifyInstance) {
       providerCache.set(key, { at: Date.now(), provider });
     }
     return provider;
+  }
+
+  // ===== CDN 线路切换（首期：EdgeOne <-> 阿里云 ESA） =====
+
+  function switchPartnerOf(type: string): string {
+    return String(cdnConfig[type]?.switchPartner || '');
+  }
+
+  /** 切换目标账户 + 当前 DNS 写权限校验（站点校验由 resolveSwitchTarget 继续完成） */
+  async function resolveSwitchAccount(req: any, row: any, aid: number) {
+    const partner = switchPartnerOf(String(row?.route || ''));
+    if (!partner) throw new Error('该 CDN 线路暂不支持一键切换');
+    const acct: any = await getVisibleAccount('cdn_account', aid, req.user);
+    if (!acct) throw new Error('目标 CDN 账户不存在或无权限');
+    if (String(acct.type) !== partner) throw new Error('目标账户与目标线路不匹配');
+    const dnsDomain: any = await assertDnsDomainUsable(req.user, Number(row.did), String(row.name));
+    if (!dnsDomain) throw new Error('该加速域名未关联可写的 DNS 域名，无法自动切换解析');
+    return { partner, acct, dnsDomain };
+  }
+
+  /** 继续校验目标站点确实覆盖当前加速域名，并返回已绑定 zone 的 provider */
+  async function resolveSwitchTarget(req: any, row: any, aid: number, zoneId: string) {
+    const base = await resolveSwitchAccount(req, row, aid);
+    const provider: any = await cdnForZone(aid, zoneId || null);
+    if (!provider || typeof provider.getZones !== 'function') throw new Error('目标 CDN 账户不可用');
+    const zones = await provider.getZones();
+    if (!Array.isArray(zones) || !zones.length) {
+      const err = provider.getError?.() || '';
+      throw new Error(err ? '获取目标站点失败：' + err : '目标账户下没有可用站点');
+    }
+    const zone = zones.find((z: any) => String(z.zoneId) === String(zoneId));
+    if (!zone) throw new Error('目标站点不存在或不属于该账户');
+    if (!siteCoversDomain(row.name, zone.zoneName, base.dnsDomain.name)) {
+      throw new Error(`目标站点 ${zone.zoneName} 与当前域名不属于同一主域名，已拒绝切换`);
+    }
+    return { ...base, provider, zone };
   }
 
   // 列表
@@ -3470,6 +3672,393 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (err) return { code: -1, msg: '云端检测失败：' + err };
     }
     return { code: 0, data: { exists: false } };
+  });
+
+  // 切换线路：目标账户下与当前域名同主域名的站点
+  app.get('/api/cdn/domains/:id/switch/sites', authCdnDomain, async (req: any) => {
+    const row = await loadCdnDomain(Number(req.params.id));
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const aid = Number(req.query?.aid || 0);
+    if (!aid) return { code: -1, msg: '请选择目标线路账户' };
+    try {
+      const { partner, acct, dnsDomain } = await resolveSwitchAccount(req, row, aid);
+      const provider: any = await cdnForZone(aid, null);
+      if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '目标 CDN 账户不可用' };
+      const zones = await provider.getZones();
+      if (!Array.isArray(zones)) return { code: -1, msg: '获取目标站点失败：' + (provider.getError?.() || '未知错误') };
+      if (!zones.length) {
+        const err = provider.getError?.() || '';
+        if (err) return { code: -1, msg: '获取目标站点失败：' + err };
+      }
+      const matched = zones
+        .filter((z: any) => siteCoversDomain(row.name, z.zoneName, dnsDomain.name))
+        .sort((a: any, b: any) => {
+          const an = normalizeHost(a.zoneName);
+          const bn = normalizeHost(b.zoneName);
+          const exactA = an === normalizeHost(row.name) ? 1 : 0;
+          const exactB = bn === normalizeHost(row.name) ? 1 : 0;
+          return exactB - exactA || bn.length - an.length;
+        })
+        .map((z: any) => ({
+          zoneId: String(z.zoneId || ''),
+          zoneName: String(z.zoneName || ''),
+          status: z.status || '',
+          area: z.area || '',
+          planName: z.planName || '',
+        }))
+        .filter((z: any) => !!z.zoneId);
+      return {
+        code: 0,
+        data: {
+          aid,
+          accountName: acct.name,
+          targetRoute: partner,
+          targetRouteName: cdnConfig[partner]?.name || partner,
+          dnsName: dnsDomain.name,
+          zones: matched,
+        },
+      };
+    } catch (e: any) {
+      return { code: -1, msg: e?.message || String(e) };
+    }
+  });
+
+  // 切换线路预检：目标站点是否已有同名加速域名
+  app.get('/api/cdn/domains/:id/switch/check', authCdnDomain, async (req: any) => {
+    const row = await loadCdnDomain(Number(req.params.id));
+    if (!row) return { code: -1, msg: '加速域名不存在' };
+    const aid = Number(req.query?.aid || 0);
+    const zoneId = String(req.query?.zone_id || '').trim();
+    if (!aid || !zoneId) return { code: -1, msg: '请选择目标账户和站点' };
+    try {
+      const { provider, dnsDomain, zone } = await resolveSwitchTarget(req, row, aid, zoneId);
+      const cname = await provider.getDomainCname(row.name);
+      const err = provider.getError?.() || '';
+      if (!cname && err) return { code: -1, msg: '检查目标域名失败：' + err };
+      return {
+        code: 0,
+        data: {
+          exists: !!cname,
+          cname: cname || '',
+          dnsName: dnsDomain.name,
+          recordName: calcRecordName(String(row.name), String(dnsDomain.name)),
+          zoneId,
+          zoneName: zone.zoneName,
+        },
+      };
+    } catch (e: any) {
+      return { code: -1, msg: e?.message || String(e) };
+    }
+  });
+
+  // 执行切换：复用或创建目标域名 -> 更新 DNS -> 更新本地线路 -> 按需配置证书
+  app.post('/api/cdn/domains/:id/switch', authCdnDomain, async (req: any, reply: any) => {
+    const id = Number(req.params.id);
+    if (!hitRateLimit(`cdn-switch:${req.user.uid}`, 10, 10 * 60_000)) {
+      return { code: -1, msg: '切换操作过于频繁，请稍后再试' };
+    }
+    const locked = await withDistributedLockResult(
+      `dnsmgr:cdn-switch:${id}`,
+      async () => {
+        const row: any = await loadCdnDomain(id);
+        if (!row) return { code: -1, msg: '加速域名不存在' };
+        const b = req.body || {};
+        const aid = Number(b.aid || 0);
+        const zoneId = String(b.zone_id || '').trim();
+        if (!aid || !zoneId) return { code: -1, msg: '请选择目标账户和站点' };
+
+        let ctx: any;
+        try {
+          ctx = await resolveSwitchTarget(req, row, aid, zoneId);
+        } catch (e: any) {
+          return { code: -1, msg: e?.message || String(e) };
+        }
+        const { partner, acct, dnsDomain, provider } = ctx;
+
+        // 证书模式先校验，避免创建云端域名后才发现参数不允许
+        const certModeRaw = b.cert_mode === undefined ? null : String(b.cert_mode);
+        const requestedCertMode = certModeRaw === null ? null : ['freecert', 'certapply', 'certlink'].includes(certModeRaw) ? certModeRaw : 'none';
+        if (requestedCertMode && requestedCertMode !== 'none') {
+          if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '仅管理员可配置证书' });
+          if (!cdnCertModeSupported(acct.type, requestedCertMode)) return { code: -1, msg: '目标线路不支持所选证书方式' };
+          if (requestedCertMode === 'certlink' && !b.cert_order_id && !b.cert_aid && !b.cert_use_default) {
+            return { code: -1, msg: '请选择证书来源' };
+          }
+        }
+
+        const dnsAcct: any = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
+        if (!dnsAcct) return { code: -1, msg: 'DNS 账户不存在，无法自动切换解析' };
+        let dns: any;
+        try {
+          dns = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
+        } catch (e: any) {
+          return { code: -1, msg: '读取 DNS 账户失败：' + (e?.message || String(e)) };
+        }
+        if (!dns) return { code: -1, msg: 'DNS 模块不存在，无法自动切换解析' };
+
+        const origin = String(b.origin || '').trim();
+        const originType = ['ipaddr', 'domain'].includes(String(b.origin_type || '')) ? String(b.origin_type) : 'ipaddr';
+        const protoRaw = String(b.origin_protocol || 'follow');
+        const originProtocol = ['follow', 'http', 'https'].includes(protoRaw) ? protoRaw : 'follow';
+        const httpPort = Number(b.http_port) > 0 ? Number(b.http_port) : 80;
+        const httpsPort = Number(b.https_port) > 0 ? Number(b.https_port) : 443;
+        const originHost = String(b.origin_host || '');
+
+        let cname = await provider.getDomainCname(row.name);
+        const reused = !!cname;
+        let created = false;
+        // 仅当创建接口明确返回成功时才允许失败回滚删除，
+        // 避免把「创建返回失败但复查发现已存在」的既有域名误删。
+        let createdByUs = false;
+        let originWarning = '';
+        let cloudInfo: any = null;
+
+        if (!cname) {
+          if (!origin) return { code: -1, msg: '目标站点没有同名域名，请填写回源地址' };
+          const createdCname = await provider.createDomain(row.name, origin, originType, 'mainland_china', zoneId);
+          if (createdCname) {
+            cname = createdCname;
+            created = true;
+            createdByUs = true;
+          } else {
+            // 创建接口超时/轮询失败时域名可能已经创建，再查一次避免重复创建
+            cname = await provider.getDomainCname(row.name);
+            if (!cname) {
+              return { code: -1, msg: '在目标站点创建加速域名失败：' + (provider.getError?.() || '未知错误') };
+            }
+            created = true;
+          }
+          const needOriginUpdate = !!(originHost || originProtocol !== 'follow' || httpPort !== 80 || httpsPort !== 443);
+          if (needOriginUpdate) {
+            const ok = await provider
+              .updateOrigin(row.name, origin, originType, originHost, originProtocol, httpPort, httpsPort)
+              .catch(() => false);
+            if (!ok) originWarning = '回源协议/端口/HOST 应用失败（' + (provider.getError?.() || '未知错误') + '），可在详情页重试';
+          }
+        } else {
+          // 复用已有域名：按要求不修改目标回源/规则，仅尽力读取云端信息同步本地展示
+          cloudInfo = await readCloudDomainInfo(provider, row.name, zoneId);
+        }
+
+        let dnsResult: SwitchDnsResult;
+        try {
+          dnsResult = await switchLinkedDnsRecord(row, dnsDomain, dns, String(cname));
+        } catch (e: any) {
+          if (createdByUs) await provider.deleteDomain(row.name).catch(() => undefined);
+          return { code: -1, msg: '切换 DNS 解析失败：' + (e?.message || String(e)) + (createdByUs ? '（已回滚本次新建的云端域名）' : '') };
+        }
+
+        const certStateBefore = await readCdnCertState(provider, row.name);
+        const certBeforeUsable = certInfoCoversDomain(certStateBefore, row.name);
+        let nextCertMode = requestedCertMode;
+        if (nextCertMode === null) {
+          nextCertMode = String(row.cert_mode || '');
+          if (nextCertMode && !cdnCertModeSupported(acct.type, nextCertMode)) nextCertMode = '';
+          if (!nextCertMode && certBeforeUsable && certStateBefore?.source === 'platform' && cdnConfig[acct.type]?.freecert) {
+            nextCertMode = 'freecert';
+          }
+        }
+        if (nextCertMode === 'none') nextCertMode = '';
+
+        // 旧线路的「与项目联动」自动部署任务必须停用，避免切换后仍按旧 provider 部署证书
+        let certCleanupWarning = '';
+        if (String(row.cert_mode || '') === 'certlink') {
+          try {
+            await setCertMode(id, '');
+          } catch (e: any) {
+            certCleanupWarning = '旧证书自动部署任务停用失败：' + (e?.message || String(e));
+          }
+        }
+
+        const nextOrigin = created
+          ? { origin, origin_type: originType, origin_host: originHost, origin_protocol: originProtocol, http_port: httpPort, https_port: httpsPort }
+          : {
+              origin: cloudInfo?.origin || row.origin || '',
+              origin_type: cloudInfo?.origin_type || row.origin_type || 'ipaddr',
+              origin_host: cloudInfo?.origin_host ?? row.origin_host ?? '',
+              origin_protocol: cloudInfo?.origin_protocol || row.origin_protocol || 'follow',
+              http_port: Number(cloudInfo?.http_port || row.http_port || 80),
+              https_port: Number(cloudInfo?.https_port || row.https_port || 443),
+            };
+        const nextStatus = created ? 'online' : cloudInfo ? (cloudInfo.status === 'offline' ? 'offline' : 'online') : row.status || 'online';
+        const nextHttps = certStateBefore ? (certBeforeUsable ? 1 : 0) : created ? 0 : Number(row.https_enabled) || 0;
+        const nextForce = cloudInfo ? (cloudInfo.force_redirect ? 1 : 0) : Number(row.force_redirect) || 0;
+
+        try {
+          await query(
+            `UPDATE ${table('cdn_domain')}
+                SET aid = ?, route = ?, zone_id = ?, cname = ?, dns_record = ?, origin = ?, origin_type = ?, origin_host = ?,
+                    origin_protocol = ?, http_port = ?, https_port = ?, status = ?, https_enabled = ?, force_redirect = ?, cert_mode = ?
+              WHERE id = ?`,
+            [
+              acct.id,
+              acct.type,
+              zoneId,
+              String(cname),
+              dnsResult.recordId,
+              nextOrigin.origin,
+              nextOrigin.origin_type,
+              nextOrigin.origin_host,
+              nextOrigin.origin_protocol,
+              nextOrigin.http_port,
+              nextOrigin.https_port,
+              nextStatus,
+              nextHttps,
+              nextForce,
+              created ? '' : nextCertMode,
+              id,
+            ],
+          );
+        } catch (e: any) {
+          // 本地写库失败：尽量把 DNS 改回旧值并清理本次新建的云端域名
+          let rollbackDns = '';
+          if (dnsResult.added) {
+            // 本次新加的记录直接删除；不能把它改成旧值，否则会留下一条多余记录
+            const removed = await dns.deleteDomainRecord(dnsResult.recordId).catch(() => false);
+            if (!removed) rollbackDns = '；新增的 DNS 记录回滚删除失败，请手动处理';
+          } else if (dnsResult.updated && row.cname) {
+            const reverted = await switchLinkedDnsRecord(
+              { ...row, cname: String(cname), dns_record: dnsResult.recordId },
+              dnsDomain,
+              dns,
+              String(row.cname),
+            ).catch(() => false);
+            if (!reverted) rollbackDns = '；DNS 回滚失败，请手动改回 ' + row.cname;
+          }
+          let rollbackCloud = '';
+          if (createdByUs) {
+            const removed = await provider.deleteDomain(row.name).catch(() => false);
+            if (!removed) rollbackCloud = '；云端域名回滚失败，请手动删除';
+          }
+          // 旧线路证书联动任务已在上方停用；本地写库失败时恢复原证书方式
+          if (String(row.cert_mode || '') === 'certlink') {
+            await setCertMode(id, 'certlink').catch(() => undefined);
+          }
+          return { code: -1, msg: '保存切换结果失败：' + (e?.message || String(e)) + rollbackDns + rollbackCloud };
+        }
+
+        // 证书：只有用户在切换时显式选择或在新建域名时传入才自动处理；复用已有域名默认不动证书
+        let certResult: any = null;
+        if (requestedCertMode && requestedCertMode !== 'none') {
+          try {
+            if (requestedCertMode === 'freecert') {
+              const r: any = (await runFreeCert([id], false, req.user))[0];
+              certResult = r || null;
+              if (r && r.status !== 'failed') await setCertMode(id, 'freecert');
+            } else if (requestedCertMode === 'certapply') {
+              const r: any = (await runCertLink([id], false, req.user))[0];
+              certResult = r || null;
+              if (r && r.status !== 'failed') await setCertMode(id, 'certapply', r.order_id ? [Number(r.order_id)] : []);
+            } else if (requestedCertMode === 'certlink') {
+              const r: any = await applyCertLink(
+                id,
+                provider,
+                { certOrderId: b.cert_order_id, certAid: b.cert_aid, useDefault: !!b.cert_use_default },
+                req.user,
+              );
+              certResult = r || null;
+              if (r && r.status !== 'failed') await setCertMode(id, 'certlink');
+            }
+          } catch (e: any) {
+            certResult = { status: 'failed', message: e?.message || String(e) };
+          }
+          if (certResult?.status === 'failed') {
+            // 证书失败不影响线路切换结果，但本地不保留会误导的证书方式
+            await query(`UPDATE ${table('cdn_domain')} SET cert_mode = '' WHERE id = ?`, [id]).catch(() => undefined);
+          }
+        }
+
+        const certStateAfter = await readCdnCertState(provider, row.name);
+        const certAfterUsable = certInfoCoversDomain(certStateAfter, row.name);
+        const certPending = certResult?.status === 'pending';
+        const certApplied = certResult?.status === 'applied' || certAfterUsable;
+        // 证书状态读不到时也提示（文案是“暂未检测到”），避免 HTTPS 不可用却静默通过
+        const needsCert = certResult?.status === 'failed' || (!certApplied && !certPending);
+
+        const warnings: string[] = [];
+        if (originWarning) warnings.push(originWarning);
+        if (dnsResult.warning) warnings.push(dnsResult.warning);
+        if (certCleanupWarning) warnings.push(certCleanupWarning);
+        if (!created && !cloudInfo) warnings.push('未能读取目标线路的回源信息，本地展示可能仍为原线路配置');
+        if (!created && cloudInfo?.status === 'offline') warnings.push('目标加速域名当前处于关闭状态，切换解析后流量可能无法加速，请到目标线路启用');
+        if (certResult?.status === 'failed' && certResult.message) warnings.push('证书配置失败：' + certResult.message);
+        if (needsCert) warnings.push('目标域名暂未检测到可用证书，HTTPS 可能不可用');
+
+        const targetName = cdnConfig[acct.type]?.name || acct.type;
+        const oldName = cdnConfig[row.route]?.name || row.route;
+        let msg = `已从 ${oldName} 切换到 ${targetName}（${created ? '已在目标站点创建同名域名' : '已复用目标站点同名域名'}）`;
+        if (dnsResult.added) msg += '；已新增 DNS CNAME 解析';
+        else if (dnsResult.updated) msg += '；已更新 DNS CNAME 解析';
+        else msg += '；DNS 解析已指向目标线路';
+        if (certResult?.message) msg += `；证书：${certResult.message}`;
+        msg += '；原线路云端域名已保留，可随时切回';
+
+        audit(req, {
+          targetType: 'cdn_domain',
+          targetId: id,
+          targetName: String(row.name),
+          summary: `切换 CDN 线路 ${row.name}：${oldName} -> ${targetName}`,
+          changes: [
+            { field: '线路', from: String(row.route || ''), to: String(acct.type) },
+            { field: '账户', from: String(row.aid || ''), to: String(acct.id) },
+            { field: '站点', from: String(row.zone_id || ''), to: zoneId },
+            { field: 'CNAME', from: String(row.cname || ''), to: String(cname) },
+          ],
+          detail: {
+            old_aid: row.aid,
+            old_route: row.route,
+            old_cname: row.cname,
+            aid: acct.id,
+            route: acct.type,
+            zone_id: zoneId,
+            cname,
+            created,
+            reused,
+            dns_record: dnsResult.recordId,
+            dns_updated: dnsResult.updated,
+            dns_added: dnsResult.added,
+            cert_mode: requestedCertMode,
+            cert_status: certResult?.status || null,
+            needs_cert: needsCert,
+            warnings,
+          },
+        });
+
+        return {
+          code: 0,
+          msg,
+          data: {
+            id,
+            name: row.name,
+            aid: acct.id,
+            route: acct.type,
+            routename: targetName,
+            zone_id: zoneId,
+            cname: String(cname),
+            dns_record: dnsResult.recordId,
+            dns_updated: dnsResult.updated,
+            dns_added: dnsResult.added,
+            created,
+            reused,
+            old_aid: row.aid,
+            old_route: row.route,
+            old_cname: row.cname,
+            old_kept: true,
+            cert_mode: requestedCertMode,
+            cert: certResult,
+            cert_pending: !!certPending,
+            needs_cert: needsCert,
+            cert_status: certStateAfter
+              ? { httpsEnabled: !!certStateAfter.httpsEnabled, covered: certAfterUsable, source: certStateAfter.source, mode: certStateAfter.mode }
+              : null,
+            warnings,
+          },
+        };
+      },
+      10,
+    );
+    if (!locked.locked) return { code: -1, msg: '该域名正在执行切换，请稍后再试' };
+    return locked.result;
   });
 
   // 详情（域名级配置）

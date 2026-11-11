@@ -40,6 +40,8 @@ export interface CdnProviderMeta {
   certapply?: boolean;
   // 支持「与项目联动」：按精确子域名选择/签发证书，确认后自动部署
   certlink?: boolean;
+  // 支持一键切换到的目标线路（同一加速域名在两条线路间迁移）
+  switchPartner?: string;
   // 接入向导能力（在下方按厂商合并生成）
   addFlow?: CdnAddFlow;
 }
@@ -58,6 +60,8 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
     note: '接入前请先在腾讯云 EdgeOne 控制台创建站点（Zone）',
     freecert: true,
     certlink: true,
+    // 一键切换：EdgeOne 与阿里云 ESA 的加速域名均按站点管理，可互相同名迁移
+    switchPartner: 'aliyun_esa',
     config: {
       SecretId: { name: 'SecretId', type: 'input', required: true },
       SecretKey: { name: 'SecretKey', type: 'input', required: true },
@@ -75,6 +79,8 @@ export const cdnConfig: Record<string, CdnProviderMeta> = {
     name: '阿里云 ESA',
     note: '边缘安全加速，接入前请先在阿里云 ESA 控制台创建站点',
     certapply: true,
+    // 一键切换：与腾讯云 EdgeOne 双向迁移
+    switchPartner: 'tencent_edgeone',
     config: {
       AccessKeyId: { name: 'AccessKeyId', type: 'input', required: true },
       AccessKeySecret: { name: 'AccessKeySecret', type: 'input', required: true },

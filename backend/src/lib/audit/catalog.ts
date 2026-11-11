@@ -122,6 +122,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
 
   // CDN 加速域名
   'POST /api/cdn/domains': { module: 'cdn', action: 'cdn.domain.create', targetType: 'cdn_domain' },
+  'POST /api/cdn/domains/:id/switch': { module: 'cdn', action: 'cdn.domain.switch', targetType: 'cdn_domain' },
   'DELETE /api/cdn/domains/:id': { module: 'cdn', action: 'cdn.domain.delete', targetType: 'cdn_domain' },
   'POST /api/cdn/domains/:id/status': { module: 'cdn', action: 'cdn.domain.status', targetType: 'cdn_domain' },
   'POST /api/cdn/domains/:id/origin': { module: 'cdn', action: 'cdn.domain.origin', targetType: 'cdn_domain' },
