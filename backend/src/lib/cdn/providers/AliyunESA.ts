@@ -162,6 +162,8 @@ export class AliyunESA implements CdnProvider {
       Ttl: 600,
       Data: JSON.stringify({ value: originVal }),
       Proxied: true,
+      // ESA 在 Proxied=true 时强制要求业务场景；缺失会报 "business type is empty or incorrect"
+      BizName: 'web',
     };
     if (originType === 'domain') param.SourceType = 'Domain';
     if (!(await this.call(param))) return false;
