@@ -138,7 +138,8 @@ export class Dnsla implements DnsProvider {
       host: Name,
       data: Value,
       ttl: Number(TTL),
-      lineId: Line,
+      // 与上游一致：0 表示默认线路，API 要求省略该字段而不是传 lineId=0
+      lineId: String(Line) === '0' ? '' : Line,
     };
     if (Type === 'MX') param.preference = Number(MX);
     if (Type === 'REDIRECT_URL') {
@@ -160,7 +161,7 @@ export class Dnsla implements DnsProvider {
       host: Name,
       data: Value,
       ttl: Number(TTL),
-      lineId: Line,
+      lineId: String(Line) === '0' ? '' : Line,
     };
     if (Type === 'MX') param.preference = Number(MX);
     if (Type === 'REDIRECT_URL') {

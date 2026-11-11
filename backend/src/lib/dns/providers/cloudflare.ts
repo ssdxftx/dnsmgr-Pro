@@ -56,6 +56,8 @@ export class CloudflareDns implements DnsProvider {
     Type: string | null = null,
     Line: string | null = null,
     _Status: string | null = null,
+    SortField: string | null = null,
+    SortOrder: string | null = null,
   ): Promise<RecordListResult | false> {
     if (Value) KeyWord = Value;
     const params: Record<string, any> = { type: Type ?? undefined, search: KeyWord ?? undefined, page: PageNumber, per_page: PageSize };
@@ -64,6 +66,11 @@ export class CloudflareDns implements DnsProvider {
       params.name = SubDomain === '@' ? ascii : SubDomain + '.' + ascii;
     }
     if (Line) params.proxied = Line === '1' ? 'true' : 'false';
+    const allowedSort: Record<string, string> = { Name: 'name', Type: 'type', LineName: 'proxied', Value: 'content' };
+    if (SortField && allowedSort[SortField]) {
+      params.order = allowedSort[SortField];
+      params.direction = String(SortOrder).toLowerCase() === 'desc' ? 'desc' : 'asc';
+    }
     const data = await this.send('GET', '/zones/' + this.config.domainid + '/dns_records', params);
     if (!data) return false;
     const list = (data.result || []).map((row: any) => this.extractRow(row));

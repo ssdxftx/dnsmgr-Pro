@@ -161,7 +161,7 @@ export class PowerDns implements DnsProvider {
   private normalizeValue(Type: string, Value: string, MX: number): string {
     let v = Value;
     if (Type === 'TXT' && !v.startsWith('"')) v = '"' + v + '"';
-    if ((Type === 'CNAME' || Type === 'MX') && !v.endsWith('.')) v += '.';
+    if ((Type === 'CNAME' || Type === 'MX' || Type === 'ALIAS') && !v.endsWith('.')) v += '.';
     if (Type === 'MX') v = `${Number(MX)} ${v}`;
     return v;
   }

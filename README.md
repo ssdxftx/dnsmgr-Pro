@@ -74,7 +74,7 @@ npm run dev
 
 - **8 个证书签发渠道**：Let's Encrypt、ZeroSSL、Google SSL、LiteSSL、腾讯云免费 SSL、阿里云免费 SSL、UCloud 免费 SSL、自定义 ACME。
 - **证书订单**：支持单域名与泛域名、DNS-01 验证、CNAME 代理、自动续签、手动导入、证书详情、PFX 导出与吊销。
-- **50 个部署目标**：覆盖宝塔、1Panel、AMH、CloudPanel、DirectAdmin、MW、AcePanel、耗子面板、小皮面板、群晖、飞牛 OS、Proxmox VE、K8S、雷池 WAF、堡塔云 WAF、Cdnfly、LeCDN、GoEdge、南墙 WAF、AxisNow、Cachefly、阿里云、腾讯云、华为云、UCloud、七牛云、多吉云、又拍云、百度云、金山云、火山引擎、西部数码、网宿、白山云、天翼云、雨云、uniCloud、AWS、Gcore、SSH、FTP、S3 存储与本地目录等。
+- **51 个部署目标**：覆盖宝塔、1Panel、AMH、CloudPanel、DirectAdmin、MW、AcePanel、耗子面板、小皮面板、群晖、飞牛 OS、Proxmox VE、K8S、雷池 WAF、SamWaf、堡塔云 WAF、Cdnfly、LeCDN、GoEdge、南墙 WAF、AxisNow、Cachefly、阿里云、腾讯云、华为云、UCloud、七牛云、多吉云、又拍云、百度云、金山云、火山引擎、西部数码、网宿、白山云、天翼云、雨云、uniCloud、AWS、Gcore、SSH、FTP、S3 存储与本地目录等。
 - **CDN 证书联动**：EdgeOne 支持厂商免费证书申请；EdgeOne / ESA 支持证书直传 CDN、站点级泛域名证书签发与自动部署。
 - **自动部署任务**：证书续签或重新签发后，按任务配置自动上传到面板、WAF、CDN、云厂商或服务器。
 

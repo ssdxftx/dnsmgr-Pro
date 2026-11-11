@@ -67,11 +67,14 @@ export class Dnspod implements DnsProvider {
     Type: string | null = null,
     Line: string | null = null,
     Status: string | null = null,
+    _SortField: string | null = null,
+    _SortOrder: string | null = null,
+    GroupId: string | null = null,
   ): Promise<RecordListResult | false> {
     const offset = (PageNumber - 1) * PageSize;
     let action: string;
     const param: Record<string, any> = {};
-    if (Status || Value) {
+    if (Status || Value || GroupId) {
       action = 'DescribeRecordFilterList';
       param.Domain = this.domain;
       param.Offset = offset;
@@ -82,6 +85,7 @@ export class Dnspod implements DnsProvider {
       if (Status) param.RecordStatus = [Status === '1' ? 'ENABLE' : 'DISABLE'];
       if (Type) param.RecordType = [this.convertType(Type)];
       if (Line) param.RecordLine = [Line];
+      if (GroupId) param.GroupId = [Number(GroupId)];
     } else {
       action = 'DescribeRecordList';
       param.Domain = this.domain;
@@ -91,6 +95,11 @@ export class Dnspod implements DnsProvider {
       param.Subdomain = SubDomain ?? undefined;
       param.RecordType = Type ? this.convertType(Type) : undefined;
       param.RecordLineId = Line ?? undefined;
+    }
+    const allowedSort: Record<string, string> = { Name: 'name', Type: 'type', LineName: 'line', Value: 'value', UpdateTime: 'updated_on' };
+    if (_SortField && allowedSort[_SortField]) {
+      param.SortField = allowedSort[_SortField];
+      param.SortType = String(_SortOrder).toLowerCase() === 'desc' ? 'DESC' : 'ASC';
     }
     const data = await this.send(action, param);
     if (!data) {

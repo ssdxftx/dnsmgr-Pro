@@ -112,16 +112,17 @@ export class AliyunDns implements DnsProvider {
   }
 
   async getDomainRecordLog(PageNumber = 1, PageSize = 20, KeyWord: string | null = null, StartDate: string | null = null, EndDate: string | null = null): Promise<RecordListResult | false> {
-    const param: Record<string, any> = { Action: 'DescribeRecordLogs', DomainName: this.domain, PageNumber, PageSize };
+    const param: Record<string, any> = { Action: 'DescribeRecordLogs', DomainName: this.domain, PageNumber, PageSize, Lang: 'zh' };
     if (KeyWord) param.KeyWord = KeyWord;
-    if (StartDate) param.StartTimestamp = Number(StartDate);
-    if (EndDate) param.EndTimestamp = Number(EndDate);
+    // 官方参数为 StartDate/endDate，格式 YYYY-MM-DD；旧实现误用了 StartTimestamp/EndTimestamp
+    if (StartDate) param.StartDate = StartDate;
+    if (EndDate) param.endDate = EndDate;
     const data = await this.request(param);
     if (!data) return false;
     const list = (data.RecordLogs?.RecordLog || []).map((row: any) => ({
       RecordId: String(row.RecordId ?? ''),
       Domain: this.domain,
-      Name: row.Rr ?? '',
+      Name: row.Rr ?? row.Name ?? '',
       Type: '',
       Value: '',
       Line: '',
@@ -129,8 +130,10 @@ export class AliyunDns implements DnsProvider {
       MX: null,
       Status: '',
       Weight: null,
-      Remark: null,
-      UpdateTime: row.OperTime ?? null,
+      Remark: row.Message ?? null,
+      UpdateTime: row.ActionTimestamp
+        ? new Date(Number(row.ActionTimestamp)).toISOString().slice(0, 19).replace('T', ' ')
+        : (row.OperTime ?? null),
     }));
     return { total: data.TotalCount || 0, list };
   }

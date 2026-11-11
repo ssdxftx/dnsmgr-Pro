@@ -16,7 +16,7 @@ top: 60
 - 面板：宝塔、1Panel、AMH、CloudPanel、DirectAdmin、小皮面板、耗子面板、AcePanel、MW。
 - 系统与虚拟化：群晖、飞牛 OS、Proxmox VE。
 - 容器与集群：K8S。
-- WAF：雷池、堡塔云 WAF、南墙、AxisNow。
+- WAF：雷池、SamWaf、堡塔云 WAF、南墙、AxisNow。
 - CDN：Cloudflare、Cdnfly、LeCDN、GoEdge、Cachefly、阿里云、腾讯云、华为云、UCloud、七牛云、多吉云、又拍云、百度云、金山云、火山引擎、西部数码、网宿、白山云、天翼云、雨云、uniCloud、AWS、Gcore。
 - 服务器与存储：SSH、FTP、S3、本地目录。
 

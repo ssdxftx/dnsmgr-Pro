@@ -353,6 +353,10 @@ async function followFetch(
       else if (!useProxy) reqInit.dispatcher = getDirectDispatcher();
     }
     const res = (await undiciFetch(current, reqInit as any)) as unknown as Response;
+    // 调用方显式要求 manual 时必须原样返回 3xx：部署商登录/证书导入依赖
+    // Location、中间响应的 Set-Cookie 以及 302/303 状态码，不能被包装层吞掉。
+    // 初始目标已完成地址校验；若调用方自行跟随 Location，仍需自行做目标校验。
+    if (init.redirect === 'manual') return res;
     if (!REDIRECT_STATUS.has(res.status)) return res;
     const location = res.headers.get('location');
     if (!location) return res;

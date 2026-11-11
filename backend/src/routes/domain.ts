@@ -901,6 +901,9 @@ export default async function domainRoutes(app: FastifyInstance) {
       q.type || null,
       q.line || null,
       q.status || null,
+      null,
+      null,
+      q.groupid || null,
     );
     if (res === false) return { code: -1, msg: provider.getError() };
     const rawPageCount = Array.isArray(res.list) ? res.list.length : 0;
@@ -1703,6 +1706,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       asText(b.status) || null,
       asText(b.sortName) || null,
       asText(b.sortOrder) || null,
+      asText(b.groupid) || null,
     );
     if (res === false) return { total: 0, rows: [] };
     let list = res.list || [];

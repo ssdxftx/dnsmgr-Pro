@@ -21,7 +21,7 @@ features:
   - title: CDN 与边缘
     details: 12 家 CDN 厂商、缓存规则、刷新预热、站点规则与 Cloudflare Tunnel。
   - title: 证书与部署
-    details: ACME 签发、自动续签、CNAME 代理与 50 类部署目标。
+    details: ACME 签发、自动续签、CNAME 代理与 51 类部署目标。
   - title: 运维与安全
     details: 容灾切换、定时任务、加密备份、凭证保险库、审计与 API Key 治理。
 ---

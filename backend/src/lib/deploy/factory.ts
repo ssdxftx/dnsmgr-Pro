@@ -6,6 +6,7 @@ import { BtpanelDeploy } from './providers/btpanel.js';
 import { NginxProxyManagerDeploy } from './providers/nginxproxymanager.js';
 import { LuckyDeploy } from './providers/lucky.js';
 import { SafelineDeploy } from './providers/safeline.js';
+import { SamwafDeploy } from './providers/samwaf.js';
 import { KsyunDeploy } from './providers/ksyun.js';
 import { BaishanDeploy } from './providers/baishan.js';
 import { GoedgeDeploy } from './providers/goedge.js';
@@ -61,6 +62,7 @@ const providerMap: Record<string, new (config: Record<string, any>) => DeployPro
   nginxproxymanager: NginxProxyManagerDeploy,
   lucky: LuckyDeploy,
   safeline: SafelineDeploy,
+  samwaf: SamwafDeploy,
   ksyun: KsyunDeploy,
   baishan: BaishanDeploy,
   goedge: GoedgeDeploy,

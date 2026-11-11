@@ -1,6 +1,17 @@
+import { X509Certificate } from 'node:crypto';
 import { safeFetchDeploy } from '../../netGuard.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
+
+/** AxisNow 的 PUT 只能改名称，需用 SHA-256 指纹判断证书内容是否已更新。 */
+function certFingerprint(pem: any): string | null {
+  if (typeof pem !== 'string' || pem.trim() === '') return null;
+  try {
+    return new X509Certificate(pem).fingerprint256.replace(/:/g, '').toLowerCase();
+  } catch {
+    return null;
+  }
+}
 
 export class AxisnowDeploy implements DeployProvider {
   private token: string;
@@ -97,39 +108,37 @@ export class AxisnowDeploy implements DeployProvider {
 
     if (uuid) {
       try {
-        await this.request('GET', '/client/v1/certificates/' + uuid);
-        this.log('证书' + certName + '已存在，UUID:' + uuid);
-        const param = {
-          name: certName,
-          certificate: fullchain,
-          private_key: privatekey,
-        };
-        await this.request('PUT', '/client/v1/certificates/' + uuid, param);
-        this.log('证书更新成功，UUID:' + uuid);
+        const existing = await this.request('GET', '/client/v1/certificates/' + uuid);
+        const oldFingerprint = certFingerprint(existing?.certificate);
+        const newFingerprint = certFingerprint(fullchain);
+        if (oldFingerprint && newFingerprint && oldFingerprint === newFingerprint) {
+          this.log('相同证书' + certName + '已存在，UUID:' + uuid);
+          return;
+        }
+        this.log('原证书内容不同或无法核对，将上传新证书，原UUID:' + uuid);
       } catch (e: any) {
-        this.log('原证书获取或更新失败(' + e.message + ')，将重新上传证书');
-        uuid = null;
+        this.log('原证书获取失败(' + e.message + ')，将重新上传证书');
       }
+      uuid = null;
     }
 
-    if (!uuid) {
-      const param = {
-        type: 'upload',
-        name: certName,
-        certificate: fullchain,
-        private_key: privatekey,
-      };
-      let result: any;
-      try {
-        result = await this.request('POST', '/client/v1/certificates', param);
-      } catch (e: any) {
-        throw new Error('上传证书失败:' + e.message);
-      }
-      uuid = result.uuid;
-      this.log('上传证书成功，UUID:' + uuid);
+    const param = {
+      type: 'upload',
+      name: certName,
+      certificate: fullchain,
+      private_key: privatekey,
+    };
+    let result: any;
+    try {
+      result = await this.request('POST', '/client/v1/certificates', param);
+    } catch (e: any) {
+      throw new Error('上传证书失败:' + e.message);
     }
+    const newUuid = typeof result?.uuid === 'string' ? result.uuid.trim() : '';
+    if (!newUuid) throw new Error('上传证书失败:响应未返回证书UUID');
 
-    info.uuid = uuid;
+    info.uuid = newUuid;
+    this.log('上传证书成功，UUID:' + newUuid);
   }
 
   setLogger(func: (txt: string) => void): void {

@@ -39,8 +39,7 @@ const pageSize = ref(20);
 
 const columns = computed(() => [
   { title: t('record.logTime'), key: 'UpdateTime', width: 200, render: (row: any) => formatDateTime(row.UpdateTime) },
-  { title: t('record.logRecordId'), key: 'RecordId', width: 200 },
-  { title: t('record.logName'), key: 'Name' },
+  { title: t('record.logMessage'), key: 'Remark' },
 ]);
 
 const pagination = computed(() => ({

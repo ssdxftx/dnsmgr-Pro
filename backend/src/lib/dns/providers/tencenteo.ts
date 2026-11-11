@@ -66,6 +66,10 @@ export class TencentEoDns implements DnsProvider {
     SubDomain: string | null = null,
     Value: string | null = null,
     Type: string | null = null,
+    _Line: string | null = null,
+    _Status: string | null = null,
+    SortField: string | null = null,
+    SortOrder: string | null = null,
   ): Promise<RecordListResult | false> {
     const filters: any[] = [];
     if (SubDomain) {
@@ -78,6 +82,11 @@ export class TencentEoDns implements DnsProvider {
     if (Value) filters.push({ Name: 'content', Values: [Value], Fuzzy: true });
     if (Type) filters.push({ Name: 'type', Values: [Type] });
     const param: Record<string, any> = { ZoneId: this.domainid, Offset: (PageNumber - 1) * PageSize, Limit: PageSize, Filters: filters };
+    const allowedSort: Record<string, string> = { Name: 'name', Type: 'type', Value: 'content', UpdateTime: 'modified-on' };
+    if (SortField && allowedSort[SortField]) {
+      param.SortBy = allowedSort[SortField];
+      param.SortOrder = String(SortOrder).toLowerCase() === 'desc' ? 'desc' : 'asc';
+    }
     const data = await this.send('DescribeDnsRecords', param);
     if (!data) return false;
     const list = (data.DnsRecords || []).map((row: any) => this.extractRow(row));

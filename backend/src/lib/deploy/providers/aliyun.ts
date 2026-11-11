@@ -643,13 +643,14 @@ export class AliyunDeploy implements DeployProvider {
       data.certConfig.privateKey = privatekey;
 
       const param: Record<string, any> = {
-        authConfig: data.authConfig,
         certConfig: data.certConfig,
         protocol: data.protocol,
         routeConfig: data.routeConfig,
         tlsConfig: data.tlsConfig,
         wafConfig: data.wafConfig,
       };
+      // authConfig 仅 2023-03-30 版接口支持；2021-04-06（fc2）发送会被旧接口拒绝
+      if (version === '2023-03-30') param.authConfig = data.authConfig;
       await client.request('PUT', 'UpdateCustomDomain', '/' + version + '/custom-domains/' + domain, param);
 
       this.log('函数计算域名 ' + domain + ' 部署证书成功！');

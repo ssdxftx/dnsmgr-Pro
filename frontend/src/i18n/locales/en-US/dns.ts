@@ -176,8 +176,7 @@ export default {
     logTitle: 'Record Logs - {name}',
     logSubtitle: 'Aliyun only; operation logs of DNS records',
     logTime: 'Time',
-    logName: 'Host',
-    logRecordId: 'Record ID',
+    logMessage: 'Message',
   },
   cname: {
     title: 'CNAME Proxy',

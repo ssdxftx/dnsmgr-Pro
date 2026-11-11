@@ -44,6 +44,7 @@ export interface DnsProvider {
     Status?: string | null,
     SortField?: string | null,
     SortOrder?: string | null,
+    GroupId?: string | null,
   ): Promise<RecordListResult | false>;
   getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false>;
   addDomainRecord(

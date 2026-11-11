@@ -176,8 +176,7 @@ export default {
     logTitle: '解析日志 - {name}',
     logSubtitle: '仅阿里云支持；展示解析记录的操作日志',
     logTime: '操作时间',
-    logName: '主机记录',
-    logRecordId: '记录ID',
+    logMessage: '操作内容',
   },
   cname: {
     title: 'CNAME 代理',

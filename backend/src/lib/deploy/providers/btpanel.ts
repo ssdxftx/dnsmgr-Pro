@@ -50,7 +50,8 @@ export class BtpanelDeploy implements DeployProvider {
 
   private async saveSsl(path: string, data: Record<string, any>): Promise<void> {
     const result = await this.request(path, data);
-    if (!result.status && result.msg) throw new Error(result.msg);
+    // status=false 即失败；不能只看 msg，否则无 msg 的失败响应会被静默当成成功
+    if (!result.status) throw new Error(result.msg || '面板返回失败');
   }
 
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {

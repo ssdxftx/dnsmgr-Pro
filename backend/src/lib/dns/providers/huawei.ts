@@ -52,6 +52,8 @@ export class HuaweiDns implements DnsProvider {
     Type: string | null = null,
     Line: string | null = null,
     Status: string | null = null,
+    SortField: string | null = null,
+    SortOrder: string | null = null,
   ): Promise<RecordListResult | false> {
     const offset = (PageNumber - 1) * PageSize;
     const query: Record<string, any> = {
@@ -66,6 +68,11 @@ export class HuaweiDns implements DnsProvider {
     if (SubDomain) {
       query.name = this.getHost(SubDomain);
       query.search_mode = 'equal';
+    }
+    const allowedSort: Record<string, string> = { Name: 'name', Type: 'type', UpdateTime: 'updated_at' };
+    if (SortField && allowedSort[SortField]) {
+      query.sort_key = allowedSort[SortField];
+      query.sort_dir = String(SortOrder).toLowerCase() === 'desc' ? 'desc' : 'asc';
     }
     const data = await this.send('GET', '/v2.1/zones/' + this.domainid + '/recordsets', query);
     if (!data) return false;
