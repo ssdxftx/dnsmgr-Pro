@@ -16,7 +16,7 @@ function sleep(ms: number): Promise<void> {
 
 function whoisLookup(domain: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    lookup(domain, { follow: 2, timeout: 20000 }, (err: any, data: any) => {
+    lookup(domain, { follow: 2, timeout: 10000 }, (err: any, data: any) => {
       if (err) reject(new Error(err?.message || 'whois查询失败'));
       else resolve(typeof data === 'string' ? data : String(data));
     });
@@ -24,29 +24,117 @@ function whoisLookup(domain: string): Promise<string> {
 }
 
 /** RDAP 查询（HTTPS），作为 whois(43端口) 受限时的备用方案 */
-async function rdapLookup(domain: string): Promise<{ creationDate: string | null; expirationDate: string | null }> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const res = await fetchWithProxy(`https://rdap.org/domain/${encodeURIComponent(domain)}`, {
-      headers: { Accept: 'application/json', 'User-Agent': 'dnsmgr-pro' },
-      signal: controller.signal,
-    });
-    if (!res.ok) throw new Error('rdap查询失败');
-    const data: any = await res.json();
-    let expiration: string | null = null;
-    let creation: string | null = null;
-    for (const e of data.events || []) {
-      if (e.eventAction === 'expiration' && !expiration) expiration = e.eventDate;
-      if (e.eventAction === 'registration' && !creation) creation = e.eventDate;
-    }
-    return {
-      creationDate: creation ? parseDateValue(String(creation)) : null,
-      expirationDate: expiration ? parseDateValue(String(expiration)) : null,
-    };
-  } finally {
-    clearTimeout(timer);
+type DomainDates = { creationDate: string | null; expirationDate: string | null };
+
+async function fetchRdap(url: string): Promise<DomainDates> {
+  const res = await fetchWithProxy(url, {
+    headers: { Accept: 'application/rdap+json, application/json', 'User-Agent': 'dnsmgr-pro' },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) {
+    const hint = res.status === 404 ? '（该后缀无可用 RDAP 服务）' : '';
+    throw new Error(`HTTP ${res.status}${hint}`);
   }
+  const data: any = await res.json();
+  let expiration: string | null = null;
+  let creation: string | null = null;
+  for (const e of data.events || []) {
+    if (e.eventAction === 'expiration' && !expiration) expiration = e.eventDate;
+    if (e.eventAction === 'registration' && !creation) creation = e.eventDate;
+  }
+  if (!expiration) throw new Error('响应未包含到期时间');
+  return {
+    creationDate: creation ? parseDateValue(String(creation)) : null,
+    expirationDate: parseDateValue(String(expiration)),
+  };
+}
+
+// IANA RDAP 引导表：rdap.org 限流/跳转失败时，直接查注册局 RDAP
+let rdapBootstrap: { at: number; services: [string[], string[]][] } | null = null;
+
+async function rdapBootstrapUrl(domain: string): Promise<string | null> {
+  const tld = domain.split('.').pop()?.toLowerCase();
+  if (!tld) return null;
+  if (!rdapBootstrap || Date.now() - rdapBootstrap.at > 12 * 3600_000) {
+    try {
+      const res = await fetchWithProxy('https://data.iana.org/rdap/dns.json', {
+        headers: { Accept: 'application/json', 'User-Agent': 'dnsmgr-pro' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!res.ok) return null;
+      const data: any = await res.json();
+      rdapBootstrap = { at: Date.now(), services: Array.isArray(data.services) ? data.services : [] };
+    } catch {
+      return null;
+    }
+  }
+  const hit = rdapBootstrap.services.find(([tlds, urls]) => Array.isArray(tlds) && Array.isArray(urls) && tlds.includes(tld));
+  if (!hit?.[1]?.[0]) return null;
+  const base = hit[1][0].endsWith('/') ? hit[1][0] : hit[1][0] + '/';
+  return `${base}domain/${encodeURIComponent(domain)}`;
+}
+
+async function rdapLookup(domain: string): Promise<DomainDates> {
+  const errors: string[] = [];
+  // 优先走 IANA 引导出的注册局 RDAP：rdap.org 经 Cloudflare 限流时经常 403/超时
+  const bootstrapUrl = await rdapBootstrapUrl(domain);
+  if (bootstrapUrl) {
+    try {
+      return await fetchRdap(bootstrapUrl);
+    } catch (e: any) {
+      errors.push(`注册局 RDAP ${e?.message || '查询失败'}`);
+    }
+  }
+  try {
+    return await fetchRdap(`https://rdap.org/domain/${encodeURIComponent(domain)}`);
+  } catch (e: any) {
+    errors.push(`rdap.org ${e?.message || '查询失败'}`);
+  }
+  throw new Error(errors.join('；') || '查询失败');
+}
+
+// 最后兜底：.cn 等后缀没有 RDAP 服务，且服务器 43 端口被限制时，
+// 从公开 WHOIS 页面提取。主机固定，域名只作为路径参数编码。
+const WEB_DATE = String.raw`(\d{4}-\d{1,2}-\d{1,2}(?:[T ]\d{1,2}:\d{1,2}:\d{1,2}Z?)?)`;
+const WEB_EXPIRY_RE = new RegExp(
+  String.raw`(?:Registry Expiry Date|Registrar Registration Expiration Date|Expiration Date|Expiry Date|Expiration Time|Registry Expiration Date|Registrant Registration Expiration Date|Expires On|Expires|Paid-till|Expiration)\s*:\s*${WEB_DATE}`,
+  'i',
+);
+const WEB_CREATION_RE = new RegExp(
+  String.raw`(?:Creation Date|Created Date|Created On|Created|Registration Time|Registration Date|Registered|Creation)\s*:\s*${WEB_DATE}`,
+  'i',
+);
+
+export function parseWebWhoisHtml(html: string): DomainDates {
+  const expiration = html.match(WEB_EXPIRY_RE)?.[1];
+  if (!expiration) throw new Error('页面未返回到期时间');
+  const creation = html.match(WEB_CREATION_RE)?.[1];
+  return {
+    creationDate: creation ? parseDateValue(creation) : null,
+    expirationDate: parseDateValue(expiration),
+  };
+}
+
+async function webWhoisLookup(domain: string): Promise<DomainDates> {
+  const encoded = encodeURIComponent(domain);
+  const sources = [`https://who.is/whois/${encoded}`, `https://www.whois.com/whois/${encoded}`];
+  let lastError: any = null;
+  for (const url of sources) {
+    try {
+      const res = await fetchWithProxy(url, {
+        headers: { Accept: 'text/html,application/xhtml+xml', 'User-Agent': 'Mozilla/5.0 (compatible; dnsmgr-pro)' },
+        redirect: 'follow',
+        signal: AbortSignal.timeout(12000),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return parseWebWhoisHtml(await res.text());
+    } catch (e: any) {
+      lastError = e;
+    }
+  }
+  throw lastError || new Error('备用 WHOIS 查询失败');
 }
 
 function parseDateValue(raw: string): string | null {
@@ -96,16 +184,36 @@ function parseWhoisData(raw: string): { creationDate: string | null; expirationD
 }
 
 export async function getDomainDate(domain: string): Promise<{ regTime: string | null; expireTime: string }> {
+  let whoisError = '';
   try {
     const raw = await whoisLookup(domain);
     const { creationDate, expirationDate } = parseWhoisData(raw);
     if (expirationDate) return { regTime: creationDate, expireTime: expirationDate };
-  } catch {
+    whoisError = 'WHOIS 响应未包含到期时间';
+  } catch (e: any) {
     // whois(43端口) 受限，改用 RDAP
+    whoisError = e?.message || 'WHOIS 查询失败';
   }
-  const { creationDate, expirationDate } = await rdapLookup(domain);
-  if (!expirationDate) throw new Error('域名到期时间未知');
-  return { regTime: creationDate, expireTime: expirationDate };
+
+  let rdapError = '';
+  try {
+    const { creationDate, expirationDate } = await rdapLookup(domain);
+    if (expirationDate) return { regTime: creationDate, expireTime: expirationDate };
+    rdapError = 'RDAP 响应未包含到期时间';
+  } catch (e: any) {
+    rdapError = e?.message || 'RDAP 查询失败';
+  }
+
+  let webError = '';
+  try {
+    const { creationDate, expirationDate } = await webWhoisLookup(domain);
+    if (expirationDate) return { regTime: creationDate, expireTime: expirationDate };
+    webError = '备用 WHOIS 响应未包含到期时间';
+  } catch (e: any) {
+    webError = e?.message || '备用 WHOIS 查询失败';
+  }
+
+  throw new Error(`无法获取到期时间：WHOIS ${whoisError}；RDAP ${rdapError}；备用 WHOIS ${webError}`);
 }
 
 export async function updateDomainDate(id: number, domain: string) {

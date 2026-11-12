@@ -176,6 +176,8 @@ const saveBusy = ref(false);
 const domains = ref<any[]>([]);
 // 正在手动刷新到期时间的域名 id：只让被点击的那一格转圈，不阻塞整表
 const refreshingIds = ref<Set<number>>(new Set());
+// 列重建信号：n-data-table 会缓存列渲染结果，手动刷新开始/结束时显式触发重绘
+const refreshTick = ref(0);
 const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatus === 2).length);
 const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
 const recordTotal = computed(() => domains.value.reduce((sum: number, d: any) => sum + (d._count_error ? 0 : Number(d.recordcount) || 0), 0));
@@ -208,6 +210,7 @@ const editForm = ref<{ remark: string; cid: number | null; is_hide: boolean; is_
 const categoryOptions = computed(() => categories.value.map((c) => ({ label: c.name, value: c.id })));
 
 const columns = computed(() => {
+  void refreshTick.value;
   const cols: any[] = [];
   if (isAdmin.value) cols.push({ type: 'selection', width: 40 });
   cols.push({ title: 'ID', key: 'id', width: 60, mobile: 'hide' });
@@ -248,8 +251,15 @@ const columns = computed(() => {
       // 只读授权由服务端拒绝；界面也不把不可写的到期时间伪装成可点击
       const canRefresh = isAdmin.value || Number(row._readonly) !== 1;
       const expired = val && expireTs(val) < Date.now();
-      const text = val ? String(val).slice(0, 10) : (row.checkstatus === 2 ? t('domain.queryFailed') : t('domain.notQueried'));
-      const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
+      // 点击后立即把日期换成「刷新中…」并转圈，避免请求慢时看起来没反应
+      const text = refreshing
+        ? t('domain.refreshingShort')
+        : val
+          ? String(val).slice(0, 10)
+          : row.checkstatus === 2
+            ? t('domain.queryFailed')
+            : t('domain.notQueried');
+      const color = refreshing ? 'var(--app-primary)' : expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
       const label = h('span', { style: color ? { color } : undefined }, text || '-');
       // 刷新入口就是到期时间本身：不再额外放一个刷新按钮，点击后原地转圈
       return h(
@@ -497,10 +507,17 @@ async function batchNotice(isNotice: number) {
   }
 }
 
+function setRefreshing(id: number, refreshing: boolean): void {
+  if (refreshing) refreshingIds.value.add(id);
+  else refreshingIds.value.delete(id);
+  refreshTick.value++;
+}
+
 async function updateDate(row: any) {
   const id = Number(row.id);
   if (!Number.isFinite(id) || refreshingIds.value.has(id)) return;
-  refreshingIds.value.add(id);
+  setRefreshing(id, true);
+  const toast = message.loading(t('domain.refreshing'), { duration: 0 });
   try {
     const res = await api<any>('POST', `/domains/${id}/update-date`);
     if (res.code === 0) {
@@ -523,7 +540,8 @@ async function updateDate(row: any) {
   } catch (e: any) {
     message.error(e?.message || String(e));
   } finally {
-    refreshingIds.value.delete(id);
+    toast.destroy();
+    setRefreshing(id, false);
   }
 }
 

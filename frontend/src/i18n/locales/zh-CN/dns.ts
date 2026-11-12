@@ -48,6 +48,7 @@ export default {
     importPartial: '部分域名导入失败：{names}',
     accountOption: '{id} - {type}（{name}）',
     refreshing: '正在刷新到期时间...',
+    refreshingShort: '刷新中…',
     refreshSuccess: '刷新成功',
     deleteTitle: '删除域名',
     deleteConfirm: '确定删除域名 {name} 吗？',

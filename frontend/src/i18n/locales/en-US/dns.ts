@@ -48,6 +48,7 @@ export default {
     importPartial: 'Some domains failed to import: {names}',
     accountOption: '{id} - {type} ({name})',
     refreshing: 'Refreshing expiry time...',
+    refreshingShort: 'Refreshing…',
     refreshSuccess: 'Refreshed successfully',
     deleteTitle: 'Delete Domain',
     deleteConfirm: 'Delete domain "{name}"?',
