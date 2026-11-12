@@ -47,7 +47,7 @@ export default {
     importSuccess: 'Successfully imported {count} domains',
     importPartial: 'Some domains failed to import: {names}',
     accountOption: '{id} - {type} ({name})',
-    queryingWhois: 'Querying WHOIS expiry time...',
+    refreshing: 'Refreshing expiry time...',
     refreshSuccess: 'Refreshed successfully',
     deleteTitle: 'Delete Domain',
     deleteConfirm: 'Delete domain "{name}"?',

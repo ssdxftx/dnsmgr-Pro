@@ -59,7 +59,7 @@
             :loading="loadBusy"
             :show-full-name="true"
             :show-add="false"
-            @refresh="loadDomains"
+            @refresh="loadDomains()"
           />
         </template>
         <ResponsiveDataTable
@@ -74,7 +74,7 @@
           :error="loadError"
           :virtual-scroll="domains.length > 200"
           :max-height="620"
-          @retry="loadDomains"
+          @retry="loadDomains()"
         />
       </div>
     </n-card>
@@ -136,11 +136,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref } from 'vue';
+import { computed, h, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { NButton, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
-import { CloudDownloadOutline, RefreshOutline, SearchOutline, GlobeOutline, AlertCircleOutline, NotificationsOutline, FolderOpenOutline } from '@vicons/ionicons5';
+import { NButton, NSpin, NSpace, NTag, NEllipsis, NModal, NForm, NFormItem, NInput, NSelect, NSwitch, useMessage, useDialog } from 'naive-ui';
+import { CloudDownloadOutline, SearchOutline, GlobeOutline, AlertCircleOutline, NotificationsOutline, FolderOpenOutline } from '@vicons/ionicons5';
 import { api } from '../api';
 import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
@@ -174,6 +174,8 @@ const loadBusy = ref(false);
 const loadError = ref(false);
 const saveBusy = ref(false);
 const domains = ref<any[]>([]);
+// 正在手动刷新到期时间的域名 id：只让被点击的那一格转圈，不阻塞整表
+const refreshingIds = ref<Set<number>>(new Set());
 const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatus === 2).length);
 const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
 const recordTotal = computed(() => domains.value.reduce((sum: number, d: any) => sum + (d._count_error ? 0 : Number(d.recordcount) || 0), 0));
@@ -241,29 +243,35 @@ const columns = computed(() => {
     width: 200,
     render(row: any) {
       const val = row.expiretime || '';
+      const id = Number(row.id);
+      const refreshing = refreshingIds.value.has(id);
+      // 只读授权由服务端拒绝；界面也不把不可写的到期时间伪装成可点击
+      const canRefresh = isAdmin.value || Number(row._readonly) !== 1;
       const expired = val && expireTs(val) < Date.now();
       const text = val ? String(val).slice(0, 10) : (row.checkstatus === 2 ? t('domain.queryFailed') : t('domain.notQueried'));
       const color = expired ? 'var(--app-error)' : row.checkstatus === 2 ? 'var(--app-warning)' : undefined;
-      const label = h('span', { style: { whiteSpace: 'nowrap', ...(color ? { color } : {}) } }, text || '-');
-      // 移动端只保留日期本身：刷新按钮与提醒开关原本挤在同一格，
-      // 卡片里会读成「2027-03-18 刷新 已开启」三个语义混在一起
-      if (!isAdmin.value || isMobile.value) return label;
-      return h(NSpace, { size: 4, align: 'center', wrap: false }, {
-        default: () => [
-          label,
-          h(
-            NButton,
-            {
-              size: 'tiny',
-              quaternary: true,
-              title: t('domain.refreshExpire'),
-              'aria-label': t('domain.refreshExpire'),
-              onClick: () => updateDate(row),
-            },
-            { icon: () => h(RefreshOutline) },
-          ),
-        ],
-      });
+      const label = h('span', { style: color ? { color } : undefined }, text || '-');
+      // 刷新入口就是到期时间本身：不再额外放一个刷新按钮，点击后原地转圈
+      return h(
+        'span',
+        {
+          class: ['domain-expire-time', canRefresh ? 'domain-expire-time--clickable' : '', refreshing ? 'domain-expire-time--loading' : ''],
+          title: canRefresh ? (refreshing ? t('domain.refreshing') : t('domain.refreshExpire')) : undefined,
+          role: canRefresh ? 'button' : undefined,
+          tabindex: canRefresh ? 0 : undefined,
+          'aria-label': canRefresh ? (refreshing ? t('domain.refreshing') : t('domain.refreshExpire')) : undefined,
+          'aria-busy': refreshing ? 'true' : undefined,
+          onClick: canRefresh ? () => updateDate(row) : undefined,
+          onKeydown: canRefresh
+            ? (e: KeyboardEvent) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return;
+                e.preventDefault();
+                updateDate(row);
+              }
+            : undefined,
+        },
+        [label, refreshing ? h(NSpin, { size: 12, strokeWidth: 2 }) : null],
+      );
     },
   });
   // 到期提醒独立成列：移动端由 mobile:'status' 提升到卡片标题行右侧
@@ -309,17 +317,25 @@ const columns = computed(() => {
 });
 
 // 参数快速切换时中止上一次请求，避免旧响应覆盖新结果
-// 记录最近一次成功加载时间：用于从后台标签页返回时按需刷新到期时间
+// 记录最近一次成功加载时间：用于从后台标签页/其他路由返回时按需刷新到期时间
 let lastLoadedAt = 0;
 
 let loadAbort: AbortController | null = null;
-async function loadDomains() {
+// 静默刷新不置 loadBusy，单独标记避免轮询与标签页可见事件同时触发两个请求
+let silentLoading = false;
+async function loadDomains(opts: { silent?: boolean } = {}) {
+  const silent = opts.silent === true;
+  // 静默刷新不得抢占用户主动触发的搜索/刷新，也不得在弹窗编辑期间替换行对象
+  if (silent && (silentLoading || loadBusy.value || showEdit.value || showImport.value || showCategory.value)) return;
   loadAbort?.abort();
   const ac = new AbortController();
   loadAbort = ac;
-  loadBusy.value = true;
+  if (silent) silentLoading = true;
+  else loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined, { signal: ac.signal });
+    // 静默刷新失败时保留当前列表，避免一次限流/超时把整页清空
+    if (silent && res.code !== 0) return;
     loadError.value = res.code !== 0;
     const list: any[] = res.code === 0 ? res.data : [];
     // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片
@@ -338,9 +354,11 @@ async function loadDomains() {
     checked.value = checked.value.filter((id) => visibleIds.has(Number(id)));
     lastLoadedAt = Date.now();
   } catch (e: any) {
-    if (e?.name !== 'AbortError') loadError.value = true;
+    // 静默刷新失败不打断用户：保留旧数据，等下一次轮询/激活再试
+    if (e?.name !== 'AbortError' && !silent) loadError.value = true;
   } finally {
-    if (loadAbort === ac) loadBusy.value = false;
+    if (silent) silentLoading = false;
+    if (loadAbort === ac && !silent) loadBusy.value = false;
   }
 }
 
@@ -480,17 +498,32 @@ async function batchNotice(isNotice: number) {
 }
 
 async function updateDate(row: any) {
-  message.loading(t('domain.queryingWhois'));
+  const id = Number(row.id);
+  if (!Number.isFinite(id) || refreshingIds.value.has(id)) return;
+  refreshingIds.value.add(id);
   try {
-    const res = await api('POST', `/domains/${row.id}/update-date`);
-    message.destroyAll();
+    const res = await api<any>('POST', `/domains/${id}/update-date`);
     if (res.code === 0) {
+      // 原地更新该行：不整表重拉，避免滚动位置与正在进行的操作被打断
+      const apply = (target: any) => {
+        if (!target) return;
+        if (res.expireTime) target.expiretime = res.expireTime;
+        if (res.regTime !== undefined) target.regtime = res.regTime;
+        target.checkstatus = 1;
+      };
+      apply(row);
+      // 请求期间若自动轮询替换了列表，同步更新当前列表里的同一行
+      apply(domains.value.find((d: any) => Number(d.id) === id));
       message.success(t('domain.refreshSuccess'));
-      loadDomains();
-    } else message.error(res.msg);
+    } else {
+      message.error(res.msg);
+      // 失败原因可能是限流/无权限，也可能是 whois 查询失败；静默同步服务端状态
+      void loadDomains({ silent: true });
+    }
   } catch (e: any) {
-    message.destroyAll();
     message.error(e?.message || String(e));
+  } finally {
+    refreshingIds.value.delete(id);
   }
 }
 
@@ -610,21 +643,99 @@ function delDomain(row: any) {
   });
 }
 
+// 页面被 keep-alive 缓存：再次进入时 onMounted 不会触发，必须靠 onActivated 补数据。
+// 60 秒轮询负责停留在页面时持续同步后台任务刷新后的到期时间。
+const AUTO_REFRESH_MS = 60_000;
+const MIN_REFRESH_GAP_MS = 5_000;
+let autoTimer: ReturnType<typeof setInterval> | null = null;
+let activatedOnce = false;
+let pageActive = false;
+
+function canAutoRefresh(): boolean {
+  return pageActive && document.visibilityState === 'visible' && !loadBusy.value && !showEdit.value && !showImport.value && !showCategory.value;
+}
+
+function refreshIfStale(): void {
+  if (!canAutoRefresh()) return;
+  if (Date.now() - lastLoadedAt < MIN_REFRESH_GAP_MS) return;
+  void loadDomains({ silent: true });
+}
+
+function startAutoRefresh(): void {
+  stopAutoRefresh();
+  autoTimer = setInterval(refreshIfStale, AUTO_REFRESH_MS);
+}
+
+function stopAutoRefresh(): void {
+  if (!autoTimer) return;
+  clearInterval(autoTimer);
+  autoTimer = null;
+}
+
 // 从注册商页面续费后切回本站时，静默重新拉取一次列表，
-// 让页面直接显示最新到期时间；60 秒内重复切回不重复请求。
+// 让页面直接显示最新到期时间；短时间内的重复切换不重复请求。
 function onVisibilityChange() {
   if (document.visibilityState !== 'visible') return;
-  if (Date.now() - lastLoadedAt < 60_000) return;
-  loadDomains();
+  refreshIfStale();
 }
 
 onMounted(() => {
-  loadDomains();
+  pageActive = true;
+  void loadDomains();
+  startAutoRefresh();
   document.addEventListener('visibilitychange', onVisibilityChange);
 });
 
+onActivated(() => {
+  pageActive = true;
+  // 首次激活与 onMounted 同时发生，跳过以免重复请求
+  if (activatedOnce) refreshIfStale();
+  activatedOnce = true;
+  startAutoRefresh();
+});
+
+onDeactivated(() => {
+  pageActive = false;
+  stopAutoRefresh();
+  loadAbort?.abort();
+  loadAbort = null;
+  loadBusy.value = false;
+  silentLoading = false;
+});
+
 onUnmounted(() => {
+  pageActive = false;
+  stopAutoRefresh();
+  loadAbort?.abort();
   document.removeEventListener('visibilitychange', onVisibilityChange);
 });
 </script>
 
+<style>
+.domain-expire-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+
+.domain-expire-time--clickable {
+  cursor: pointer;
+}
+
+.domain-expire-time--clickable:hover {
+  color: var(--app-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.domain-expire-time--clickable:focus-visible {
+  outline: 2px solid var(--app-primary);
+  outline-offset: 2px;
+}
+
+.domain-expire-time--loading {
+  cursor: progress;
+}
+</style>

@@ -47,7 +47,7 @@ export default {
     importSuccess: '成功导入 {count} 个域名',
     importPartial: '部分域名导入失败：{names}',
     accountOption: '{id} - {type}（{name}）',
-    queryingWhois: '正在查询 WHOIS 到期时间...',
+    refreshing: '正在刷新到期时间...',
     refreshSuccess: '刷新成功',
     deleteTitle: '删除域名',
     deleteConfirm: '确定删除域名 {name} 吗？',
