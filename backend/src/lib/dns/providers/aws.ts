@@ -5,6 +5,12 @@ import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from
 const CHANGE_ROOT = 'ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/"';
 const CREATE_ROOT = 'CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/"';
 
+// Route53 没有「按页取记录」的服务端接口，ListResourceRecordSets 必须沿游标翻完整区。
+// 前端翻页/查找记录会在短时间重复请求同一 Zone，这里缓存完整结果，避免每页重新下载。
+const hostedZoneCache = new Map<string, { at: number; list: any[] }>();
+const recordSetCache = new Map<string, { at: number; list: any[] }>();
+const AWS_LIST_TTL = 20_000;
+
 // Route53 响应固定包在单一根节点（如 ListHostedZonesResponse）内，这里统一解开
 function unwrap(data: any): any {
   if (!data || typeof data !== 'object') return data;
@@ -27,6 +33,7 @@ export class AwsDns implements DnsProvider {
   private error = '';
   private domain: string;
   private domainId: string;
+  private cacheId: string;
 
   constructor(config: Record<string, any>) {
     this.client = new AWS(
@@ -39,6 +46,7 @@ export class AwsDns implements DnsProvider {
     );
     this.domain = config.domain || '';
     this.domainId = str(config.domainid);
+    this.cacheId = String(config.AccessKeyId || '') + ':' + this.domainId;
   }
 
   getError() {
@@ -60,6 +68,8 @@ export class AwsDns implements DnsProvider {
   }
 
   private async listAllHostedZones(): Promise<any[] | false> {
+    const cached = hostedZoneCache.get(this.cacheId);
+    if (cached && Date.now() - cached.at < AWS_LIST_TTL) return cached.list;
     const list: any[] = [];
     let marker = '';
     for (;;) {
@@ -72,10 +82,15 @@ export class AwsDns implements DnsProvider {
       marker = truncated ? str(data.NextMarker) : '';
       if (!truncated || !marker) break;
     }
+    if (hostedZoneCache.size > 200) hostedZoneCache.clear();
+    hostedZoneCache.set(this.cacheId, { at: Date.now(), list });
     return list;
   }
 
   private async listAllRecordSets(): Promise<any[] | false> {
+    const key = this.cacheId + ':' + this.zoneId();
+    const cached = recordSetCache.get(key);
+    if (cached && Date.now() - cached.at < AWS_LIST_TTL) return cached.list;
     const list: any[] = [];
     const params: Record<string, any> = { maxitems: '300' };
     for (let guard = 0; guard < 1000; guard++) {
@@ -91,6 +106,9 @@ export class AwsDns implements DnsProvider {
       if (data.NextRecordIdentifier) params.identifier = str(data.NextRecordIdentifier);
       else delete params.identifier;
     }
+    // 单个 Zone 可能是数 MB 的记录集；限制缓存条目数，避免账户/Zone 多时内存无界增长
+    if (recordSetCache.size > 100) recordSetCache.clear();
+    recordSetCache.set(key, { at: Date.now(), list });
     return list;
   }
 
@@ -136,7 +154,7 @@ export class AwsDns implements DnsProvider {
         const raw = str(record.Value);
         const parsed = this.parseValue(type, raw);
         list.push({
-          RecordId: this.encodeRecordId(name, type, raw),
+          RecordId: this.encodeRecordId(name, type, raw, ttl),
           Domain: this.domain,
           Name: name,
           Type: type,
@@ -175,7 +193,7 @@ export class AwsDns implements DnsProvider {
       Type: old.Type,
       Value: parsed.value,
       Line: 'default',
-      TTL: 300,
+      TTL: old.TTL ?? 300,
       MX: parsed.mx,
       Status: '1',
       Weight: null,
@@ -198,7 +216,7 @@ export class AwsDns implements DnsProvider {
     values.push(raw);
     const ttl = TTL ? Number(TTL) : (set ? parseInt(str(set.TTL)) || 300 : 600);
     if (!(await this.changeRecordSets([{ Action: 'UPSERT', Name: fqdn, Type: type, TTL: ttl, Values: values }]))) return false;
-    return this.encodeRecordId(this.fromFqdn(fqdn), type, raw);
+    return this.encodeRecordId(this.fromFqdn(fqdn), type, raw, ttl);
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null): Promise<boolean> {
@@ -231,8 +249,37 @@ export class AwsDns implements DnsProvider {
       return (await this.changeRecordSets([{ Action: 'UPSERT', Name: fqdn, Type: type, TTL: Number(TTL), Values: unique }])) !== false;
     }
 
-    if (!(await this.deleteDomainRecord(RecordId))) return false;
-    return (await this.addDomainRecord(Name, Type, Value, Line, TTL, MX, Weight, Remark)) !== false;
+    // 名称/类型变化时把「删除旧的」和「写入新的」放进同一个 ChangeBatch 原子提交，
+    // 避免先删后加在第二次调用失败时直接把解析记录弄丢。
+    const oldSet = await this.getRecordSet(oldFqdn, oldType);
+    if (oldSet === false) return false;
+    if (!oldSet) {
+      this.error = '记录不存在';
+      return false;
+    }
+    const oldValues = this.extractValues(oldSet);
+    const remaining = oldValues.filter((item) => item !== oldRaw);
+    if (remaining.length === oldValues.length) {
+      this.error = '记录不存在';
+      return false;
+    }
+    const newSet = await this.getRecordSet(fqdn, type);
+    if (newSet === false) return false;
+    const newValues = newSet ? this.extractValues(newSet) : [];
+    if (newValues.includes(newRaw)) {
+      this.error = '已存在相同记录';
+      return false;
+    }
+    newValues.push(newRaw);
+    const oldTtl = parseInt(str(oldSet.TTL)) || 300;
+    const changes: any[] = [];
+    if (remaining.length) {
+      changes.push({ Action: 'UPSERT', Name: oldFqdn, Type: oldType, TTL: oldTtl, Values: remaining });
+    } else {
+      changes.push({ Action: 'DELETE', Name: oldFqdn, Type: oldType, TTL: oldTtl, Values: oldValues });
+    }
+    changes.push({ Action: 'UPSERT', Name: fqdn, Type: type, TTL: TTL ? Number(TTL) : 600, Values: newValues });
+    return (await this.changeRecordSets(changes)) !== false;
   }
 
   async updateDomainRecordRemark(_RecordId: string, _Remark: string | null): Promise<boolean> {
@@ -276,12 +323,12 @@ export class AwsDns implements DnsProvider {
   }
 
   async addDomain(Domain: string): Promise<boolean> {
-    return (
-      (await this.send('POST', '/hostedzone', {
-        Name: Domain,
-        CallerReference: 'dnsmgr-' + Domain + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2),
-      }, CREATE_ROOT)) !== false
-    );
+    const ok = (await this.send('POST', '/hostedzone', {
+      Name: Domain,
+      CallerReference: 'dnsmgr-' + Domain + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2),
+    }, CREATE_ROOT)) !== false;
+    if (ok) hostedZoneCache.delete(this.cacheId);
+    return ok;
   }
 
   private async getRecordSet(fqdn: string, type: string): Promise<any | false | null> {
@@ -306,7 +353,9 @@ export class AwsDns implements DnsProvider {
         ResourceRecords: { ResourceRecord: change.Values.map((value) => ({ Value: value })) },
       },
     }));
-    return (await this.send('POST', `/hostedzone/${this.zoneId()}/rrset`, { ChangeBatch: { Changes: { Change } } }, CHANGE_ROOT)) !== false;
+    const ok = (await this.send('POST', `/hostedzone/${this.zoneId()}/rrset`, { ChangeBatch: { Changes: { Change } } }, CHANGE_ROOT)) !== false;
+    if (ok) recordSetCache.delete(this.cacheId + ':' + this.zoneId());
+    return ok;
   }
 
   private extractValues(set: any): string[] {
@@ -386,16 +435,22 @@ export class AwsDns implements DnsProvider {
     return domainToASCII(domain) || domain;
   }
 
-  private encodeRecordId(name: string, type: string, value: string): string {
-    return Buffer.from(`${name}\x1e${type}\x1e${value}`, 'utf8').toString('base64url');
+  private encodeRecordId(name: string, type: string, value: string, ttl?: number): string {
+    const body = ttl && Number.isFinite(ttl) ? `${name}\x1e${type}\x1e${value}\x1e${Number(ttl)}` : `${name}\x1e${type}\x1e${value}`;
+    return Buffer.from(body, 'utf8').toString('base64url');
   }
 
-  private decodeRecordId(recordId: string): { Name: string; Type: string; Value: string } | null {
+  private decodeRecordId(recordId: string): { Name: string; Type: string; Value: string; TTL?: number } | null {
     try {
       const decoded = Buffer.from(String(recordId), 'base64url').toString('utf8');
       const parts = decoded.split('\x1e');
-      if (parts.length !== 3) return null;
-      return { Name: parts[0], Type: parts[1], Value: parts[2] };
+      if (parts.length !== 3 && parts.length !== 4) return null;
+      return {
+        Name: parts[0],
+        Type: parts[1],
+        Value: parts[2],
+        ...(parts.length === 4 ? { TTL: Number(parts[3]) || undefined } : {}),
+      };
     } catch {
       return null;
     }

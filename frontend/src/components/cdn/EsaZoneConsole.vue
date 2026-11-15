@@ -130,7 +130,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useDialog, useMessage, NCard, NButton, NForm, NFormItem, NIcon, NInput, NSpace, NSwitch, NTag } from 'naive-ui';
 import { CheckmarkCircleOutline } from '@vicons/ionicons5';
@@ -140,20 +140,20 @@ import { formatDateTime } from '../../lib/datetime';
 import { zoneAreaKey } from '../../lib/zoneLabels';
 import DetailGrid from '../DetailGrid.vue';
 import EsaCardSelect from './EsaCardSelect.vue';
-import EsaSettingsList from './EsaSettingsList.vue';
-import EsaVersionsModule from './EsaVersionsModule.vue';
-import EsaDnsModule from './EsaDnsModule.vue';
-import EsaSslModule from './EsaSslModule.vue';
-import EsaSecurityModule from './EsaSecurityModule.vue';
-import EsaCachingModule from './EsaCachingModule.vue';
-import EsaRulesModule from './EsaRulesModule.vue';
-import EsaNetworkModule from './EsaNetworkModule.vue';
-import EsaTrafficModule from './EsaTrafficModule.vue';
-import EsaErModule from './EsaErModule.vue';
-import EsaCappingModule from './EsaCappingModule.vue';
-import EsaL4Module from './EsaL4Module.vue';
-import CdnZoneGlobalSetting from './CdnZoneGlobalSetting.vue';
-import EsaApiConsole from './EsaApiConsole.vue';
+const EsaSettingsList = defineAsyncComponent(() => import('./EsaSettingsList.vue'));
+const EsaVersionsModule = defineAsyncComponent(() => import('./EsaVersionsModule.vue'));
+const EsaDnsModule = defineAsyncComponent(() => import('./EsaDnsModule.vue'));
+const EsaSslModule = defineAsyncComponent(() => import('./EsaSslModule.vue'));
+const EsaSecurityModule = defineAsyncComponent(() => import('./EsaSecurityModule.vue'));
+const EsaCachingModule = defineAsyncComponent(() => import('./EsaCachingModule.vue'));
+const EsaRulesModule = defineAsyncComponent(() => import('./EsaRulesModule.vue'));
+const EsaNetworkModule = defineAsyncComponent(() => import('./EsaNetworkModule.vue'));
+const EsaTrafficModule = defineAsyncComponent(() => import('./EsaTrafficModule.vue'));
+const EsaErModule = defineAsyncComponent(() => import('./EsaErModule.vue'));
+const EsaCappingModule = defineAsyncComponent(() => import('./EsaCappingModule.vue'));
+const EsaL4Module = defineAsyncComponent(() => import('./EsaL4Module.vue'));
+const CdnZoneGlobalSetting = defineAsyncComponent(() => import('./CdnZoneGlobalSetting.vue'));
+const EsaApiConsole = defineAsyncComponent(() => import('./EsaApiConsole.vue'));
 
 const props = defineProps<{
   aid: number;

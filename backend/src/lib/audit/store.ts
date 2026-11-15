@@ -20,6 +20,10 @@ let failCount = 0;
 let deadCount = 0;
 let retryAfter = 0;
 let spoolBytes = 0;
+// drain 期间的新记录先进入内存缓冲，等 spool 重写完成后再追加，
+// 避免 stat→rename 之间 appendFileSync 的内容被旧快照覆盖。
+let pendingSpool: string[] = [];
+let pendingSpoolBytes = 0;
 const retryTimes = new WeakMap<AuditRow, number>();
 
 try {
@@ -47,8 +51,13 @@ function spoolRow(row: AuditRow): void {
   try {
     const line = JSON.stringify(row) + '\n';
     const size = Buffer.byteLength(line);
-    if (spoolBytes + size > SPOOL_MAX_BYTES) {
+    if (spoolBytes + pendingSpoolBytes + size > SPOOL_MAX_BYTES) {
       reportDead(1, '审计 spool 已达上限');
+      return;
+    }
+    if (draining) {
+      pendingSpool.push(line);
+      pendingSpoolBytes += size;
       return;
     }
     fs.mkdirSync(path.dirname(SPOOL_PATH), { recursive: true });
@@ -56,6 +65,23 @@ function spoolRow(row: AuditRow): void {
     spoolBytes += size;
   } catch (e: any) {
     reportDead(1, '审计 spool 写入失败：' + (e?.message || e));
+  }
+}
+
+/** drain 结束后把期间积压的记录追加回 spool；失败时计入死信，避免静默丢失 */
+function flushPendingSpool(): void {
+  if (!pendingSpool.length) return;
+  const lines = pendingSpool.join('');
+  const bytes = pendingSpoolBytes;
+  const count = pendingSpool.length;
+  pendingSpool = [];
+  pendingSpoolBytes = 0;
+  try {
+    fs.mkdirSync(path.dirname(SPOOL_PATH), { recursive: true });
+    fs.appendFileSync(SPOOL_PATH, lines, { mode: 0o600 });
+    spoolBytes += bytes;
+  } catch (e: any) {
+    reportDead(count, '审计 spool 写入失败：' + (e?.message || e));
   }
 }
 
@@ -158,6 +184,7 @@ async function drainSpool(): Promise<void> {
     throw e;
   } finally {
     rl?.close();
+    flushPendingSpool();
     draining = false;
   }
 }
@@ -208,6 +235,8 @@ export async function shutdownAudit(): Promise<void> {
   timer = null;
   const deadline = Date.now() + 3000;
   while ((queue.length || spoolBytes > 0) && Date.now() < deadline) {
+    // 数据库处于失败退避期时继续空转会占满退出预算，直接结束让定时器/wal 自然回收。
+    if (Date.now() < retryAfter) break;
     const before = failCount;
     await flushAudit();
     if (failCount > before) break;

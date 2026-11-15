@@ -103,7 +103,7 @@ export async function purgePrivateAssets(
   if (uid && opts.deleteUserTasks) await q(`DELETE FROM ${table('dns_check_task')} WHERE uid = ?`, [uid]);
   await delByIds(q, 'cdn_cache_rule', 'did', cdnDomainIds);
   await delByIds(q, 'cdn_stat_data', 'aid', cdnAccountIds);
-  await delByIds(q, 'cf_rule_credential', 'aid', cdnAccountIds);
+  await delByIds(q, 'cf_rule_credential', 'aid', accountIds);
   await delByIds(q, 'cdn_domain', 'id', cdnDomainIds);
   await delByIds(q, 'cert_domain', 'oid', certOrderIds);
   await delByIds(q, 'cert_deploy', 'oid', certOrderIds);

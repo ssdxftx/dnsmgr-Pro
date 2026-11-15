@@ -145,10 +145,12 @@ export class TencentEdgeOne implements CdnProvider {
       OriginProtocol: 'FOLLOW',
     };
     if (!(await this.send('CreateAccelerationDomain', param))) return false;
-    for (let i = 0; i < 10; i++) {
+    // 创建后 CNAME 由上游异步分配：立即查一次，短暂等待后再查一次即可。
+    // 原来 10 次 × 1 秒的同步轮询会让批量接入 50 个域名阻塞约 500 秒。
+    for (let i = 0; i < 2; i++) {
       const cname = await this.getDomainCname(domain);
       if (cname) return cname;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 700));
     }
     this.error = '未获取到 CNAME，请稍后在列表刷新重试';
     return false;
@@ -169,20 +171,36 @@ export class TencentEdgeOne implements CdnProvider {
     return all;
   }
 
+  /** 按域名过滤查询加速域名，避免为一个 CNAME 扫描整个 Zone */
+  private async findAccelerationDomain(zoneId: string, domain: string): Promise<any | false> {
+    const target = String(domain || '').toLowerCase();
+    const filtered = await this.send('DescribeAccelerationDomains', {
+      ZoneId: zoneId,
+      Offset: 0,
+      Limit: 100,
+      Filters: [{ Name: 'domain-name', Values: [domain] }],
+    });
+    if (filtered) {
+      const rows = filtered.AccelerationDomains || [];
+      const hit = rows.find((d: any) => String(d.DomainName || '').toLowerCase() === target);
+      if (hit) return hit;
+      // 过滤参数被上游忽略时，返回的是第一页全量；只有恰好满页才需要回退扫描
+      if (rows.length < 100) return false;
+    }
+    const all = await this.listAllAccelerationDomains(zoneId);
+    if (all === false) return false;
+    return all.find((d: any) => String(d.DomainName || '').toLowerCase() === target) || false;
+  }
+
   async getDomainCname(domain: string): Promise<string | false> {
     // 先清掉上一次调用残留的错误，避免调用方把“未找到”误判成接口失败
     this.error = '';
     const zoneId = await this.findZone(domain);
     if (!zoneId) return false;
-    const list = await this.listAllAccelerationDomains(zoneId);
-    if (list === false) return false;
-    const target = String(domain || '').toLowerCase();
-    for (const d of list) {
-      if (String(d.DomainName || '').toLowerCase() !== target) continue;
-      if (d.Cname) return d.Cname;
-      this.error = '目标站点同名加速域名尚未分配 CNAME，请稍后重试';
-      return false;
-    }
+    const d = await this.findAccelerationDomain(zoneId, domain);
+    if (d === false) return false;
+    if (d.Cname) return d.Cname;
+    this.error = '目标站点同名加速域名尚未分配 CNAME，请稍后重试';
     return false;
   }
 

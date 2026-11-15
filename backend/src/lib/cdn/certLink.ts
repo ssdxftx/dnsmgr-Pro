@@ -14,6 +14,26 @@ import { canAccessCertOrder } from '../accounts/visibility.js';
 import { loadAccountConfig } from '../accounts/taskConfig.js';
 import { withDistributedLockResult } from '../scheduler/distLock.js';
 
+// 加密配置每次重新 AES 解密 + JSON.stringify 的成本会随账户/任务数量线性增长。
+// 密文本身带随机 IV，只要配置未更新，密文文本就保持不变；按密文哈希缓存解密结果，
+// 重复联动时只做一次廉价哈希即可复用，避免 O(账户数)/O(任务数) 次重复解密。
+const configDecodeCache = new Map<string, { value: any; json: string }>();
+const CONFIG_DECODE_CACHE_MAX = 2000;
+
+function decodeConfigCached(raw: any): { value: any; json: string } {
+  const key = createHash('sha256').update(String(raw ?? '')).digest('hex');
+  const hit = configDecodeCache.get(key);
+  if (hit) return hit;
+  const value = decryptConfig(raw);
+  const entry = { value, json: JSON.stringify(value || {}) };
+  if (configDecodeCache.size >= CONFIG_DECODE_CACHE_MAX) {
+    const oldest = configDecodeCache.keys().next().value;
+    if (oldest) configDecodeCache.delete(oldest);
+  }
+  configDecodeCache.set(key, entry);
+  return entry;
+}
+
 // 证书联动阶段：order=证书订单、issue=签发、account=部署账户、task=部署任务、deploy=部署到 CDN
 export type LinkNode = 'order' | 'issue' | 'account' | 'task' | 'deploy';
 export type LinkStatus = 'doing' | 'ok' | 'fail';
@@ -126,7 +146,8 @@ export async function findExactCertOrders(name: string, q: QueryFn = query): Pro
 export async function findOrderByDomains(aid: number, domains: string[], q: QueryFn = query): Promise<any | null> {
   const want = [...domains].sort();
   const rows = await q(
-    `SELECT O.*, GROUP_CONCAT(D.domain ORDER BY D.domain SEPARATOR ',') AS doms
+    `SELECT O.id, O.aid, O.status, O.error, O.link,
+            GROUP_CONCAT(D.domain ORDER BY D.domain SEPARATOR ',') AS doms
        FROM ${table('cert_order')} O JOIN ${table('cert_domain')} D ON D.oid = O.id
       WHERE O.aid = ? AND O.status IN (0, 1, 2, 3)
       GROUP BY O.id`,
@@ -270,7 +291,7 @@ export async function ensureDeployAccount(plan: CertDeployPlan, q: QueryFn = que
   return withNamedLock('dnsmgr:cert-deploy-account:', plan.accountType + '|' + cfg, async () => {
   // 加密存储使用随机 IV，无法按密文比较，改为按类型取出后解密比对
   const rows: any = await q(`SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = 1`, [plan.accountType]);
-  const hit = (rows as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === cfg);
+  const hit = (rows as any[]).find((r: any) => decodeConfigCached(r.config).json === cfg);
   if (hit?.id) return Number(hit.id);
   const res: any = await q(
     `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`,
@@ -291,7 +312,7 @@ export async function ensureDeployTask(
   return withNamedLock('dnsmgr:cert-deploy-task:', aid + '|' + oid + '|' + cfg, async () => {
   const rows: any = await q(`SELECT id, active, config FROM ${table('cert_deploy')} WHERE aid = ? AND oid = ?`, [aid, oid]);
   // 加密存储使用随机 IV，需解密后比较配置
-  const hit = (rows as any[]).find((r: any) => JSON.stringify(decryptConfig(r.config) || {}) === cfg);
+  const hit = (rows as any[]).find((r: any) => decodeConfigCached(r.config).json === cfg);
   if (hit?.id) {
     if (!hit.active) await q(`UPDATE ${table('cert_deploy')} SET active = 1 WHERE id = ?`, [hit.id]);
     return { taskId: Number(hit.id), created: false };

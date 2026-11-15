@@ -87,6 +87,31 @@ export async function deliverToSubscription(sub: EventSubscription, event: strin
   ).catch(() => undefined);
 }
 
+const MAX_CONCURRENT_DELIVERIES = 4;
+const MAX_PENDING_DELIVERIES = 1000;
+let activeDeliveries = 0;
+const pendingDeliveries: Array<() => Promise<void>> = [];
+
+function pumpDeliveries(): void {
+  while (activeDeliveries < MAX_CONCURRENT_DELIVERIES && pendingDeliveries.length) {
+    const task = pendingDeliveries.shift()!;
+    activeDeliveries++;
+    void task()
+      .catch(() => undefined)
+      .finally(() => {
+        activeDeliveries--;
+        pumpDeliveries();
+      });
+  }
+}
+
+function enqueueDelivery(task: () => Promise<void>): void {
+  // 外部回调持续失败/变慢时，队列不能无界增长；丢弃最旧任务比拖垮进程更安全。
+  if (pendingDeliveries.length >= MAX_PENDING_DELIVERIES) pendingDeliveries.shift();
+  pendingDeliveries.push(task);
+  pumpDeliveries();
+}
+
 export async function emitEvent(event: string, data: any): Promise<void> {
   try {
     const rows: EventSubscription[] = await query(
@@ -95,7 +120,8 @@ export async function emitEvent(event: string, data: any): Promise<void> {
     for (const row of rows) {
       const events = subscriptionEvents(row.events);
       if (!events.includes('*') && !events.includes(event)) continue;
-      void deliverToSubscription(row, event, data);
+      // 有界队列：事件风暴时不能为每个订阅同时发起外网请求
+      enqueueDelivery(() => deliverToSubscription(row, event, data));
     }
   } catch {
     /* 事件回调不影响主流程 */

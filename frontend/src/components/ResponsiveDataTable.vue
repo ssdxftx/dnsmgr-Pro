@@ -94,8 +94,8 @@
             </div>
           </div>
           <!-- 空值字段不占行：4 行里 2 行是空的情况此前会浪费近一半卡片高度 -->
-          <div v-if="visibleCols(row).length" class="m-card__rows" :class="{ 'is-clamped': isClamped(row) }">
-            <div v-for="col in visibleCols(row)" :key="String(col.key)" class="m-card__row">
+          <div v-if="rowCols(row).length" class="m-card__rows" :class="{ 'is-clamped': isClamped(row, index) }">
+            <div v-for="col in rowCols(row)" :key="String(col.key)" class="m-card__row">
               <div class="m-card__label">{{ col.title }}</div>
               <div class="m-card__value">
                 <CellRender :col="col" :row="row" :index="index" />
@@ -103,10 +103,10 @@
             </div>
           </div>
           <div v-else class="m-card__empty-row">{{ t('common.noExtraInfo') }}</div>
-          <button v-if="isClamped(row)" type="button" class="m-card__more" @click.stop="toggleExpand(row)">
-            {{ t('common.expandAll', { n: visibleCols(row).length }) }}
+          <button v-if="isClamped(row, index)" type="button" class="m-card__more" @click.stop="toggleExpand(row, index)">
+            {{ t('common.expandAll', { n: rowCols(row).length }) }}
           </button>
-          <button v-else-if="isExpanded(row) && visibleCols(row).length > collapseAfter" type="button" class="m-card__more" @click.stop="toggleExpand(row)">
+          <button v-else-if="isExpanded(row, index) && rowCols(row).length > collapseAfter" type="button" class="m-card__more" @click.stop="toggleExpand(row, index)">
             {{ t('common.collapseList') }}
           </button>
           <div v-if="actionColumn" class="m-card__actions">
@@ -306,16 +306,16 @@ function rowKeyOf(row: any, index: number) {
   return String(row?._key ?? row?.id ?? index);
 }
 
-function isExpanded(row: any) {
-  return expandedKeys.value.has(rowKeyOf(row, 0));
+function isExpanded(row: any, index = 0) {
+  return expandedKeys.value.has(rowKeyOf(row, index));
 }
 
-function isClamped(row: any) {
-  return visibleCols(row).length > collapseAfter.value && !isExpanded(row);
+function isClamped(row: any, index = 0) {
+  return rowCols(row).length > collapseAfter.value && !isExpanded(row, index);
 }
 
-function toggleExpand(row: any) {
-  const key = rowKeyOf(row, 0);
+function toggleExpand(row: any, index = 0) {
+  const key = rowKeyOf(row, index);
   const next = new Set(expandedKeys.value);
   if (next.has(key)) next.delete(key);
   else next.add(key);
@@ -363,8 +363,12 @@ async function remeasure() {
 
 onMounted(() => {
   if (!wrapRef.value) return;
+  let resizeTimer: number | undefined;
   ro = new ResizeObserver(([entry]) => {
     wrapW.value = entry.contentRect.width;
+    // 容器宽度变化后必须重新测量自然宽度，否则变宽后仍保留不需要的横向滚动条
+    if (resizeTimer) window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(() => void remeasure(), 100);
   });
   ro.observe(wrapRef.value);
   void remeasure();
@@ -379,8 +383,16 @@ onBeforeUnmount(() => {
  */
 const showSkeleton = computed(() => props.loading && !props.data.length);
 
-watch([() => props.columns, () => props.data], () => {
+watch(() => props.columns, () => {
   expandedKeys.value = new Set();
+  void remeasure();
+});
+watch(() => props.data, (data) => {
+  // 数据刷新时保留用户已展开的卡片，只清理已经不在列表中的 key
+  if (expandedKeys.value.size) {
+    const valid = new Set((data || []).map((row: any, index: number) => rowKeyOf(row, index)));
+    expandedKeys.value = new Set([...expandedKeys.value].filter((key) => valid.has(key)));
+  }
   void remeasure();
 });
 
@@ -467,6 +479,19 @@ const mobileRows = computed(() => {
   }
   return props.data;
 });
+
+// 每行只计算一次可见列，避免模板中 4 次 visibleCols 各自遍历列并生成被丢弃的 VNode
+const mobileColsCache = computed(() => {
+  const map = new WeakMap<object, any[]>();
+  for (const row of mobileRows.value) {
+    if (row && typeof row === 'object') map.set(row, visibleCols(row));
+  }
+  return map;
+});
+function rowCols(row: any): any[] {
+  if (!row || typeof row !== 'object') return [];
+  return mobileColsCache.value.get(row) || visibleCols(row);
+}
 
 const mobilePagination = computed(() => {
   if (!isMobile.value) return null;

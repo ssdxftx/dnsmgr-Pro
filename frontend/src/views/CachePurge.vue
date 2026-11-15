@@ -135,8 +135,21 @@ async function submit() {
 async function loadTasks() {
   tasksLoadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/cdn/cache-tasks');
-    if (res.code === 0) tasks.value = res.data || [];
+    const all: any[] = [];
+    let failed = false;
+    for (let page = 1; page <= 50; page++) {
+      const res = await api<any>('GET', '/cdn/cache-tasks', { page, size: 200 });
+      if (res.code !== 0) {
+        failed = true;
+        break;
+      }
+      const list = res.data || [];
+      all.push(...list);
+      const total = Number(res.total || 0);
+      if (!list.length || list.length < 200 || (total > 0 && all.length >= total)) break;
+    }
+    // 分页中途失败时保留旧列表，避免只显示部分历史
+    if (!failed) tasks.value = all;
   } finally {
     tasksLoadBusy.value = false;
   }

@@ -95,6 +95,15 @@ async function handle(row: any): Promise<void> {
     }
 
     action = 0;
+    // 健康状态下的成功探测是最常见路径：只有历史失败计数需要清理时才写库，
+    // 避免每次探测都执行「+1 再清零」两次写入。
+    if (result.status && Number(row.status || 0) === 0) {
+      await query(
+        `UPDATE ${table('dmtask')} SET errcount = 0 WHERE id = ? AND status = 0 AND errcount <> 0`,
+        [row.id],
+      );
+      return;
+    }
     // 先原子计入本次结果再比较，否则并发执行会互相覆盖 errcount；cycle=2 实际要连续 3 次失败才切换。
     const inc: any = await query(
       `UPDATE ${table('dmtask')} SET errcount = errcount + 1 WHERE id = ? AND status = ?`,

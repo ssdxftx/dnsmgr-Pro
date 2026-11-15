@@ -115,10 +115,15 @@ async function load() {
 
 async function save() {
   saveBusy.value = true;
-  const res = await api('POST', '/optimize/settings', { ...form });
-  saveBusy.value = false;
-  if (res.code === 0) message.success(t('optimize.savedMsg'));
-  else message.error(res.msg);
+  try {
+    const res = await api('POST', '/optimize/settings', { ...form });
+    if (res.code === 0) message.success(t('optimize.savedMsg'));
+    else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 onMounted(load);

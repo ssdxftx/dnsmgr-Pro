@@ -57,7 +57,7 @@
         />
       </div>
       <div v-else-if="field.type === 'array' && field.items?.length" class="esa-field__array">
-        <div v-for="(item, index) in arrayValue" :key="index" class="esa-field__array-item">
+        <div v-for="(item, index) in arrayValue" :key="stableKey(item, index)" class="esa-field__array-item">
           <div class="esa-field__array-head">
             <span>#{{ index + 1 }}</span>
             <n-button size="tiny" quaternary type="error" @click="removeItem(index)">{{ t('cdnEsaApi.removeItem') }}</n-button>
@@ -114,6 +114,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { stableKey } from '../../lib/stableKey';
 import { useI18n } from 'vue-i18n';
 import { NButton, NDynamicTags, NInput, NInputNumber, NSwitch, NTag } from 'naive-ui';
 import EsaCardSelect from './EsaCardSelect.vue';

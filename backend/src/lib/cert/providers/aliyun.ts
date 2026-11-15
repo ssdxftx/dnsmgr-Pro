@@ -64,20 +64,24 @@ export class AliyunCert implements CertProvider {
 
     await new Promise((r) => setTimeout(r, 1000));
 
+    // 验证记录通常在 Apply 后很快生成，先直接查一次详情：拿到 DomainValidationList
+    // 就立即返回，不再同步等待最长 120 秒的签发状态轮询。
+    let detail = await this.request({ Action: 'GetInstanceDetail', InstanceId: instanceId }, true);
     let status = '';
-    let poll = 0;
-    do {
-      if (poll++ > 120) throw new Error('申请证书超时，请稍后重试');
+    for (let poll = 0; !detail?.DomainValidationList?.length; poll++) {
+      if (poll > 120) throw new Error('申请证书超时，请稍后重试');
       data = await this.request({ Action: 'GetTaskAttribute', TaskId: instanceId }, true);
       status = data.TaskStatus;
-      if (status === 'processing') {
-        await new Promise((r) => setTimeout(r, 1000));
-      } else if (status === 'failed') {
-        throw new Error('申请证书失败：' + data.TaskMessage);
+      if (status === 'failed') throw new Error('申请证书失败：' + data.TaskMessage);
+      if (status !== 'processing') {
+        detail = await this.request({ Action: 'GetInstanceDetail', InstanceId: instanceId }, true);
+        break;
       }
-    } while (status === 'processing');
-
-    data = await this.request({ Action: 'GetInstanceDetail', InstanceId: instanceId }, true);
+      await new Promise((r) => setTimeout(r, 1000));
+      // 每 3 秒补查一次详情，既能尽早返回验证记录，又避免每秒额外请求
+      if (poll % 3 === 2) detail = await this.request({ Action: 'GetInstanceDetail', InstanceId: instanceId }, true);
+    }
+    data = detail || (await this.request({ Action: 'GetInstanceDetail', InstanceId: instanceId }, true));
     const order: any = { InstanceId: instanceId };
 
     const dnsList: Record<string, any[]> = {};

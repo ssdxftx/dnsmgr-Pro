@@ -32,11 +32,27 @@ async function cdnForZone(aid: number, zoneId: string | null) {
   return provider;
 }
 
-async function insertTask(url: string, route: string, op: string, status: number, msg: string | null, taskId?: string | null, ownerUid = 0) {
-  await query(
-    `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime, owner_uid) VALUES (?, ?, ?, ?, ?, ?, NOW(), ?)`,
-    [url, op, route, taskId ?? null, status, msg, ownerUid],
-  );
+interface TaskHistoryRow {
+  url: string;
+  route: string;
+  op: string;
+  status: number;
+  msg: string | null;
+  taskId: string | null;
+  ownerUid: number;
+}
+
+/** 批量写历史，避免每个 URL 单独一次 INSERT */
+async function insertTasks(rows: TaskHistoryRow[]): Promise<void> {
+  // 每行 8 个占位符；SQLite 默认变量上限 999，按 100 行分批（800 个参数）
+  for (let i = 0; i < rows.length; i += 100) {
+    const chunk = rows.slice(i, i + 100);
+    const values = chunk.map(() => '(?, ?, ?, ?, ?, ?, NOW(), ?)').join(', ');
+    await query(
+      `INSERT INTO ${table('cdn_cache_task')} (url, type, provider, task_id, status, msg, addtime, owner_uid) VALUES ${values}`,
+      chunk.flatMap((r) => [r.url, r.op, r.route, r.taskId, r.status, r.msg, r.ownerUid]),
+    );
+  }
 }
 
 /** 按加速域名分组分发缓存操作（预热 / 清除缓存） */
@@ -45,6 +61,9 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
   const grouped: Record<string, { route: string; provider: any; urls: string[] }> = {};
   const providers: Record<string, any> = {};
   const failed: { url: string; msg: string }[] = [];
+  const history: TaskHistoryRow[] = [];
+  // 同一任务里多个 URL 常属于同一域名，按域名缓存一次查询结果
+  const domainCandidates = new Map<string, any[]>();
 
   for (const url of list) {
     const domain = domainFromUrl(url);
@@ -52,14 +71,18 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
       failed.push({ url, msg: 'URL 格式错误' });
       continue;
     }
-    const candidates: any[] = await query(
-      `SELECT D.* FROM ${table('cdn_domain')} D
-         JOIN ${table('cdn_account')} A ON D.aid = A.id
-        WHERE D.name = ?
-          AND (A.visibility <> 'private' OR A.owner_uid = ?)
-        ORDER BY CASE WHEN A.visibility = 'private' THEN 0 ELSE 1 END, D.id`,
-      [domain, ownerUid],
-    );
+    let candidates = domainCandidates.get(domain);
+    if (!candidates) {
+      candidates = await query(
+        `SELECT D.* FROM ${table('cdn_domain')} D
+           JOIN ${table('cdn_account')} A ON D.aid = A.id
+          WHERE D.name = ?
+            AND (A.visibility <> 'private' OR A.owner_uid = ?)
+          ORDER BY CASE WHEN A.visibility = 'private' THEN 0 ELSE 1 END, D.id`,
+        [domain, ownerUid],
+      );
+      domainCandidates.set(domain, candidates);
+    }
     const row: any = candidates[0];
     if (!row) {
       failed.push({ url, msg: `未找到加速域名 ${domain}` });
@@ -90,7 +113,7 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
     if (typeof fn !== 'function') {
       for (const u of g.urls) {
         failed.push({ url: u, msg: unsupported });
-        await insertTask(u, g.route, taskType, 1, unsupported, null, ownerUid);
+        history.push({ url: u, route: g.route, op: taskType, status: 1, msg: unsupported, taskId: null, ownerUid });
       }
       continue;
     }
@@ -100,13 +123,14 @@ async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: stri
     for (const u of g.urls) {
       if (taskId === false) {
         failed.push({ url: u, msg: errMsg || '提交失败' });
-        await insertTask(u, g.route, taskType, 1, errMsg, null, ownerUid);
+        history.push({ url: u, route: g.route, op: taskType, status: 1, msg: errMsg, taskId: null, ownerUid });
       } else {
         success++;
-        await insertTask(u, g.route, taskType, 0, null, typeof taskId === 'string' ? taskId : null, ownerUid);
+        history.push({ url: u, route: g.route, op: taskType, status: 0, msg: null, taskId: typeof taskId === 'string' ? taskId : null, ownerUid });
       }
     }
   }
+  await insertTasks(history);
   return { success, failed: failed.length };
 }
 

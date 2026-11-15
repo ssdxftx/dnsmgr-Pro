@@ -53,7 +53,7 @@ async function tick(): Promise<void> {
 
   const now = Math.floor(Date.now() / 1000);
   const rows = await query(
-    `SELECT * FROM ${table('dmtask')} WHERE checknexttime <= ? AND active = 1 ORDER BY id ASC`,
+    `SELECT * FROM ${table('dmtask')} WHERE checknexttime <= ? AND active = 1 ORDER BY checknexttime ASC, id ASC LIMIT 200`,
     [now]
   );
 

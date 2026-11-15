@@ -354,11 +354,13 @@ async function createSite() {
   }
 }
 
+let loadAllSeq = 0;
 async function loadAll() {
+  const seq = ++loadAllSeq;
   loadBusy.value = true;
-  zoneList.value = [];
   try {
     if (!accounts.value.length) await loadAccounts();
+    if (seq !== loadAllSeq) return;
     const qAid = Number(route.query.aid || 0);
     const targets = qAid
       ? accounts.value.filter((a: any) => a.id === qAid)
@@ -366,12 +368,13 @@ async function loadAll() {
     if (!targets.length) {
       // 无可用账户时回退到本地聚合接口
       const res = await api<any>('GET', '/cdn/zones');
+      if (seq !== loadAllSeq) return;
       if (res.code === 0) {
         zoneList.value = (res.data || []).map((z: any) => ({ ...z, key: `${z.aid}:${z.zone_id}` }));
       } else {
         message.error(res.msg);
       }
-      return;
+      return; // 失败时保留旧列表
     }
     // 全账户拉取云端站点（含尚未接入域名的站点）。账号多时限制 4 并发，
     // 避免浏览器同时排队几十个请求、抢占当前页面带宽。
@@ -393,9 +396,10 @@ async function loadAll() {
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
+    if (seq !== loadAllSeq) return;
     zoneList.value = results.flat();
   } finally {
-    loadBusy.value = false;
+    if (seq === loadAllSeq) loadBusy.value = false;
   }
 }
 

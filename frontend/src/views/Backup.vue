@@ -24,7 +24,7 @@
 
     <n-card :bordered="false">
       <template #header>{{ t('backup.jobsTitle') }}</template>
-      <ResponsiveDataTable :columns="jobColumns" :data="jobs" :loading="loading" :empty-text="t('backup.jobsEmpty')" />
+      <ResponsiveDataTable :columns="jobColumns" :data="jobs" :loading="loading" :empty-text="t('backup.jobsEmpty')" :pagination="{ pageSize: 20 }" />
     </n-card>
 
     <n-card :bordered="false">
@@ -351,15 +351,28 @@ async function loadMaint() {
 async function loadAll() {
   loading.value = true;
   try {
+    const loadAllJobs = async () => {
+      const all: any[] = [];
+      for (let page = 1; page <= 50; page++) {
+        const res = await api<any>('GET', '/backup/jobs', { page, size: 200 });
+        if (res.code !== 0) return res;
+        const list = res.data || [];
+        all.push(...list);
+        const total = Number(res.total || 0);
+        if (!list.length || list.length < 200 || (total > 0 && all.length >= total)) break;
+      }
+      return { code: 0, data: all };
+    };
     const [k, j, d, s] = await Promise.all([
       api<any>('GET', '/backup/key/status'),
-      api<any>('GET', '/backup/jobs'),
+      loadAllJobs(),
       api<any>('GET', '/backup/destinations'),
       api<any>('GET', '/backup/schedules'),
       loadMaint(),
     ]);
     keyReady.value = !!k?.data?.configured;
-    jobs.value = j?.data || [];
+    // 任务分页中途失败时保留旧列表，不被空数组覆盖
+    if (j?.code === 0) jobs.value = j.data || [];
     destinations.value = d?.data || [];
     schedules.value = s?.data || [];
   } catch (e: any) {

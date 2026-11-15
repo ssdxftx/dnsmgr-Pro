@@ -74,7 +74,7 @@
           <div class="rule-editor__ladder">
             <section
               v-for="(br, bi) in form.eoBranches"
-              :key="bi"
+              :key="stableKey(br, bi)"
               class="rule-editor__branch"
               :class="{ 'rule-editor__branch--else': br.type === 'else' }"
               :style="{ '--i': bi }"
@@ -119,7 +119,7 @@
                   spellcheck="false"
                 />
                 <div v-else class="rule-editor__conds">
-                  <template v-for="(grp, gi) in br.orGroups" :key="gi">
+                  <template v-for="(grp, gi) in br.orGroups" :key="stableKey(grp, gi)">
                     <div v-if="gi > 0" class="rule-editor__or-divider">Or</div>
                     <div class="rule-editor__group">
                       <div class="rule-editor__group-head">
@@ -135,7 +135,7 @@
                         </n-space>
                       </div>
                       <div class="rule-editor__cond-list">
-                        <div v-for="(it, ii) in grp.items" :key="ii" class="rule-editor__cond-row">
+                        <div v-for="(it, ii) in grp.items" :key="stableKey(it, ii)" class="rule-editor__cond-row">
                           <ConditionPicker
                             kind="target"
                             :model-value="it.target"
@@ -208,7 +208,7 @@
                 <div class="rule-editor__actions-caption">
                   <span class="rule-editor__actions-caption-text">{{ t('cdnRules.actionTitle') }}</span>
                 </div>
-                <div v-for="(a, ai) in br.actions" :key="ai" class="rule-editor__group rule-editor__group--action">
+                <div v-for="(a, ai) in br.actions" :key="stableKey(a, ai)" class="rule-editor__group rule-editor__group--action">
                   <div class="rule-editor__group-head">
                     <ActionPicker
                       :model-value="a.name"
@@ -262,6 +262,7 @@
 
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
+import { stableKey } from '../../lib/stableKey';
 import { useI18n } from 'vue-i18n';
 import {
   NAlert, NButton, NDynamicTags, NForm, NFormItem, NIcon, NInput, NInputNumber,

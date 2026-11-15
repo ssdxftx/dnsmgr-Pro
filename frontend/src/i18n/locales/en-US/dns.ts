@@ -242,6 +242,7 @@ export default {
     emailPlaceholder: 'Leave blank to use the system default mailbox',
     resultTitle: 'Check Result',
     resultOk: 'Normal',
+    checkFailed: 'Check failed',
     neverRun: 'Not Checked',
     lastCheck: 'Last Check',
     issueCount: '{count} issue(s)',

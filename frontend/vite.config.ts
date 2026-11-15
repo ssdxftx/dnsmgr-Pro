@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import Components from 'unplugin-vue-components/vite';
+import { NaiveUiResolver } from 'unplugin-vue-components/resolvers';
 import pkg from './package.json' with { type: 'json' };
 
 // 开发/预览隧道域名改为显式放行：通配整个 trycloudflare.com 会把任意临时隧道
@@ -11,7 +13,12 @@ const extraAllowedHosts = (process.env.VITE_ALLOWED_HOSTS || '')
 const allowedHosts = ['.monkeycode-ai.online', ...extraAllowedHosts];
 
 export default defineConfig({
-  plugins: [vue()],
+  plugins: [
+    vue(),
+    // naive-ui 组件按模板实际使用情况自动导入，避免全量 app.component() 注册
+    // 把整套组件库静态拉进入口 chunk。
+    Components({ resolvers: [NaiveUiResolver()], dts: false, dirs: [] }),
+  ],
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { createPrivateKey, randomBytes, X509Certificate } from 'node:crypto';
 import { domainToASCII } from 'node:url';
-import { readFileSync, existsSync } from 'node:fs';
+import { existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join } from 'node:path';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
@@ -27,6 +27,22 @@ import { emitEvent } from '../lib/events.js';
 import { legacyApiAuth } from '../lib/legacyApi.js';
 
 const LOG_DIR = logDir();
+const LOG_TAIL_BYTES = 500_000;
+
+/** 只读取日志末尾，避免证书/部署日志增长后阻塞事件循环并占用大量内存 */
+function readLogTail(file: string, maxBytes = LOG_TAIL_BYTES): string {
+  const st = statSync(file);
+  const size = Math.min(st.size, maxBytes);
+  if (size <= 0) return '';
+  const buf = Buffer.alloc(size);
+  const fd = openSync(file, 'r');
+  try {
+    readSync(fd, buf, 0, size, st.size - size);
+  } finally {
+    closeSync(fd);
+  }
+  return buf.toString('utf8');
+}
 
 // 密钥类型/长度白名单：防止超大 keysize 同步生成 RSA 密钥阻塞事件循环（DoS）
 const VALID_KEY_SIZES: Record<string, string[]> = { RSA: ['2048', '3072', '4096'], ECC: ['256', '384', '521'] };
@@ -365,15 +381,9 @@ export default async function certRoutes(app: FastifyInstance) {
       where += ' AND A.id = ?';
       params.push(id);
     } else if (domain) {
-      const oids = await query(`SELECT oid FROM ${table('cert_domain')} WHERE domain LIKE ? ESCAPE '!'`, ['%' + escapeLike(String(domain)) + '%']);
-      // 用占位符绑定，避免把库中 oid 值直接拼进 SQL 文本（二次注入）
-      const oidNums = oids.map((o: any) => Number(o.oid)).filter((n: number) => Number.isInteger(n) && n > 0);
-      if (oidNums.length) {
-        where += ' AND A.id IN (' + oidNums.map(() => '?').join(',') + ')';
-        params.push(...oidNums);
-      } else {
-        where += ' AND 1=0';
-      }
+      // 用 EXISTS 子查询替代先查 oid 再拼 IN (...)，避免匹配域名较多时超过 SQLite 参数上限
+      where += ` AND EXISTS (SELECT 1 FROM ${table('cert_domain')} CD WHERE CD.oid = A.id AND CD.domain LIKE ? ESCAPE '!')`;
+      params.push('%' + escapeLike(String(domain)) + '%');
     }
     if (aid) {
       where += ' AND A.aid = ?';
@@ -794,20 +804,27 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!processid) return { code: -1, msg: '无日志' };
     const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: -1, msg: '日志文件不存在' };
-    return { code: 0, data: readFileSync(file, 'utf8') };
+    return { code: 0, data: readLogTail(file) };
   });
 
   // ============ CNAME 代理 ============
   app.get('/api/cert/cnames', auth, async (req: any) => {
+    const size = clampLimit(req.query?.size, 200, 200);
+    const offset = Math.min(clampOffset(req.query?.offset), 1_000_000);
+    const where = `(C.visibility IS NULL OR C.visibility <> 'private' OR C.owner_uid = ?)`;
     const rows: any[] = await query(
       `SELECT A.*, B.name AS cnamedomain, C.visibility AS account_visibility, C.owner_uid AS account_owner
          FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id
-         LEFT JOIN ${table('account')} C ON B.aid = C.id ORDER BY A.id DESC`,
+         LEFT JOIN ${table('account')} C ON B.aid = C.id
+        WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
+      [Number(req.user.uid), size, offset],
     );
-    return {
-      code: 0,
-      data: rows.filter((r) => r.account_visibility !== 'private' || Number(r.account_owner) === Number(req.user.uid)),
-    };
+    const totalRow: any = await queryOne(
+      `SELECT COUNT(*) AS c FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id
+        LEFT JOIN ${table('account')} C ON B.aid = C.id WHERE ${where}`,
+      [Number(req.user.uid)],
+    );
+    return { code: 0, data: rows, total: Number(totalRow?.c || 0), size };
   });
 
   app.post('/api/cert/cnames', auth, async (req: any) => {
@@ -1070,8 +1087,8 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!processid) return { code: 0, data: '' };
     const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: 0, data: '' };
-    const text = readFileSync(file, 'utf8');
-    return { code: 0, data: text.length > 500_000 ? text.slice(-500_000) : text };
+    const text = readLogTail(file);
+    return { code: 0, data: text };
   });
 
   app.post('/api/deploy/tasks/:id/reset', auth, async (req: any, reply: any) => {

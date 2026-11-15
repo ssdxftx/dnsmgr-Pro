@@ -172,41 +172,43 @@ export class GoEdgeDns implements DnsProvider {
       return false;
     }
     const hasLocalFilter = !!SubDomain || !!Value || !!Status;
-    const offset = hasLocalFilter ? 0 : Math.max(0, (PageNumber - 1) * PageSize);
-    const pageSize = hasLocalFilter ? 1000 : Math.max(1, PageSize);
-    const payload: Record<string, any> = {
-      nsDomainId: Number(this.domainid),
-      offset,
-      size: pageSize,
-    };
-    if (KeyWord) payload.keyword = KeyWord;
-    if (_Type) payload.type = _Type;
-    if (Line) payload.nsRouteCode = this.routeCodes(Line)[0];
+    const basePayload: Record<string, any> = { nsDomainId: Number(this.domainid) };
+    if (KeyWord) basePayload.keyword = KeyWord;
+    if (_Type) basePayload.type = _Type;
+    if (Line) basePayload.nsRouteCode = this.routeCodes(Line)[0];
     try {
-      const data = await this.request('/NSRecordService/listNSRecords', payload);
-      let list: RecordInfo[] = [];
-      for (const record of data.nsRecords || []) {
-        const row = this.normalizeRecord(record);
-        if (SubDomain && row.Name.toLowerCase() !== SubDomain.toLowerCase()) continue;
-        if (Value && !row.Value.toLowerCase().includes(Value.toLowerCase())) continue;
-        if (Status && row.Status !== Status) continue;
-        list.push(row);
-      }
-      let total = list.length;
-      if (!hasLocalFilter) {
-        // 当前页长度不是总数：必须查 count，否则 page*pageSize>=total 会在第一页就结束索引。
-        total = offset + list.length + (list.length >= pageSize ? 1 : 0);
-        try {
-          const countData = await this.request('/NSRecordService/countNSRecords', { nsDomainId: Number(this.domainid) });
-          const n = Number(countData?.count);
-          if (Number.isFinite(n) && n >= 0) total = Math.max(n, offset + list.length);
-        } catch {
-          // count 接口不可用时保留“满页则至少还有下一页”的下界语义
+      if (hasLocalFilter) {
+        // 本地过滤必须翻页拉全量，固定 size=1000 会在记录超过 1000 条时漏记录
+        const matched: RecordInfo[] = [];
+        let offset = 0;
+        for (let page = 0; page < 200; page++) {
+          const data = await this.request('/NSRecordService/listNSRecords', { ...basePayload, offset, size: 1000 });
+          const batch: any[] = Array.isArray(data.nsRecords) ? data.nsRecords : [];
+          for (const record of batch) {
+            const row = this.normalizeRecord(record);
+            if (SubDomain && row.Name.toLowerCase() !== SubDomain.toLowerCase()) continue;
+            if (Value && !row.Value.toLowerCase().includes(Value.toLowerCase())) continue;
+            if (Status && row.Status !== Status) continue;
+            matched.push(row);
+          }
+          if (batch.length < 1000) break;
+          offset += batch.length;
         }
-      } else {
         const offsetLocal = Math.max(0, (PageNumber - 1) * PageSize);
-        total = list.length;
-        list = list.slice(offsetLocal, offsetLocal + Math.max(1, PageSize));
+        return { total: matched.length, list: matched.slice(offsetLocal, offsetLocal + Math.max(1, PageSize)) };
+      }
+      const offset = Math.max(0, (PageNumber - 1) * PageSize);
+      const pageSize = Math.max(1, PageSize);
+      const data = await this.request('/NSRecordService/listNSRecords', { ...basePayload, offset, size: pageSize });
+      const list: RecordInfo[] = (data.nsRecords || []).map((record: any) => this.normalizeRecord(record));
+      // 当前页长度不是总数：必须查 count，否则 page*pageSize>=total 会在第一页就结束索引。
+      let total = offset + list.length + (list.length >= pageSize ? 1 : 0);
+      try {
+        const countData = await this.request('/NSRecordService/countNSRecords', { nsDomainId: Number(this.domainid) });
+        const n = Number(countData?.count);
+        if (Number.isFinite(n) && n >= 0) total = Math.max(n, offset + list.length);
+      } catch {
+        // count 接口不可用时保留“满页则至少还有下一页”的下界语义
       }
       return { total, list };
     } catch (e: any) {

@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { configEnsure, configGet, configSet } from '../../config.js';
 import { keyCheck, readArchiveHeader } from './archive.js';
 import { deriveKek } from '../vault/keys.js';
+import { withDistributedLockResult } from '../scheduler/distLock.js';
 
 const KEY_NAME = 'backup_key';
 const PREV_KEY_NAME = 'backup_key_prev';
@@ -78,16 +79,25 @@ export async function rotateBackupKey(): Promise<Buffer> {
   if (envBackupKey()) {
     throw new Error('备份密钥由环境变量 DNSMGR_BACKUP_KEY 托管，请直接更换该变量后重启服务');
   }
-  const old = await getBackupKey();
-  const key = randomBytes(32);
-  if (old) {
-    // 先写历史再覆盖当前：任一步失败都不会丢失可用于解密的旧密钥
-    const history = (await getBackupKeyHistory()).filter((k) => !k.equals(old) && !k.equals(key));
-    const next = [old, ...history].slice(0, KEEP_PREV_KEYS).map((k) => k.toString('base64url'));
-    await configSet(PREV_KEY_NAME, JSON.stringify(next));
-  }
-  await configSet(KEY_NAME, key.toString('base64url'));
-  return key;
+  // 多副本同时轮换会各自读取同一个旧值并覆盖 backup_key_prev，导致历史归档永久不可解密。
+  const outcome = await withDistributedLockResult(
+    'dnsmgr:backup-key-rotate',
+    async () => {
+      const old = await getBackupKey();
+      const key = randomBytes(32);
+      if (old) {
+        // 先写历史再覆盖当前：任一步失败都不会丢失可用于解密的旧密钥
+        const history = (await getBackupKeyHistory()).filter((k) => !k.equals(old) && !k.equals(key));
+        const next = [old, ...history].slice(0, KEEP_PREV_KEYS).map((k) => k.toString('base64url'));
+        await configSet(PREV_KEY_NAME, JSON.stringify(next));
+      }
+      await configSet(KEY_NAME, key.toString('base64url'));
+      return key;
+    },
+    10,
+  );
+  if (!outcome.locked || !outcome.result) throw new Error('备份密钥轮换正在进行，请稍后重试');
+  return outcome.result;
 }
 
 export async function hasBackupKey(): Promise<boolean> {

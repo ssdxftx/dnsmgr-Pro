@@ -108,6 +108,7 @@ export async function detectCloudflareProxy(
   fullDomain: string,
   type: string,
   actual: string[],
+  resolver: (domain: string, type: string) => Promise<string[]> = localResolve,
 ): Promise<{ proxied: boolean; actual: string[] }> {
   const recordType = String(type ?? '').toUpperCase();
   // 只有 CNAME 才可能因 Cloudflare 代理而解析到 CF IP。
@@ -116,7 +117,7 @@ export async function detectCloudflareProxy(
   if (recordType !== 'CNAME') return { proxied: false, actual };
   if (isCloudflareProxyValues(actual)) return { proxied: true, actual };
   if (recordType === 'CNAME') {
-    const [v4, v6] = await Promise.all([localResolve(fullDomain, 'A'), localResolve(fullDomain, 'AAAA')]);
+    const [v4, v6] = await Promise.all([resolver(fullDomain, 'A'), resolver(fullDomain, 'AAAA')]);
     const ips = [...v4, ...v6];
     if (isCloudflareProxyValues(ips)) return { proxied: true, actual: ips };
   }

@@ -291,9 +291,11 @@ async function dbHasAdmin(cfg: DbConfig, prefix: string): Promise<boolean> {
       db.exec('PRAGMA busy_timeout = 5000');
       const row = db.prepare(`SELECT 1 FROM "${prefix}user" WHERE level >= 2 LIMIT 1`).get();
       return !!row;
-    } catch {
-      // 表不存在 = 还没有管理员，交给向导建号；其他异常保守按「有管理员」处理
-      return false;
+    } catch (e: any) {
+      // 只有「表不存在」才说明还没有管理员；busy/locked、文件损坏等查询失败必须
+      // 保守按已有管理员处理，否则会向半成品库重复插入 level 2 账号。
+      if (/no such table/i.test(String(e?.message || e))) return false;
+      return true;
     } finally {
       db?.close?.();
     }

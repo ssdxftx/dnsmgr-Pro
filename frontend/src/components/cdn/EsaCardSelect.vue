@@ -120,6 +120,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { NButton, NIcon, NInput } from 'naive-ui';
 import { AddOutline, CheckmarkOutline, ChevronDownOutline, CloseOutline } from '@vicons/ionicons5';
 import { useI18n } from 'vue-i18n';
+import { useResponsive } from '../../composables/useResponsive';
 
 export interface EsaCardOption {
   label: string;
@@ -170,7 +171,7 @@ const keyword = ref('');
 const rootRef = ref<HTMLElement | null>(null);
 const panelRef = ref<HTMLElement | null>(null);
 const teleportTarget = ref<string | HTMLElement>('body');
-const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth);
+const { width: viewportWidth } = useResponsive();
 
 const values = computed<any[]>(() => {
   if (!props.multiple) return [props.modelValue];
@@ -310,20 +311,26 @@ function onKeydown(event: KeyboardEvent) {
   open.value = false;
 }
 
-function onResize() {
-  viewportWidth.value = window.innerWidth;
-}
+watch(open, (visible) => {
+  if (visible) {
+    document.addEventListener('pointerdown', onDocumentPointerDown);
+    document.addEventListener('keydown', onKeydown);
+  } else {
+    document.removeEventListener('pointerdown', onDocumentPointerDown);
+    document.removeEventListener('keydown', onKeydown);
+  }
+});
 
 onMounted(() => {
-  document.addEventListener('pointerdown', onDocumentPointerDown);
-  document.addEventListener('keydown', onKeydown);
-  window.addEventListener('resize', onResize);
+  if (open.value) {
+    document.addEventListener('pointerdown', onDocumentPointerDown);
+    document.addEventListener('keydown', onKeydown);
+  }
 });
 
 onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', onDocumentPointerDown);
   document.removeEventListener('keydown', onKeydown);
-  window.removeEventListener('resize', onResize);
 });
 </script>
 

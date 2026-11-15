@@ -2,6 +2,7 @@ import { Aliyun } from '../../clients/Aliyun.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
+import { cachedDetail } from '../detailCache.js';
 
 const scopeMap: Record<string, string> = { mainland_china: 'domestic', overseas: 'overseas', global: 'global' };
 
@@ -13,9 +14,11 @@ function sanitizeUrlList(urls: string[]): string {
 export class AliyunCDN implements CdnProvider {
   private client: Aliyun;
   private error = '';
+  private cacheId: string;
 
   constructor(config: Record<string, any>) {
     this.client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, 'cdn.aliyuncs.com', '2018-05-10');
+    this.cacheId = String(config.AccessKeyId || '');
   }
 
   getError() {
@@ -51,10 +54,12 @@ export class AliyunCDN implements CdnProvider {
       Sources: JSON.stringify(sources),
     };
     if (!(await this.call(param))) return false;
-    for (let i = 0; i < 10; i++) {
+    // 创建后 CNAME 由上游异步分配：立即查一次，短暂等待后再查一次即可。
+    // 原来 10 次 × 1 秒的同步轮询会让批量接入 50 个域名阻塞约 500 秒。
+    for (let i = 0; i < 2; i++) {
       const cname = await this.getDomainCname(domain);
       if (cname) return cname;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 700));
     }
     this.error = '未获取到 CNAME，请稍后在列表刷新重试';
     return false;
@@ -75,10 +80,12 @@ export class AliyunCDN implements CdnProvider {
       if (!data) return false;
       const pageData = data.Domains?.PageData || [];
       // 单个域名的详情/配置查询彼此独立，用 4 并发替代逐域名串行 2N 次请求
-      const pageItems = await mapPool(pageData, 4, async (d: any) => {
-        let detail: any = {};
-        const dr = await this.call({ Action: 'DescribeCdnDomainDetail', DomainName: d.DomainName });
-        if (dr) detail = dr.GetDomainDetailModel || {};
+      const pageItems = await mapPool(pageData, 8, async (d: any) => {
+        const detailRaw = await cachedDetail(`aliyun:${this.cacheId}:detail:${d.DomainName}`, 30_000, async () => {
+          const dr = await this.call({ Action: 'DescribeCdnDomainDetail', DomainName: d.DomainName });
+          return dr ? dr.GetDomainDetailModel || {} : null;
+        });
+        const detail: any = detailRaw || {};
         const origins: string[] = [];
         let port = 0;
         let srcs: any[] = [];
@@ -93,7 +100,9 @@ export class AliyunCDN implements CdnProvider {
         }
         let forceRedirect = false;
         const httpsEnabled = String(detail.ServerCertificateStatus || '').toLowerCase() === 'on';
-        const cfg = await this.call({ Action: 'DescribeCdnDomainConfigs', DomainName: d.DomainName, FunctionNames: 'https_force' });
+        const cfg = await cachedDetail(`aliyun:${this.cacheId}:https-force:${d.DomainName}`, 30_000, () =>
+          this.call({ Action: 'DescribeCdnDomainConfigs', DomainName: d.DomainName, FunctionNames: 'https_force' }),
+        );
         if (cfg) {
           for (const c of cfg.DomainConfigs?.DomainConfig || []) {
             if (c.FunctionName !== 'https_force') continue;
@@ -167,10 +176,9 @@ export class AliyunCDN implements CdnProvider {
     await this.call({ Action: 'BatchDeleteCdnDomainConfig', DomainNames: domain, FunctionNames: functionNames });
   }
 
-  // 移植自 multi-cloud-cdn AliyunDomainServiceImpl.saveCacheRules：
-  // 先删除旧的 filetype_based_ttl_set/path_based_ttl_set 再按新规则下发；后缀规则用 filetype_based_ttl_set，weight 按条数递减表示优先级
+  // 先下发新规则，成功后再删除未被新规则覆盖的旧 function：避免删除成功但设置失败时配置被清空。
   async setCacheRules(domain: string, rules: any[]) {
-    await this.deleteDomainConfig(domain, 'filetype_based_ttl_set,path_based_ttl_set');
+    const managedNames = ['filetype_based_ttl_set', 'path_based_ttl_set'];
     const list = rules.filter((r) => {
       const p = normalizeValue(r?.path);
       return p !== '' && p !== '*';
@@ -209,10 +217,17 @@ export class AliyunCDN implements CdnProvider {
         functions.push(buildTtlFunction('path_based_ttl_set', 'path', normalizeValue(parsed.value), ttl, weight--));
       }
     }
-    if (!functions.length) return true;
-    return (
-      (await this.call({ Action: 'BatchSetCdnDomainConfig', DomainNames: domain, Functions: JSON.stringify(functions) })) !== false
-    );
+    if (!functions.length) {
+      await this.deleteDomainConfig(domain, managedNames.join(','));
+      return true;
+    }
+    const ok =
+      (await this.call({ Action: 'BatchSetCdnDomainConfig', DomainNames: domain, Functions: JSON.stringify(functions) })) !== false;
+    if (!ok) return false;
+    const used = new Set(functions.map((f) => f.functionName));
+    const stale = managedNames.filter((name) => !used.has(name));
+    if (stale.length) await this.deleteDomainConfig(domain, stale.join(','));
+    return true;
   }
 
   // 移植自 multi-cloud-cdn AliyunDomainServiceImpl.httpsConfiguration / forcedToJump：
@@ -256,17 +271,26 @@ export class AliyunCDN implements CdnProvider {
 
   async setAccess(domain: string, config: Record<string, any>): Promise<boolean> {
     const functions = this.buildAccessFunctions(config);
-    const names = [
+    const managed = [
       'referer_white_list_set',
       'referer_black_list_set',
       'ip_allow_list_set',
       'ip_black_list_set',
       'ua_black_list_set',
       'ua_white_list_set',
-    ].join(',');
-    await this.deleteDomainConfig(domain, names);
-    if (!functions.length) return true;
-    return (await this.call({ Action: 'BatchSetCdnDomainConfig', DomainNames: domain, Functions: JSON.stringify(functions) })) !== false;
+    ];
+    if (!functions.length) {
+      await this.deleteDomainConfig(domain, managed.join(','));
+      return true;
+    }
+    // 先设新配置，成功后再删除未使用的旧 function，失败时保留原防盗链配置。
+    if ((await this.call({ Action: 'BatchSetCdnDomainConfig', DomainNames: domain, Functions: JSON.stringify(functions) })) === false) {
+      return false;
+    }
+    const used = new Set(functions.map((f: any) => String(f.functionName)));
+    const stale = managed.filter((name) => !used.has(name));
+    if (stale.length) await this.deleteDomainConfig(domain, stale.join(','));
+    return true;
   }
 
   private buildAccessFunctions(config: Record<string, any>): any[] {

@@ -24,6 +24,20 @@ interface DomainCtx {
   service: CloudflareEnhanceService;
 }
 
+/** 有界并发：批量上游调用串行在 100 条时会线性叠加超时 */
+async function runLimited<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const worker = async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await fn(items[index], index);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 async function enhanceConfig(acct: any): Promise<Record<string, any>> {
   try {
     return await loadAccountConfig(acct);
@@ -496,17 +510,17 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       let addedCount = 0;
       const failedHostnames: string[] = [];
       const warnings: string[] = [];
-      for (const hostname of hostnames) {
+      await runLimited(hostnames, 5, async (hostname) => {
         if (!checkDomainFormat(hostname)) {
           failedHostnames.push(`${hostname}（格式不正确）`);
-          continue;
+          return;
         }
         try {
           await ctx.service.createCustomHostname(ctx.domain.thirdid, hostname, origin || null, sslMethod, minTlsVersion);
           addedCount++;
         } catch (e: any) {
           failedHostnames.push(`${hostname}（${e?.message || '失败'}）`);
-          continue;
+          return;
         }
         // 审计日志失败不能反向把已创建成功的主机名计为创建失败。
         try {
@@ -514,7 +528,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         } catch (e: any) {
           warnings.push(`${hostname}（日志写入失败：${e?.message || '未知错误'}）`);
         }
-      }
+      });
 
       let message = `批量添加完成：成功 ${addedCount} 个`;
       if (failedHostnames.length) message += `，失败 ${failedHostnames.length} 个：${failedHostnames.join('; ')}`;
@@ -605,11 +619,11 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       let deletedCount = 0;
       const failures: string[] = [];
       const warnings: string[] = [];
-      for (const hostnameId of hostnameIds) {
+      await runLimited(hostnameIds, 5, async (hostnameId) => {
         const id = String(hostnameId ?? '').trim();
         if (!id) {
           failures.push('(空 ID)');
-          continue;
+          return;
         }
         let hostname = '';
         try {
@@ -619,14 +633,14 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
           deletedCount++;
         } catch (e: any) {
           failures.push(`${id}${hostname ? '（' + hostname + '）' : ''}：${e?.message || '删除失败'}`);
-          continue;
+          return;
         }
         try {
           await addLog(req.user.uid, ctx.domain.name, '批量删除自定义主机名', hostname);
         } catch (e: any) {
           warnings.push(`${hostname || id}（日志写入失败）`);
         }
-      }
+      });
       let message = `批量删除完成：成功 ${deletedCount} 个`;
       if (failures.length) message += `，失败 ${failures.length} 个：${failures.join('; ')}`;
       if (warnings.length) message += `，警告 ${warnings.length} 条`;
@@ -663,7 +677,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       let updatedCount = 0;
       const failures: string[] = [];
       const warnings: string[] = [];
-      for (const hostnameId of hostnameIds) {
+      await runLimited(hostnameIds, 5, async (hostnameId) => {
         let hostname = '';
         try {
           const current = await ctx.service.getCustomHostname(ctx.domain.thirdid, hostnameId);
@@ -676,7 +690,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
           updatedCount++;
         } catch (e: any) {
           failures.push(`${hostnameId}${hostname ? '（' + hostname + '）' : ''}：${e?.message || '修改失败'}`);
-          continue;
+          return;
         }
         try {
           await addLog(
@@ -688,7 +702,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         } catch {
           warnings.push(`${hostname || hostnameId}（日志写入失败）`);
         }
-      }
+      });
       let message = `批量修改完成：成功 ${updatedCount} 个`;
       if (failures.length) message += `，失败 ${failures.length} 个：${failures.join('; ')}`;
       if (warnings.length) message += `，警告 ${warnings.length} 条`;

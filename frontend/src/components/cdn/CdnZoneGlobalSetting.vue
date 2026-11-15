@@ -230,12 +230,17 @@ async function save() {
     AccelerateMainland: { Switch: zone.accelerateMainland ? 'on' : 'off' },
   };
   saveBusy.value = true;
-  const res = await api<any>('POST', '/cdn/zones/setting', { aid: props.aid, zone_id: props.zoneId, setting: cfg });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg || t('cdnZoneSetting.saved'));
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/cdn/zones/setting', { aid: props.aid, zone_id: props.zoneId, setting: cfg });
+    if (res.code === 0) {
+      message.success(res.msg || t('cdnZoneSetting.saved'));
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 watch(() => [props.aid, props.zoneId], load, { immediate: true });

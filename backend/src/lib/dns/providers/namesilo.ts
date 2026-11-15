@@ -8,6 +8,9 @@ export class NamesiloDns implements DnsProvider {
   private version = '1';
   private error = '';
   private domain: string;
+  private recordsCache: { at: number; list: RecordInfo[] } | null = null;
+  /** 接口一次返回整区，记录查找直接取全量，避免逐页重复下载同一个 Zone */
+  readonly clientPaged = true;
 
   constructor(config: Record<string, any>) {
     this.apikey = config.apikey || '';
@@ -77,22 +80,29 @@ export class NamesiloDns implements DnsProvider {
     Value: string | null = null,
     Type: string | null = null,
   ): Promise<RecordListResult | false> {
-    const data = await this.sendRequest('dnsListRecords', { domain: this.domain });
-    if (!data) return false;
-    let list: RecordInfo[] = (data.resource_record || []).map((row: any) => ({
-      RecordId: String(row.record_id),
-      Domain: this.domain,
-      Name: row.host,
-      Type: row.type,
-      Value: row.value,
-      Line: 'default',
-      TTL: row.ttl,
-      MX: row.distance ?? null,
-      Status: '1',
-      Weight: null,
-      Remark: null,
-      UpdateTime: null,
-    }));
+    let list: RecordInfo[];
+    const cached = this.recordsCache && Date.now() - this.recordsCache.at < 15_000 ? this.recordsCache.list : null;
+    if (cached) {
+      list = cached;
+    } else {
+      const data = await this.sendRequest('dnsListRecords', { domain: this.domain });
+      if (!data) return false;
+      list = (data.resource_record || []).map((row: any) => ({
+        RecordId: String(row.record_id),
+        Domain: this.domain,
+        Name: row.host,
+        Type: row.type,
+        Value: row.value,
+        Line: 'default',
+        TTL: row.ttl,
+        MX: row.distance ?? null,
+        Status: '1',
+        Weight: null,
+        Remark: null,
+        UpdateTime: null,
+      }));
+      this.recordsCache = { at: Date.now(), list };
+    }
     if (SubDomain) {
       list = list.filter((v) => v.Name.toLowerCase() === SubDomain.toLowerCase());
     } else {
@@ -122,6 +132,7 @@ export class NamesiloDns implements DnsProvider {
     const param: Record<string, any> = { domain: this.domain, rrtype: Type, rrhost: host, rrvalue: Value, rrttl: TTL };
     if (Type === 'MX') param.rrdistance = Number(MX);
     const data = await this.sendRequest('dnsAddRecord', param);
+    if (data && data.record_id) this.recordsCache = null;
     return data && data.record_id ? String(data.record_id) : false;
   }
 
@@ -129,11 +140,15 @@ export class NamesiloDns implements DnsProvider {
     const host = Name === '@' ? '' : Name;
     const param: Record<string, any> = { domain: this.domain, rrid: RecordId, rrtype: Type, rrhost: host, rrvalue: Value, rrttl: TTL };
     if (Type === 'MX') param.rrdistance = Number(MX);
-    return (await this.sendRequest('dnsUpdateRecord', param)) !== false;
+    const ok = (await this.sendRequest('dnsUpdateRecord', param)) !== false;
+    if (ok) this.recordsCache = null;
+    return ok;
   }
 
   async deleteDomainRecord(RecordId: string) {
-    return (await this.sendRequest('dnsDeleteRecord', { domain: this.domain, rrid: RecordId })) !== false;
+    const ok = (await this.sendRequest('dnsDeleteRecord', { domain: this.domain, rrid: RecordId })) !== false;
+    if (ok) this.recordsCache = null;
+    return ok;
   }
 
   async setDomainRecordStatus(_RecordId: string, _Status: string) {

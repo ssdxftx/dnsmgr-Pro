@@ -337,6 +337,14 @@ const authUserCache = new Map<number, { user: any; at: number }>();
 const AUTH_USER_CACHE_MS = 2000;
 
 const apiKeyLastTouch = new Map<number, number>();
+const API_KEY_TOUCH_MAX = 10_000;
+function touchApiKey(id: number, now: number): void {
+  if (!apiKeyLastTouch.has(id) && apiKeyLastTouch.size >= API_KEY_TOUCH_MAX) {
+    const oldest = apiKeyLastTouch.keys().next().value;
+    if (oldest !== undefined) apiKeyLastTouch.delete(oldest);
+  }
+  apiKeyLastTouch.set(id, now);
+}
 
 (app as any).decorate('authenticate', async function (req: any, reply: any) {
   // 用户级 API Key：仅接受请求头，避免被日志/Referer 泄露；仍按用户等级执行全部权限校验
@@ -412,7 +420,7 @@ const apiKeyLastTouch = new Map<number, number>();
     if (keyRow) {
       const last = apiKeyLastTouch.get(apiKeyId) || 0;
       if (Date.now() - last > 60_000) {
-        apiKeyLastTouch.set(apiKeyId, Date.now());
+        touchApiKey(apiKeyId, Date.now());
         query(
           `UPDATE ${table('api_key')} SET last_used_at = NOW(), last_used_ip = ? WHERE id = ?`,
           [String(req.ip || '').slice(0, 64), apiKeyId],
@@ -644,6 +652,17 @@ async function cleanAuditLog(): Promise<void> {
       )
       : await query(
         `DELETE FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000`,
+      );
+    if (!res?.affectedRows) break;
+  }
+  // 事件投递记录只保留 90 天，否则事件风暴会让表无限增长。
+  for (let i = 0; i < 20; i++) {
+    const res: any = getDbType() === 'sqlite'
+      ? await query(
+        `DELETE FROM ${table('event_delivery')} WHERE id IN (SELECT id FROM ${table('event_delivery')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000)`,
+      )
+      : await query(
+        `DELETE FROM ${table('event_delivery')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000`,
       );
     if (!res?.affectedRows) break;
   }

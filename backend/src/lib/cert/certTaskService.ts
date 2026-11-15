@@ -168,9 +168,21 @@ async function renewExpiringOrders(days: number): Promise<number> {
 
 async function continueRunningOrders(): Promise<number> {
   const rows = await findRunningOrders();
-  for (const row of rows) {
-    await processOrder(row.id);
-  }
+  // 单个订单可能因 DNS 验证等待数分钟；有限并发推进，避免一个慢订单堵住整轮续签。
+  const concurrency = Math.min(3, rows.length);
+  let cursor = 0;
+  const worker = async () => {
+    for (;;) {
+      const index = cursor++;
+      if (index >= rows.length) return;
+      try {
+        await processOrder(rows[index].id);
+      } catch (e: any) {
+        console.log(`[cert] 订单 ${rows[index].id} 推进失败: ${e?.message || e}`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: concurrency }, worker));
   return rows.length;
 }
 
@@ -196,8 +208,9 @@ export async function certTaskRun(): Promise<void> {
 
   const days = Number(await configGet('cert_renewdays', '7')) || 7;
   const renewed = await renewExpiringOrders(days);
-  const continued = await continueRunningOrders();
-  const deployed = await deployPendingTasks();
+  // 订单签发可能被 ACME 的 DNS 验证等待数分钟；部署任务与之并行推进，
+  // 否则同一轮里已签发证书的部署会被慢订单饿死。
+  const [continued, deployed] = await Promise.all([continueRunningOrders(), deployPendingTasks()]);
   if (renewed || continued || deployed) {
     console.log(`[cert] 本轮调度：续签 ${renewed} 个、推进 ${continued} 个订单、部署 ${deployed} 个任务`);
   }

@@ -61,7 +61,7 @@
 
     <n-card :bordered="false">
       <template #header>{{ t('myBackup.jobsTitle') }}</template>
-      <ResponsiveDataTable :columns="columns" :data="jobs" :loading="loading" :empty-text="t('myBackup.jobsEmpty')" />
+      <ResponsiveDataTable :columns="columns" :data="jobs" :loading="loading" :empty-text="t('myBackup.jobsEmpty')" :pagination="{ pageSize: 20 }" />
     </n-card>
   </div>
 </template>
@@ -138,7 +138,19 @@ async function load() {
   loading.value = true;
   loadError.value = false;
   try {
-    const [v, j] = await Promise.all([api<any>('GET', '/vault/status'), api<any>('GET', '/backup/jobs?mine=1')]);
+    const loadAllJobs = async () => {
+      const all: any[] = [];
+      for (let page = 1; page <= 50; page++) {
+        const res = await api<any>('GET', '/backup/jobs', { mine: 1, page, size: 200 });
+        if (res.code !== 0) return res;
+        all.push(...(res.data || []));
+        const total = Number(res.total || 0);
+        const list = res.data || [];
+        if (!list.length || list.length < 200 || (total > 0 && all.length >= total)) break;
+      }
+      return { code: 0, data: all };
+    };
+    const [v, j] = await Promise.all([api<any>('GET', '/vault/status'), loadAllJobs()]);
     if (v.code !== 0 || j.code !== 0) throw new Error(v.msg || j.msg || 'load failed');
     vault.value = v?.data || {};
     jobs.value = (j?.data || []).filter((x: any) => x.scope === 'user');

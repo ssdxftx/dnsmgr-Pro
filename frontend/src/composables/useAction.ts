@@ -17,7 +17,8 @@ export function useAction() {
     try {
       return await fn();
     } finally {
-      busy[key] = false;
+      // 删除而不是置 false：行级 key 会随翻页/切换持续增加，长期会话下 Map 会无界增长
+      delete busy[key];
     }
   }
 

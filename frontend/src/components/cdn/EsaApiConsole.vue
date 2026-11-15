@@ -20,7 +20,7 @@
                 <span class="esa-group__name">{{ group.label }}</span>
                 <span class="esa-group__count">{{ group.count }}</span>
               </button>
-              <div v-show="expanded[group.name]" class="esa-group__body">
+              <div v-if="expanded[group.name]" class="esa-group__body">
                 <div v-for="leaf in group.leaves" :key="leaf.key" class="esa-leaf">
                   <div class="esa-leaf__title">{{ leaf.title }}</div>
                   <button
@@ -242,7 +242,8 @@ const arrayTables = computed(() => {
     const keys = [...new Set(value.slice(0, 20).flatMap((row) => (row && typeof row === 'object' ? Object.keys(row) : [])))].slice(0, 14);
     out.push({
       key,
-      rows: value,
+      // 大数组默认只渲染前 500 行，避免一次性把整份上游结果塞进 DOM
+      rows: value.length > 500 ? value.slice(0, 500) : value,
       columns: keys.map((k) => ({
         title: k,
         key: k,
@@ -391,7 +392,9 @@ async function loadCatalog() {
       return;
     }
     catalog.value = res.data;
-    for (const group of groups.value) expanded[group.name] = true;
+    // 默认只展开第一个分组，避免目录动作多时首屏创建数千个按钮节点
+    const firstGroup = groups.value[0];
+    if (firstGroup) expanded[firstGroup.name] = true;
     const allActions = leaves.value.flatMap((leaf) => leaf.actions);
     const first = allActions.find((action) => catalog.value?.actions[action]?.op === 'read') || allActions[0];
     if (first) selectAction(first);

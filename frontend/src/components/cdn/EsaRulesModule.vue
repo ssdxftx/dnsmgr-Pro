@@ -52,6 +52,7 @@
       :loading="ruleLoadBusy"
       :empty-text="t('esaZone.empty')"
       :error="!!ruleLoadError"
+      :pagination="rulePagination"
       @retry="loadRules"
     />
   </div>
@@ -106,11 +107,32 @@ const dialog = useDialog();
 const { busy, run } = useAction();
 
 const ruleList = ref<any[]>([]);
+const rulePage = ref(1);
+const rulePageSize = ref(20);
+const ruleTotal = ref(0);
+const rulePagination = computed(() => ({
+  page: rulePage.value,
+  pageSize: rulePageSize.value,
+  itemCount: ruleTotal.value,
+  showSizePicker: true,
+  pageSizes: [20, 50, 100],
+  onChange: (p: number) => {
+    rulePage.value = p;
+    void loadRules();
+  },
+  onUpdatePageSize: (s: number) => {
+    rulePageSize.value = s;
+    rulePage.value = 1;
+    void loadRules();
+  },
+}));
 const ruleLoadBusy = ref(false);
 const ruleLoadError = ref('');
 const ruleSaveBusy = ref(false);
 const ruleKind = ref(props.onlyKind || 'RedirectRule');
 const ruleSchema = ref<any>(null);
+const schemaCache = new Map<string, any>();
+let rulesLoadSeq = 0;
 const showRuleEditor = ref(false);
 const ruleEditingId = ref('');
 const ruleInitial = ref<any>(null);
@@ -145,6 +167,10 @@ function selectEsaCategory(key: string) {
 
 function selectEsaKind(kind: string) {
   ruleKind.value = kind;
+  rulePage.value = 1;
+  // 切类型后旧列表已不属于当前 kind，先清空，加载失败时不能把它当成新类型的数据
+  ruleList.value = [];
+  ruleTotal.value = 0;
   loadRules();
 }
 
@@ -152,6 +178,9 @@ function onPickEsaKind(kind: string) {
   const meta = esaKindMeta(kind);
   if (meta) esaCategory.value = meta.category;
   ruleKind.value = kind;
+  rulePage.value = 1;
+  ruleList.value = [];
+  ruleTotal.value = 0;
   showKindPicker.value = false;
   loadRuleSchemaForKind().then(() => {
     loadRules();
@@ -160,41 +189,49 @@ function onPickEsaKind(kind: string) {
 }
 
 async function loadRuleSchemaForKind() {
-  const res = await api<any>('GET', `/cdn/accounts/${props.aid}/rule-schema`, { kind: ruleKind.value });
-  if (res.code === 0) ruleSchema.value = res.data;
+  const kind = ruleKind.value;
+  const cacheKey = `${props.aid}:${kind}`;
+  if (schemaCache.has(cacheKey)) {
+    ruleSchema.value = schemaCache.get(cacheKey);
+    return;
+  }
+  const res = await api<any>('GET', `/cdn/accounts/${props.aid}/rule-schema`, { kind });
+  if (kind !== ruleKind.value) return;
+  if (res.code === 0) {
+    schemaCache.set(cacheKey, res.data);
+    ruleSchema.value = res.data;
+  }
 }
 
 async function loadRules(): Promise<boolean> {
+  const seq = ++rulesLoadSeq;
   ruleLoadBusy.value = true;
   ruleLoadError.value = '';
   let ok = true;
   try {
     await loadRuleSchemaForKind();
-    const all: any[] = [];
-    for (let page = 1; page <= 20; page++) {
-      const res = await api<any>('GET', `/cdn/accounts/${props.aid}/rule-configs`, {
-        zoneId: props.zoneId,
-        kind: ruleKind.value,
-        page,
-        size: 100,
-      });
-      if (res.code !== 0) {
-        ok = false;
-        ruleLoadError.value = res.msg || t('esaZone.loadFailed');
-        break;
-      }
-      const list = res.data?.list || [];
-      all.push(...list);
-      const total = Number(res.data?.total || 0);
-      if (list.length < 100 || all.length >= total) break;
+    if (seq !== rulesLoadSeq) return false;
+    // 服务端分页：只拉当前页，避免规则多时连续 20 次请求并一次渲染上千行 DOM
+    const res = await api<any>('GET', `/cdn/accounts/${props.aid}/rule-configs`, {
+      zoneId: props.zoneId,
+      kind: ruleKind.value,
+      page: rulePage.value,
+      size: rulePageSize.value,
+    });
+    if (seq !== rulesLoadSeq) return false;
+    if (res.code !== 0) {
+      ok = false;
+      ruleLoadError.value = res.msg || t('esaZone.loadFailed');
+    } else {
+      ruleList.value = res.data?.list || [];
+      ruleTotal.value = Number(res.data?.total || 0);
     }
-    ruleList.value = all;
   } catch (e: any) {
+    if (seq !== rulesLoadSeq) return false;
     ok = false;
     ruleLoadError.value = e?.message || t('esaZone.loadFailed');
-    ruleList.value = [];
   } finally {
-    ruleLoadBusy.value = false;
+    if (seq === rulesLoadSeq) ruleLoadBusy.value = false;
   }
   return ok;
 }
@@ -296,6 +333,7 @@ function delRule(row: any) {
       });
       if (res.code === 0) {
         message.success(res.msg);
+        if (ruleList.value.length === 1 && rulePage.value > 1) rulePage.value--;
         loadRules();
       } else message.error(res.msg);
     },

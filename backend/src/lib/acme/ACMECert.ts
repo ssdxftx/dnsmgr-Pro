@@ -135,6 +135,37 @@ function parseAkiKeyId(der: Buffer): string {
 
 export class ACMECert extends ACMEv2 {
   private alternateChains: string[] = [];
+  private requestChain: Promise<unknown> = Promise.resolve();
+
+  /**
+   * ACME JWS 的 nonce 是单值状态，并发签名会复用 nonce 触发 badNonce。
+   * 把网络请求串行化、但让每个 challenge 的退避等待相互重叠：
+   * 100 个 SAN 不再依次等待 255 秒，而是最多等待最慢的一个 challenge。
+   */
+  private serializedRequest<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.requestChain.then(fn, fn);
+    this.requestChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  private async validateChallenge(opts: any): Promise<void> {
+    this.log('Notifying server for validation of ' + opts.domain);
+    await this.serializedRequest(() => this.request(opts.challenge_url, {}));
+
+    this.log('Waiting for server challenge validation');
+    await this.sleep(1000);
+
+    let body: any;
+    if (!(await this.poll('pending', opts.auth_url, (b) => (body = b)))) {
+      this.log('Validation failed: ' + opts.domain);
+      const error = body?.challenges?.[0]?.error;
+      throw this.createACMEException(error?.type || 'connection', 'Challenge validation failed: ' + (error?.detail || opts.domain));
+    }
+    this.log('Validation successful: ' + opts.domain);
+  }
 
   async register(termsOfServiceAgreed = false, contacts: string[] = []): Promise<string> {
     return this._register(termsOfServiceAgreed, contacts);
@@ -313,22 +344,8 @@ export class ACMECert extends ACMEv2 {
     }
 
     if (order.challenges?.length) {
-      for (const opts of order.challenges) {
-        this.log('Notifying server for validation of ' + opts.domain);
-        await this.request(opts.challenge_url, {});
-
-        this.log('Waiting for server challenge validation');
-        await this.sleep(1000);
-
-        let body: any;
-        if (!(await this.poll('pending', opts.auth_url, (b) => (body = b)))) {
-          this.log('Validation failed: ' + opts.domain);
-          const error = body.challenges[0].error;
-          throw this.createACMEException(error.type, 'Challenge validation failed: ' + error.detail);
-        } else {
-          this.log('Validation successful: ' + opts.domain);
-        }
-      }
+      // 各 challenge 的 DNS 验证彼此独立；并发等待验证结果，网络请求仍由 serializedRequest 串行化
+      await Promise.all(order.challenges.map((opts: any) => this.validateChallenge(opts)));
     }
   }
 
@@ -611,7 +628,7 @@ export class ACMECert extends ACMEv2 {
   private async poll(initial: string, type: string, setRet: (v: any) => void): Promise<boolean> {
     const maxTries = 10;
     for (let i = 0; i < maxTries; i++) {
-      const ret = await this.request(type);
+      const ret = await this.serializedRequest(() => this.request(type));
       const body = ret.body;
       setRet(body);
       if (body.status !== initial) return body.status === 'valid';

@@ -30,7 +30,7 @@ import {
   uploadToDestination,
 } from '../lib/backup/destinations.js';
 import { saveUpload, releaseTemp } from '../lib/backup/upload.js';
-import { contentDisposition } from '../lib/util.js';
+import { contentDisposition, clampLimit } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { publicError } from '../lib/util.js';
@@ -132,10 +132,21 @@ export default async function backupRoutes(app: FastifyInstance) {
     // 管理员默认看到整站任务；个人页传 mine=1，只返回自己的备份，
     // 避免「我的备份」列出并可删除其他用户的个人备份。
     const mine = String(req.query?.mine || '') === '1';
-    const rows = admin && !mine
-      ? await query(`SELECT * FROM ${table('backup_job')} ORDER BY id DESC LIMIT 200`)
-      : await query(`SELECT * FROM ${table('backup_job')} WHERE owner_uid = ? ORDER BY id DESC LIMIT 200`, [req.user.uid]);
-    return { code: 0, data: rows };
+    const size = clampLimit(req.query?.size, 200, 200);
+    const offset = (clampLimit(req.query?.page, 1, 10000) - 1) * size;
+    const pageOffset = Math.min(offset, 1_000_000);
+    let rows: any[];
+    let total = 0;
+    if (admin && !mine) {
+      rows = await query(`SELECT * FROM ${table('backup_job')} ORDER BY id DESC LIMIT ? OFFSET ?`, [size, pageOffset]);
+      const c: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('backup_job')}`);
+      total = Number(c?.c || 0);
+    } else {
+      rows = await query(`SELECT * FROM ${table('backup_job')} WHERE owner_uid = ? ORDER BY id DESC LIMIT ? OFFSET ?`, [req.user.uid, size, pageOffset]);
+      const c: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('backup_job')} WHERE owner_uid = ?`, [req.user.uid]);
+      total = Number(c?.c || 0);
+    }
+    return { code: 0, data: rows, total, size };
   });
 
   app.get('/api/backup/jobs/:id/download', auth, async (req: any, reply: any) => {

@@ -116,6 +116,7 @@ function option(): any {
     series: props.series.map((s, i) => {
       const type = s.chart === 'bar' ? 'bar' : 'line';
       return {
+        id: s.key || s.label,
         name: s.label,
         type,
         yAxisIndex: props.dual && i > 0 ? 1 : 0,
@@ -136,7 +137,7 @@ function option(): any {
 function render() {
   if (!el.value) return;
   if (!chart) chart = echarts.init(el.value);
-  chart.setOption(option(), { notMerge: true, lazyUpdate: true });
+  chart.setOption(option(), { replaceMerge: ['series'], lazyUpdate: true });
 }
 
 onMounted(() => {

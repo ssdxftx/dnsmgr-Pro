@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('optimize.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('optimize.mainDomain')" filterable remote :loading="domainLoadBusy" @search="onDomainSearch" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -115,13 +115,23 @@ function toggleIpType(v: string, checked: boolean) {
   form.ip_type = ipTypeSelect.value.join(',');
 }
 
+let domainSearchTimer: number | undefined;
+let domainSearchSeq = 0;
+function onDomainSearch(kw: string) {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+  // 250ms 防抖：避免每输入一个字符就发一次远程搜索
+  domainSearchTimer = window.setTimeout(() => void loadDomains(kw), 250);
+}
+
 async function loadDomains(kw = '') {
+  const seq = ++domainSearchSeq;
   domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/optimize/domains', kw ? { kw } : undefined);
+    if (seq !== domainSearchSeq) return;
     if (res.code === 0) domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id }));
   } finally {
-    domainLoadBusy.value = false;
+    if (seq === domainSearchSeq) domainLoadBusy.value = false;
   }
 }
 

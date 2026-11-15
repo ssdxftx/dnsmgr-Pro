@@ -129,8 +129,21 @@ export function saveDbConfig(cfg: DbConfig): void {
     const rel = path.relative(resolveDataDir(), saved.db_file);
     if (rel && !rel.startsWith('..') && !path.isAbsolute(rel)) saved.db_file = rel;
   }
-  // 含数据库密码，显式以 0600 权限写入，避免同机其他用户读取
-  fs.writeFileSync(CONF_PATH, JSON.stringify(saved, null, 2), { mode: 0o600 });
+  // 含数据库密码，显式以 0600 权限写入，避免同机其他用户读取。
+  // 先写临时文件再原子 rename：进程崩溃时不会留下截断的 JSON 导致下次启动连错数据库。
+  const tmp = CONF_PATH + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(saved, null, 2), { mode: 0o600 });
+    fs.chmodSync(tmp, 0o600);
+    fs.renameSync(tmp, CONF_PATH);
+  } catch (e) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      // 临时文件可能尚未创建
+    }
+    throw e;
+  }
   try {
     fs.chmodSync(CONF_PATH, 0o600);
   } catch {

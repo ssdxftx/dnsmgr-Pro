@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { MetricAgg, ProviderCatalog } from './catalog/types.js';
 import type { MetricSeries, ProviderCard } from './catalog/result.js';
 import type { StatisticsDomain } from './types.js';
@@ -82,7 +83,17 @@ export async function buildProviderCard(
     .map((a) => a.id)
     .sort((x, y) => x - y)
     .join(',');
-  const key = `${input.route}|${formatTime(start)}|${formatTime(end)}|${acctIds}`;
+  // 域名集合变化（新增/删除加速域名）必须产生新 key，否则 2 分钟缓存期内仍返回旧聚合。
+  const domainDigest = createHash('sha256')
+    .update(
+      input.accounts
+        .flatMap((a) => a.domains.map((d) => `${d.name}|${d.route}|${d.zoneId || ''}|${d.serviceArea || ''}`))
+        .sort()
+        .join('\n'),
+    )
+    .digest('hex')
+    .slice(0, 16);
+  const key = `${input.route}|${formatTime(start)}|${formatTime(end)}|${acctIds}|${domainDigest}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data;
 

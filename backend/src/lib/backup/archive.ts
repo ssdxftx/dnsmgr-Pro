@@ -88,10 +88,32 @@ export function resolveArchivePath(fileName: string): string {
   return path.join(backupsDir(), base);
 }
 
-async function writeChunk(ws: NodeJS.WritableStream, text: string): Promise<void> {
-  if (!ws.write(text)) {
-    await new Promise<void>((resolve) => ws.once('drain', resolve));
-  }
+async function writeChunk(ws: NodeJS.WritableStream, text: string, getError?: () => Error | null): Promise<void> {
+  if (getError?.()) throw getError();
+  if (ws.write(text)) return;
+  await new Promise<void>((resolve, reject) => {
+    const stream = ws as any;
+    const cleanup = () => {
+      stream.off?.('drain', onDrain);
+      stream.off?.('error', onError);
+    };
+    const onDrain = () => {
+      cleanup();
+      const err = getError?.();
+      if (err) reject(err);
+      else resolve();
+    };
+    const onError = (err: any) => {
+      cleanup();
+      reject(err || getError?.() || new Error('归档写入失败'));
+    };
+    stream.once('drain', onDrain);
+    stream.once('error', onError);
+    // 错误可能已在 write() 返回 false 之前发生，此时不会再等到 drain/error；
+    // 直接根据已记录的错误或流状态结束 Promise，避免归档任务永久挂起。
+    if (getError?.()) onError(getError());
+    else if (stream.destroyed || stream.writableEnded) onError(new Error('归档写入流已关闭'));
+  });
 }
 
 /**
@@ -109,6 +131,14 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
 
   const gz = createGzip({ level: 6 });
   const ws = createWriteStream(tmp, { mode: 0o600 });
+  let streamError: Error | null = null;
+  const rememberError = (err: any) => {
+    streamError = err instanceof Error ? err : new Error(String(err));
+  };
+  // 必须尽早挂载 error 监听：写盘失败可能在任意一次 write 的同一 tick 抛出，
+  // 只在所有写入结束后注册会留下 uncaughtException 或永久 pending 的 drain Promise。
+  gz.on('error', rememberError);
+  ws.on('error', rememberError);
   try {
     gz.on('data', (c: Buffer) => {
       hash.update(c);
@@ -116,31 +146,53 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     });
     gz.pipe(ws);
 
-    await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{');
+    await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{', () => streamError);
     let firstTable = true;
     for await (const t of draft.tables()) {
-      if (!firstTable) await writeChunk(gz, ',');
+      if (streamError) throw streamError;
+      if (!firstTable) await writeChunk(gz, ',', () => streamError);
       firstTable = false;
       // data 必须边读边写；行数只有写完才知道，因此把 rows 统计放到 data 之后。
       // 导入端按字段名解析，字段顺序不影响兼容性。
-      await writeChunk(gz, JSON.stringify(t.name) + ':{"columns":' + JSON.stringify(t.columns) + ',"data":[');
+      await writeChunk(gz, JSON.stringify(t.name) + ':{"columns":' + JSON.stringify(t.columns) + ',"data":[', () => streamError);
       let rowCount = 0;
       for await (const row of t.rows) {
-        if (rowCount) await writeChunk(gz, ',');
-        await writeChunk(gz, JSON.stringify(row));
+        if (rowCount) await writeChunk(gz, ',', () => streamError);
+        await writeChunk(gz, JSON.stringify(row), () => streamError);
         rowCount++;
       }
       stats.tables[t.name] = { rows: rowCount, columns: t.columns };
-      await writeChunk(gz, '],"rows":' + rowCount + '}');
+      await writeChunk(gz, '],"rows":' + rowCount + '}', () => streamError);
     }
     if (draft.header.vault) stats.vault = draft.header.vault;
-    await writeChunk(gz, '}}');
+    await writeChunk(gz, '}}', () => streamError);
     gz.end();
     await new Promise<void>((resolve, reject) => {
-      ws.once('finish', resolve);
-      ws.once('error', reject);
-      gz.once('error', reject);
+      const stream = ws as any;
+      const cleanup = () => {
+        stream.off?.('finish', onFinish);
+        stream.off?.('error', onError);
+        stream.off?.('close', onClose);
+      };
+      const onFinish = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (err: any) => {
+        cleanup();
+        reject(err);
+      };
+      const onClose = () => {
+        if (ws.writableFinished) return;
+        cleanup();
+        reject(streamError || new Error('归档写入流提前关闭'));
+      };
+      ws.once('finish', onFinish);
+      ws.once('error', onError);
+      ws.once('close', onClose);
+      if (streamError) onError(streamError);
     });
+    if (streamError) throw streamError;
 
     checksum = hash.digest('hex');
     const iv = randomBytes(12);
@@ -173,6 +225,10 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     } finally {
       await fd.close();
     }
+  } catch (e) {
+    // 目标归档可能已创建但未写完，失败时删除半成品，避免占满备份目录
+    await unlink(outPath).catch(() => undefined);
+    throw e;
   } finally {
     // 无论成功失败都清理包含明文的 gzip 临时文件
     await unlink(tmp).catch(() => undefined);

@@ -3,6 +3,8 @@ import { findRecordById } from '../recordLookup.js';
 import { safeFetchDeploy } from '../../netGuard.js';
 
 export class TechnitiumDns implements DnsProvider {
+  /** 厂商接口无分页参数：列表由本地切片，按 ID 查找时一次取全量即可，避免逐页重复请求 */
+  readonly clientPaged = true;
   private url: string;
   private token: string;
   private error = '';
@@ -163,7 +165,10 @@ export class TechnitiumDns implements DnsProvider {
         if (Type) list = list.filter((v) => v.Type === Type);
         if (Status) list = list.filter((v) => v.Status === Status);
       }
-      return { total: list.length, list };
+      const total = list.length;
+    const page = Math.max(1, Number(_PageNumber) || 1);
+    const size = Math.max(1, Number(_PageSize) || 20);
+    return { total, list: list.slice((page - 1) * size, page * size) };
     }
     return false;
   }
@@ -250,8 +255,14 @@ export class TechnitiumDns implements DnsProvider {
       let oldValue = (oldRecord.rData?.appName ?? '') + ' ' + (oldRecord.rData?.classPath ?? '');
       if (oldRecord.rData?.recordData) oldValue += ' ' + oldRecord.rData.recordData;
       if (oldValue !== Value.trimEnd() || domain !== newDomain) {
-        await this.deleteDomainRecord(RecordId);
-        return (await this.addDomainRecord(Name, Type, Value, _Line, TTL, MX, _Weight, Remark)) !== false;
+        // 先创建新记录再删除旧记录：删除失败最多留下重复记录，避免先删后加失败导致解析中断。
+        const added = await this.addDomainRecord(Name, Type, Value, _Line, TTL, MX, _Weight, Remark);
+        if (!added) return false;
+        if (!(await this.deleteDomainRecord(RecordId))) {
+          this.error = '新记录已创建，但旧 APP 记录删除失败，请手动清理重复记录';
+          return false;
+        }
+        return true;
       }
     }
     const params: Record<string, any> = { domain, zone: this.domain, type: oldRecord.type, ttl: Number(TTL) };

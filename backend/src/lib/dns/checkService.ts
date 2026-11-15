@@ -35,8 +35,8 @@ export interface CheckProxied {
   actual: string[];
 }
 
-/** 拉取某域名全部记录（分页） */
-async function fetchAllRecords(provider: any): Promise<any[]> {
+/** 拉取某域名全部记录（分页）；返回 error 时不得把空列表当成“检测通过” */
+async function fetchAllRecords(provider: any): Promise<{ list: any[]; error?: string }> {
   let list: any[] = [];
   let pageSize = 500;
   let prevPageSig = '';
@@ -44,19 +44,20 @@ async function fetchAllRecords(provider: any): Promise<any[]> {
   // 10 页会在小页厂商（如京东云 99 条/页）下截断到 990 条；放宽到 200 页并优先用 total 终止。
   for (let page = 1; page <= 200; page++) {
     const res = await provider.getDomainRecords(page, 500, null, null, null, null, null, null);
-    if (res === false || !res.list || !res.list.length) break;
+    if (res === false) return { list, error: provider.getError?.() || '云端解析记录获取失败' };
+    if (!res.list || !res.list.length) break;
     // 部分厂商忽略分页参数，每次都返回同一份全量列表；页签名一致即视为没有下一页，
     // 否则会把记录重复拼接 10 次，导致告警数量与外部 DNS 调用被放大。
     const pageSig = JSON.stringify([res.list.length, sigOf(res.list[0]), sigOf(res.list[res.list.length - 1])]);
     if (page > 1 && pageSig === prevPageSig) break;
     prevPageSig = pageSig;
-    list = list.concat(res.list);
+    list.push(...res.list);
     const total = Number((res as any).total);
     if (Number.isFinite(total) && total > 0 && list.length >= total) break;
     if (page === 1) pageSize = res.list.length;
     if (res.list.length < pageSize) break;
   }
-  return list;
+  return { list };
 }
 
 /** 某域名的可选检测子域名（记录中的非 @ 子域名前缀） */
@@ -67,7 +68,7 @@ export async function listSubDomains(did: number): Promise<string[]> {
   if (!acct) return [];
   const provider: any = getDnsProvider(acct.type, await loadAccountConfig(acct), d.name, d.thirdid);
   if (!provider) return [];
-  const list = await fetchAllRecords(provider);
+  const { list } = await fetchAllRecords(provider);
   const subs = new Set<string>();
   for (const r of list) {
     const name = String(r.Name ?? '').trim();
@@ -103,7 +104,9 @@ export async function checkDomainRecords(
     scopeAdmin = isAdmin || whole;
   }
 
-  const list = await fetchAllRecords(provider);
+  const fetched = await fetchAllRecords(provider);
+  if (fetched.error) return { total: 0, issues: [], proxied: [], error: fetched.error };
+  const list = fetched.list;
 
   const subNorm = sub ? String(sub).trim().toLowerCase().replace(/\.+$/, '') : '';
   // 检测目标域名集合：普通用户未选子域名时为其所有接入域名，否则为指定子域名
@@ -142,15 +145,27 @@ export async function checkDomainRecords(
     targetsToCheck.push({ name: r.Name, type: r.Type, value, fullDomain });
   }
 
+  // 同一任务内同名同类型记录只解析一次：通配符、根域和同名多值记录此前会重复解析。
+  const resolveCache = new Map<string, Promise<string[]>>();
+  const resolveOnce = (domain: string, type: string): Promise<string[]> => {
+    const key = `${domain}|${String(type || '').toUpperCase()}`;
+    let task = resolveCache.get(key);
+    if (!task) {
+      task = localResolve(domain, type);
+      resolveCache.set(key, task);
+    }
+    return task;
+  };
+
   // 受限并发解析：每条记录解析失败会退化到 DoH（最长 6s），串行在 N 大时可达数秒
   const CONCURRENCY = 10;
   let cursor = 0;
   const worker = async () => {
     while (cursor < targetsToCheck.length) {
       const c = targetsToCheck[cursor++];
-      const actual = await localResolve(c.fullDomain, c.type);
+      const actual = await resolveOnce(c.fullDomain, c.type);
       if (actual.length && recordValueMatches(String(c.value), actual)) continue;
-      const cf = await detectCloudflareProxy(c.fullDomain, c.type, actual);
+      const cf = await detectCloudflareProxy(c.fullDomain, c.type, actual, resolveOnce);
       if (cf.proxied) {
         proxied.push({ name: c.name, type: c.type, value: String(c.value), actual: cf.actual });
         continue;
@@ -199,7 +214,18 @@ export async function executeCheckTasks(): Promise<number> {
     if (!claim || !claim.affectedRows) continue;
     // 逐条隔离：单个域名检测/通知异常不应中断其余任务（next_run 已推进，异常不隔离会静默漏掉整轮）
     try {
-      const { issues } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
+      const { issues, error } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
+      if (error) {
+        // 云端记录拉取失败（401/403/429/超时等）必须显式落库失败状态，
+        // 不能把空列表当成“检测通过”。
+        await query(
+          `UPDATE ${table('dns_check_task')} SET last_status = ?, issue_count = 0 WHERE id = ?`,
+          [-1, t.id],
+        );
+        console.error('[dnscheck] 任务 ' + t.id + ' 云端解析获取失败:', error);
+        run++;
+        continue;
+      }
       // 结果落库，供前端展示真实异常数（此前只发邮件，页面无从得知）
       const issueCount = issues ? issues.length : 0;
       await query(

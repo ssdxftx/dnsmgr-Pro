@@ -160,6 +160,9 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.ip_type || !task.recordnum || !task.ttl) {
       return { code: -1, msg: '必填项不能为空' };
     }
+    if (!Number.isInteger(task.ttl) || task.ttl < 1 || task.ttl > 604800) {
+      return { code: -1, msg: 'TTL 必须是 1-604800 之间的整数' };
+    }
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.recordnum < 1) return { code: -1, msg: '解析数量不能少于1个' };
     if (task.recordnum > 50) return { code: -1, msg: '解析数量不能超过50个' };
@@ -192,6 +195,9 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     };
     if (!task.did || !task.rr || !task.ip_type || !task.recordnum || !task.ttl) {
       return { code: -1, msg: '必填项不能为空' };
+    }
+    if (!Number.isInteger(task.ttl) || task.ttl < 1 || task.ttl > 604800) {
+      return { code: -1, msg: 'TTL 必须是 1-604800 之间的整数' };
     }
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
     if (task.recordnum < 1) return { code: -1, msg: '解析数量不能少于1个' };

@@ -43,17 +43,8 @@ export function isPrivateIp(ip: string): boolean {
 // 校验主机名（IP 或域名）解析后的地址不能是内网地址
 export async function assertHostAllowed(host: string): Promise<void> {
   if (privateFetchAllowed()) return;
-  const h = String(host || '').replace(/^\[|\]$/g, '');
-  if (!h) throw new Error('地址不能为空');
-  if (net.isIP(h)) {
-    if (isPrivateIp(h)) throw new Error('禁止访问内网地址');
-    return;
-  }
-  const addrs = await lookup(h, { all: true }).catch(() => []);
-  if (!addrs.length) throw new Error('域名解析失败');
-  for (const a of addrs) {
-    if (isPrivateIp(a.address)) throw new Error('禁止访问内网地址');
-  }
+  // 复用 pinnedDispatcherFor 的 30 秒解析缓存，避免同一次 ACME 请求连续解析两次
+  await resolveForPin(String(host || ''), isPrivateIp, '禁止访问内网地址');
 }
 
 // 校验待请求的 URL：仅允许 http/https，且解析后的地址不能是内网地址

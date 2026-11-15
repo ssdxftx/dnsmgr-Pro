@@ -1,4 +1,9 @@
 import { randomBytes } from 'node:crypto';
+import { createReadStream, createWriteStream } from 'node:fs';
+import { mkdir, rmdir, unlink } from 'node:fs/promises';
+import { createInterface } from 'node:readline';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { query, table, listColumns } from '../../db.js';
 import { isGeneratedColumn } from '../../db/types.js';
@@ -6,7 +11,7 @@ import { getSysKey } from '../../config.js';
 import { APP_VERSION } from '../version.js';
 import { fmtDateTime } from '../util.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS, kdfParamsFromStored, unwrapDek, wrapDek } from '../vault/keys.js';
-import { archiveFileName, backupsDir, ensureDataDirs, writeArchive, type ArchiveStats, type ArchiveTableChunk } from './archive.js';
+import { archiveFileName, backupsDir, ensureDataDirs, resolveArchivePath, tmpDir, writeArchive, type ArchiveStats, type ArchiveTableChunk } from './archive.js';
 import { ensureBackupKey, getBackupKey } from './key.js';
 import { encodeRow, EXCLUDE_COLUMNS, TABLES, type BackupTable } from './manifest.js';
 import { readSnapshot, type SnapshotRead } from './snapshot.js';
@@ -42,18 +47,15 @@ interface UserContext {
   taskIds: Set<number>;
 }
 
-const USER_SKIP_TABLES = new Set<string>([
-  'config',
-  'announcement',
-  'domain_category',
-  'optimizeip',
-  'sctask',
-  'cdn_preheat_task',
-  'cdn_cache_task',
-  'reg_code',
-  'event_subscription',
-  'backup_destination',
-  'backup_schedule',
+// 个人备份只导出个人导入流程能够恢复的表。导出侧与导入侧必须使用同一份范围，
+// 否则归档里会包含域名/解析/任务/证书等数据，恢复时被静默跳过，用户却看到“导入成功”。
+const USER_EXPORT_TABLES = new Set<string>([
+  'user',
+  'user_vault',
+  'api_key',
+  'account',
+  'cdn_account',
+  'cert_account',
 ]);
 
 async function buildUserContext(read: SnapshotRead, uid: number): Promise<UserContext> {
@@ -211,7 +213,7 @@ function siteFilter(name: string, ex: SiteExclusions) {
     if (name === 'dmlog') return !ex.tasks.has(Number(row.taskid));
     if (name === 'cdn_domain') return !ex.cdnDomains.has(Number(row.id));
     if (name === 'cdn_cache_rule') return !ex.cdnDomains.has(Number(row.did));
-    if (name === 'cf_rule_credential') return !ex.cdnAccounts.has(Number(row.aid));
+    if (name === 'cf_rule_credential') return !ex.accounts.has(Number(row.aid));
     if (name === 'cert_order') return !ex.certOrders.has(Number(row.id));
     if (name === 'cert_domain' || name === 'cert_deploy') return !ex.certOrders.has(Number(row.oid));
     return true;
@@ -252,7 +254,7 @@ function userFilter(name: string, ctx: UserContext, includeLogs: boolean) {
       case 'cert_link_log':
         return ctx.domainIds.has(Number(row.did));
       case 'cf_rule_credential':
-        return ctx.cdnAccountIds.has(Number(row.aid));
+        return ctx.accountIds.has(Number(row.aid));
       case 'dmtask':
         return ctx.domainIds.has(Number(row.did));
       case 'dmlog':
@@ -316,6 +318,74 @@ async function tableChunk(
 // 同时读取大表导致峰值内存叠加。后到的任务排队等待，不改变其最终执行结果。
 let exportChain: Promise<unknown> = Promise.resolve();
 
+
+interface SpoolTable {
+  name: string;
+  columns: string[];
+  file: string;
+}
+
+interface SpooledExport {
+  header: Record<string, any>;
+  dir: string;
+  tables: SpoolTable[];
+}
+
+/**
+ * 在一致性快照内把表数据落到临时文件，压缩/加密留到快照结束后执行。
+ * 这样 MySQL 的 REPEATABLE READ 事务与 SQLite 读事务只覆盖「读+顺序写盘」，
+ * 不会因为 gzip/AES 计算而持续数分钟，避免阻塞 WAL checkpoint 或长期占用连接。
+ */
+async function spoolTables(tables: () => AsyncGenerator<ArchiveTableChunk>, dir: string): Promise<SpoolTable[]> {
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+  const out: SpoolTable[] = [];
+  try {
+    let index = 0;
+    for await (const chunk of tables()) {
+      if (!chunk.columns.length) continue;
+      const file = path.join(dir, `${String(index++).padStart(4, '0')}.ndjson`);
+      const source = Readable.from(
+        (async function* () {
+          for await (const row of chunk.rows) yield JSON.stringify(row) + '\n';
+        })(),
+      );
+      await pipeline(source, createWriteStream(file, { mode: 0o600 }));
+      out.push({ name: chunk.name, columns: chunk.columns, file });
+    }
+    return out;
+  } catch (e) {
+    await cleanupSpool({ header: {}, dir, tables: out });
+    throw e;
+  }
+}
+
+async function* readSpoolRows(file: string): AsyncGenerator<Record<string, any>> {
+  const rl = createInterface({ input: createReadStream(file), crlfDelay: Infinity });
+  try {
+    for await (const line of rl) {
+      if (line) yield JSON.parse(line);
+    }
+  } finally {
+    rl.close();
+  }
+}
+
+function spooledDraft(spool: SpooledExport): { header: Record<string, any>; tables: () => AsyncGenerator<ArchiveTableChunk> } {
+  return {
+    header: spool.header,
+    tables: async function* () {
+      for (const t of spool.tables) {
+        yield { name: t.name, columns: t.columns, rows: readSpoolRows(t.file) };
+      }
+    },
+  };
+}
+
+async function cleanupSpool(spool: SpooledExport): Promise<void> {
+  await Promise.all(spool.tables.map((t) => unlink(t.file).catch(() => undefined)));
+  await rmdir(spool.dir).catch(() => undefined);
+}
+
 /**
  * 导出备份。
  * - site：整站全量，跳过用户显式排除的保险库与其私有账户
@@ -346,6 +416,7 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
     [opts.kind || 'manual', scope, ownerUid, includeLogs ? 1 : 0, Number(opts.scheduleId || 0)],
   );
   const jobId = Number(jobRows?.insertId || 0);
+  let spool: SpooledExport | null = null;
 
   try {
     let key: Buffer;
@@ -395,7 +466,7 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
     const fileName = archiveFileName(scope);
     const outPath = path.join(backupsDir(), fileName);
 
-    const result = await readSnapshot(async (read) => {
+    spool = await readSnapshot(async (read) => {
       const excludedUsers = new Set<number>();
       if (scope === 'site') {
         const rows = await read(`SELECT uid FROM ${table('user_vault')} WHERE exclude_from_site_backup = 1`);
@@ -422,20 +493,19 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
         };
       }
 
-      const draft = {
-        header: {
-          formatVersion: 1,
-          appVersion: APP_VERSION,
-          createdAt: fmtDateTime(),
-          scope,
-          ownerUid: scope === 'user' ? ownerUid : 0,
-          kdf,
-          vault: vaultStats,
-        },
-        tables: async function* () {
+      const header = {
+        formatVersion: 1,
+        appVersion: APP_VERSION,
+        createdAt: fmtDateTime(),
+        scope,
+        ownerUid: scope === 'user' ? ownerUid : 0,
+        kdf,
+        vault: vaultStats,
+      };
+      const draftTables = async function* () {
           const sysKey = await getSysKey();
           for (const name of TABLES) {
-            if (scope === 'user' && USER_SKIP_TABLES.has(name)) continue;
+            if (scope === 'user' && !USER_EXPORT_TABLES.has(name)) continue;
             if (name === 'audit_log' && !includeLogs) continue;
             const keep =
               scope === 'site'
@@ -464,12 +534,14 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
             if (!chunk.columns.length) continue;
             yield chunk;
           }
-        },
-      };
-
-      const written = await writeArchive(draft, key, outPath);
-      return { ...written, fileName };
+        };
+      const dir = path.join(tmpDir(), 'export-' + randomBytes(8).toString('hex'));
+      const tables = await spoolTables(draftTables, dir);
+      return { header, dir, tables };
     });
+
+    const written = await writeArchive(spooledDraft(spool), key, outPath);
+    const result = { ...written, fileName };
 
     await query(
       `UPDATE ${table('backup_job')}
@@ -498,12 +570,14 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
       jobId,
     ]).catch(() => undefined);
     throw e;
+  } finally {
+    if (spool) await cleanupSpool(spool);
   }
 }
 
 /** 启动时清理 1 小时前的上传/导出中间文件 */
 export async function cleanTmpFiles(): Promise<void> {
-  const { readdir, stat, unlink } = await import('node:fs/promises');
+  const { readdir, stat, unlink, rm } = await import('node:fs/promises');
   const dir = path.join(process.env.DNSMGR_DATA_DIR || path.resolve(process.cwd(), 'data'), 'tmp');
   const dirs: Array<{ dir: string; onlyTmp: boolean }> = [
     { dir, onlyTmp: false },
@@ -519,8 +593,27 @@ export async function cleanTmpFiles(): Promise<void> {
       if (isTempActive(p)) continue;
       const st = await stat(p).catch(() => null);
       // 6 小时兜底：大库备份可能持续很久，1 小时窗口容易误删仍在使用的文件
-      if (st && now - st.mtimeMs > 6 * 3600_000) await unlink(p).catch(() => undefined);
+      if (!st || now - st.mtimeMs <= 6 * 3600_000) continue;
+      if (st.isDirectory()) await rm(p, { recursive: true, force: true }).catch(() => undefined);
+      else await unlink(p).catch(() => undefined);
     }
+  }
+  // 失败/进程崩溃遗留的 backup_job 不会进入 success 保留策略，定期清理记录与残留归档。
+  const staleJobs = await query<any>(
+    `SELECT id, file_name FROM ${table('backup_job')}
+      WHERE status IN ('failed', 'running') AND created_at < DATE_SUB(NOW(), INTERVAL 7 DAY)
+      LIMIT 500`,
+  );
+  for (const job of staleJobs) {
+    const name = String(job.file_name || '');
+    if (name) {
+      try {
+        await unlink(resolveArchivePath(name));
+      } catch {
+        // 文件不存在或文件名非法时忽略
+      }
+    }
+    await query(`DELETE FROM ${table('backup_job')} WHERE id = ? AND status IN ('failed', 'running')`, [job.id]);
   }
 }
 

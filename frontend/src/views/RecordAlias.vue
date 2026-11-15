@@ -52,10 +52,15 @@ const columns = computed(() => [
 
 async function load() {
   loadBusy.value = true;
-  const res = await api<any>('GET', `/domains/${domainId}/aliases`);
-  rows.value = res.code === 0 ? res.data || [] : [];
-  if (res.code !== 0) message.error(res.msg);
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/domains/${domainId}/aliases`);
+    if (res.code === 0) rows.value = res.data || [];
+    else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function add() {
@@ -90,7 +95,7 @@ function del(r: any) {
 }
 
 async function loadDomainName() {
-  const dl = await api<any>('GET', '/domains', undefined, { cache: true });
+  const dl = await api<any>('GET', '/domains?basic=1', undefined, { cache: true });
   if (dl.code === 0) {
     const d = (dl.data || []).find((x: any) => x.id === domainId);
     if (d) domainName.value = d._base_name || d.name;

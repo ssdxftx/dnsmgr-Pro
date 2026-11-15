@@ -5,7 +5,7 @@
         <span v-for="f in fields" :key="f.name" class="esa-rows__cell" :style="cellStyle(f)">{{ f.label }}</span>
         <span class="esa-rows__cell esa-rows__cell--op">{{ t('esaZone.actions') }}</span>
       </div>
-      <div v-for="(row, i) in rows" :key="i" class="esa-rows__row">
+      <div v-for="(row, i) in rows" :key="stableKey(row, i)" class="esa-rows__row">
         <span v-for="f in fields" :key="f.name" class="esa-rows__cell" :style="cellStyle(f)">
           <EsaCardSelect
             v-if="f.type === 'select'"
@@ -50,6 +50,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { stableKey } from '../../lib/stableKey';
 import { useI18n } from 'vue-i18n';
 import { NButton, NEmpty, NInput, NInputNumber, NSwitch } from 'naive-ui';
 import EsaCardSelect from './EsaCardSelect.vue';

@@ -31,6 +31,7 @@ export async function migrate(): Promise<void> {
       PRIMARY KEY (bucket)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  await ensureIndex('rate_limit', 'idx_window', '(`window_start`)');
   // 用户名唯一约束：防止并发注册/建号绕过「先查后插」判重产生重复账号
   await ensureUniqueIndex('user', 'username', 'uniq_username');
   // 邮箱唯一：空字符串统一转 NULL，避免旧数据中的空串触发唯一冲突
@@ -377,9 +378,11 @@ async function ensureUniqueIndex(tableName: string, column: string, indexName: s
 // 复合唯一索引：消除「先查后插」在并发/双击下的重复数据；已有重复数据时记录并继续
 async function ensureCompositeUniqueIndex(tableName: string, columns: string[], indexName: string): Promise<void> {
   try {
+    const sqlite = getDbType() === 'sqlite';
+    const actualName = sqlite ? sqliteIndexName(table(tableName), indexName) : indexName;
+    if (await indexExists(table(tableName), actualName)) return;
     const cols = columns.map((c) => `\`${c}\``).join(', ');
-    if (getDbType() === 'sqlite') {
-      const actualName = sqliteIndexName(table(tableName), indexName);
+    if (sqlite) {
       await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} (${cols})`);
     } else {
       await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${cols})`);
@@ -414,7 +417,8 @@ async function migrateTaskRecordIds(): Promise<void> {
     const oldIndexes = name === 'dmtask' ? ['uniq_recordid'] : ['uniq_record_switch'];
     const newIndex = name === 'dmtask' ? 'uniq_did_recordid' : 'uniq_did_record_switch';
     // 必须先删旧索引，再改列类型：MySQL 不允许把被索引的 varchar 直接改成无前缀的 TEXT。
-    for (const idx of [...oldIndexes, newIndex]) {
+    // 新索引只在缺失时创建；把它一起删掉会导致每次启动重建大表索引，并留下唯一性空窗。
+    for (const idx of oldIndexes) {
       const actual = sqlite ? sqliteIndexName(table(name), idx) : idx;
       try {
         if (!(await indexExists(table(name), actual))) continue;
@@ -438,8 +442,9 @@ async function migrateTaskRecordIds(): Promise<void> {
       }
     }
     try {
+      const actual = sqlite ? sqliteIndexName(table(name), newIndex) : newIndex;
+      if (await indexExists(table(name), actual)) continue;
       if (sqlite) {
-        const actual = sqliteIndexName(table(name), newIndex);
         const cols = name === 'dmtask' ? '(`did`, `recordid`)' : '(`did`, `recordid`, `switchtype`, `switchtime`)';
         await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actual}\` ON ${table(name)} ${cols}`);
       } else {
@@ -622,6 +627,7 @@ async function migrateBackupAndVault(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
   await ensureColumn('backup_job', 'schedule_id', "int(11) unsigned NOT NULL DEFAULT '0'");
+  await ensureIndex('backup_job', 'idx_owner_created', '(`owner_uid`,`created_at`)');
 
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('backup_destination')} (
@@ -713,6 +719,30 @@ async function migrateBackupAndVault(): Promise<void> {
 }
 
 
+/** 按主键分批 CASE WHEN 更新，把逐行 UPDATE 压缩为每批一次往返 */
+async function applyCaseUpdates(
+  tableName: string,
+  column: string,
+  keyColumn: string,
+  pairs: Array<{ rid: any; val: string }>,
+): Promise<number> {
+  let applied = 0;
+  const keyExpr = keyColumn === '`key`' ? '`key`' : keyColumn;
+  for (let i = 0; i < pairs.length; i += 100) {
+    const chunk = pairs.slice(i, i + 100);
+    const cases = chunk.map(() => 'WHEN ? THEN ?').join(' ');
+    const params: any[] = [];
+    for (const p of chunk) params.push(p.rid, p.val);
+    params.push(...chunk.map((p) => p.rid));
+    await query(
+      `UPDATE ${table(tableName)} SET ${column} = CASE ${keyExpr} ${cases} ELSE ${column} END WHERE ${keyExpr} IN (${chunk.map(() => '?').join(',')})`,
+      params,
+    );
+    applied += chunk.length;
+  }
+  return applied;
+}
+
 /**
  * 历史 enc:v1 只用 sys_key 派生密钥。配置了 DNSMGR_CONFIG_KEY 后，旧数据仍可被拖库的
  * sys_key 解出，v2 的“数据库泄露无法解密”目标对历史数据不成立。启动时把常见密文字段
@@ -740,15 +770,16 @@ async function migrateLegacyEncV1(): Promise<void> {
       const rows = await query<any>(
         `SELECT ${keyCol} AS rid, ${col} AS val FROM ${table(spec.table)} WHERE ${col} LIKE 'enc:v1:%' LIMIT 5000`,
       );
+      const pairs: Array<{ rid: any; val: string }> = [];
       for (const row of rows) {
         const plain = decryptText(String(row.val || ''));
         if (plain === null) {
           console.warn(`[migrate] ${spec.table}.${col} 的 enc:v1 密文无法解密，保持原样`);
           continue;
         }
-        await query(`UPDATE ${table(spec.table)} SET ${col} = ? WHERE ${keyCol} = ?`, [encryptText(plain), row.rid]);
-        migrated++;
+        pairs.push({ rid: row.rid, val: encryptText(plain) });
       }
+      migrated += await applyCaseUpdates(spec.table, col, keyCol, pairs);
     } catch (e: any) {
       console.warn(`[migrate] 迁移 ${spec.table}.${spec.column} 的 enc:v1 失败（跳过）：${e?.message || e}`);
     }
@@ -756,6 +787,7 @@ async function migrateLegacyEncV1(): Promise<void> {
   // config 表以 key 为主键，单独处理；只迁移敏感键，避免把普通配置误加密。
   try {
     const rows = await query<any>(`SELECT \`key\` AS k, value AS val FROM ${table('config')} WHERE value LIKE 'enc:v1:%' LIMIT 5000`);
+    const pairs: Array<{ rid: any; val: string }> = [];
     for (const row of rows) {
       if (!isSecretKey(String(row.k || ''))) continue;
       const plain = decryptText(String(row.val || ''));
@@ -763,9 +795,9 @@ async function migrateLegacyEncV1(): Promise<void> {
         console.warn(`[migrate] config.${row.k} 的 enc:v1 密文无法解密，保持原样`);
         continue;
       }
-      await query(`UPDATE ${table('config')} SET value = ? WHERE \`key\` = ?`, [encryptText(plain), row.k]);
-      migrated++;
+      pairs.push({ rid: row.k, val: encryptText(plain) });
     }
+    migrated += await applyCaseUpdates('config', 'value', '`key`', pairs);
   } catch (e: any) {
     console.warn('[migrate] 迁移 config 的 enc:v1 失败（跳过）：' + (e?.message || e));
   }

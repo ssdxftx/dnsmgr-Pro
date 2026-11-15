@@ -142,6 +142,37 @@ async function insertRow(q: Q, name: string, row: Record<string, any>, cols: Set
   return Number(res?.insertId || 0);
 }
 
+async function insertRows(q: Q, name: string, rows: Record<string, any>[], cols: Set<string>): Promise<number> {
+  if (!rows.length) return 0;
+  // 不同行可能因归档版本缺少列而拥有不同键集合；按键签名分组后使用多行 VALUES，
+  // 把大表恢复从「每行一次往返」降为「每批一次往返」。
+  const groups = new Map<string, { keys: string[]; rows: Record<string, any>[] }>();
+  for (const row of rows) {
+    const keys = Object.keys(row).filter((c) => !c.startsWith('__') && cols.has(c));
+    if (!keys.length) continue;
+    const sig = keys.join('\u0000');
+    const group = groups.get(sig) || { keys, rows: [] };
+    group.rows.push(row);
+    groups.set(sig, group);
+  }
+  let count = 0;
+  for (const group of groups.values()) {
+    // SQLite 默认变量上限为 999，按列数动态控制批大小，避免超出参数上限
+    const chunkSize = Math.max(1, Math.floor(500 / group.keys.length));
+    for (let i = 0; i < group.rows.length; i += chunkSize) {
+      const chunk = group.rows.slice(i, i + chunkSize);
+      const values = chunk.flatMap((row) => group.keys.map((c) => decodeStoredValue(row[c])));
+      const placeholders = chunk.map(() => `(${group.keys.map(() => '?').join(',')})`).join(',');
+      await q(
+        `INSERT INTO ${table(name)} (${group.keys.map((c) => `\`${c}\``).join(',')}) VALUES ${placeholders}`,
+        values,
+      );
+      count += chunk.length;
+    }
+  }
+  return count;
+}
+
 async function uniqueName(q: Q, base: string): Promise<string> {
   const name = String(base || 'user').slice(0, 64);
   const exists = async (n: string) => {
@@ -150,7 +181,8 @@ async function uniqueName(q: Q, base: string): Promise<string> {
   };
   if (!(await exists(name))) return name;
   for (let i = 1; i <= 100; i++) {
-    const n = `${name}${i}`;
+    const suffix = String(i);
+    const n = `${name.slice(0, Math.max(0, 64 - suffix.length))}${suffix}`;
     if (!(await exists(n))) return n;
   }
   return `${name.slice(0, 55)}_${randomBytes(2).toString('hex')}`;
@@ -289,6 +321,13 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
         const rep = emptyReport();
         report.tables[name] = rep;
         const columns = await cols(name);
+        const pendingRows: Record<string, any>[] = [];
+        const flushRows = async () => {
+          if (!pendingRows.length) return 0;
+          const n = await insertRows(q, name, pendingRows, columns);
+          pendingRows.length = 0;
+          return n;
+        };
 
         for await (const raw of stream) {
           const row = { ...raw };
@@ -797,7 +836,8 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               continue;
             }
             case 'cf_rule_credential': {
-              const aid = caidMap.get(Number(row.aid));
+              // cf_rule_credential.aid 指向 DNS 账户（account.id），不是 CDN 账户
+              const aid = aidMap.get(Number(row.aid));
               if (!aid) {
                 rep.skipped++;
                 continue;
@@ -816,8 +856,8 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               row.taskid = taskid;
               delete row.id;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              pendingRows.push(row);
+              if (pendingRows.length >= 500) rep.inserted += await flushRows();
               continue;
             }
             case 'permission': {
@@ -842,8 +882,8 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'audit_log': {
               row.uid = uidMap.get(Number(row.uid)) ?? 0;
               delete row.id;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              pendingRows.push(row);
+              if (pendingRows.length >= 500) rep.inserted += await flushRows();
               continue;
             }
             case 'backup_destination': {
@@ -878,6 +918,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             }
           }
         }
+        if (pendingRows.length) rep.inserted += await flushRows();
       }
       if (opts.invalidateSessions) {
         // 与数据替换同事务：恢复提交即旧 JWT 失效，不会出现“数据已换、会话未失效”的窗口。

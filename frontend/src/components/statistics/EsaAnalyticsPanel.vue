@@ -64,11 +64,14 @@ const subItems = [
 const siteOptions = computed(() => sites.value.map((site) => ({ label: site.name || site.zoneId, value: site.key })));
 const selected = computed(() => sites.value.find((site) => site.key === siteKey.value) || null);
 
+let loadSeq = 0;
 async function load() {
+  const seq = ++loadSeq;
   busy.value = true;
   error.value = '';
   try {
     const res = await api<any>('GET', '/cdn/zones', props.aid ? { aid: props.aid } : undefined);
+    if (seq !== loadSeq) return;
     if (res.code !== 0) throw new Error(res.msg || t('statistics.queryFailed'));
     const rows = (res.data || []) as any[];
     sites.value = rows
@@ -86,11 +89,12 @@ async function load() {
     const preferred = sites.value.find((site) => site.zoneId === props.zoneId);
     if (!sites.value.some((site) => site.key === siteKey.value)) siteKey.value = preferred?.key || sites.value[0]?.key || null;
   } catch (e: any) {
+    if (seq !== loadSeq) return;
     error.value = e?.message || t('statistics.queryFailed');
     sites.value = [];
     siteKey.value = null;
   } finally {
-    busy.value = false;
+    if (seq === loadSeq) busy.value = false;
   }
 }
 

@@ -25,6 +25,8 @@ export class HenetDns implements DnsProvider {
   private cookie = '';
   private loggedIn = false;
   private cacheKey: string;
+  private domainsHtml: string | null = null;
+  private domainsHtmlAt = 0;
 
   constructor(config: Record<string, any>) {
     this.username = config.username || '';
@@ -55,9 +57,17 @@ export class HenetDns implements DnsProvider {
 
   private clearCachedSession() {
     sessionCache.delete(this.cacheKey);
+    this.domainsHtml = null;
   }
 
-  private async request(method: 'GET' | 'POST', path: string, params: Record<string, any> | null = null, requireLogin = true, allowRelogin = true): Promise<string | false> {
+  private async request(
+    method: 'GET' | 'POST',
+    path: string,
+    params: Record<string, any> | null = null,
+    requireLogin = true,
+    allowRelogin = true,
+    redirects = 0,
+  ): Promise<string | false> {
     if (requireLogin && !this.loggedIn && (await this.login()) === false) {
       return false;
     }
@@ -94,10 +104,14 @@ export class HenetDns implements DnsProvider {
         if (this.loggedIn) this.saveCachedSession();
       }
       if (res.status >= 300 && res.status < 400 && res.headers.get('location')) {
+        if (redirects >= 5) {
+          this.error = '登录跳转次数过多，已停止重试';
+          return false;
+        }
         const loc = res.headers.get('location')!;
         const url = new URL(loc, this.baseUrl);
         if (url.hostname === 'dns.he.net') {
-          return this.request('GET', url.pathname + url.search, null, false, allowRelogin);
+          return this.request('GET', url.pathname + url.search, null, false, allowRelogin, redirects + 1);
         }
       }
       if (res.status >= 400) {
@@ -241,8 +255,16 @@ export class HenetDns implements DnsProvider {
   }
 
   async getDomainList(KeyWord: string | null = null, PageNumber = 1, PageSize = 20): Promise<DomainListResult | false> {
-    const html = await this.login();
-    if (html === false) return false;
+    let html: string | false;
+    // 域名列表在 60 秒内复用同一份页面，避免每次 getDomainList 都重新登录/拉首页。
+    if (this.loggedIn && this.domainsHtml && Date.now() - this.domainsHtmlAt < 60_000) {
+      html = this.domainsHtml;
+    } else {
+      html = await this.login();
+      if (html === false) return false;
+      this.domainsHtml = html;
+      this.domainsHtmlAt = Date.now();
+    }
     let list = this.parseDomains(html);
     if (KeyWord) {
       list = list.filter((row) => row.Domain.toLowerCase().includes(KeyWord.toLowerCase()));

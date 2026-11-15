@@ -18,6 +18,7 @@ export function clearToken() {
   cacheEpoch++;
   getCache.clear();
   inflight.clear();
+  meAbort?.abort();
 }
 export function getUser(): any {
   try {
@@ -27,7 +28,14 @@ export function getUser(): any {
   }
 }
 export function setUser(u: any) {
+  const prev = getUser();
   localStorage.setItem(USER_KEY, JSON.stringify(u));
+  // 角色/权限变化后旧 GET 数据可能包含越权或过期字段，立即失效缓存。
+  if (prev && JSON.stringify(prev) !== JSON.stringify(u)) {
+    cacheEpoch++;
+    getCache.clear();
+    inflight.clear();
+  }
   // 通知 Pinia store 同步更新：否则 403/401 触发的用户刷新只改 localStorage，
   // 菜单与统计入口仍按旧身份渲染
   window.dispatchEvent(new CustomEvent('dnsmgr:user-updated', { detail: u }));
@@ -86,7 +94,10 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
   let payload: string | undefined;
   if (isGet && body) {
     const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(body)) if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+    // 参数按 key 排序生成 canonical key，避免同一组参数因对象属性顺序不同而重复请求。
+    for (const [k, v] of Object.entries(body).filter(([, v]) => v !== undefined && v !== null && v !== '').sort(([a], [b]) => a.localeCompare(b))) {
+      qs.set(k, String(v));
+    }
     if (qs.toString()) fullUrl += (url.includes('?') ? '&' : '?') + qs.toString();
   } else if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
@@ -168,7 +179,10 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
 
   if (isGet && !opts.signal && !opts.force) {
     inflight.set(cacheKey, task);
-    task.finally(() => inflight.delete(cacheKey)).catch(() => {});
+    task.finally(() => {
+      // 写操作可能已清空 inflight 并加入同 key 的新请求，只删除自己这一项。
+      if (inflight.get(cacheKey) === task) inflight.delete(cacheKey);
+    }).catch(() => {});
   } else if (!isGet) {
     // 写操作成功后失效 GET 缓存，保证后续读取拿到最新数据
     task.then((data) => { if ((data as any)?.code === 0) invalidateApiCache(); }).catch(() => {});
@@ -178,16 +192,23 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
 
 // 401/403 后刷新本地用户对象（含 level / stat_cache），使菜单与路由准入与后端一致
 let meRefreshing = false;
+let meAbort: AbortController | null = null;
 function refreshMe(): void {
   if (meRefreshing || !getToken()) return;
   meRefreshing = true;
-  fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + getToken() } })
+  const ctrl = new AbortController();
+  meAbort?.abort();
+  meAbort = ctrl;
+  const timer = setTimeout(() => ctrl.abort(), 5000);
+  fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + getToken() }, signal: ctrl.signal })
     .then((r) => (r.ok ? r.json() : null))
     .then((res) => {
       if (res && res.code === 0 && res.data) setUser(res.data);
     })
     .catch(() => undefined)
     .finally(() => {
+      clearTimeout(timer);
+      if (meAbort === ctrl) meAbort = null;
       meRefreshing = false;
     });
 }

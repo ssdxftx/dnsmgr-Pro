@@ -358,6 +358,7 @@
               size="small"
               :loading="ruleLoadBusy"
               :empty-text="t('cdnRules.empty')"
+              :pagination="rulePagination"
             />
           </div>
 
@@ -1070,7 +1071,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, h, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useDialog, useMessage, NButton, NTag } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
@@ -1080,14 +1081,14 @@ import PageHeader from '../components/PageHeader.vue';
 import { zoneAreaKey } from '../lib/zoneLabels';
 import DetailGrid from '../components/DetailGrid.vue';
 import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
-import RuleEditor from '../components/cdn/RuleEditor.vue';
+const RuleEditor = defineAsyncComponent(() => import('../components/cdn/RuleEditor.vue'));
 import RuleTemplatePicker from '../components/cdn/RuleTemplatePicker.vue';
 import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleCreatePicker.vue';
 import EsaRuleKindPicker from '../components/cdn/EsaRuleKindPicker.vue';
 import ZoneModuleMenu, { type ZoneModuleMenuItem } from '../components/cdn/ZoneModuleMenu.vue';
-import EsaZoneConsole from '../components/cdn/EsaZoneConsole.vue';
+const EsaZoneConsole = defineAsyncComponent(() => import('../components/cdn/EsaZoneConsole.vue'));
 import CdnZoneGlobalSetting from '../components/cdn/CdnZoneGlobalSetting.vue';
-import CdnZonePlatform from '../components/cdn/CdnZonePlatform.vue';
+const CdnZonePlatform = defineAsyncComponent(() => import('../components/cdn/CdnZonePlatform.vue'));
 import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 import { useAction } from '../composables/useAction';
 import { formatDateTime } from '../lib/datetime';
@@ -1288,8 +1289,22 @@ async function loadZoneInfo() {
 }
 async function loadDomains() {
   // 由后端按账户 + 站点过滤，替代拉全量后在本地筛选
-  const res = await api<any>('GET', '/cdn/domains', { aid, zone_id: zoneId });
-  if (res.code === 0) domains.value = res.data || [];
+  // 接口已分页；按页取全量，避免站点域名超过默认 200 条时列表被截断
+  const rows: any[] = [];
+  let failed = false;
+  for (let page = 1; page <= 50; page++) {
+    const res = await api<any>('GET', '/cdn/domains', { aid, zone_id: zoneId, page, size: 500 });
+    if (res.code !== 0) {
+      failed = true;
+      break;
+    }
+    const list = res.data || [];
+    rows.push(...list);
+    const total = Number(res.total || 0);
+    if (!list.length || list.length < 500 || (total > 0 && rows.length >= total)) break;
+  }
+  // 失败时保留原列表，避免分页中途失败把已显示域名清空
+  if (!failed) domains.value = rows;
 }
 async function loadNs() {
   if (!zoneId) return;
@@ -1856,6 +1871,27 @@ function delLoadBalancer(r: any) {
 // ===================== 规则引擎（可视化） =====================
 const ruleList = ref<any[]>([]);
 const ruleLoadBusy = ref(false);
+const ruleLoadError = ref('');
+const rulePage = ref(1);
+const rulePageSize = ref(20);
+const ruleTotal = ref(0);
+let rulesLoadSeq = 0;
+const rulePagination = computed(() => ({
+  page: rulePage.value,
+  pageSize: rulePageSize.value,
+  itemCount: ruleTotal.value,
+  showSizePicker: true,
+  pageSizes: [20, 50, 100],
+  onChange: (p: number) => {
+    rulePage.value = p;
+    void loadRules();
+  },
+  onUpdatePageSize: (size: number) => {
+    rulePageSize.value = size;
+    rulePage.value = 1;
+    void loadRules();
+  },
+}));
 const ruleSaveBusy = ref(false);
 const ruleKind = ref('RedirectRule');
 const ruleSchema = ref<any>(null);
@@ -1892,6 +1928,9 @@ function selectEsaCategory(key: string) {
 }
 function selectEsaKind(kind: string) {
   ruleKind.value = kind;
+  rulePage.value = 1;
+  ruleList.value = [];
+  ruleTotal.value = 0;
   loadRules();
 }
 /** 从「新建规则」卡片选择类型：先同步分类，再切换并打开编辑器 */
@@ -1899,6 +1938,9 @@ function onPickEsaKind(kind: string) {
   const meta = esaKindMeta(kind);
   if (meta) esaCategory.value = meta.category;
   ruleKind.value = kind;
+  rulePage.value = 1;
+  ruleList.value = [];
+  ruleTotal.value = 0;
   showKindPicker.value = false;
   loadRuleSchemaForKind().then(() => {
     loadRules();
@@ -1925,32 +1967,42 @@ async function loadRuleSchemaForKind() {
   if (res.code === 0) ruleSchema.value = res.data;
 }
 async function loadRules(): Promise<boolean> {
+  const seq = ++rulesLoadSeq;
   ruleLoadBusy.value = true;
+  ruleLoadError.value = '';
   let ok = true;
   try {
-    if (isEsa.value) await loadRuleSchemaForKind();
     if (isEsa.value) {
-      // ESA 规则按 kind 分页，单页 100；循环取全量，避免规则较多时列表被截断
-      const all: any[] = [];
-      for (let page = 1; page <= 20; page++) {
-        const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, page, size: 100 });
-        if (res.code !== 0) {
-          ok = false;
-          break;
-        }
-        const l = res.data?.list || [];
-        all.push(...l);
-        const total = Number(res.data?.total || 0);
-        if (l.length < 100 || all.length >= total) break;
+      await loadRuleSchemaForKind();
+      if (seq !== rulesLoadSeq) return false;
+      // 服务端分页：只拉当前页，避免规则多时连续请求并一次渲染上千行
+      const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-configs`, {
+        zoneId,
+        kind: ruleKind.value,
+        page: rulePage.value,
+        size: rulePageSize.value,
+      });
+      if (seq !== rulesLoadSeq) return false;
+      if (res.code !== 0) {
+        ok = false;
+        ruleLoadError.value = res.msg || '规则加载失败';
+        message.error(ruleLoadError.value);
+      } else {
+        ruleList.value = res.data?.list || [];
+        ruleTotal.value = Number(res.data?.total || 0);
       }
-      ruleList.value = all;
     } else {
       const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, { zoneId });
+      if (seq !== rulesLoadSeq) return false;
       ok = res.code === 0;
-      ruleList.value = ok ? res.data || [] : [];
+      if (ok) ruleList.value = res.data || [];
+      else {
+        ruleLoadError.value = res.msg || '规则加载失败';
+        message.error(ruleLoadError.value);
+      }
     }
   } finally {
-    ruleLoadBusy.value = false;
+    if (seq === rulesLoadSeq) ruleLoadBusy.value = false;
   }
   return ok;
 }
@@ -2226,6 +2278,7 @@ function delRule(r: any) {
         : await api('DELETE', `/cdn/accounts/${aid}/rules`, { zoneId, ruleIds: [String(r.ruleId)] });
       if (res.code === 0) {
         message.success(res.msg);
+        if (isEsa.value && ruleList.value.length === 1 && rulePage.value > 1) rulePage.value--;
         loadRules();
       } else message.error(res.msg);
     },

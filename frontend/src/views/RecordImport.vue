@@ -47,7 +47,7 @@ const lineOptions = computed(() => Object.entries(lines.value).map(([name, code]
 onMounted(async () => {
   // 域名信息与线路列表相互独立，并行拉取
   const [dl, lr] = await Promise.all([
-    api<any>('GET', '/domains', undefined, { cache: true }),
+    api<any>('GET', '/domains?basic=1', undefined, { cache: true }),
     api<any>('GET', `/domains/${domainId}/lines`),
   ]);
   if (dl.code === 0) {
@@ -64,18 +64,23 @@ onMounted(async () => {
 async function doImport() {
   if (!String(form.record || '').trim()) return message.warning(t('record.fillRequired'));
   saveBusy.value = true;
-  const res = await api('POST', `/domains/${domainId}/records/batch-add`, {
-    record: form.record,
-    type: form.type || '',
-    line: form.line,
-    ttl: form.ttl,
-    mx: form.mx,
-    remark: form.remark,
-  });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    router.push(`/domains/${domainId}/records`);
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/domains/${domainId}/records/batch-add`, {
+      record: form.record,
+      type: form.type || '',
+      line: form.line,
+      ttl: form.ttl,
+      mx: form.mx,
+      remark: form.remark,
+    });
+    if (res.code === 0) {
+      message.success(res.msg);
+      router.push(`/domains/${domainId}/records`);
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 </script>

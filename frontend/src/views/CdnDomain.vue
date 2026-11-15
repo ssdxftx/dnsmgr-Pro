@@ -624,6 +624,7 @@ let linkResolve: ((v: string | null) => void) | null = null;
 // 证书管理：统一设置证书方式、申请/部署与进度
 const showCertMgr = ref(false);
 const certMgrTarget = ref<any>(null);
+let certMgrSeq = 0;
 const certMgrMode = ref('');
 const certMgrBusy = ref(false);
 const certMgrLoadBusy = ref(false);
@@ -682,6 +683,7 @@ function deployStatusText(s: number) {
 
 // 证书管理：打开弹窗并按所选方式加载对应内容
 async function openCertMgr(row: any) {
+  const seq = ++certMgrSeq;
   certMgrTarget.value = row;
   certMgrBusy.value = false;
   certMgrLoadBusy.value = false;
@@ -697,6 +699,7 @@ async function openCertMgr(row: any) {
   certMgrMode.value = row.cert_mode || '';
   showCertMgr.value = true;
   const status = await fetchCertStatus();
+  if (seq !== certMgrSeq) return;
   // 优先按云端真实状态预选证书方式，其次沿用本地记录
   certMgrMode.value = inferModeFromCloud(status, row) || row.cert_mode || '';
   await onCertMgrModeChange(certMgrMode.value);
@@ -723,9 +726,12 @@ function cloudSourceType(s: string): 'success' | 'info' | 'default' | 'warning' 
 // 拉取云端证书状态（只读）
 async function fetchCertStatus(): Promise<any | null> {
   if (!certMgrTarget.value) return null;
+  const seq = certMgrSeq;
+  const targetId = Number(certMgrTarget.value.id);
   certMgrCloudLoadBusy.value = true;
   try {
-    const res = await api<any>('GET', `/cdn/domains/${certMgrTarget.value.id}/cert_status`);
+    const res = await api<any>('GET', `/cdn/domains/${targetId}/cert_status`);
+    if (seq !== certMgrSeq || Number(certMgrTarget.value?.id) !== targetId) return null;
     if (res.code !== 0) {
       message.error(res.msg || t('common.loadFailed'));
       return null;
@@ -736,10 +742,10 @@ async function fetchCertStatus(): Promise<any | null> {
     certMgrMismatch.value = !!(data.cert_mode && inferred && data.cert_mode !== inferred);
     return data;
   } catch (e: any) {
-    message.error(e?.message || t('common.loadFailed'));
+    if (seq === certMgrSeq) message.error(e?.message || t('common.loadFailed'));
     return null;
   } finally {
-    certMgrCloudLoadBusy.value = false;
+    if (seq === certMgrSeq) certMgrCloudLoadBusy.value = false;
   }
 }
 
@@ -760,11 +766,14 @@ async function onCertMgrModeChange(mode: string) {
 
 async function loadCertMgrCandidates() {
   if (!certMgrTarget.value) return;
+  const seq = certMgrSeq;
+  const targetId = Number(certMgrTarget.value.id);
   certMgrLoadBusy.value = true;
   certMgrCandidates.value = null;
   certMgrChoice.value = '';
   certMgrError.value = '';
   const res = await fetchCandidates(certMgrTarget.value.name);
+  if (seq !== certMgrSeq || Number(certMgrTarget.value?.id) !== targetId) return;
   certMgrLoadBusy.value = false;
   if (res.code !== 0) {
     certMgrError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
@@ -1013,16 +1022,39 @@ const columns = computed<any[]>(() => [
   },
 ]);
 
+let domainsRequestSeq = 0;
+let lastDomainsLoadAt = 0;
 async function loadDomains() {
+  const seq = ++domainsRequestSeq;
   loadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/cdn/domains');
-    domains.value = res.code === 0 ? res.data : [];
-  } catch {
-    domains.value = [];
+    // 接口已分页，前端按页取全量以保持批量选择/统计语义；单次请求仍有上限，
+    // 不会再次出现「一次拉全部域名导致响应和内存暴涨」。
+    const all: any[] = [];
+    const pageSize = 500;
+    for (let page = 1; page <= 50; page++) {
+      const res = await api<any>('GET', '/cdn/domains', { page, size: pageSize });
+      if (seq !== domainsRequestSeq) return;
+      if (res.code !== 0) {
+        // 失败时保留旧数据，避免一次瞬时 500 把整张表清空
+        message.error(res.msg || t('common.networkError'));
+        return;
+      }
+      const list = res.data || [];
+      all.push(...list);
+      const total = Number(res.total || 0);
+      if (!list.length || list.length < pageSize || (total > 0 && all.length >= total)) break;
+    }
+    if (seq !== domainsRequestSeq) return;
+    domains.value = all;
+    lastDomainsLoadAt = Date.now();
+    const visible = new Set(all.map((r: any) => Number(r.id)));
+    checkedIds.value = checkedIds.value.filter((id) => visible.has(Number(id)));
+  } catch (e: any) {
+    if (seq === domainsRequestSeq) message.error(e?.message || t('common.networkError'));
   } finally {
     // 网络异常也必须复位，否则列表永久转圈
-    loadBusy.value = false;
+    if (seq === domainsRequestSeq) loadBusy.value = false;
   }
 }
 
@@ -1035,7 +1067,7 @@ async function loadAccounts() {
 }
 
 async function loadDnsDomains() {
-  const res = await api<any>('GET', '/domains', undefined, { cache: true });
+  const res = await api<any>('GET', '/domains?basic=1', undefined, { cache: true });
   if (res.code === 0) dnsDomains.value = res.data.map((d: any) => ({ id: d.id, name: d.name }));
 }
 
@@ -1085,19 +1117,32 @@ watch(
 );
 
 async function loadProviders() {
-  const res = await api<any>('GET', '/cdn/providers');
-  if (res.code === 0) providerCaps.value = res.data || {};
+  try {
+    const res = await api<any>('GET', '/cdn/providers');
+    if (res.code === 0) providerCaps.value = res.data || {};
+  } catch (e: any) {
+    providerCaps.value = {};
+    message.error(e?.message || t('common.networkError'));
+  }
 }
 
+let zoneRequestSeq = 0;
 async function onAccountChange(aid: number) {
   form.zone_id = null;
   form.zone_name = '';
   zoneOptions.value = [];
   clearScene();
+  const seq = ++zoneRequestSeq;
   const type = accountTypes.value[aid];
   if (type === 'tencent_edgeone' || type === 'aliyun_esa') {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/zones`);
-    if (res.code === 0) zoneOptions.value = res.data.map((z: any) => ({ label: z.zoneName, value: z.zoneId, name: z.zoneName }));
+    try {
+      const res = await api<any>('GET', `/cdn/accounts/${aid}/zones`);
+      // 快速切换账户时旧响应不能覆盖新账户的站点列表
+      if (seq !== zoneRequestSeq || Number(form.aid) !== Number(aid)) return;
+      if (res.code === 0) zoneOptions.value = res.data.map((z: any) => ({ label: z.zoneName, value: z.zoneId, name: z.zoneName }));
+    } catch {
+      if (seq === zoneRequestSeq) zoneOptions.value = [];
+    }
   }
 }
 
@@ -1541,6 +1586,8 @@ onDeactivated(() => {
 });
 
 onActivated(() => {
+  // keep-alive 返回时列表可能已过期；首次挂载与 onMounted 并发时跳过重复请求
+  if (!loadBusy.value && Date.now() - lastDomainsLoadAt > 30_000) loadDomains();
   if (linkLogDomainId.value && !linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
 });
 

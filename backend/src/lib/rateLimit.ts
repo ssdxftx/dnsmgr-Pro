@@ -38,22 +38,14 @@ export async function hitRateLimitDistributed(key: string, max: number, windowMs
   const now = Date.now();
   const windowStart = Math.floor(now / windowMs) * windowMs;
   try {
-    const res: any = await query(
-      `UPDATE ${table('rate_limit')} SET hits = hits + 1 WHERE bucket = ? AND window_start = ?`,
+    // 单条原子 upsert：窗口切换与计数在同一行完成，避免「删除当前窗口计数」的竞态。
+    await query(
+      `INSERT INTO ${table('rate_limit')} (bucket, window_start, hits) VALUES (?, ?, 1)
+       ON DUPLICATE KEY UPDATE
+         hits = CASE WHEN window_start = VALUES(window_start) THEN hits + 1 ELSE 1 END,
+         window_start = VALUES(window_start)`,
       [key, windowStart],
     );
-    if (!Number(res?.affectedRows || 0)) {
-      // 旧窗口先删除，再插入新窗口；并发插入冲突时改为对新窗口自增
-      await query(`DELETE FROM ${table('rate_limit')} WHERE bucket = ? AND window_start <> ?`, [key, windowStart]).catch(() => undefined);
-      try {
-        await query(`INSERT INTO ${table('rate_limit')} (bucket, window_start, hits) VALUES (?, ?, 1)`, [key, windowStart]);
-      } catch {
-        await query(
-          `UPDATE ${table('rate_limit')} SET hits = hits + 1 WHERE bucket = ? AND window_start = ?`,
-          [key, windowStart],
-        );
-      }
-    }
     const rows: any = await query(`SELECT hits FROM ${table('rate_limit')} WHERE bucket = ?`, [key]);
     if (Math.random() < 0.01) {
       await query(`DELETE FROM ${table('rate_limit')} WHERE window_start < ?`, [now - windowMs * 10]).catch(() => undefined);

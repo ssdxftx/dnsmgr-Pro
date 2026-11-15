@@ -166,12 +166,30 @@ function tickClock() {
   const p = (n: number) => String(n).padStart(2, '0');
   clockEl.value.textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
-onMounted(() => {
+function startClock() {
+  if (clockTimer || isMobile.value) return;
   tickClock();
   clockTimer = window.setInterval(tickClock, 1000);
+}
+function stopClock() {
+  if (clockTimer) window.clearInterval(clockTimer);
+  clockTimer = undefined;
+}
+function onVisibilityChange() {
+  if (document.hidden) stopClock();
+  else startClock();
+}
+onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  startClock();
+});
+watch(isMobile, (mobile) => {
+  if (mobile) stopClock();
+  else if (!document.hidden) startClock();
 });
 onBeforeUnmount(() => {
-  if (clockTimer) window.clearInterval(clockTimer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  stopClock();
 });
 
 const avatarText = computed(() => String(user.value?.username || 'U').slice(0, 1).toUpperCase());

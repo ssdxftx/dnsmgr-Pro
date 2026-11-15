@@ -91,6 +91,7 @@ export default async function expireRoutes(app: FastifyInstance) {
     const ids: number[] = Array.isArray(b.ids) ? b.ids.map(Number).filter((n: number) => n > 0) : [];
     const isNotice = b.is_notice == 1 ? 1 : 0;
     if (!ids.length) return { code: -1, msg: '请选择域名' };
+    if (ids.length > 500) return { code: -1, msg: '单次最多操作 500 个域名' };
     const allowed = await query(
       `SELECT D.id FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
         WHERE D.id IN (${ids.map(() => '?').join(',')})

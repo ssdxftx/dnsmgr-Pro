@@ -25,14 +25,20 @@ interface PermItem {
 function normalizePermission(input: any[]): PermItem[] {
   const out: PermItem[] = [];
   for (const item of input || []) {
+    // 单用户最多 500 条授权：防止超大数组拼出超长多值 INSERT 或触发 SQL 参数上限
+    if (out.length >= 500) break;
     if (typeof item === 'string') {
-      out.push({ domain: String(item).trim().toLowerCase().replace(/\.$/, ''), sub: null, readonly: 0, expiretime: null });
+      const domain = String(item).trim().toLowerCase().replace(/\.$/, '').slice(0, 253);
+      if (!domain) continue;
+      out.push({ domain, sub: null, readonly: 0, expiretime: null });
     } else if (item && typeof item === 'object' && item.domain) {
+      const domain = String(item.domain).trim().toLowerCase().replace(/\.$/, '').slice(0, 253);
+      if (!domain) continue;
       out.push({
-        domain: String(item.domain).trim().toLowerCase().replace(/\.$/, ''),
-        sub: item.sub ? String(item.sub).trim().toLowerCase().replace(/\.+$/, '') : null,
+        domain,
+        sub: item.sub ? String(item.sub).trim().toLowerCase().replace(/\.+$/, '').slice(0, 253) : null,
         readonly: Number(item.readonly || 0),
-        expiretime: item.expiretime ? String(item.expiretime) : null,
+        expiretime: item.expiretime ? String(item.expiretime).slice(0, 32) : null,
       });
     }
   }

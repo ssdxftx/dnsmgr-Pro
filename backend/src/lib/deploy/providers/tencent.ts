@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { TencentCloud } from '../../clients/TencentCloud.js';
 import { parseCertPem } from '../../cert/utils.js';
 import type { DeployProvider } from '../types.js';
@@ -36,7 +37,7 @@ export class TencentDeploy implements DeployProvider {
     if (config.product === 'update_new') {
       return await this.updateCertNew(fullchain, privatekey, config, info);
     }
-    const certId = await this.getCertId(fullchain, privatekey);
+    const certId = await this.getCertId(fullchain, privatekey, info);
     if (!certId) throw new Error('证书ID获取失败');
     info.cert_id = certId;
 
@@ -96,10 +97,17 @@ export class TencentDeploy implements DeployProvider {
     }
   }
 
-  private async getCertId(fullchain: string, privatekey: string): Promise<string> {
+  private async getCertId(fullchain: string, privatekey: string, info?: any): Promise<string> {
     const certInfo = parseCertPem(fullchain);
     if (!certInfo) throw new Error('证书解析失败');
     const certName = certInfo.subject.split('*.').join('') + '-' + Math.floor(certInfo.validFrom);
+    // 部署失败重试会再次进入这里。腾讯云上传证书不是幂等的，重复上传会生成新证书并占用配额；
+    // 用证书内容指纹确认还是同一张证书时，直接复用上一次上传得到的 CertificateId。
+    const fingerprint = createHash('sha256').update(fullchain).digest('hex');
+    if (info?.cert_id && String(info.cert_fingerprint || '') === fingerprint) {
+      this.log('复用已上传证书 CertificateId=' + info.cert_id);
+      return String(info.cert_id);
+    }
 
     const param = {
       CertificatePublicKey: fullchain,
@@ -122,6 +130,10 @@ export class TencentDeploy implements DeployProvider {
       SwitchStatus: 1,
     });
 
+    if (info && typeof info === 'object') {
+      info.cert_id = String(data.CertificateId);
+      info.cert_fingerprint = fingerprint;
+    }
     return data.CertificateId;
   }
 

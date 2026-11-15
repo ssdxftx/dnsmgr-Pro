@@ -1,7 +1,7 @@
 import { unlink } from 'node:fs/promises';
 import { query, table } from '../../db.js';
 import { resolveArchivePath } from './archive.js';
-import { deleteRemote } from './destinations.js';
+import { deleteRemoteStrict } from './destinations.js';
 
 export interface RetentionOptions {
   kind: 'manual' | 'schedule' | 'pre_restore';
@@ -40,7 +40,8 @@ export async function applyBackupRetention(opts: RetentionOptions): Promise<numb
     const at = new Date(String(r.created_at).replace(' ', 'T')).getTime();
     if (i < keepCount && !(Number.isFinite(at) && at < cutoff)) continue;
     try {
-      if (r.dest_id) await deleteRemote(Number(r.dest_id), String(r.file_name)).catch(() => undefined);
+      // 远端删除失败时保留本地文件与任务记录，下一轮继续重试；否则会产生无法追踪的远端孤儿文件。
+      if (r.dest_id) await deleteRemoteStrict(Number(r.dest_id), String(r.file_name));
       await unlink(resolveArchivePath(String(r.file_name))).catch(() => undefined);
       await query(`DELETE FROM ${table('backup_job')} WHERE id = ?`, [r.id]);
       removed++;

@@ -62,8 +62,8 @@ export class BtpanelDeploy implements DeployProvider {
     }
 
     const sites = String(config.sites || '').split('\n');
-    let success = 0;
-    let errmsg: string | null = null;
+    const failures: string[] = [];
+    let deployed = 0;
     for (const raw of sites) {
       const siteName = raw.trim();
       if (!siteName) continue;
@@ -81,13 +81,16 @@ export class BtpanelDeploy implements DeployProvider {
           await this.saveSsl('/site?action=SetSSL', { type: '0', siteName, key: privatekey, csr: fullchain });
           this.log('网站 ' + siteName + ' 证书部署成功');
         }
-        success++;
+        deployed++;
       } catch (e: any) {
-        errmsg = e.message;
-        this.log('站点 ' + siteName + ' 证书部署失败：' + errmsg);
+        const msg = e.message || String(e);
+        failures.push(`${siteName}: ${msg}`);
+        this.log('站点 ' + siteName + ' 证书部署失败：' + msg);
       }
     }
-    if (success === 0) throw new Error(errmsg || '要部署的网站不存在');
+    // 部分站点失败时整个部署任务必须可见失败，否则失败站点不会重试、也不会触发通知。
+    if (failures.length) throw new Error(`证书部署部分失败（${failures.length} 个站点）：${failures.join('；')}`);
+    if (!deployed) throw new Error('要部署的网站不存在');
   }
 
   setLogger(func: (txt: string) => void): void {

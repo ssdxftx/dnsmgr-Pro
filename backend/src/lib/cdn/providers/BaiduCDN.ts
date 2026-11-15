@@ -2,6 +2,7 @@ import { BaiduCloud } from '../../clients/BaiduCloud.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
+import { cachedDetail } from '../detailCache.js';
 
 function parsePeer(peer: string): { host: string; port: number } | null {
   const m = String(peer).match(/^https?:\/\/(\[[^\]]+\]|[^/:]+)(?::(\d+))?/);
@@ -16,9 +17,11 @@ function isIp(host: string): boolean {
 export class BaiduCDN implements CdnProvider {
   private client: BaiduCloud;
   private error = '';
+  private cacheId: string;
 
   constructor(config: Record<string, any>) {
     this.client = new BaiduCloud(config.AccessKeyId, config.SecretAccessKey, 'cdn.baidubce.com');
+    this.cacheId = String(config.AccessKeyId || '');
   }
 
   getError() {
@@ -52,10 +55,12 @@ export class BaiduCDN implements CdnProvider {
       });
     const body = { form: 'default', origin: origins, defaultHost: domain, follow302: false };
     if (!(await this.call('PUT', `/v2/domain/${domain}`, null, body))) return false;
-    for (let i = 0; i < 10; i++) {
+    // 创建后 CNAME 由上游异步分配：立即查一次，短暂等待后再查一次即可。
+    // 原来 10 次 × 1 秒的同步轮询会让批量接入 50 个域名阻塞约 500 秒。
+    for (let i = 0; i < 2; i++) {
       const cname = await this.getDomainCname(domain);
       if (cname) return cname;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 700));
     }
     this.error = '未获取到 CNAME，请稍后在列表刷新重试';
     return false;
@@ -76,10 +81,10 @@ export class BaiduCDN implements CdnProvider {
     if (!data) return false;
     const domains = data.domains || [];
     // 域名详情彼此独立，4 并发拉取，避免逐域名串行 N 次请求
-    const items = await mapPool(domains, 4, async (d: any) => {
+    const items = await mapPool(domains, 8, async (d: any) => {
       const name = d.domain || d.Domain || '';
       if (!name) return null;
-      const detail = await this.getDomainDetail(name);
+      const detail = await cachedDetail(`baidu:${this.cacheId}:detail:${name}`, 30_000, () => this.getDomainDetail(name));
       if (!detail) return null;
       const origins: string[] = [];
       let httpPort = 80;

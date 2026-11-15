@@ -15,6 +15,8 @@ export const STATUS_LABEL: Record<number, string> = {
 };
 
 const RETRY_INTERVAL = [60, 180, 300, 600, 600];
+const DOMAIN_NAMES_TTL_MS = 60_000;
+let domainNamesCache: { at: number; list: string[] } | null = null;
 
 import { decryptConfig, encryptConfig, encryptText } from './secret.js';
 
@@ -189,12 +191,17 @@ export class CertOrderService {
 
   private async getMainDomain(host: string): Promise<string> {
     if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(':')) return host;
-    // 单个订单内缓存域名/别名列表，避免 per-domain 重复全表查询
-    if (!this.domainNames) {
+    // 域名/别名列表是站点级数据，多个订单共用同一份短 TTL 缓存；
+    // 每个订单实例各查一次会在域名多、续签轮次长时放大 CPU 与内存开销。
+    if (!domainNamesCache || Date.now() - domainNamesCache.at > DOMAIN_NAMES_TTL_MS) {
       const rows = await query(`SELECT name FROM ${table('domain')}`);
       const aliasRows = await query(`SELECT name FROM ${table('domain_alias')}`);
-      this.domainNames = [...rows.map((r: any) => r.name), ...aliasRows.map((r: any) => r.name)].sort((a, b) => b.length - a.length);
+      domainNamesCache = {
+        at: Date.now(),
+        list: [...rows.map((r: any) => r.name), ...aliasRows.map((r: any) => r.name)].sort((a, b) => b.length - a.length),
+      };
     }
+    this.domainNames = domainNamesCache.list;
     for (const d of this.domainNames) {
       if (host === d || host.endsWith('.' + d)) return d;
     }

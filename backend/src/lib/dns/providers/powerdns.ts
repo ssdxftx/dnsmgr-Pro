@@ -17,6 +17,8 @@ interface PdnsRrset {
 }
 
 export class PowerDns implements DnsProvider {
+  /** 厂商接口无分页参数：列表由本地切片，按 ID 查找时一次取全量即可，避免逐页重复请求 */
+  readonly clientPaged = true;
   private baseUrl: string;
   private apikey: string;
   private error = '';
@@ -87,7 +89,10 @@ export class PowerDns implements DnsProvider {
       Domain: (row.name || '').replace(/\.$/, ''),
       RecordCount: 0,
     }));
-    return { total: list.length, list };
+    const total = list.length;
+    const page = Math.max(1, Number(_PageNumber) || 1);
+    const size = Math.max(1, Number(_PageSize) || 20);
+    return { total, list: list.slice((page - 1) * size, page * size) };
   }
 
   async getDomainRecords(
@@ -171,7 +176,7 @@ export class PowerDns implements DnsProvider {
   // 1) 新增时以 REPLACE 静默覆盖同名同类型已有记录；2) 改/删时误判「记录不存在」。
   private async ensureRrsets(): Promise<boolean> {
     if (this.rrsetsCache !== null) return true;
-    const res = await this.getDomainRecords(1, 1000);
+    const res = await this.getDomainRecords(1, 1_000_000);
     if (res === false) {
       if (!this.error) this.error = '获取域名记录失败，请刷新页面重试';
       return false;

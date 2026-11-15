@@ -7,7 +7,7 @@
           <n-space :size="4" style="width: 100%">
             <n-input v-model:value="form.rr" :placeholder="t('dm.hostRecord')" style="width: 200px" />
             <span>.</span>
-            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('dm.mainDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" @update:value="onDomainSelect" style="flex: 1" />
+            <n-select v-model:value="form.did" :options="domainOptions" :placeholder="t('dm.mainDomain')" filterable remote :loading="domainLoadBusy" @search="onDomainSearch" @update:value="onDomainSelect" style="flex: 1" />
           </n-space>
         </n-form-item>
 
@@ -149,15 +149,25 @@ const checktypeOptions = computed(() => [
   { value: 2, label: 'HTTP(S)', disabled: false },
 ]);
 
+let domainSearchTimer: number | undefined;
+let domainSearchSeq = 0;
+function onDomainSearch(kw: string) {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+  // 250ms 防抖：避免每输入一个字符就发一次远程搜索
+  domainSearchTimer = window.setTimeout(() => void loadDomains(kw), 250);
+}
+
 async function loadDomains(kw = '') {
+  const seq = ++domainSearchSeq;
   domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/dmonitor/domains', kw ? { kw } : undefined);
+    if (seq !== domainSearchSeq) return;
     if (res.code === 0) {
       domainOptions.value = res.data.map((d: any) => ({ label: d.name, value: d.id, type: d.type }));
     }
   } finally {
-    domainLoadBusy.value = false;
+    if (seq === domainSearchSeq) domainLoadBusy.value = false;
   }
 }
 
@@ -286,7 +296,9 @@ async function submit() {
 }
 
 onMounted(async () => {
-  // 域名选项与任务详情相互独立，并行拉取
-  await Promise.all([loadDomains(), isEdit.value ? loadTask() : Promise.resolve()]);
+  // 必须先把域名选项加载完，loadTask 回填 did 后才能正确推导 dnstype；
+  // 域名列表失败不应阻断编辑数据回填。
+  await loadDomains().catch(() => undefined);
+  if (isEdit.value) await loadTask();
 });
 </script>

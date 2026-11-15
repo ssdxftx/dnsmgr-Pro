@@ -86,10 +86,12 @@ export class KingsoftCDN implements CdnProvider {
       this.error = '金山云未返回域名ID';
       return false;
     }
-    for (let i = 0; i < 10; i++) {
+    // 创建后 CNAME 由上游异步分配：立即查一次，短暂等待后再查一次即可。
+    // 原来 10 次 × 1 秒的同步轮询会让批量接入 50 个域名阻塞约 500 秒。
+    for (let i = 0; i < 2; i++) {
       const info = await this.basicInfo(String(domainId));
       if (info && pick(info, 'Cname', 'cname')) return String(pick(info, 'Cname', 'cname'));
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 700));
     }
     return domain + '.download.ks-cdn.com';
   }

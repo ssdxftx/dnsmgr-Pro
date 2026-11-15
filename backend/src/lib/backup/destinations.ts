@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { rename, stat, unlink } from 'node:fs/promises';
 import { Readable } from 'node:stream';
@@ -157,20 +157,49 @@ function s3Module() {
   return s3ModulePromise;
 }
 
+const S3_CLIENT_CACHE_MAX = 20;
+const s3Clients = new Map<string, Promise<import('@aws-sdk/client-s3').S3Client>>();
+
 async function s3Client(cfg: any): Promise<import('@aws-sdk/client-s3').S3Client> {
   // 自建 S3 常在内网，允许内网目标但拒绝链路本地/云元数据地址
   if (cfg.endpoint) await assertDeployTargetAllowed(String(cfg.endpoint));
-  const { S3Client } = await s3Module();
-  return new S3Client({
-    region: cfg.region || 'us-east-1',
-    endpoint: cfg.endpoint || undefined,
-    forcePathStyle: true,
-    credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
-    // 关闭默认的 CRC 校验：新版 SDK 会对流式上传启用 aws-chunked，
-    // 部分 S3 兼容实现（MinIO/R2/自建网关）会把分块头写进对象，导致归档损坏
-    requestChecksumCalculation: 'WHEN_REQUIRED',
-    responseChecksumValidation: 'WHEN_REQUIRED',
+  // 按 endpoint/region/凭证指纹复用客户端：SDK 客户端各自持有连接池，
+  // 每次上传/清理都 new 一个会缓慢累积 socket、FD 与内存。
+  const fingerprint = createHash('sha256')
+    .update([cfg.region || '', cfg.endpoint || '', cfg.accessKeyId || '', cfg.secretAccessKey || ''].join('\u0000'))
+    .digest('hex');
+  const cached = s3Clients.get(fingerprint);
+  if (cached) return cached;
+  const task = (async () => {
+    const { S3Client } = await s3Module();
+    return new S3Client({
+      region: cfg.region || 'us-east-1',
+      endpoint: cfg.endpoint || undefined,
+      forcePathStyle: true,
+      credentials: { accessKeyId: cfg.accessKeyId, secretAccessKey: cfg.secretAccessKey },
+      // 关闭默认的 CRC 校验：新版 SDK 会对流式上传启用 aws-chunked，
+      // 部分 S3 兼容实现（MinIO/R2/自建网关）会把分块头写进对象，导致归档损坏
+      requestChecksumCalculation: 'WHEN_REQUIRED',
+      responseChecksumValidation: 'WHEN_REQUIRED',
+    });
+  })();
+  s3Clients.set(fingerprint, task);
+  task.catch(() => {
+    if (s3Clients.get(fingerprint) === task) s3Clients.delete(fingerprint);
   });
+  if (s3Clients.size > S3_CLIENT_CACHE_MAX) {
+    const oldest = s3Clients.keys().next().value;
+    if (oldest !== undefined) {
+      const stale = s3Clients.get(oldest);
+      s3Clients.delete(oldest);
+      // 客户端可能仍有上传/删除请求在途，延后销毁，避免淘汰缓存时中断正在执行的备份。
+      stale?.then((client) => {
+        const timer = setTimeout(() => client.destroy(), 60_000);
+        timer.unref?.();
+      }).catch(() => undefined);
+    }
+  }
+  return task;
 }
 
 function s3Key(cfg: any, name: string): string {
@@ -297,7 +326,8 @@ export async function deleteRemote(destId: number, name: string): Promise<void> 
 
 export async function deleteRemoteStrict(destId: number, name: string): Promise<void> {
   const row = await getDestination(destId);
-  if (!row) throw new Error('备份目的地不存在');
+  // 目的地已被删除时远端对象已无从查找，视为清理成功，避免本地备份永远无法按保留策略删除。
+  if (!row) return;
   if (row.type === 'webdav') {
     const res = await webdavFetch(row.config, joinUrl(String(row.config.url), name), { method: 'DELETE' });
     if (res.status !== 404 && !res.ok) throw new Error(`WebDAV 删除失败（HTTP ${res.status}）`);

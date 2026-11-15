@@ -2,6 +2,8 @@ import { BaiduCloud } from '../../clients/BaiduCloud.js';
 import type { DnsProvider, DomainListResult, RecordListResult, RecordInfo } from '../types.js';
 
 export class BaiduDns implements DnsProvider {
+  /** 厂商接口无分页参数：列表由本地切片，按 ID 查找时一次取全量即可，避免逐页重复请求 */
+  readonly clientPaged = true;
   private client: BaiduCloud;
   private error = '';
   private domain: string;
@@ -78,7 +80,10 @@ export class BaiduDns implements DnsProvider {
       if (Type) list = list.filter((v: any) => v.Type === Type);
       if (Status) list = list.filter((v: any) => v.Status === Status);
     }
-    return { total: list.length, list };
+    const total = list.length;
+    const page = Math.max(1, Number(_PageNumber) || 1);
+    const size = Math.max(1, Number(_PageSize) || 20);
+    return { total, list: list.slice((page - 1) * size, page * size) };
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {

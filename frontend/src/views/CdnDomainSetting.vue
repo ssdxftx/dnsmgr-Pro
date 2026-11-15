@@ -54,7 +54,7 @@
 
       <n-card :title="t('cdnSetting.cacheCard')" size="small" :bordered="false">
         <n-space vertical size="small">
-          <div v-for="(rule, idx) in cacheForm.rules" :key="idx" class="rule-row">
+          <div v-for="(rule, idx) in cacheForm.rules" :key="stableKey(rule, idx)" class="rule-row">
             <n-input v-model:value="rule.path" :placeholder="t('cdnSetting.cachePathPlaceholder')" />
             <n-input-number v-model:value="rule.ttl" :min="0" style="width:140px" :placeholder="t('cdnSetting.ttlPlaceholder')" />
             <n-button size="small" @click="removeRule(idx)">{{ t('common.delete') }}</n-button>
@@ -130,6 +130,7 @@ import { useI18n } from 'vue-i18n';
 import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
+import { stableKey } from '../lib/stableKey';
 
 const { t } = useI18n();
 const route = useRoute();

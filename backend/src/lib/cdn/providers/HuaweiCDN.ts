@@ -2,6 +2,7 @@ import { HuaweiCloud } from '../../clients/HuaweiCloud.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
+import { cachedDetail } from '../detailCache.js';
 
 const serviceAreaMap: Record<string, string> = {
   mainland_china: 'mainland_china',
@@ -34,9 +35,11 @@ function ttlToUnit(seconds: number): { ttl: number; ttl_unit: string } {
 export class HuaweiCDN implements CdnProvider {
   private client: HuaweiCloud;
   private error = '';
+  private cacheId: string;
 
   constructor(config: Record<string, any>) {
     this.client = new HuaweiCloud(config.AccessKeyId, config.SecretAccessKey, 'cdn.myhuaweicloud.com');
+    this.cacheId = String(config.AccessKeyId || '');
   }
 
   getError() {
@@ -98,10 +101,12 @@ export class HuaweiCDN implements CdnProvider {
     };
     if (!(await this.call('POST', '/v1.0/cdn/domains', null, body))) return false;
     // 华为创建后返回域名信息，含 cname；否则轮询详情
-    for (let i = 0; i < 10; i++) {
+    // 创建后 CNAME 由上游异步分配：立即查一次，短暂等待后再查一次即可。
+    // 原来 10 次 × 1 秒的同步轮询会让批量接入 50 个域名阻塞约 500 秒。
+    for (let i = 0; i < 2; i++) {
       const cname = await this.getDomainCname(domain);
       if (cname) return cname;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 700));
     }
     this.error = '未获取到 CNAME，请稍后在列表刷新重试';
     return false;
@@ -122,10 +127,10 @@ export class HuaweiCDN implements CdnProvider {
       if (!data) return false;
       const domains = data.domains || [];
       // 域名详情彼此独立，4 并发拉取，避免逐域名串行 N 次请求
-      const pageItems = await mapPool(domains, 4, async (d: any) => {
+      const pageItems = await mapPool(domains, 8, async (d: any) => {
         const name = d.domain_name || d.DomainName || '';
         if (!name) return null;
-        const detail = await this.getDomainDetail(name);
+        const detail = await cachedDetail(`huawei:${this.cacheId}:detail:${name}`, 30_000, () => this.getDomainDetail(name));
         const info = detail?.domain || {};
         const sources = info.sources || [];
         const origins: string[] = [];

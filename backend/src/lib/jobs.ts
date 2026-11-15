@@ -154,8 +154,14 @@ export function runJobInBackground(
         failed = Math.max(0, Number(nextFailed) || 0);
         await updateJob(id, { done, failed, result }).catch(() => undefined);
       };
+      let timeoutTimer: NodeJS.Timeout | undefined;
       try {
-        const finalResult = await worker(progress);
+        const timeoutMs = Math.max(60_000, Number(process.env.DNSMGR_JOB_TIMEOUT_MS || 30 * 60_000) || 30 * 60_000);
+        const timeout = new Promise<never>((_, reject) => {
+          timeoutTimer = setTimeout(() => reject(new Error('任务执行超时')), timeoutMs);
+          timeoutTimer.unref?.();
+        });
+        const finalResult = await Promise.race([worker(progress), timeout]);
         await updateJob(id, {
           status: failed > 0 ? (done > 0 ? 'partial' : 'failed') : 'success',
           done,
@@ -165,6 +171,7 @@ export function runJobInBackground(
       } catch (e: any) {
         await updateJob(id, { status: 'failed', done, failed, error: e?.message || String(e) }).catch(() => undefined);
       } finally {
+        if (timeoutTimer) clearTimeout(timeoutTimer);
         clearInterval(heartbeat);
       }
     })();

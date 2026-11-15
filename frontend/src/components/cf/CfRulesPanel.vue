@@ -486,14 +486,17 @@ async function onPhaseChange() {
   await loadRules();
 }
 
+let rulesLoadSeq = 0;
 async function loadRules() {
   if (!selectedDomain.value || !selectedPhase.value) {
     rules.value = [];
     return;
   }
+  const seq = ++rulesLoadSeq;
   loadBusy.value = true;
   needCredential.value = false;
   const res = await api<any>('GET', `/cf-rules/rules?domainId=${selectedDomain.value}&phase=${selectedPhase.value}`);
+  if (seq !== rulesLoadSeq) return;
   loadBusy.value = false;
   if (res.code === 0) {
     rules.value = res.data?.rules || [];

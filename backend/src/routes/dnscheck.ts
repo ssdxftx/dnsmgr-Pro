@@ -169,9 +169,10 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
       result = await checkDomainRecords(row.did, types.length ? types : undefined, row.uid, row.sub);
       const next = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
       const issueCount = result.issues ? result.issues.length : 0;
+      const status = result.error ? -1 : issueCount ? 1 : 0;
       await query(
         `UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ?, last_status = ?, issue_count = ? WHERE id = ?`,
-        [next, issueCount ? 1 : 0, issueCount, id],
+        [next, status, issueCount, id],
       );
     });
     if (!locked) return { code: -1, msg: '自动检测任务正在执行，请稍后再试' };

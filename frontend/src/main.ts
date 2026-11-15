@@ -1,6 +1,5 @@
 import { createApp } from 'vue';
 import { createPinia } from 'pinia';
-import Naive from './plugins/naive';
 import App from './App.vue';
 import router from './router';
 import i18n, { ensureLocale, getInitialLocale } from './i18n';
@@ -11,23 +10,6 @@ import './styles/tokens.css';
 import './styles/responsive.css';
 import './styles/ui-consistency.css';
 
-// 语言包改为按需网络加载，需给加载失败兜底：失败时仍要挂载应用，避免整站白屏
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('locale load timeout')), ms);
-    p.then(
-      (v) => {
-        clearTimeout(timer);
-        resolve(v);
-      },
-      (e) => {
-        clearTimeout(timer);
-        reject(e);
-      },
-    );
-  });
-}
-
 async function bootstrap() {
   // Mock 数据仅在显式开启时动态加载，避免生产入口携带整份演示数据；
   // 同时必须处于开发模式，防止 VITE_MOCK=true 的构建产物被误部署成「任意密码可登录」的控制台
@@ -36,20 +18,17 @@ async function bootstrap() {
     installMock();
   }
 
-  // 首屏只加载当前语言包，另一种语言在切换时按需下载
-  try {
-    await withTimeout(ensureLocale(getInitialLocale()), 5000);
-  } catch (e) {
-    // 降级：语言包加载失败不阻断挂载，界面以 key 兜底显示并可刷新重试
+  // 语言包后台加载，不阻塞首屏挂载：网络慢时先渲染应用骨架，
+  // 加载完成后 setLocaleMessage 会触发响应式更新，不再出现最长 5 秒白屏。
+  void ensureLocale(getInitialLocale()).catch((e) => {
     console.error('[i18n] 语言包加载失败，降级渲染', e);
-  }
+  });
 
   const app = createApp(App);
   app.directive('reveal', vReveal);
   app.use(createPinia());
   app.use(router);
   app.use(i18n);
-  app.use(Naive);
   app.mount('#app');
 
   prefetchRoutes();

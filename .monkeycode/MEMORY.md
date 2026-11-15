@@ -32,8 +32,8 @@ Entries discovered by the Agent during task execution should follow this format:
 ## Entries
 
 [User Instruction Summary]
-- Date: 2026-10-29
-- Context: 用户要求删除 monkeycode-ai 署名相关内容，并固定使用 ssdxftx 身份推送（此前 2026-09-30 已提出同一要求）
+- Date: 2026-11-14
+- Context: 用户要求删除 monkeycode-ai 署名相关内容，并固定使用 ssdxftx 身份推送（此前 2026-09-30、2026-10-29 已提出同一要求）
 - Instructions:
   - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（同时写入本仓库本地配置与全局配置）
   - 禁止在提交信息中添加 `Co-authored-by` 尾注：删除 `.git/config` 中的 `coauthor.*` 配置项，并移除 `.git/hooks/prepare-commit-msg` 钩子

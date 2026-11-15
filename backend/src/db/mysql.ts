@@ -31,9 +31,27 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
     charset: 'utf8mb4',
     dateStrings: true,
   });
+  // 分布式锁会跨整个备份/调度任务持有连接。使用独立小连接池，
+  // 避免长任务挤占业务请求的 20 条连接（GET_LOCK 的持有连接不能提前归还）。
+  const lockPool = mysql.createPool({
+    host: cfg.db_host,
+    port: Number(cfg.db_port || 3306),
+    user: cfg.db_user,
+    password: cfg.db_password,
+    database: cfg.db_name,
+    waitForConnections: true,
+    connectionLimit: 4,
+    maxIdle: 4,
+    idleTimeout: 60000,
+    connectTimeout: 10000,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 10000,
+    charset: 'utf8mb4',
+    dateStrings: true,
+  });
   // GROUP_CONCAT 默认上限 1024 字节，站点聚合（域名列表）会被截断；每条新连接统一放大
   pool.on('connection', (conn: any) => {
-    conn.query('SET SESSION group_concat_max_len = 1048576');
+    Promise.resolve(conn.query('SET SESSION group_concat_max_len = 1048576')).catch(() => undefined);
   });
 
   async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
@@ -111,7 +129,7 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
   ): Promise<LockOutcome<T>> {
     let conn: mysql.PoolConnection;
     try {
-      conn = await pool.getConnection();
+      conn = await lockPool.getConnection();
     } catch {
       return { locked: false };
     }
@@ -176,6 +194,7 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
     indexExists,
     uniqueIndexExists,
     async close() {
+      await lockPool.end().catch(() => undefined);
       await pool.end().catch(() => undefined);
     },
     identity() {

@@ -52,6 +52,9 @@ export function phasePermission(phase: string): string {
 }
 
 /** 按 phase 管理 Cloudflare Ruleset 与规则 */
+const rulesetIdCache = new Map<string, { id: string; at: number }>();
+const RULESET_ID_TTL = 60_000;
+
 export class CloudflareRulesetService {
   constructor(private cf: CloudflareEnhanceService, private scope: RulesetScope) {}
 
@@ -65,15 +68,28 @@ export class CloudflareRulesetService {
   }
 
   private async listRulesets(): Promise<any[]> {
-    const result = await this.cf.apiResult('GET', this.basePath(), { per_page: 100 });
-    return Array.isArray(result) ? result : [];
+    const all: any[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const result = await this.cf.apiResult('GET', this.basePath(), { per_page: 100, page });
+      const list = Array.isArray(result) ? result : [];
+      all.push(...list);
+      if (list.length < 100) break;
+    }
+    return all;
   }
 
   /** 定位指定 phase 的 ruleset id；create 为真时不存在则创建空 ruleset */
   private async resolveRulesetId(phase: string, create: boolean): Promise<string | null> {
+    const cacheKey = `${this.basePath()}|${phase}`;
+    const hit = rulesetIdCache.get(cacheKey);
+    if (hit && Date.now() - hit.at < RULESET_ID_TTL) return hit.id;
     const list = await this.listRulesets();
     const existing = list.find((r) => r && r.phase === phase);
-    if (existing?.id) return String(existing.id);
+    if (existing?.id) {
+      if (rulesetIdCache.size > 500) rulesetIdCache.clear();
+      rulesetIdCache.set(cacheKey, { id: String(existing.id), at: Date.now() });
+      return String(existing.id);
+    }
     if (!create) return null;
     const created = await this.cf.apiResult('POST', this.basePath(), {}, {
       kind: this.rulesetKind(),
@@ -81,7 +97,12 @@ export class CloudflareRulesetService {
       name: `${phase} rules`,
       rules: [],
     });
-    return created?.id ? String(created.id) : null;
+    if (created?.id) {
+      if (rulesetIdCache.size > 500) rulesetIdCache.clear();
+      rulesetIdCache.set(cacheKey, { id: String(created.id), at: Date.now() });
+      return String(created.id);
+    }
+    return null;
   }
 
   /** 读取规则；ruleset 不存在时返回空数组，读取不产生写入 */

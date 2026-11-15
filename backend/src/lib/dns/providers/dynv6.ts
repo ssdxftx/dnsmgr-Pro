@@ -3,6 +3,8 @@ import { findRecordById } from '../recordLookup.js';
 
 import { fetchWithProxy } from '../../http.js';
 export class Dynv6Dns implements DnsProvider {
+  /** 厂商接口无分页参数：列表由本地切片，按 ID 查找时一次取全量即可，避免逐页重复请求 */
+  readonly clientPaged = true;
   private token: string;
   private baseUrl = 'https://dynv6.com/api/v2';
   private error = '';
@@ -135,7 +137,10 @@ export class Dynv6Dns implements DnsProvider {
       if (Value) list = list.filter((v) => v.Value === Value);
       if (Type) list = list.filter((v) => v.Type === Type);
     }
-    return { total: list.length, list };
+    const total = list.length;
+    const page = Math.max(1, Number(_PageNumber) || 1);
+    const size = Math.max(1, Number(_PageSize) || 20);
+    return { total, list: list.slice((page - 1) * size, page * size) };
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {

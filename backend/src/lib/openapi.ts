@@ -25,8 +25,10 @@ interface RouteInfo {
 
 export function registerOpenApi(app: FastifyInstance): void {
   const routes: RouteInfo[] = [];
+  let cachedSpec: any = null;
 
   app.addHook('onRoute', (route: any) => {
+    cachedSpec = null;
     const urls = Array.isArray(route.url) ? route.url : [route.url];
     const methods = Array.isArray(route.method) ? route.method : [route.method];
     for (const url of urls) {
@@ -48,10 +50,10 @@ export function registerOpenApi(app: FastifyInstance): void {
     if (!checkLevel(req.user, 2)) return reply.code(403).send({ code: -1, msg: '无权限' });
   };
 
-  app.get('/api/openapi.json', { preHandler: adminOnly }, async () => buildSpec(routes));
+  app.get('/api/openapi.json', { preHandler: adminOnly }, async () => (cachedSpec ||= buildSpec(routes)));
   app.get('/api/docs', { preHandler: adminOnly }, async (_req: any, reply: any) => {
     reply.type('text/html; charset=utf-8');
-    return docsHtml(buildSpec(routes));
+    return docsHtml(cachedSpec ||= buildSpec(routes));
   });
 }
 

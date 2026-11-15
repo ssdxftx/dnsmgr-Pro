@@ -9,7 +9,7 @@
     </div>
 
     <template v-if="mode === 'visual'">
-      <div v-for="(grp, gi) in groups" :key="gi" class="esa-cond__group">
+      <div v-for="(grp, gi) in groups" :key="stableKey(grp, gi)" class="esa-cond__group">
         <div v-if="gi > 0" class="esa-cond__or">{{ L('或 (Or)', 'Or') }}</div>
         <div class="esa-cond__group-head">
           <span class="esa-cond__group-title">{{ L(`条件组 ${gi + 1}`, `Group ${gi + 1}`) }}</span>
@@ -18,7 +18,7 @@
           </n-button>
         </div>
 
-        <div v-for="(it, ii) in grp.items" :key="ii" class="esa-cond__row">
+        <div v-for="(it, ii) in grp.items" :key="stableKey(it, ii)" class="esa-cond__row">
           <EsaCardSelect
             v-model="it.field"
             :options="fieldOptions"
@@ -99,6 +99,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue';
+import { stableKey } from '../../lib/stableKey';
 import { NButton, NDynamicTags, NInput, NRadioButton, NRadioGroup } from 'naive-ui';
 import EsaCardSelect, { type EsaCardOption } from './EsaCardSelect.vue';
 

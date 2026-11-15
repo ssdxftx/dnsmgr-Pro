@@ -249,8 +249,20 @@ function rowDid(row: any): number | null {
   return did === null || did === undefined ? null : Number(did);
 }
 
+const fallbackRowKeys = new WeakMap<object, string>();
+let fallbackRowSeq = 0;
 function recordKey(row: any): string {
-  return String(row?.RecordId ?? row?.id ?? '') + ':' + String(row?.did ?? props.domainId ?? '');
+  const did = String(row?.did ?? props.domainId ?? '');
+  const raw = row?.RecordId ?? row?.id;
+  if (raw !== undefined && raw !== null && raw !== '') return String(raw) + ':' + did;
+  // 接口缺少稳定 ID 时不能退化成同一个空字符串 key，否则批量选择会串行到错误记录。
+  if (!row || typeof row !== 'object') return `none:${did}`;
+  let key = fallbackRowKeys.get(row);
+  if (!key) {
+    key = `tmp${++fallbackRowSeq}`;
+    fallbackRowKeys.set(row, key);
+  }
+  return key + ':' + did;
 }
 
 function selectedRows(): any[] {

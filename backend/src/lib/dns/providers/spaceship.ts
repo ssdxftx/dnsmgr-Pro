@@ -114,14 +114,28 @@ export class SpaceshipDns implements DnsProvider {
     _KeyWord: string | null = null,
     SubDomain: string | null = null,
   ): Promise<RecordListResult | false> {
-    const param: Record<string, any> = { take: PageSize, skip: (PageNumber - 1) * PageSize };
+    let rawItems: any[] = [];
+    let total = 0;
     if (SubDomain) {
-      param.take = 100;
-      param.skip = 0;
+      // 本地过滤必须翻页拉全量，固定 take=100 会在记录超过 100 条时漏记录
+      let skip = 0;
+      for (let page = 0; page < 200; page++) {
+        const data = await this.sendRequest('GET', '/dns/records/' + this.domain, { take: 100, skip });
+        if (!data) return false;
+        const batch = Array.isArray(data.items) ? data.items : [];
+        rawItems.push(...batch);
+        total = Math.max(total, Number(data.total || 0));
+        if (batch.length < 100 || (total > 0 && rawItems.length >= total)) break;
+        skip += batch.length;
+      }
+    } else {
+      const param: Record<string, any> = { take: PageSize, skip: (PageNumber - 1) * PageSize };
+      const data = await this.sendRequest('GET', '/dns/records/' + this.domain, param);
+      if (!data) return false;
+      rawItems = Array.isArray(data.items) ? data.items : [];
+      total = Number(data.total || 0);
     }
-    const data = await this.sendRequest('GET', '/dns/records/' + this.domain, param);
-    if (!data) return false;
-    let list: RecordInfo[] = (data.items || []).map((row: any) => {
+    let list: RecordInfo[] = rawItems.map((row: any) => {
       const { address, mx } = this.extractAddress(row);
       return {
         RecordId: `${row.type}|${row.name}|${address}|${mx}`,
@@ -141,7 +155,7 @@ export class SpaceshipDns implements DnsProvider {
     if (SubDomain) {
       list = list.filter((v) => v.Name.toLowerCase() === SubDomain.toLowerCase());
     }
-    return { total: data.total || 0, list };
+    return { total: total || list.length, list };
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {

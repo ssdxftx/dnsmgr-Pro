@@ -1,7 +1,7 @@
 <template>
   <div class="rule-array">
     <div v-if="!rows.length" class="rule-array__empty">{{ t('cdnRules.arrayEmpty') }}</div>
-    <div v-for="(row, idx) in rows" :key="idx" class="rule-array__row">
+    <div v-for="(row, idx) in rows" :key="stableKey(row, idx)" class="rule-array__row">
       <n-space :size="6" align="center" style="width: 100%">
         <span class="rule-array__index">{{ idx + 1 }}</span>
         <template v-for="f in fields" :key="f.name">
@@ -40,6 +40,7 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
+import { stableKey } from '../../lib/stableKey';
 import { useI18n } from 'vue-i18n';
 import { NButton, NInput, NSpace, NSwitch } from 'naive-ui';
 import EsaCardSelect from './EsaCardSelect.vue';

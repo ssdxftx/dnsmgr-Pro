@@ -367,7 +367,7 @@ async function load() {
 }
 
 async function loadDomainInfo() {
-  const res = await api<any>('GET', '/domains', undefined, { cache: true });
+  const res = await api<any>('GET', '/domains?basic=1', undefined, { cache: true });
   if (res.code === 0) {
     const d = res.data.find((x: any) => x.id === domainId);
     if (d) domainName.value = d.name;

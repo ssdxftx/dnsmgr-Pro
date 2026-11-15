@@ -258,11 +258,21 @@ export default async function scheduleRoutes(app: FastifyInstance) {
     if (!Array.isArray(ids) || ids.length === 0) return { code: -1, msg: '参数错误' };
     const list = [...new Set(ids.map((x: any) => Number(x)).filter((n: number) => Number.isFinite(n) && n > 0))];
     if (!list.length) return { code: -1, msg: '参数错误' };
+    if (list.length > 500) return { code: -1, msg: '单次最多操作 500 个定时切换任务' };
     const ph = list.map(() => '?').join(',');
-    const tasks: any[] = await query(`SELECT did FROM ${table('sctask')} WHERE id IN (${ph})`, list);
-    for (const task of tasks) {
-      if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
-    }
+    // 一次 JOIN 完成批量判权，替代逐任务查询 domain/account 的 N+1；
+    // 不存在的 id 保持旧行为（忽略），但任何已存在任务不可访问时整体拒绝。
+    const existingRow: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('sctask')} WHERE id IN (${ph})`, list);
+    const legacyId = req.user?.legacy_domain ? Number(req.user?.legacy_domain_id || 0) : 0;
+    const allowedRows: any[] = await query(
+      `SELECT A.id FROM ${table('sctask')} A
+         LEFT JOIN ${table('domain')} B ON A.did = B.id
+         LEFT JOIN ${table('account')} C ON B.aid = C.id
+        WHERE A.id IN (${ph}) AND B.id IS NOT NULL
+          AND (C.visibility IS NULL OR C.visibility <> 'private' OR C.owner_uid = ? OR (? > 0 AND B.id = ?))`,
+      [...list, Number(req.user.uid), legacyId, legacyId],
+    );
+    if (allowedRows.length !== Number(existingRow?.c || 0)) return { code: -1, msg: '无权限操作该域名的私有账户' };
     let success = 0;
     if (act === 'delete') {
       const res: any = await query(`DELETE FROM ${table('sctask')} WHERE id IN (${ph})`, list);

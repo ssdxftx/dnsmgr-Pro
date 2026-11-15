@@ -21,7 +21,7 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('cname.listTitle') }}</h3>
         </div>
-        <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('cname.empty')" />
+        <ResponsiveDataTable :columns="columns" :data="rows" :loading="loadBusy" :empty-text="t('cname.empty')" :pagination="{ pageSize: 20 }" />
       </div>
     </n-card>
 
@@ -102,9 +102,22 @@ const columns = computed(() => [
 async function load() {
   loadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/cert/cnames');
-    rows.value = res.code === 0 ? res.data || [] : [];
-    if (res.code !== 0) message.error(res.msg);
+    // 后端已分页；CNAME 总量通常不大，按页取全量后由表格做前端分页，
+    // 既保留顶部统计的全量口径，也不会再被默认 200 条静默截断。
+    const all: any[] = [];
+    const size = 200;
+    for (let offset = 0; offset <= 10_000; offset += size) {
+      const res = await api<any>('GET', '/cert/cnames', { size, offset });
+      if (res.code !== 0) {
+        message.error(res.msg);
+        return;
+      }
+      const list = res.data || [];
+      all.push(...list);
+      const total = Number(res.total || 0);
+      if (!list.length || list.length < size || (total > 0 && all.length >= total)) break;
+    }
+    rows.value = all;
   } catch (e: any) {
     message.error(e?.message || t('common.networkError'));
   } finally {

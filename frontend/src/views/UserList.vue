@@ -88,9 +88,9 @@
         </n-form-item>
         <n-form-item v-if="form.level === 1" :label="t('userList.subPermission')">
           <div class="perm-list">
-            <div v-for="(p, idx) in form.permission" :key="idx" class="perm-item">
+            <div v-for="(p, idx) in form.permission" :key="stableKey(p, idx)" class="perm-item">
               <div class="perm-row">
-                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable remote :loading="domainLoadBusy" @search="loadDomains" class="perm-domain" />
+                <n-select v-model:value="p.domain" :options="domainOptions" :placeholder="t('userList.selectDomain')" filterable remote :loading="domainLoadBusy" @search="onDomainSearch" class="perm-domain" />
                 <div class="perm-actions">
                   <n-select v-model:value="p.readonly" :options="modeOptions" class="perm-mode" />
                   <n-button size="small" type="error" quaternary @click="removePerm(idx)">{{ t('common.delete') }}</n-button>
@@ -126,6 +126,7 @@ import ResponsiveDataTable from '../components/ResponsiveDataTable.vue';
 import TelemetryCard from '../components/TelemetryCard.vue';
 import OverviewStats from '../components/OverviewStats.vue';
 import { useAction } from '../composables/useAction';
+import { stableKey } from '../lib/stableKey';
 
 const message = useMessage();
 const dialog = useDialog();
@@ -318,13 +319,23 @@ async function loadUsers() {
   }
 }
 
+let domainSearchTimer: number | undefined;
+let domainSearchSeq = 0;
+function onDomainSearch(kw: string) {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+  // 250ms 防抖：避免每输入一个字符就发一次远程搜索
+  domainSearchTimer = window.setTimeout(() => void loadDomains(kw), 250);
+}
+
 async function loadDomains(kw = '') {
+  const seq = ++domainSearchSeq;
   domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/user/domains', kw ? { kw } : undefined);
+    if (seq !== domainSearchSeq) return;
     if (res.code === 0) domainOptions.value = res.data.map((d: string) => ({ label: d, value: d }));
   } finally {
-    domainLoadBusy.value = false;
+    if (seq === domainSearchSeq) domainLoadBusy.value = false;
   }
 }
 

@@ -47,7 +47,7 @@
           <n-input v-model:value="form.name" :placeholder="t('dnsCheck.namePlaceholder')" />
         </n-form-item>
         <n-form-item :label="t('dnsCheck.domain')">
-          <n-select v-model:value="form.did" :options="domainOptions" filterable remote :loading="domainLoadBusy" @search="loadDomains" :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
+          <n-select v-model:value="form.did" :options="domainOptions" filterable remote :loading="domainLoadBusy" @search="onDomainSearch" :placeholder="t('dnsCheck.domainPlaceholder')" @update:value="onDomainChange" />
         </n-form-item>
         <n-form-item :label="t('dnsCheck.subdomain')">
           <n-select v-model:value="form.sub" :options="subOptions" filterable clearable :placeholder="t('dnsCheck.subPlaceholder')" :disabled="!form.did" />
@@ -144,7 +144,7 @@ const saveBusy = ref(false);
 const tasks = ref<any[]>([]);
 const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
 const issueTasks = computed(() => tasks.value.filter((t: any) => t.last_run && Number(t.last_status) === 1).length);
-const normalTasks = computed(() => tasks.value.filter((t: any) => t.last_run && Number(t.last_status) !== 1).length);
+const normalTasks = computed(() => tasks.value.filter((t: any) => t.last_run && Number(t.last_status) !== 1 && Number(t.last_status) !== -1).length);
 const neverRunTasks = computed(() => tasks.value.filter((t: any) => !t.last_run).length);
 const lastRunAt = computed(() => {
   const times = tasks.value.map((t: any) => t.last_run).filter(Boolean).sort();
@@ -221,6 +221,9 @@ const columns = computed(() => [
       if (!row.last_run) return h(NTag, { size: 'small', type: 'default', bordered: false }, { default: () => t('dnsCheck.neverRun') });
       if (Number(row.last_status) === 1) {
         return h(NTag, { size: 'small', type: 'error', bordered: false }, { default: () => t('dnsCheck.issueCount', { count: Number(row.issue_count) || 0 }) });
+      }
+      if (Number(row.last_status) === -1) {
+        return h(NTag, { size: 'small', type: 'warning', bordered: false }, { default: () => t('dnsCheck.checkFailed') });
       }
       return h(NTag, { size: 'small', type: 'success', bordered: false }, { default: () => t('dnsCheck.resultOk') });
     },
@@ -335,15 +338,25 @@ async function load() {
   }
 }
 
+let domainSearchTimer: number | undefined;
+let domainSearchSeq = 0;
+function onDomainSearch(kw: string) {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+  // 250ms 防抖：避免每输入一个字符就发一次远程搜索
+  domainSearchTimer = window.setTimeout(() => void loadDomains(kw), 250);
+}
+
 async function loadDomains(kw = '') {
+  const seq = ++domainSearchSeq;
   domainLoadBusy.value = true;
   try {
     const res = await api<any>('GET', '/dns-check/domains', kw ? { kw } : undefined);
+    if (seq !== domainSearchSeq) return;
     if (res.code === 0) {
       domainOptions.value = (res.data || []).map((d: any) => ({ label: d.name, value: d.id }));
     }
   } finally {
-    domainLoadBusy.value = false;
+    if (seq === domainSearchSeq) domainLoadBusy.value = false;
   }
 }
 

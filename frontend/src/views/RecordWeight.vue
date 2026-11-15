@@ -134,10 +134,15 @@ const columns = computed(() => [
 
 async function load() {
   loadBusy.value = true;
-  const res = await api<any>('GET', `/domains/${domainId}/weight`, { pagesize: 100 });
-  rows.value = res.code === 0 ? res.data?.list || [] : [];
-  if (res.code !== 0) message.error(res.msg);
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/domains/${domainId}/weight`, { pagesize: 100 });
+    if (res.code === 0) rows.value = res.data?.list || [];
+    else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function toggle(r: any) {
@@ -191,7 +196,7 @@ async function saveWeights() {
 }
 
 async function loadDomainName() {
-  const dl = await api<any>('GET', '/domains', undefined, { cache: true });
+  const dl = await api<any>('GET', '/domains?basic=1', undefined, { cache: true });
   if (dl.code === 0) {
     const d = (dl.data || []).find((x: any) => x.id === domainId);
     if (d) domainName.value = d._base_name || d.name;

@@ -90,7 +90,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import {
   NAlert,
   NButton,
@@ -149,7 +149,10 @@ interface DetailData {
 
 const { t } = useI18n();
 const route = useRoute();
+const router = useRouter();
 const routeKey = String(route.params.route || '');
+// 非法服务商路由必须回到统计首页，不能用 EdgeOne 数据兜底造成误判。
+if (!PROVIDERS[routeKey]) void router.replace('/statistics');
 const meta = PROVIDERS[routeKey] || PROVIDERS.tencent_edgeone;
 const providerView = defineAsyncComponent(
   ({
@@ -340,9 +343,21 @@ function onTab(value: string) {
 
 async function loadOptions() {
   if (!isAdmin.value) return;
+  const loadAllCdnDomains = async (): Promise<{ code: number; data: any[] }> => {
+    const all: any[] = [];
+    for (let page = 1; page <= 50; page++) {
+      const res = await api<any>('GET', '/cdn/domains', { page, size: 500 });
+      if (res.code !== 0) throw new Error(res.msg || '加载加速域名失败');
+      const list = res.data || [];
+      all.push(...list);
+      const total = Number(res.total || 0);
+      if (!list.length || list.length < 500 || (total > 0 && all.length >= total)) break;
+    }
+    return { code: 0, data: all };
+  };
   const [a, d] = await Promise.all([
     api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] })),
-    api<any>('GET', '/cdn/domains').catch(() => ({ code: -1, data: [] })),
+    loadAllCdnDomains().catch(() => ({ code: -1, data: [] })),
   ]);
   // 只保留当前服务商的账户，避免选到其他服务商后查询为空
   accountOptions.value = (a.data || [])
@@ -361,19 +376,31 @@ function onAccountChange() {
   reload();
 }
 
-watch(autoRefresh, (on) => {
+function stopAutoRefresh() {
   if (timer) {
     clearInterval(timer);
     timer = null;
   }
-  if (on) {
-    timer = setInterval(() => {
-      if (tab.value !== 'analytics') loadGroup(tab.value);
-    }, 60_000);
-  }
+}
+function startAutoRefresh() {
+  if (!autoRefresh.value || timer || document.hidden) return;
+  timer = setInterval(() => {
+    if (!document.hidden && tab.value !== 'analytics') loadGroup(tab.value);
+  }, 60_000);
+}
+function onVisibilityChange() {
+  if (document.hidden) stopAutoRefresh();
+  else startAutoRefresh();
+}
+
+watch(autoRefresh, (on) => {
+  if (on) startAutoRefresh();
+  else stopAutoRefresh();
 });
 
 onMounted(() => {
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  startAutoRefresh();
   loadOptions();
   loadGroup('overview');
   if (String(route.query.tab || '') === 'analytics' && routeKey === 'aliyun_esa' && isAdmin.value) {
@@ -381,7 +408,8 @@ onMounted(() => {
   }
 });
 onBeforeUnmount(() => {
-  if (timer) clearInterval(timer);
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  stopAutoRefresh();
 });
 </script>
 

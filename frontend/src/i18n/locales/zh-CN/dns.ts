@@ -242,6 +242,7 @@ export default {
     emailPlaceholder: '留空使用系统默认收件邮箱',
     resultTitle: '检测结果',
     resultOk: '正常',
+    checkFailed: '检测失败',
     neverRun: '未检测',
     lastCheck: '最近一次检测',
     issueCount: '异常 {count} 项',

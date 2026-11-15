@@ -25,12 +25,14 @@ import {
   cdnLinkIds,
   linkOrderToCdnDomain,
 } from '../lib/cdn/certLink.js';
+import { isCdnDomainIdColumnAvailable } from '../lib/cert/cdnDomainIdColumn.js';
 import { CertDeployService } from '../lib/deployService.js';
 import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
-import { asText } from '../lib/util.js';
+import { asText, clampLimit, clampOffset } from '../lib/util.js';
+import { createJob, runJobInBackground } from '../lib/jobs.js';
 
 // 统计区间上限（31 天）：区间越大生成的标签越多，超长区间可一次性产出数万个标签
 const MAX_STAT_RANGE_MS = 31 * 86400_000;
@@ -440,13 +442,19 @@ function normalizeServiceArea(value: any): string {
 }
 
 function parseIds(raw: any): number[] {
-  return [
+  const list = [
     ...new Set(
       (Array.isArray(raw) ? raw : [])
         .map((x: any) => Number(x))
         .filter((n: number) => Number.isInteger(n) && n > 0),
     ),
-  ].slice(0, 200) as number[]; // 上限 200，避免单请求扇出大量上游调用
+  ] as number[];
+  if (list.length > 200) {
+    const err: any = new Error('单次最多操作 200 个加速域名，请分批提交');
+    err.statusCode = 400;
+    throw err;
+  }
+  return list;
 }
 
 function summarizeResults(list: any[], pendingLabel: string): string {
@@ -769,7 +777,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
       params.push(...allowedAids);
     }
     const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
-    const rows = await query(`SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC`, params);
+    const pageSize = clampLimit(q.size, 200, 500);
+    const pageOffset = Math.min(clampOffset(q.page ? (Math.max(1, Number(q.page)) - 1) * pageSize : 0), 1_000_000);
+    const rows = await query(
+      `SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...params, pageSize, pageOffset],
+    );
+    const totalRow: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('cdn_domain')}${where}`, params);
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const cdnAccounts = visibleAccounts;
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
@@ -777,8 +791,28 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
     // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
     const linkedDids = new Set<number>();
-    // link 可能保存多个 cdnDomainIds；生成列只覆盖主关联，必须解析完整列表。
-    const lrows = await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%']);
+    // link 可能保存多个 cdnDomainIds；生成列覆盖主关联，其余通过 link 解析补齐。
+    const lrows: any[] = [];
+    if (isCdnDomainIdColumnAvailable()) {
+      const pageIds = rows.map((r: any) => Number(r.id)).filter((n: number) => n > 0);
+      if (pageIds.length) {
+        lrows.push(
+          ...(await query(
+            `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IN (${pageIds.map(() => '?').join(',')})`,
+            pageIds,
+          )),
+        );
+      }
+      // 兼容只保存 cdnDomainIds 数组、没有主 cdnDomainId 的历史订单
+      lrows.push(
+        ...(await query(
+          `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IS NULL AND link IS NOT NULL AND link LIKE ?`,
+          ['%"cdnDomainId"%'],
+        )),
+      );
+    } else {
+      lrows.push(...(await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%'])));
+    }
     for (const o of lrows as any[]) {
       for (const did of cdnLinkIds(o.link)) linkedDids.add(did);
     }
@@ -795,7 +829,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       can_certapply: certAids.has(r.aid) ? 1 : 0,
       can_certlink: linkAids.has(r.aid) ? 1 : 0,
     }));
-    return { code: 0, data };
+    return { code: 0, data, total: Number(totalRow?.c || 0), size: pageSize };
   });
 
   // 站点列表（按账户 + 站点聚合）
@@ -942,7 +976,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
       await runPool(
         pending.map((z) => async () => {
           try {
-            z.paused = (await provider.getZonePaused(String(z.zoneId))) === true;
+            // 并发补齐时每个任务使用独立 provider：getZonePaused 会把失败信息写入 this.error，
+            // 复用同一实例会让并发请求互相覆盖错误，返回给用户的失败原因不可信。
+            const p: any = await cdnForZone(aid, null);
+            z.paused = p && typeof p.getZonePaused === 'function' ? (await p.getZonePaused(String(z.zoneId))) === true : false;
           } catch {
             z.paused = false;
           }
@@ -1319,7 +1356,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !functionId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listFunctionReplicas !== 'function') return { code: -1, msg: '该 CDN 类型不支持函数副本' };
-    const r = await provider.listFunctionReplicas(zoneId, functionId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listFunctionReplicas(zoneId, functionId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取函数副本失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1452,7 +1489,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listKvNamespaces !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
-    const r = await provider.listKvNamespaces(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listKvNamespaces(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取 KV 命名空间失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1502,7 +1539,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !namespace) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.kvList !== 'function') return { code: -1, msg: '该 CDN 类型不支持 EdgeKV' };
-    const r = await provider.kvList(zoneId, namespace, String(req.query.prefix || ''), String(req.query.cursor || ''), Number(req.query.limit || 100));
+    const r = await provider.kvList(zoneId, namespace, String(req.query.prefix || ''), String(req.query.cursor || ''), clampLimit(req.query.limit, 100, 200));
     if (r === false) return { code: -1, msg: '获取 KV 键列表失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1565,7 +1602,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !groupId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listConfigGroupVersions !== 'function') return { code: -1, msg: '该 CDN 类型不支持版本管理' };
-    const r = await provider.listConfigGroupVersions(zoneId, groupId, Number(req.query.page || 1), Number(req.query.size || 50));
+    const r = await provider.listConfigGroupVersions(zoneId, groupId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 50, 200));
     if (r === false) return { code: -1, msg: '获取版本列表失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1668,7 +1705,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listMultiPathGateways !== 'function') return { code: -1, msg: '该 CDN 类型不支持多通道安全网关' };
-    const r = await provider.listMultiPathGateways(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listMultiPathGateways(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取网关列表失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1876,7 +1913,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listInferenceServices !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
-    const r = await provider.listInferenceServices(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listInferenceServices(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取推理服务失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1930,7 +1967,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !serviceId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listInferenceDeploymentRecords !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
-    const r = await provider.listInferenceDeploymentRecords(zoneId, serviceId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listInferenceDeploymentRecords(zoneId, serviceId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取部署记录失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1943,7 +1980,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !serviceId || !recordId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.getInferenceDeploymentLogs !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
-    const r = await provider.getInferenceDeploymentLogs(zoneId, serviceId, recordId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.getInferenceDeploymentLogs(zoneId, serviceId, recordId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取部署日志失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -1967,7 +2004,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listInferenceApiTokens !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
-    const r = await provider.listInferenceApiTokens(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listInferenceApiTokens(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取推理 Token 失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2005,7 +2042,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !serviceId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listInferenceDomains !== 'function') return { code: -1, msg: '该 CDN 类型不支持边缘推理' };
-    const r = await provider.listInferenceDomains(zoneId, serviceId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listInferenceDomains(zoneId, serviceId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取推理域名失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2054,7 +2091,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listJitTranscodeTemplates !== 'function') return { code: -1, msg: '该 CDN 类型不支持即时转码' };
-    const r = await provider.listJitTranscodeTemplates(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listJitTranscodeTemplates(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取转码模板失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2225,7 +2262,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listSharedCnames !== 'function') return { code: -1, msg: '该 CDN 类型不支持共享 CNAME' };
-    const r = await provider.listSharedCnames(zoneId, Number(req.query.page || 1), Number(req.query.size || 50));
+    const r = await provider.listSharedCnames(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 50, 200));
     if (r === false) return { code: -1, msg: '获取共享 CNAME 失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2317,7 +2354,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listAliasDomains !== 'function') return { code: -1, msg: '该 CDN 类型不支持别称域名' };
-    const r = await provider.listAliasDomains(zoneId, Number(req.query.page || 1), Number(req.query.size || 50));
+    const r = await provider.listAliasDomains(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 50, 200));
     if (r === false) return { code: -1, msg: '获取别称域名失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2404,7 +2441,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listCustomErrorPages !== 'function') return { code: -1, msg: '该 CDN 类型不支持自定义响应页面' };
-    const r = await provider.listCustomErrorPages(zoneId, Number(req.query.page || 1), Number(req.query.size || 50));
+    const r = await provider.listCustomErrorPages(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 50, 200));
     if (r === false) return { code: -1, msg: '获取自定义响应页面失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2458,7 +2495,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listOriginGroups !== 'function') return { code: -1, msg: '该 CDN 类型不支持源站组' };
-    const r = await provider.listOriginGroups(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listOriginGroups(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取源站组失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2507,7 +2544,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listLoadBalancers !== 'function') return { code: -1, msg: '该 CDN 类型不支持负载均衡' };
-    const r = await provider.listLoadBalancers(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listLoadBalancers(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取负载均衡失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -2682,7 +2719,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!isEsaRuleKind(kind)) return { code: -1, msg: '不支持的规则类型' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listRuleConfigs !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
-    const r = await provider.listRuleConfigs(zoneId, kind, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listRuleConfigs(zoneId, kind, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取规则失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3013,7 +3050,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listJsInjectionRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持 JS 注入规则' };
-    const r = await provider.listJsInjectionRules(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listJsInjectionRules(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取 JS 注入规则失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3082,7 +3119,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listClientAttesters !== 'function') return { code: -1, msg: '该 CDN 类型不支持客户端认证选项' };
-    const r = await provider.listClientAttesters(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listClientAttesters(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取客户端认证选项失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3152,7 +3189,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listApiServices !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 服务' };
-    const r = await provider.listApiServices(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listApiServices(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取 API 服务失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3209,7 +3246,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listApiResources !== 'function') return { code: -1, msg: '该 CDN 类型不支持 API 资源' };
-    const r = await provider.listApiResources(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listApiResources(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取 API 资源失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3259,7 +3296,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const aid = Number((req.params as any).aid);
     const provider: any = await cdnForZone(aid, null);
     if (!provider || typeof provider.listContentIdentifiers !== 'function') return { code: -1, msg: '该 CDN 类型不支持内容标识符' };
-    const r = await provider.listContentIdentifiers(Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listContentIdentifiers(clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取内容标识符失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3303,7 +3340,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listL4Proxies !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层代理' };
-    const r = await provider.listL4Proxies(zoneId, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listL4Proxies(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取四层代理失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3372,7 +3409,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId || !proxyId) return { code: -1, msg: '参数不完整' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listL4ProxyRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层转发规则' };
-    const r = await provider.listL4ProxyRules(zoneId, proxyId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listL4ProxyRules(zoneId, proxyId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取四层转发规则失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3451,7 +3488,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String(req.query.zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId || null);
     if (!provider || typeof provider.listPurgeTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持刷新任务查询' };
-    const r = await provider.listPurgeTasks(zoneId || null, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listPurgeTasks(zoneId || null, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取刷新任务失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3461,7 +3498,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneId = String(req.query.zoneId || '').trim();
     const provider: any = await cdnForZone(aid, zoneId || null);
     if (!provider || typeof provider.listPrefetchTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持预热任务查询' };
-    const r = await provider.listPrefetchTasks(zoneId || null, Number(req.query.page || 1), Number(req.query.size || 20));
+    const r = await provider.listPrefetchTasks(zoneId || null, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 20, 200));
     if (r === false) return { code: -1, msg: '获取预热任务失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3473,7 +3510,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listRealtimeLogTasks !== 'function') return { code: -1, msg: '该 CDN 类型不支持实时日志' };
-    const r = await provider.listRealtimeLogTasks(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.listRealtimeLogTasks(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取实时日志任务失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3538,16 +3575,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   app.get('/api/cdn/accounts/:aid/logs/offline/l7', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
-    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
-    const domains = String(req.query.domains || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
+    const domains = String(req.query.domains || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
     const provider: any = await cdnForZone(aid, zoneIds[0] || null);
     if (!provider || typeof provider.downloadL7Logs !== 'function') return { code: -1, msg: '该 CDN 类型不支持离线日志' };
     const r = await provider.downloadL7Logs(
       zoneIds,
       String(req.query.startTime || ''),
       String(req.query.endTime || ''),
-      Number(req.query.limit || 20),
-      Number(req.query.offset || 0),
+      clampLimit(req.query.limit, 20, 1000),
+      Math.min(clampOffset(req.query.offset), 1_000_000),
       domains,
     );
     if (r === false) return { code: -1, msg: '获取离线日志失败，' + provider.getError() };
@@ -3556,16 +3593,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   app.get('/api/cdn/accounts/:aid/logs/offline/l4', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
-    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
-    const proxyIds = String(req.query.proxyIds || '').split(',').map((x) => x.trim()).filter(Boolean);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
+    const proxyIds = String(req.query.proxyIds || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
     const provider: any = await cdnForZone(aid, zoneIds[0] || null);
     if (!provider || typeof provider.downloadL4Logs !== 'function') return { code: -1, msg: '该 CDN 类型不支持四层离线日志' };
     const r = await provider.downloadL4Logs(
       zoneIds,
       String(req.query.startTime || ''),
       String(req.query.endTime || ''),
-      Number(req.query.limit || 20),
-      Number(req.query.offset || 0),
+      clampLimit(req.query.limit, 20, 200),
+      Math.min(clampOffset(req.query.offset), 1_000_000),
       proxyIds,
     );
     if (r === false) return { code: -1, msg: '获取四层离线日志失败，' + provider.getError() };
@@ -3621,7 +3658,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.getPrefetchOriginLimit !== 'function') return { code: -1, msg: '该 CDN 类型不支持预热回源限速' };
-    const r = await provider.getPrefetchOriginLimit(zoneId, Number(req.query.page || 1), Number(req.query.size || 100));
+    const r = await provider.getPrefetchOriginLimit(zoneId, clampLimit(req.query.page, 1, 10000), clampLimit(req.query.size, 100, 200));
     if (r === false) return { code: -1, msg: '获取预热回源限速失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3646,10 +3683,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   app.get('/api/cdn/accounts/:aid/analysis/top', authAid, async (req: any) => {
     const aid = Number((req.params as any).aid);
-    const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const zoneIds = String(req.query.zoneIds || '').split(',').map((s) => s.trim()).filter(Boolean).slice(0, 200);
     const provider: any = await cdnForZone(aid, zoneIds[0] || null);
     if (!provider || typeof provider.topAnalysis !== 'function') return { code: -1, msg: '该 CDN 类型不支持统计' };
-    const r = await provider.topAnalysis(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), String(req.query.metricName || 'l7Flow_outFlux'), Number(req.query.limit || 10));
+    const r = await provider.topAnalysis(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), String(req.query.metricName || 'l7Flow_outFlux'), clampLimit(req.query.limit, 10, 100));
     if (r === false) return { code: -1, msg: '获取统计失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3670,7 +3707,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const zoneIds = String(req.query.zoneIds || '').split(',').map((x) => x.trim()).filter(Boolean);
     const provider: any = await cdnForZone(aid, zoneIds[0] || null);
     if (!provider || typeof provider.getDdosAttackEvents !== 'function') return { code: -1, msg: '该 CDN 类型不支持 DDoS 事件查询' };
-    const r = await provider.getDdosAttackEvents(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), Number(req.query.limit || 20));
+    const r = await provider.getDdosAttackEvents(zoneIds, String(req.query.startTime || ''), String(req.query.endTime || ''), clampLimit(req.query.limit, 20, 200));
     if (r === false) return { code: -1, msg: '获取 DDoS 事件失败，' + provider.getError() };
     return { code: 0, data: r };
   });
@@ -3685,7 +3722,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       String(req.query.startTime || ''),
       String(req.query.endTime || ''),
       String(req.query.metricName || 'ddos_attackFlux_protocol'),
-      Number(req.query.limit || 10),
+      clampLimit(req.query.limit, 10, 100),
     );
     if (r === false) return { code: -1, msg: '获取 DDoS Top 失败，' + provider.getError() };
     return { code: 0, data: r };
@@ -3782,7 +3819,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
             .filter((z: any) => typeof z.paused !== 'boolean')
             .map((z: any) => async () => {
               try {
-                z.paused = (await provider.getZonePaused(String(z.zoneId))) === true;
+                // 同上：不要复用列表请求的 provider，避免并发错误状态串台
+                const p: any = await cdnForZone(aid, null);
+                z.paused = p && typeof p.getZonePaused === 'function' ? (await p.getZonePaused(String(z.zoneId))) === true : false;
               } catch {
                 z.paused = false;
               }
@@ -4584,23 +4623,27 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return `自动添加验证解析失败（${dns.getError()}），请手动添加 ${name} ${rec.type} ${rec.value}`;
   }
 
-  async function runFreeCert(ids: number[], checkOnly: boolean, user: any): Promise<any[]> {
+  async function runFreeCert(ids: number[], checkOnly: boolean, user: any, onItem?: (r: any) => void | Promise<void>): Promise<any[]> {
     const results: any[] = [];
+    const emit = async (r: any) => {
+      results.push(r);
+      if (onItem) await onItem(r);
+    };
     for (const id of ids) {
       const row = await loadCdnDomain(id);
       if (!row || !(await getVisibleAccount('cdn_account', Number(row.aid), user))) {
-        results.push({ id, status: 'failed', message: '加速域名不存在' });
+        await emit({ id, status: 'failed', message: '加速域名不存在' });
         continue;
       }
       const name = row.name;
       const provider: any = await cdnForRow(row);
       if (!provider) {
-        results.push({ id, name, status: 'failed', message: 'CDN账户不存在' });
+        await emit({ id, name, status: 'failed', message: 'CDN账户不存在' });
         continue;
       }
       const fn = checkOnly ? provider.checkFreeCert : provider.applyFreeCert;
       if (typeof fn !== 'function') {
-        results.push({ id, name, status: 'failed', message: '该厂商暂不支持配置平台免费证书' });
+        await emit({ id, name, status: 'failed', message: '该厂商暂不支持配置平台免费证书' });
         continue;
       }
       let r: any;
@@ -4618,17 +4661,50 @@ export default async function cdnRoutes(app: FastifyInstance) {
         for (const rec of r.records) notes.push(await addVerifyRecord(row, rec, user));
         message = (message || '需完成域名验证') + '；' + notes.join('；');
       }
-      results.push({ id, name, status: r?.status || 'failed', message, records: r?.records || [] });
+      await emit({ id, name, status: r?.status || 'failed', message, records: r?.records || [] });
     }
     return results;
+  }
+
+  // 大批量证书操作改为后台任务：HTTP 请求不再等待最多 200 个域名逐个申请/部署。
+  const CERT_JOB_THRESHOLD = 10;
+  async function queueCertJob(
+    req: any,
+    type: string,
+    ids: number[],
+    runner: (onItem: (r: any) => void | Promise<void>) => Promise<any[]>,
+    apply: (r: any) => void | Promise<void>,
+  ): Promise<any> {
+    const jobId = await createJob(Number(req.user.uid), type, ids.length, { ids });
+    if (!jobId) return { code: -1, msg: '已有同类后台任务正在执行，请稍后再试' };
+    runJobInBackground(jobId, async (progress) => {
+      let done = 0;
+      let failed = 0;
+      let recent: any[] = [];
+      const data = await runner(async (r) => {
+        if (r?.status === 'failed') failed++;
+        else done++;
+        recent = [...recent.slice(-19), r];
+        await progress(done, failed, { results: recent });
+      });
+      for (const r of data) await apply(r);
+      return { results: data };
+    });
+    return { code: 0, msg: `已提交后台任务（${ids.length} 个域名），可在任务列表查看进度`, jobId, data: [] };
   }
 
   // 批量为加速域名申请平台免费证书（如腾讯云 EdgeOne 免费证书）
   app.post('/api/cdn/domains/freecert', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要配置免费证书的加速域名' };
+    const apply = async (r: any) => {
+      if (r.status !== 'failed') await setCertMode(Number(r.id), 'freecert');
+    };
+    if (ids.length > CERT_JOB_THRESHOLD) {
+      return queueCertJob(req, 'cdn.freecert', ids, (onItem) => runFreeCert(ids, false, req.user, onItem), apply);
+    }
     const data = await runFreeCert(ids, false, req.user);
-    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'freecert');
+    for (const r of data) await apply(r);
     return { code: 0, msg: summarizeResults(data, '待验证'), data };
   });
 
@@ -4636,14 +4712,20 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.post('/api/cdn/domains/freecert/check', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
+    const apply = async (r: any) => {
+      if (r.status !== 'failed') await setCertMode(Number(r.id), 'freecert');
+    };
+    if (ids.length > CERT_JOB_THRESHOLD) {
+      return queueCertJob(req, 'cdn.freecert.check', ids, (onItem) => runFreeCert(ids, true, req.user, onItem), apply);
+    }
     const data = await runFreeCert(ids, true, req.user);
-    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'freecert');
+    for (const r of data) await apply(r);
     return { code: 0, msg: summarizeResults(data, '待验证'), data };
   });
 
   // ===== 联动证书申请：按站点申请一张通配符证书，签发后直传站点并启用 HTTPS =====
 
-  async function runCertLink(ids: number[], checkOnly: boolean, user: any): Promise<any[]> {
+  async function runCertLink(ids: number[], checkOnly: boolean, user: any, onItem?: (r: any) => void | Promise<void>): Promise<any[]> {
     // 指定账户不可用时回退默认 Let's Encrypt（固定邮箱），未配置也能签发
     const configuredAid = Number(await configGet('cdn_cert_aid', '0')) || 0;
     // 配置的证书账户若属于他人私有账户，回退默认 Let's Encrypt，避免管理员借联动使用私有凭证
@@ -4652,24 +4734,28 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const le = usingDefault ? "（默认 Let's Encrypt）" : '';
     const kicked = new Set<number>();
     const results: any[] = [];
+    const emit = async (r: any) => {
+      results.push(r);
+      if (onItem) await onItem(r);
+    };
     for (const id of ids) {
       const row = await loadCdnDomain(id);
       if (!row || !(await getVisibleAccount('cdn_account', Number(row.aid), user))) {
-        results.push({ id, status: 'failed', message: '加速域名不存在' });
+        await emit({ id, status: 'failed', message: '加速域名不存在' });
         continue;
       }
       const provider: any = await cdnForRow(row);
       if (!provider || typeof provider.getCertScope !== 'function' || typeof provider.getCertDeployPlan !== 'function') {
-        results.push({ id, name: row.name, status: 'failed', message: '该厂商暂不支持联动证书申请' });
+        await emit({ id, name: row.name, status: 'failed', message: '该厂商暂不支持联动证书申请' });
         continue;
       }
       const scope = await provider.getCertScope(row.name);
       if (!scope) {
-        results.push({ id, name: row.name, status: 'failed', message: '未找到该域名对应的加速站点，请先在对应云控制台创建站点' });
+        await emit({ id, name: row.name, status: 'failed', message: '未找到该域名对应的加速站点，请先在对应云控制台创建站点' });
         continue;
       }
       if (!account) {
-        results.push({ id, name: row.name, status: 'failed', message: '无法准备证书账户（默认 Let\'s Encrypt 创建失败）' });
+        await emit({ id, name: row.name, status: 'failed', message: '无法准备证书账户（默认 Let\'s Encrypt 创建失败）' });
         continue;
       }
       const rootRow: any = await queryOne(
@@ -4679,11 +4765,11 @@ export default async function cdnRoutes(app: FastifyInstance) {
         [scope.siteName],
       );
       if (!rootRow) {
-        results.push({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 未在本系统添加，无法自动完成 DNS 验证` });
+        await emit({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 未在本系统添加，无法自动完成 DNS 验证` });
         continue;
       }
       if (rootRow.account_visibility === 'private' && Number(rootRow.account_owner) !== Number(user?.uid)) {
-        results.push({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 使用他人私有 DNS 账户，无法自动完成验证` });
+        await emit({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 使用他人私有 DNS 账户，无法自动完成验证` });
         continue;
       }
       const order = await ensureWildcardOrder(aid, scope.domains);
@@ -4703,7 +4789,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
         } else {
           message = checkOnly ? '证书尚未签发完成，请稍后再检查' : `已提交证书申请${le}，系统将自动完成 DNS 验证与签发，签发后点击「检查并部署」完成上传`;
         }
-        results.push({ id, name: row.name, status: status < 0 ? 'failed' : 'pending', message, order_id: order.id, domains: scope.domains });
+        await emit({ id, name: row.name, status: status < 0 ? 'failed' : 'pending', message, order_id: order.id, domains: scope.domains });
         continue;
       }
       // 已签发：优先执行自动部署任务（与续签同一条链路），无计划时回退直传
@@ -4725,7 +4811,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (applied) {
         await query(`UPDATE ${table('cdn_domain')} SET https_enabled = 1 WHERE id = ?`, [id]);
       }
-      results.push({ id, name: row.name, status: applied ? 'applied' : 'failed', message, order_id: order.id, domains: scope.domains });
+      await emit({ id, name: row.name, status: applied ? 'applied' : 'failed', message, order_id: order.id, domains: scope.domains });
     }
     return results;
   }
@@ -4734,8 +4820,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.post('/api/cdn/domains/cert', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要申请证书的加速域名' };
+    const apply = async (r: any) => {
+      if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply', r.order_id ? [Number(r.order_id)] : []);
+    };
+    if (ids.length > CERT_JOB_THRESHOLD) {
+      return queueCertJob(req, 'cdn.cert', ids, (onItem) => runCertLink(ids, false, req.user, onItem), apply);
+    }
     const data = await runCertLink(ids, false, req.user);
-    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply', r.order_id ? [Number(r.order_id)] : []);
+    for (const r of data) await apply(r);
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
@@ -4743,8 +4835,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.post('/api/cdn/domains/cert/check', adminAuth, async (req: any) => {
     const ids = parseIds(req.body?.ids);
     if (!ids.length) return { code: -1, msg: '请选择要检查的加速域名' };
+    const apply = async (r: any) => {
+      if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply', r.order_id ? [Number(r.order_id)] : []);
+    };
+    if (ids.length > CERT_JOB_THRESHOLD) {
+      return queueCertJob(req, 'cdn.cert.check', ids, (onItem) => runCertLink(ids, true, req.user, onItem), apply);
+    }
     const data = await runCertLink(ids, true, req.user);
-    for (const r of data) if (r.status !== 'failed') await setCertMode(Number(r.id), 'certapply', r.order_id ? [Number(r.order_id)] : []);
+    for (const r of data) await apply(r);
     return { code: 0, msg: summarizeResults(data, '待签发'), data };
   });
 
@@ -4867,8 +4965,17 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 查找该加速域名已绑定的联动证书订单（link 可能包含多个 cdnDomainIds）
   async function findLinkedOrder(did: number): Promise<any | null> {
+    if (isCdnDomainIdColumnAvailable()) {
+      const primary: any[] = await query(
+        `SELECT id, status, error, expiretime, link FROM ${table('cert_order')}
+          WHERE cdn_domain_id = ? ORDER BY id DESC LIMIT 1`,
+        [did],
+      );
+      if (primary.length) return primary[0];
+    }
     const candidates = await query(
-      `SELECT id, status, error, expiretime, link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ? ORDER BY id DESC LIMIT 200`,
+      `SELECT id, status, error, expiretime, link FROM ${table('cert_order')}
+        WHERE link IS NOT NULL AND link LIKE ? ORDER BY id DESC LIMIT 200`,
       ['%"cdnDomainId"%'],
     );
     for (const r of candidates as any[]) {
@@ -5065,7 +5172,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!(await getVisibleAccount('cdn_account', Number(aid || 0), req.user))) {
       return reply.code(404).send({ code: -1, msg: '账户不存在' });
     }
-    const r = await syncFromCloud(Number(aid || 0), Number(did || 0), req.user);
+    // 同一账户/站点的同步串行化：并发同步会触发 cdn_domain(aid,name) 唯一冲突
+    const outcome = await withDistributedLockResult(
+      `dnsmgr:cdn-sync:${Number(aid || 0)}:${Number(did || 0)}`,
+      () => syncFromCloud(Number(aid || 0), Number(did || 0), req.user),
+      5,
+    );
+    if (!outcome.locked || !outcome.result) return { code: -1, msg: '该账户正在同步，请稍后再试' };
+    const r = outcome.result;
     audit(req, {
       targetType: 'account',
       targetId: Number(aid || 0) || undefined,
@@ -5113,6 +5227,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const latest = Date.now() - 5 * 60 * 1000;
       if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
+      if (end.getTime() - start.getTime() > MAX_STAT_RANGE_MS) return { code: -1, msg: '统计区间最长 31 天' };
 
       const isAdmin = checkLevel(req.user, 2);
       const cacheEnabled = await isStatCacheEnabled();
@@ -5223,30 +5338,35 @@ export default async function cdnRoutes(app: FastifyInstance) {
       // 站点级服务商（ESA / EdgeOne）的统计以「站点」为单位，不依赖本项目是否接入过域名。
       // 本地没有域名记录时回退到云端站点列表，否则只建了站点、未接域名的账户在统计页会整块消失。
       const cloudSites = new Map<number, StatisticsDomain[]>();
+      const siteTasks: Array<() => Promise<void>> = [];
       for (const catalog of listCatalogs()) {
         if (!catalog.siteScoped) continue;
         for (const a of acctRows.filter((x) => x.type === catalog.route)) {
           const localCount = domRows.filter((d) => Number(d.aid) === Number(a.id)).length;
           if (localCount) continue;
-          try {
-            const provider: any = getCdnProvider(a.type, await accountConfigOf(a));
-            if (!provider || typeof provider.getZones !== 'function') continue;
-            const zones = await provider.getZones();
-            if (!Array.isArray(zones)) continue;
-            const list = zones
-              .map((z: any) => ({
-                name: String(z?.zoneName || z?.name || ''),
-                route: String(a.type),
-                zoneId: String(z?.zoneId || ''),
-                serviceArea: z?.area,
-              }))
-              .filter((d: any) => d.zoneId);
-            if (list.length) cloudSites.set(Number(a.id), list);
-          } catch {
-            // 云端不可达时保持「未接入」，不影响其他服务商
-          }
+          siteTasks.push(async () => {
+            try {
+              const provider: any = getCdnProvider(a.type, await accountConfigOf(a));
+              if (!provider || typeof provider.getZones !== 'function') return;
+              const zones = await provider.getZones();
+              if (!Array.isArray(zones)) return;
+              const list = zones
+                .map((z: any) => ({
+                  name: String(z?.zoneName || z?.name || ''),
+                  route: String(a.type),
+                  zoneId: String(z?.zoneId || ''),
+                  serviceArea: z?.area,
+                }))
+                .filter((d: any) => d.zoneId);
+              if (list.length) cloudSites.set(Number(a.id), list);
+            } catch {
+              // 云端不可达时保持「未接入」，不影响其他服务商
+            }
+          });
         }
       }
+      // 有界并发枚举站点，避免账户多时逐个等待上游
+      await runPool(siteTasks, 4);
 
       const inputs = listCatalogs()
         .filter(
@@ -5449,6 +5569,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       // 起始时间也落在延迟窗口内时（如刚过零点查「今天」）不再回退，避免区间为空
       if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
+      if (end.getTime() - start.getTime() > MAX_STAT_RANGE_MS) return { code: -1, msg: '统计区间最长 31 天' };
 
       const domainNames = String(q.domains || '')
         .split(',')
@@ -5674,9 +5795,13 @@ const MAX_CACHE_OP_URLS = 100;
   });
 
   // 刷新/预热历史
-  app.get('/api/cdn/cache-tasks', adminAuth, async () => {
-    const rows = await query(`SELECT * FROM ${table('cdn_cache_task')} ORDER BY id DESC LIMIT 200`);
-    return { code: 0, data: rows };
+  app.get('/api/cdn/cache-tasks', adminAuth, async (req: any) => {
+    const page = clampLimit(req.query.page, 1, 10000);
+    const size = clampLimit(req.query.size, 200, 200);
+    const offset = (page - 1) * size;
+    const rows = await query(`SELECT * FROM ${table('cdn_cache_task')} ORDER BY id DESC LIMIT ? OFFSET ?`, [size, offset]);
+    const totalRow: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('cdn_cache_task')}`);
+    return { code: 0, data: rows, total: Number(totalRow?.c || 0), page, size };
   });
 
   app.get('/api/cdn/cache-tasks/:id', adminAuth, async (req: any) => {
@@ -5749,6 +5874,8 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
   const dnsRows = await query(`SELECT * FROM ${table('domain')}`);
   const dnsMap: Record<string, any> = {};
   for (const d of dnsRows) dnsMap[d.name] = d;
+  // 只排序一次：放在每个云端域名循环内会退化为 O(M×N log N)
+  const dnsNames = Object.keys(dnsMap).sort((a, b) => b.length - a.length);
 
   // 预加载已有加速域名与 DNS 账户，避免循环内逐条 SELECT（N+1）
   const cdnByName = new Map<string, any>();
@@ -5819,7 +5946,6 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
     let belongDomain: any = null;
     let recordName = '@';
     // 按名称长度降序匹配，确保 a.example.com 优先于 example.com，结果不依赖数据库返回顺序
-    const dnsNames = Object.keys(dnsMap).sort((a, b) => b.length - a.length);
     for (const dnsName of dnsNames) {
       const d = dnsMap[dnsName];
       if (name === dnsName) {

@@ -73,10 +73,12 @@ export class VolcengineCDN implements CdnProvider {
       ],
     };
     if (!(await this.send('AddCdnDomain', param))) return false;
-    for (let i = 0; i < 10; i++) {
+    // 创建后 CNAME 由上游异步分配：立即查一次，短暂等待后再查一次即可。
+    // 原来 10 次 × 1 秒的同步轮询会让批量接入 50 个域名阻塞约 500 秒。
+    for (let i = 0; i < 2; i++) {
       const cname = await this.getDomainCname(domain);
       if (cname) return cname;
-      await new Promise((r) => setTimeout(r, 1000));
+      await new Promise((r) => setTimeout(r, 700));
     }
     this.error = '未获取到 CNAME，请稍后在列表刷新重试';
     return false;
