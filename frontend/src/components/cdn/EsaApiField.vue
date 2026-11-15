@@ -173,8 +173,11 @@ function setChild(name: string, value: any) {
 }
 
 function setArrayChild(index: number, name: string, value: any) {
-  const next = arrayValue.value.map((item, i) => (i === index ? { ...(item || {}), [name]: value } : item));
-  emitValue(next);
+  if (!arrayValue.value[index] || typeof arrayValue.value[index] !== 'object') {
+    arrayValue.value[index] = {};
+  }
+  arrayValue.value[index][name] = value;
+  emitValue([...arrayValue.value]);
 }
 
 function setJsonText(value: string) {

@@ -17,15 +17,16 @@ import { withDistributedLockResult } from '../scheduler/distLock.js';
 // 加密配置每次重新 AES 解密 + JSON.stringify 的成本会随账户/任务数量线性增长。
 // 密文本身带随机 IV，只要配置未更新，密文文本就保持不变；按密文哈希缓存解密结果，
 // 重复联动时只做一次廉价哈希即可复用，避免 O(账户数)/O(任务数) 次重复解密。
-const configDecodeCache = new Map<string, { value: any; json: string }>();
+const configDecodeCache = new Map<string, { at: number; value: any; json: string }>();
 const CONFIG_DECODE_CACHE_MAX = 2000;
+const CONFIG_DECODE_CACHE_TTL_MS = 5 * 60_000;
 
 function decodeConfigCached(raw: any): { value: any; json: string } {
   const key = createHash('sha256').update(String(raw ?? '')).digest('hex');
   const hit = configDecodeCache.get(key);
-  if (hit) return hit;
+  if (hit && Date.now() - hit.at < CONFIG_DECODE_CACHE_TTL_MS) return hit;
   const value = decryptConfig(raw);
-  const entry = { value, json: JSON.stringify(value || {}) };
+  const entry = { at: Date.now(), value, json: JSON.stringify(value || {}) };
   if (configDecodeCache.size >= CONFIG_DECODE_CACHE_MAX) {
     const oldest = configDecodeCache.keys().next().value;
     if (oldest) configDecodeCache.delete(oldest);

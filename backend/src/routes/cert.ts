@@ -659,13 +659,15 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!hitRateLimit(`cert-batch:${req.user.uid}`, 10, 10 * 60_000)) return { code: -1, msg: '批量处理过于频繁，请稍后再试' };
     const jobId = await createJob(Number(req.user.uid), 'cert.orders.process', ids.length, { ids });
     if (!jobId) return { code: -1, msg: '已有同类批量任务在执行，或后台任务已达并发上限，请稍后再试' };
-    runJobInBackground(jobId, async (progress) => {
+    runJobInBackground(jobId, async (progress, signal) => {
       let done = 0;
       let failed = 0;
       const results: any[] = [];
       for (const id of ids) {
+        if (signal.aborted) break;
         try {
           const code = await new CertOrderService(id).process(true);
+          if (signal.aborted) break;
           if (code === 3) {
             await processOrderLink(id).catch(() => undefined);
             certOrderSend(id, true).catch(() => undefined);
@@ -1042,13 +1044,15 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!hitRateLimit(`cert-batch:${req.user.uid}`, 10, 10 * 60_000)) return { code: -1, msg: '批量处理过于频繁，请稍后再试' };
     const jobId = await createJob(Number(req.user.uid), 'cert.deploy.process', ids.length, { ids });
     if (!jobId) return { code: -1, msg: '已有同类批量任务在执行，或后台任务已达并发上限，请稍后再试' };
-    runJobInBackground(jobId, async (progress) => {
+    runJobInBackground(jobId, async (progress, signal) => {
       let done = 0;
       let failed = 0;
       const results: any[] = [];
       for (const id of ids) {
+        if (signal.aborted) break;
         try {
           await new CertDeployService(id).process(true);
+          if (signal.aborted) break;
           const row: any = await queryOne(`SELECT status, error FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
           if (Number(row?.status) === 1) {
             certDeploySend(id, true).catch(() => undefined);

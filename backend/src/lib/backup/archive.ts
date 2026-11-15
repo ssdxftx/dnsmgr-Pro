@@ -88,14 +88,22 @@ export function resolveArchivePath(fileName: string): string {
   return path.join(backupsDir(), base);
 }
 
-async function writeChunk(ws: NodeJS.WritableStream, text: string, getError?: () => Error | null): Promise<void> {
+async function writeChunk(
+  ws: NodeJS.WritableStream,
+  text: string,
+  getError?: () => Error | null,
+  downstream?: NodeJS.WritableStream,
+): Promise<void> {
   if (getError?.()) throw getError();
   if (ws.write(text)) return;
   await new Promise<void>((resolve, reject) => {
     const stream = ws as any;
+    const target = downstream as any;
     const cleanup = () => {
       stream.off?.('drain', onDrain);
       stream.off?.('error', onError);
+      target?.off?.('error', onDownstreamError);
+      target?.off?.('close', onDownstreamClose);
     };
     const onDrain = () => {
       cleanup();
@@ -107,12 +115,16 @@ async function writeChunk(ws: NodeJS.WritableStream, text: string, getError?: ()
       cleanup();
       reject(err || getError?.() || new Error('归档写入失败'));
     };
+    const onDownstreamError = (err: any) => onError(err);
+    const onDownstreamClose = () => onError(getError?.() || new Error('归档写入流已关闭'));
     stream.once('drain', onDrain);
     stream.once('error', onError);
+    target?.once?.('error', onDownstreamError);
+    target?.once?.('close', onDownstreamClose);
     // 错误可能已在 write() 返回 false 之前发生，此时不会再等到 drain/error；
     // 直接根据已记录的错误或流状态结束 Promise，避免归档任务永久挂起。
     if (getError?.()) onError(getError());
-    else if (stream.destroyed || stream.writableEnded) onError(new Error('归档写入流已关闭'));
+    else if (stream.destroyed || stream.writableEnded || target?.destroyed) onError(new Error('归档写入流已关闭'));
   });
 }
 
@@ -146,26 +158,26 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     });
     gz.pipe(ws);
 
-    await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{', () => streamError);
+    await writeChunk(gz, '{"header":' + JSON.stringify(draft.header) + ',"tables":{', () => streamError, ws);
     let firstTable = true;
     for await (const t of draft.tables()) {
       if (streamError) throw streamError;
-      if (!firstTable) await writeChunk(gz, ',', () => streamError);
+      if (!firstTable) await writeChunk(gz, ',', () => streamError, ws);
       firstTable = false;
       // data 必须边读边写；行数只有写完才知道，因此把 rows 统计放到 data 之后。
       // 导入端按字段名解析，字段顺序不影响兼容性。
-      await writeChunk(gz, JSON.stringify(t.name) + ':{"columns":' + JSON.stringify(t.columns) + ',"data":[', () => streamError);
+      await writeChunk(gz, JSON.stringify(t.name) + ':{"columns":' + JSON.stringify(t.columns) + ',"data":[', () => streamError, ws);
       let rowCount = 0;
       for await (const row of t.rows) {
-        if (rowCount) await writeChunk(gz, ',', () => streamError);
-        await writeChunk(gz, JSON.stringify(row), () => streamError);
+        if (rowCount) await writeChunk(gz, ',', () => streamError, ws);
+        await writeChunk(gz, JSON.stringify(row), () => streamError, ws);
         rowCount++;
       }
       stats.tables[t.name] = { rows: rowCount, columns: t.columns };
-      await writeChunk(gz, '],"rows":' + rowCount + '}', () => streamError);
+      await writeChunk(gz, '],"rows":' + rowCount + '}', () => streamError, ws);
     }
     if (draft.header.vault) stats.vault = draft.header.vault;
-    await writeChunk(gz, '}}', () => streamError);
+    await writeChunk(gz, '}}', () => streamError, ws);
     gz.end();
     await new Promise<void>((resolve, reject) => {
       const stream = ws as any;

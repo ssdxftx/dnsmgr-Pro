@@ -51,7 +51,7 @@ async function fetchAllRecords(provider: any): Promise<{ list: any[]; error?: st
     const pageSig = JSON.stringify([res.list.length, sigOf(res.list[0]), sigOf(res.list[res.list.length - 1])]);
     if (page > 1 && pageSig === prevPageSig) break;
     prevPageSig = pageSig;
-    list.push(...res.list);
+    for (const row of res.list) list.push(row);
     const total = Number((res as any).total);
     if (Number.isFinite(total) && total > 0 && list.length >= total) break;
     if (page === 1) pageSize = res.list.length;

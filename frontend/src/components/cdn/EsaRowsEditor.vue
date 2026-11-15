@@ -86,8 +86,10 @@ function cellStyle(f: EsaRowFieldDef) {
 }
 
 function update(index: number, key: string, value: any) {
-  const next = rows.value.map((row, i) => (i === index ? { ...row, [key]: value } : row));
-  emit('update:modelValue', next);
+  const row = rows.value[index];
+  if (!row) return;
+  row[key] = value;
+  emit('update:modelValue', [...rows.value]);
 }
 
 function add() {

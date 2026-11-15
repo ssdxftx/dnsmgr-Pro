@@ -2,6 +2,9 @@ import mysql from 'mysql2/promise';
 import type { DbConfig } from '../config-loader.js';
 import type { ColumnInfo, DbDriver, LockOutcome, QueryFn } from './types.js';
 
+const LOCK_POOL_SIZE = Math.max(4, Number(process.env.DNSMGR_LOCK_POOL_SIZE || 8) || 8);
+const LOCK_ACQUIRE_TIMEOUT_MS = Math.max(1000, Number(process.env.DNSMGR_LOCK_ACQUIRE_TIMEOUT_MS || 10000) || 10000);
+
 /** MySQL/MariaDB 的隔离级别变量用连字符（REPEATABLE-READ），SQL 语法用空格 */
 function normalizeIsolation(raw: string): string {
   const v = String(raw || '').toUpperCase().replace(/[-_]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -40,8 +43,8 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
     password: cfg.db_password,
     database: cfg.db_name,
     waitForConnections: true,
-    connectionLimit: 4,
-    maxIdle: 4,
+    connectionLimit: LOCK_POOL_SIZE,
+    maxIdle: LOCK_POOL_SIZE,
     idleTimeout: 60000,
     connectTimeout: 10000,
     enableKeepAlive: true,
@@ -127,10 +130,23 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
     fn: () => Promise<T>,
     waitSeconds = 0,
   ): Promise<LockOutcome<T>> {
-    let conn: mysql.PoolConnection;
+    const pending = lockPool.getConnection();
+    let timer: NodeJS.Timeout | undefined;
+    let conn: mysql.PoolConnection | null = null;
     try {
-      conn = await lockPool.getConnection();
+      const timeout = new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), LOCK_ACQUIRE_TIMEOUT_MS);
+        timer.unref?.();
+      });
+      conn = await Promise.race([pending, timeout]);
     } catch {
+      return { locked: false };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+    if (!conn) {
+      // 超时后排队请求仍可能拿到连接，必须归还，避免连接泄漏
+      pending.then((c) => c.release()).catch(() => undefined);
       return { locked: false };
     }
     try {

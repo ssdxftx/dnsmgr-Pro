@@ -791,27 +791,45 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const linkAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.certlink).map((a: any) => a.id));
     // 推导证书管理方式：无显式记录但已绑定联动订单时视为「由本项目管理」，兼容历史数据
     const linkedDids = new Set<number>();
+    const pageIds = rows.map((r: any) => Number(r.id)).filter((n: number) => n > 0);
+    const pageIdSet = new Set(pageIds);
     // link 可能保存多个 cdnDomainIds；生成列覆盖主关联，其余通过 link 解析补齐。
     const lrows: any[] = [];
     if (isCdnDomainIdColumnAvailable()) {
-      const pageIds = rows.map((r: any) => Number(r.id)).filter((n: number) => n > 0);
       if (pageIds.length) {
-        lrows.push(
-          ...(await query(
-            `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IN (${pageIds.map(() => '?').join(',')})`,
-            pageIds,
-          )),
-        );
+        for (const o of await query(
+          `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IN (${pageIds.map(() => '?').join(',')})`,
+          pageIds,
+        )) {
+          lrows.push(o);
+        }
       }
       // 兼容只保存 cdnDomainIds 数组、没有主 cdnDomainId 的历史订单
-      lrows.push(
-        ...(await query(
-          `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IS NULL AND link IS NOT NULL AND link LIKE ?`,
-          ['%"cdnDomainId"%'],
-        )),
-      );
+      for (const o of await query(
+        `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IS NULL AND link IS NOT NULL AND link LIKE ?`,
+        ['%"cdnDomainId"%'],
+      )) {
+        lrows.push(o);
+      }
+      // 主关联不在当前页、但次关联命中当前页的订单：仅在本页仍有待推导行时补查
+      if (pageIds.length && rows.some((r: any) => r.cert_mode === null || r.cert_mode === undefined)) {
+        const extra = await query(
+          `SELECT link FROM ${table('cert_order')}
+            WHERE cdn_domain_id IS NOT NULL
+              AND cdn_domain_id NOT IN (${pageIds.map(() => '?').join(',')})
+              AND link LIKE ?`,
+          [...pageIds, '%"cdnDomainIds"%'],
+        );
+        for (const o of extra as any[]) {
+          for (const did of cdnLinkIds(o.link)) {
+            if (pageIdSet.has(did)) linkedDids.add(did);
+          }
+        }
+      }
     } else {
-      lrows.push(...(await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%'])));
+      for (const o of await query(`SELECT link FROM ${table('cert_order')} WHERE link IS NOT NULL AND link LIKE ?`, ['%"cdnDomainId"%'])) {
+        lrows.push(o);
+      }
     }
     for (const o of lrows as any[]) {
       for (const did of cdnLinkIds(o.link)) linkedDids.add(did);
@@ -4289,7 +4307,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (name !== dnsDomain.name && !name.endsWith(suffix)) {
       return { code: -1, msg: '加速域名必须属于所选域名的子域名' };
     }
-    if (await queryOne(`SELECT id FROM ${table('cdn_domain')} WHERE name = ?`, [name])) {
+    if (await queryOne(`SELECT id FROM ${table('cdn_domain')} WHERE aid = ? AND name = ?`, [Number(aid), name])) {
       return { code: -1, msg: '该加速域名已接入' };
     }
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
@@ -4677,17 +4695,22 @@ export default async function cdnRoutes(app: FastifyInstance) {
   ): Promise<any> {
     const jobId = await createJob(Number(req.user.uid), type, ids.length, { ids });
     if (!jobId) return { code: -1, msg: '已有同类后台任务正在执行，请稍后再试' };
-    runJobInBackground(jobId, async (progress) => {
+    runJobInBackground(jobId, async (progress, signal) => {
       let done = 0;
       let failed = 0;
       let recent: any[] = [];
       const data = await runner(async (r) => {
+        if (signal.aborted) throw new Error('任务已取消');
         if (r?.status === 'failed') failed++;
         else done++;
         recent = [...recent.slice(-19), r];
         await progress(done, failed, { results: recent });
       });
-      for (const r of data) await apply(r);
+      if (signal.aborted) return { results: recent };
+      for (const r of data) {
+        if (signal.aborted) break;
+        await apply(r);
+      }
       return { results: data };
     });
     return { code: 0, msg: `已提交后台任务（${ids.length} 个域名），可在任务列表查看进度`, jobId, data: [] };
@@ -4758,12 +4781,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
         await emit({ id, name: row.name, status: 'failed', message: '无法准备证书账户（默认 Let\'s Encrypt 创建失败）' });
         continue;
       }
-      const rootRow: any = await queryOne(
-        `SELECT D.id, D.aid, A.visibility AS account_visibility, A.owner_uid AS account_owner
-           FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
-          WHERE D.name = ?`,
-        [scope.siteName],
-      );
+      const rootRow: any = Number(row.did) > 0
+        ? await queryOne(
+            `SELECT D.id, D.aid, A.visibility AS account_visibility, A.owner_uid AS account_owner
+               FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+              WHERE D.name = ? AND D.aid = (SELECT aid FROM ${table('domain')} WHERE id = ?)`,
+            [scope.siteName, Number(row.did)],
+          )
+        : await queryOne(
+            `SELECT D.id, D.aid, A.visibility AS account_visibility, A.owner_uid AS account_owner
+               FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
+              WHERE D.name = ?`,
+            [scope.siteName],
+          );
       if (!rootRow) {
         await emit({ id, name: row.name, status: 'failed', message: `根域名 ${scope.siteName} 未在本系统添加，无法自动完成 DNS 验证` });
         continue;
@@ -5172,9 +5202,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!(await getVisibleAccount('cdn_account', Number(aid || 0), req.user))) {
       return reply.code(404).send({ code: -1, msg: '账户不存在' });
     }
-    // 同一账户/站点的同步串行化：并发同步会触发 cdn_domain(aid,name) 唯一冲突
+    // 同一账户的同步串行化：同步会遍历整个账户，did 只做过滤，不能作为锁粒度
     const outcome = await withDistributedLockResult(
-      `dnsmgr:cdn-sync:${Number(aid || 0)}:${Number(did || 0)}`,
+      `dnsmgr:cdn-sync:${Number(aid || 0)}`,
       () => syncFromCloud(Number(aid || 0), Number(did || 0), req.user),
       5,
     );

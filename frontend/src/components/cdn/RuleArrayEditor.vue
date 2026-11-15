@@ -69,9 +69,10 @@ function emitRows(next: any[]) {
   emit('update:value', next);
 }
 function setCell(idx: number, key: string, v: any) {
-  const next = rows.value.map((r) => ({ ...r }));
-  next[idx][key] = v;
-  emitRows(next);
+  const row = rows.value[idx];
+  if (!row) return;
+  row[key] = v;
+  emitRows([...rows.value]);
 }
 function addRow() {
   const row: Record<string, any> = {};

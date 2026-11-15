@@ -18,6 +18,10 @@ const RETRY_INTERVAL = [60, 180, 300, 600, 600];
 const DOMAIN_NAMES_TTL_MS = 60_000;
 let domainNamesCache: { at: number; list: string[] } | null = null;
 
+export function invalidateDomainNamesCache(): void {
+  domainNamesCache = null;
+}
+
 import { decryptConfig, encryptConfig, encryptText } from './secret.js';
 
 function safeJson(s: string | null): any {

@@ -346,7 +346,9 @@ async function loadOptions() {
   const loadAllCdnDomains = async (): Promise<{ code: number; data: any[] }> => {
     const all: any[] = [];
     for (let page = 1; page <= 50; page++) {
-      const res = await api<any>('GET', '/cdn/domains', { page, size: 500 });
+      const query: Record<string, any> = { page, size: 500 };
+      if (selectedAid.value) query.aid = selectedAid.value;
+      const res = await api<any>('GET', '/cdn/domains', query);
       if (res.code !== 0) throw new Error(res.msg || '加载加速域名失败');
       const list = res.data || [];
       all.push(...list);

@@ -495,20 +495,28 @@ async function loadRules() {
   const seq = ++rulesLoadSeq;
   loadBusy.value = true;
   needCredential.value = false;
-  const res = await api<any>('GET', `/cf-rules/rules?domainId=${selectedDomain.value}&phase=${selectedPhase.value}`);
-  if (seq !== rulesLoadSeq) return;
-  loadBusy.value = false;
-  if (res.code === 0) {
-    rules.value = res.data?.rules || [];
-    credentialSource.value = res.data?.credential_source || '';
-  } else {
-    rules.value = [];
-    if (res.data?.needCredential) {
-      needCredential.value = true;
-      credentialMessage.value = res.msg;
+  try {
+    const res = await api<any>('GET', `/cf-rules/rules?domainId=${selectedDomain.value}&phase=${selectedPhase.value}`);
+    if (seq !== rulesLoadSeq) return;
+    if (res.code === 0) {
+      rules.value = res.data?.rules || [];
+      credentialSource.value = res.data?.credential_source || '';
     } else {
-      message.error(res.msg);
+      rules.value = [];
+      if (res.data?.needCredential) {
+        needCredential.value = true;
+        credentialMessage.value = res.msg;
+      } else {
+        message.error(res.msg);
+      }
     }
+  } catch (e: any) {
+    if (seq === rulesLoadSeq) {
+      rules.value = [];
+      message.error(e?.message || t('common.loadFailed'));
+    }
+  } finally {
+    if (seq === rulesLoadSeq) loadBusy.value = false;
   }
 }
 

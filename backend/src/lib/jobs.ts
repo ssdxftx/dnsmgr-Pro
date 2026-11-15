@@ -135,7 +135,10 @@ export async function updateJob(
 
 export function runJobInBackground(
   id: number,
-  worker: (progress: (done: number, failed: number, result?: any) => Promise<void>) => Promise<any>,
+  worker: (
+    progress: (done: number, failed: number, result?: any) => Promise<void>,
+    signal: AbortSignal,
+  ) => Promise<any>,
 ): void {
   setImmediate(() => {
     void (async () => {
@@ -155,13 +158,17 @@ export function runJobInBackground(
         await updateJob(id, { done, failed, result }).catch(() => undefined);
       };
       let timeoutTimer: NodeJS.Timeout | undefined;
+      const abort = new AbortController();
       try {
         const timeoutMs = Math.max(60_000, Number(process.env.DNSMGR_JOB_TIMEOUT_MS || 30 * 60_000) || 30 * 60_000);
         const timeout = new Promise<never>((_, reject) => {
-          timeoutTimer = setTimeout(() => reject(new Error('任务执行超时')), timeoutMs);
+          timeoutTimer = setTimeout(() => {
+            abort.abort();
+            reject(new Error('任务执行超时'));
+          }, timeoutMs);
           timeoutTimer.unref?.();
         });
-        const finalResult = await Promise.race([worker(progress), timeout]);
+        const finalResult = await Promise.race([worker(progress, abort.signal), timeout]);
         await updateJob(id, {
           status: failed > 0 ? (done > 0 ? 'partial' : 'failed') : 'success',
           done,
@@ -169,6 +176,7 @@ export function runJobInBackground(
           result: finalResult,
         });
       } catch (e: any) {
+        abort.abort();
         await updateJob(id, { status: 'failed', done, failed, error: e?.message || String(e) }).catch(() => undefined);
       } finally {
         if (timeoutTimer) clearTimeout(timeoutTimer);

@@ -15,6 +15,7 @@ import { asText, clampLimit, fmtDateTime } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { getSysKey } from '../config.js';
 import { legacyApiAuth } from '../lib/legacyApi.js';
+import { invalidateDomainNamesCache } from '../lib/certService.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 const LEGACY_ALIAS_TYPES = new Set(['aliyun', 'henet', 'powerdns', 'spaceship']);
@@ -187,7 +188,7 @@ async function fetchAllRecords(d: any, acct?: any): Promise<{ list: any[]; ok: b
         const pageSig = JSON.stringify([r.list.length, sigOf(r.list[0]), sigOf(r.list[r.list.length - 1])]);
         if (page > 1 && pageSig === prevPageSig) break;
         prevPageSig = pageSig;
-        list.push(...r.list);
+        for (const row of r.list) list.push(row);
         const total = Number((r as any).total);
         if (Number.isFinite(total) && total > 0 && list.length >= total) break;
         if (page === 1) pageSize = r.list.length;
@@ -801,6 +802,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const id = await query(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
       aid, domainName, finalThirdid, recordcount,
     ]).then((r: any) => r.insertId || 0);
+    invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
       targetId: id,
@@ -835,6 +837,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       await q(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('dns_check_task')} WHERE did = ?`, [id]);
     });
+    invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
       targetId: id,
@@ -916,6 +919,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       await q(`DELETE FROM ${table('sctask')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('dns_check_task')} WHERE did IN (${ph})`, ids);
     });
+    invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
       summary: `批量删除 ${ids.length} 个域名`,
@@ -1537,6 +1541,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.addDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
     const ok = await provider.addDomainAlias(alias);
     if (ok) {
+      invalidateDomainNamesCache();
       audit(req, { targetType: 'domain', targetId: id, targetName: alias, summary: `添加域名别名 ${alias}` });
       return { code: 0, msg: '添加域名别名成功' };
     }
@@ -1567,6 +1572,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       }
       return { code: -1, msg: '修改域名别名失败：旧别名删除失败，' + provider.getError() };
     }
+    invalidateDomainNamesCache();
     audit(req, { targetType: 'domain', targetId: id, targetName: alias, summary: `修改域名别名 ${aliasId} -> ${alias}` });
     return { code: 0, msg: '修改域名别名成功' };
   });
@@ -1580,6 +1586,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.deleteDomainAlias !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
     const ok = await provider.deleteDomainAlias(String(aliasId));
     if (ok) {
+      invalidateDomainNamesCache();
       audit(req, { targetType: 'domain', targetId: id, summary: `删除域名别名 ${aliasId}` });
       return { code: 0, msg: '删除域名别名成功' };
     }

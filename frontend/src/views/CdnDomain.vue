@@ -772,18 +772,24 @@ async function loadCertMgrCandidates() {
   certMgrCandidates.value = null;
   certMgrChoice.value = '';
   certMgrError.value = '';
-  const res = await fetchCandidates(certMgrTarget.value.name);
-  if (seq !== certMgrSeq || Number(certMgrTarget.value?.id) !== targetId) return;
-  certMgrLoadBusy.value = false;
-  if (res.code !== 0) {
-    certMgrError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
-    return;
+  const isCurrent = () => seq === certMgrSeq && Number(certMgrTarget.value?.id) === targetId;
+  try {
+    const res = await fetchCandidates(certMgrTarget.value.name);
+    if (!isCurrent()) return;
+    if (res.code !== 0) {
+      certMgrError.value = res.msg || t('cdnDomain.fetchCandidatesFailed');
+      return;
+    }
+    const d = res.data || {};
+    certMgrCandidates.value = d;
+    if (d.exact && d.exact.length) certMgrChoice.value = `order:${d.exact[0].oid}`;
+    else if (d.providers && d.providers.length) certMgrChoice.value = '';
+    else if (d.defaultLe) certMgrChoice.value = 'default';
+  } catch (e: any) {
+    if (isCurrent()) certMgrError.value = e?.message || t('cdnDomain.fetchCandidatesFailed');
+  } finally {
+    if (isCurrent()) certMgrLoadBusy.value = false;
   }
-  const d = res.data || {};
-  certMgrCandidates.value = d;
-  if (d.exact && d.exact.length) certMgrChoice.value = `order:${d.exact[0].oid}`;
-  else if (d.providers && d.providers.length) certMgrChoice.value = '';
-  else if (d.defaultLe) certMgrChoice.value = 'default';
 }
 
 async function loadCertMgrLog() {

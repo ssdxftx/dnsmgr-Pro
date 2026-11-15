@@ -9,7 +9,7 @@
             <n-button size="small" :loading="loading.gateways" :disabled="loading.gateways" @click="loadGateways">{{ t('cdnPlatform.refresh') }}</n-button>
           </div>
         </div>
-        <ResponsiveDataTable :columns="gatewayColumns" :data="gateways" size="small" :loading="loading.gateways" :empty-text="t('cdnPlatform.gatewayEmpty')" :pagination="pager.gateways" />
+        <ResponsiveDataTable :columns="gatewayColumns" :data="gateways" :row-key="gatewayRowKey" size="small" :loading="loading.gateways" :empty-text="t('cdnPlatform.gatewayEmpty')" :pagination="pager.gateways" />
       </div>
 
       <div class="app-panel">
@@ -46,7 +46,7 @@
             <n-button size="small" :loading="loading.services" :disabled="loading.services" @click="loadInferenceServices">{{ t('cdnPlatform.refresh') }}</n-button>
           </div>
         </div>
-        <ResponsiveDataTable :columns="serviceColumns" :data="services" size="small" :loading="loading.services" :empty-text="t('cdnPlatform.inferenceEmpty')" :pagination="pager.services" />
+        <ResponsiveDataTable :columns="serviceColumns" :data="services" :row-key="serviceRowKey" size="small" :loading="loading.services" :empty-text="t('cdnPlatform.inferenceEmpty')" :pagination="pager.services" />
       </div>
 
       <div class="app-panel">
@@ -57,7 +57,7 @@
             <n-button size="small" :loading="loading.records" :disabled="loading.records || !recordServiceId.trim()" @click="loadRecords">{{ t('cdnPlatform.load') }}</n-button>
           </div>
         </div>
-        <ResponsiveDataTable :columns="recordColumns" :data="records" size="small" :loading="loading.records" :empty-text="t('cdnPlatform.recordEmpty')" :pagination="pager.records" />
+        <ResponsiveDataTable :columns="recordColumns" :data="records" :row-key="recordRowKey" size="small" :loading="loading.records" :empty-text="t('cdnPlatform.recordEmpty')" :pagination="pager.records" />
       </div>
 
       <div class="app-panel">
@@ -81,7 +81,7 @@
           </div>
         </div>
         <pre v-if="tokenContent" class="code-view" style="margin-bottom: 8px">{{ tokenContent }}</pre>
-        <ResponsiveDataTable :columns="tokenColumns" :data="tokens" size="small" :loading="loading.tokens" :empty-text="t('cdnPlatform.tokenEmpty')" :pagination="pager.tokens" />
+        <ResponsiveDataTable :columns="tokenColumns" :data="tokens" :row-key="tokenRowKey" size="small" :loading="loading.tokens" :empty-text="t('cdnPlatform.tokenEmpty')" :pagination="pager.tokens" />
       </div>
 
       <div class="app-panel">
@@ -93,7 +93,7 @@
             <n-button size="small" type="primary" :disabled="!domainServiceId.trim()" @click="createDomain">{{ t('cdnPlatform.create') }}</n-button>
           </div>
         </div>
-        <ResponsiveDataTable :columns="domainColumns" :data="domains" size="small" :loading="loading.domains" :empty-text="t('cdnPlatform.domainEmpty')" :pagination="pager.domains" />
+        <ResponsiveDataTable :columns="domainColumns" :data="domains" :row-key="domainRowKey" size="small" :loading="loading.domains" :empty-text="t('cdnPlatform.domainEmpty')" :pagination="pager.domains" />
       </div>
 
       <div class="app-panel">
@@ -118,7 +118,7 @@
           </div>
         </div>
         <span class="hint-text">{{ t('cdnPlatform.transcodeUrlHint') }}</span>
-        <ResponsiveDataTable :columns="transcodeColumns" :data="templates" size="small" :loading="loading.templates" :empty-text="t('cdnPlatform.transcodeEmpty')" :pagination="pager.templates" />
+        <ResponsiveDataTable :columns="transcodeColumns" :data="templates" :row-key="templateRowKey" size="small" :loading="loading.templates" :empty-text="t('cdnPlatform.transcodeEmpty')" :pagination="pager.templates" />
       </div>
     </template>
 
@@ -251,6 +251,21 @@ const pager = reactive({
   domains: makePager(() => loadDomains()),
   templates: makePager(() => loadTranscodeTemplates()),
 });
+let gatewaysSeq = 0;
+let servicesSeq = 0;
+let recordsSeq = 0;
+let tokensSeq = 0;
+let domainsSeq = 0;
+let templatesSeq = 0;
+let loadedRecordServiceId = '';
+let loadedDomainServiceId = '';
+
+const gatewayRowKey = (row: any) => String(row.GatewayId || row.Id || row.GatewayName || '');
+const serviceRowKey = (row: any) => String(row.ServiceId || row.Id || row.Name || '');
+const recordRowKey = (row: any) => String(row.RecordId || row.Id || '');
+const tokenRowKey = (row: any) => String(row.TokenId || row.Id || row.Name || '');
+const domainRowKey = (row: any) => String(row.DomainId || row.Domain || row.Id || '');
+const templateRowKey = (row: any) => String(row.TemplateId || row.Id || row.TemplateName || '');
 
 const base = computed(() => `/cdn/accounts/${props.aid}`);
 
@@ -330,13 +345,15 @@ const gatewayDrawer = reactive({
 });
 
 async function loadGateways() {
+  const seq = ++gatewaysSeq;
   loading.gateways = true;
   try {
     const data = await call('GET', `/multipath/gateways`, { zoneId: props.zoneId, page: pager.gateways.page, size: pager.gateways.pageSize });
+    if (seq !== gatewaysSeq) return;
     gateways.value = data?.list || [];
     pager.gateways.itemCount = Number(data?.total || 0);
   } finally {
-    loading.gateways = false;
+    if (seq === gatewaysSeq) loading.gateways = false;
   }
 }
 
@@ -602,13 +619,15 @@ const domains = ref<any[]>([]);
 const hardwareText = ref('');
 
 async function loadInferenceServices() {
+  const seq = ++servicesSeq;
   loading.services = true;
   try {
     const data = await call('GET', `/inference/services`, { zoneId: props.zoneId, page: pager.services.page, size: pager.services.pageSize });
+    if (seq !== servicesSeq) return;
     services.value = data?.list || [];
     pager.services.itemCount = Number(data?.total || 0);
   } finally {
-    loading.services = false;
+    if (seq === servicesSeq) loading.services = false;
   }
 }
 
@@ -688,14 +707,23 @@ async function operateService(row: any, operation: string) {
 }
 
 async function loadRecords() {
-  if (!recordServiceId.value.trim()) return;
+  const serviceId = recordServiceId.value.trim();
+  if (!serviceId) return;
+  if (serviceId !== loadedRecordServiceId) {
+    loadedRecordServiceId = serviceId;
+    pager.records.page = 1;
+    pager.records.itemCount = 0;
+    records.value = [];
+  }
+  const seq = ++recordsSeq;
   loading.records = true;
   try {
-    const data = await call('GET', `/inference/services/${encodeURIComponent(recordServiceId.value.trim())}/records`, { zoneId: props.zoneId, page: pager.records.page, size: pager.records.pageSize });
+    const data = await call('GET', `/inference/services/${encodeURIComponent(serviceId)}/records`, { zoneId: props.zoneId, page: pager.records.page, size: pager.records.pageSize });
+    if (seq !== recordsSeq) return;
     records.value = data?.list || [];
     pager.records.itemCount = Number(data?.total || 0);
   } finally {
-    loading.records = false;
+    if (seq === recordsSeq) loading.records = false;
   }
 }
 
@@ -730,13 +758,15 @@ async function queryMonitor() {
 }
 
 async function loadTokens() {
+  const seq = ++tokensSeq;
   loading.tokens = true;
   try {
     const data = await call('GET', `/inference/tokens`, { zoneId: props.zoneId, page: pager.tokens.page, size: pager.tokens.pageSize });
+    if (seq !== tokensSeq) return;
     tokens.value = data?.list || [];
     pager.tokens.itemCount = Number(data?.total || 0);
   } finally {
-    loading.tokens = false;
+    if (seq === tokensSeq) loading.tokens = false;
   }
 }
 
@@ -772,14 +802,23 @@ function deleteToken(row: any) {
 }
 
 async function loadDomains() {
-  if (!domainServiceId.value.trim()) return;
+  const serviceId = domainServiceId.value.trim();
+  if (!serviceId) return;
+  if (serviceId !== loadedDomainServiceId) {
+    loadedDomainServiceId = serviceId;
+    pager.domains.page = 1;
+    pager.domains.itemCount = 0;
+    domains.value = [];
+  }
+  const seq = ++domainsSeq;
   loading.domains = true;
   try {
-    const data = await call('GET', `/inference/domains`, { zoneId: props.zoneId, serviceId: domainServiceId.value.trim(), page: pager.domains.page, size: pager.domains.pageSize });
+    const data = await call('GET', `/inference/domains`, { zoneId: props.zoneId, serviceId, page: pager.domains.page, size: pager.domains.pageSize });
+    if (seq !== domainsSeq) return;
     domains.value = data?.list || [];
     pager.domains.itemCount = Number(data?.total || 0);
   } finally {
-    loading.domains = false;
+    if (seq === domainsSeq) loading.domains = false;
   }
 }
 
@@ -902,13 +941,15 @@ const domainColumns = computed(() => [
 const templates = ref<any[]>([]);
 
 async function loadTranscodeTemplates() {
+  const seq = ++templatesSeq;
   loading.templates = true;
   try {
     const data = await call('GET', `/media/transcode-templates`, { zoneId: props.zoneId, page: pager.templates.page, size: pager.templates.pageSize });
+    if (seq !== templatesSeq) return;
     templates.value = data?.list || [];
     pager.templates.itemCount = Number(data?.total || 0);
   } finally {
-    loading.templates = false;
+    if (seq === templatesSeq) loading.templates = false;
   }
 }
 

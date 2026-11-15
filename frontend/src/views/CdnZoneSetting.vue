@@ -1876,6 +1876,8 @@ const rulePage = ref(1);
 const rulePageSize = ref(20);
 const ruleTotal = ref(0);
 let rulesLoadSeq = 0;
+let ruleSchemaSeq = 0;
+const ruleSchemaCache = new Map<string, any>();
 const rulePagination = computed(() => ({
   page: rulePage.value,
   pageSize: rulePageSize.value,
@@ -1963,8 +1965,21 @@ function kindLabel(kind: string) {
 }
 async function loadRuleSchemaForKind() {
   if (!isEsa.value) return; // EO 的 schema 与 kind 无关，一次拉取即可
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-schema`, { kind: ruleKind.value });
-  if (res.code === 0) ruleSchema.value = res.data;
+  const kind = ruleKind.value;
+  const accountAid = String(aid);
+  const key = `${accountAid}:${kind}`;
+  const cached = ruleSchemaCache.get(key);
+  if (cached) {
+    ruleSchema.value = cached;
+    return;
+  }
+  const seq = ++ruleSchemaSeq;
+  const res = await api<any>('GET', `/cdn/accounts/${aid}/rule-schema`, { kind });
+  if (seq !== ruleSchemaSeq || kind !== ruleKind.value || accountAid !== String(aid)) return;
+  if (res.code === 0) {
+    ruleSchemaCache.set(key, res.data);
+    ruleSchema.value = res.data;
+  }
 }
 async function loadRules(): Promise<boolean> {
   const seq = ++rulesLoadSeq;
@@ -3700,7 +3715,9 @@ async function reloadAll() {
   loadedTabs.clear();
   loadBusy.value = true;
   try {
-    await Promise.all([loadZoneInfo(), loadDomains(), loadNs(), loadSiteProperties(), loadZonePlans()]);
+    const preloads: Promise<unknown>[] = [loadZoneInfo(), loadNs(), loadSiteProperties(), loadZonePlans()];
+    if (tab.value !== 'domains') preloads.push(loadDomains());
+    await Promise.all(preloads);
   } finally {
     loadBusy.value = false;
   }
