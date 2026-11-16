@@ -93,7 +93,9 @@ export async function checkCurl(url: string, timeout: number, ip: string | null 
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36' },
     };
     if (dispatcher) init.dispatcher = dispatcher;
-    const res = await safeFetch(url, init, 5, { requirePinnedDns: true });
+    // 任务未勾选代理时 buildDispatcher 已注入直连 Agent；这里同步关闭 safeFetch 的全局代理，
+    // 否则系统配置了代理后，直连监控仍会被“代理场景禁止域名目标”的检查拦截。
+    const res = await safeFetch(url, init, 5, { requirePinnedDns: true, useProxy: proxy });
     const httpcode = res.status;
     if (httpcode < 200 || httpcode >= 400) {
       status = false;

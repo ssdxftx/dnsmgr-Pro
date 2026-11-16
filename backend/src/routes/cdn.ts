@@ -793,6 +793,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const linkedDids = new Set<number>();
     const pageIds = rows.map((r: any) => Number(r.id)).filter((n: number) => n > 0);
     const pageIdSet = new Set(pageIds);
+    // 只有本页仍存在未显式记录 cert_mode 的行时才需要从 link 推导；
+    // 全部行都已有 cert_mode 时跳过 LIKE 全表兼容查询，避免每次列表都扫证书订单。
+    const hasUnresolvedCertMode = rows.some((r: any) => r.cert_mode === null || r.cert_mode === undefined);
     // link 可能保存多个 cdnDomainIds；生成列覆盖主关联，其余通过 link 解析补齐。
     const lrows: any[] = [];
     if (isCdnDomainIdColumnAvailable()) {
@@ -805,14 +808,16 @@ export default async function cdnRoutes(app: FastifyInstance) {
         }
       }
       // 兼容只保存 cdnDomainIds 数组、没有主 cdnDomainId 的历史订单
-      for (const o of await query(
-        `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IS NULL AND link IS NOT NULL AND link LIKE ?`,
-        ['%"cdnDomainId"%'],
-      )) {
-        lrows.push(o);
+      if (hasUnresolvedCertMode) {
+        for (const o of await query(
+          `SELECT link FROM ${table('cert_order')} WHERE cdn_domain_id IS NULL AND link IS NOT NULL AND link LIKE ?`,
+          ['%"cdnDomainId"%'],
+        )) {
+          lrows.push(o);
+        }
       }
       // 主关联不在当前页、但次关联命中当前页的订单：仅在本页仍有待推导行时补查
-      if (pageIds.length && rows.some((r: any) => r.cert_mode === null || r.cert_mode === undefined)) {
+      if (pageIds.length && hasUnresolvedCertMode) {
         const extra = await query(
           `SELECT link FROM ${table('cert_order')}
             WHERE cdn_domain_id IS NOT NULL

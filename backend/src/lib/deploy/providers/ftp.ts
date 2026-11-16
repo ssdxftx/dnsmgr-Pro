@@ -9,6 +9,13 @@ import type { DeployProvider } from '../types.js';
 // 路径里的 .. 或系统敏感目录会把证书/私钥写到 Web 根、authorized_keys 等位置。
 const FTP_DENY_PREFIXES = ['/etc', '/root', '/.ssh', '/boot', '/sys', '/proc', '/dev', '/var/spool/cron'];
 
+// basic-ftp 在密码含 CR/LF 时存在未捕获异常风险；凭据中的控制字符也会污染 FTP 命令
+function safeFtpCredential(label: string, value: any): string {
+  const raw = String(value ?? '');
+  if (/[\u0000-\u001f\u007f]/.test(raw)) throw new Error(`${label}包含非法控制字符`);
+  return raw;
+}
+
 function safeFtpPath(value: any): string {
   const raw = String(value ?? '').trim();
   if (!raw) throw new Error('FTP 目标文件路径不能为空');
@@ -59,12 +66,14 @@ export class FtpDeploy implements DeployProvider {
       throw new Error('已禁止使用明文 FTP：如确需关闭 TLS，请设置 DNSMGR_ALLOW_INSECURE_DEPLOY=1 后重启服务');
     }
     await assertNotMetadataHost(String(this.config.host || ''));
+    const user = safeFtpCredential('FTP用户名', this.config.username);
+    const password = safeFtpCredential('FTP密码', this.config.password);
     try {
       await client.access({
         host: this.config.host,
         port: Number(this.config.port || 21),
-        user: this.config.username,
-        password: this.config.password,
+        user,
+        password,
         secure,
         secureOptions: { rejectUnauthorized: !insecure },
       });

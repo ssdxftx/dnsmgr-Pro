@@ -485,12 +485,12 @@ async function certSend(title: string, content: string, result: boolean): Promis
   return true;
 }
 
-export async function certOrderSend(orderId: number, result: boolean): Promise<void> {
+export async function certOrderSend(orderId: number, result: boolean): Promise<boolean> {
   const row: any = (await query(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [orderId]))?.[0];
-  if (!row) return;
+  if (!row) return true;
   const domainList: any[] = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [orderId]);
   const domains = domainList.map((d: any) => d.domain);
-  if (!domains.length) return;
+  if (!domains.length) return true;
 
   let title = '';
   let content = '';
@@ -516,13 +516,14 @@ export async function certOrderSend(orderId: number, result: boolean): Promise<v
   // 全部渠道成功才标记已发送，否则保留 issend=0 供下一轮重试
   if (sent) await query(`UPDATE ${table('cert_order')} SET issend = 1 WHERE id = ?`, [orderId]);
   else console.warn(`[notice] 证书订单 ${orderId} 通知未全部发送成功，保留待重试`);
+  return sent;
 }
 
-export async function certDeploySend(deployId: number, result: boolean): Promise<void> {
+export async function certDeploySend(deployId: number, result: boolean): Promise<boolean> {
   const row: any = (await query(`SELECT * FROM ${table('cert_deploy')} WHERE id = ?`, [deployId]))?.[0];
-  if (!row) return;
+  if (!row) return true;
   const account: any = (await query(`SELECT id, type, name, remark FROM ${table('cert_account')} WHERE id = ?`, [row.aid]))?.[0];
-  if (!account) return;
+  if (!account) return true;
   const domainList: any[] = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ?`, [row.oid]);
   const domains = domainList.map((d: any) => d.domain);
   const typename = deployConfig[account.type]?.name || account.type || '未知';
@@ -542,6 +543,7 @@ export async function certDeploySend(deployId: number, result: boolean): Promise
   logNotify('cert', result ? 'cert.deploy.success' : 'cert.deploy.failed', sent, title, { task_id: deployId, domains });
   if (sent) await query(`UPDATE ${table('cert_deploy')} SET issend = 1 WHERE id = ?`, [deployId]);
   else console.warn(`[notice] 证书部署 ${deployId} 通知未全部发送成功，保留待重试`);
+  return sent;
 }
 
 type CheckResultLike = { status: boolean; errmsg: string | null };

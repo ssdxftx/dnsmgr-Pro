@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { preheatUrls, purgeUrls, calcNextRun, loadUrls } from '../lib/cdn/preheatService.js';
-import { fmtDateTime } from '../lib/util.js';
+import { fmtDateTime, parseRunTime } from '../lib/util.js';
 import { withDistributedLock } from '../lib/scheduler/distLock.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
@@ -51,6 +51,7 @@ export default async function preheatRoutes(app: FastifyInstance) {
     const runTime = cycle === 'daily' ? String(b.run_time || '00:00') : null;
     const op = b.op === 'purge' ? 'purge' : 'preheat';
     if (cycle === 'interval' && intervalMin < 5) return { code: -1, msg: '预热间隔不能少于 5 分钟' };
+    if (cycle === 'daily' && !parseRunTime(runTime).valid) return { code: -1, msg: '执行时间格式不正确，应为 HH:mm' };
     const nextRun = fmtDateTime(calcNextRun(cycle, intervalMin, runTime));
     const id: number = await query(
       `INSERT INTO ${table('cdn_preheat_task')} (name, urls, op, cycle, interval_min, run_time, active, next_run, addtime, owner_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?)`,
@@ -75,6 +76,7 @@ export default async function preheatRoutes(app: FastifyInstance) {
     const op = b.op === undefined ? (row.op === 'purge' ? 'purge' : 'preheat') : b.op === 'purge' ? 'purge' : 'preheat';
     const active = b.active === undefined ? Number(row.active || 0) : b.active == 0 ? 0 : 1;
     if (cycle === 'interval' && intervalMin < 5) return { code: -1, msg: '预热间隔不能少于 5 分钟' };
+    if (cycle === 'daily' && !parseRunTime(runTime).valid) return { code: -1, msg: '执行时间格式不正确，应为 HH:mm' };
     const nextRun = fmtDateTime(calcNextRun(cycle, intervalMin, runTime));
     await query(
       `UPDATE ${table('cdn_preheat_task')} SET name = ?, urls = ?, op = ?, cycle = ?, interval_min = ?, run_time = ?, active = ?, next_run = ? WHERE id = ?`,

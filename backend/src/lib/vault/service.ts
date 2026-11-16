@@ -209,7 +209,7 @@ export async function upgradeVault(
     `UPDATE ${table('user_vault')}
      SET mode = 'passphrase', kdf = 'scrypt', kdf_params = ?, salt = ?, wrapped_dek = ?,
          wrapped_dek_sys = NULL, salt_recovery = ?, wrapped_dek_recovery = ?, recovery_hash = NULL,
-         vault_epoch = vault_epoch + 1, updated_at = NOW()
+         fail_count = 0, locked_until = NULL, vault_epoch = vault_epoch + 1, updated_at = NOW()
      WHERE uid = ?`,
     [KDF_PARAMS_JSON, salt, wrapped, rec?.salt ?? null, rec?.wrapped ?? null, uid],
   );
@@ -233,7 +233,7 @@ export async function downgradeVault(uid: number, jti: string, passphrase: strin
   await query(
     `UPDATE ${table('user_vault')}
      SET mode = 'none', salt = NULL, wrapped_dek = NULL, wrapped_dek_sys = ?,
-         vault_epoch = vault_epoch + 1, updated_at = NOW()
+         fail_count = 0, locked_until = NULL, vault_epoch = vault_epoch + 1, updated_at = NOW()
      WHERE uid = ?`,
     [wrapDek(deriveSysKek(await getSysKey()), dek, uid), uid],
   );
@@ -246,6 +246,9 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
   if (!row) throw new VaultError('保险库未初始化');
   if (row.mode !== 'passphrase') throw new VaultError('便捷模式没有口令');
   const params = storedKdf(row);
+  // 新口令格式错误属于客户端校验，不应消耗口令尝试次数并触发锁定
+  const pass = String(nextPass || '');
+  if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   await claimAttempt(uid);
   const dek = unwrapDek(
     await deriveKek(String(oldPass || ''), buf(row.salt) as Buffer, params),
@@ -253,8 +256,6 @@ export async function changePassphrase(uid: number, jti: string, oldPass: string
     uid,
   );
   if (!dek) return await failAttempt(uid);
-  const pass = String(nextPass || '');
-  if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   const salt = newSalt();
   const wrapped = wrapDek(await deriveKek(pass, salt), dek, uid);
   await query(
@@ -274,14 +275,15 @@ export async function recoverVault(uid: number, jti: string, recovery: string, n
   if (!row.salt_recovery || !row.wrapped_dek_recovery) {
     throw new VaultError('未设置恢复码，无法找回口令');
   }
+  // 新口令格式错误属于客户端校验，不应消耗恢复码尝试次数并触发锁定
+  const pass = String(nextPass || '');
+  if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   await claimAttempt(uid);
   const code = String(recovery || '').trim();
   // 恢复码的校验强度必须与口令一致：直接以 scrypt 解包裹是否成功作为判定，
   // 不再走 recovery_hash（单次 SHA-256）——那会让恢复码比口令容易爆破一个数量级。
   const dek = unwrapDek(await deriveKek(code, buf(row.salt_recovery) as Buffer), buf(row.wrapped_dek_recovery) as Buffer, uid);
   if (!dek) return await failAttempt(uid, '恢复码错误');
-  const pass = String(nextPass || '');
-  if (pass.length < 12) throw new VaultError('口令至少 12 个字符');
   const salt = newSalt();
   const wrapped = wrapDek(await deriveKek(pass, salt), dek, uid);
   await query(

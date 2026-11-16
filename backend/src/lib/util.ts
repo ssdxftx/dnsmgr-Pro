@@ -16,6 +16,30 @@ export function fmtTimestamp(ts: number): string {
   return fmtDateTime(new Date(ts * 1000));
 }
 
+/** 整数范围归一化：0 和负数都是有效候选值，不能使用 `|| 默认值` */
+export function intInRange(value: any, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= min && n <= max ? n : fallback;
+}
+
+/** 解析 HH:mm；非法输入回退 00:00，并通过 valid 让接口层拒绝而不是静默改时间 */
+export function parseRunTime(value: any): { hour: number; minute: number; valid: boolean } {
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(String(value ?? '').trim());
+  if (!m) return { hour: 0, minute: 0, valid: false };
+  const hour = Number(m[1]);
+  const minute = Number(m[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return { hour: 0, minute: 0, valid: false };
+  return { hour, minute, valid: true };
+}
+
+/** 每日任务下一次执行时间；统一处理非法 run_time 与跨天 */
+export function calcDailyNextRun(runTime: any, from = new Date()): Date {
+  const { hour, minute } = parseRunTime(runTime);
+  const next = new Date(from.getFullYear(), from.getMonth(), from.getDate(), hour, minute, 0, 0);
+  if (next.getTime() <= from.getTime()) next.setDate(next.getDate() + 1);
+  return next;
+}
+
 // 仅检查对象自身属性，避免 Object.prototype 上的成员（如 constructor/toString）被当作合法键
 export function hasOwn(obj: Record<string, any>, key: any): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);

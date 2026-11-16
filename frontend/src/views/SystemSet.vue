@@ -261,7 +261,7 @@
                 />
               </n-form-item>
               <n-form-item :label="t('systemSet.legacyApiEndpoints')">
-                <n-input value="/api/domain, /api/domain/:id, /api/record/*, /api/cert/order, /cron" readonly type="textarea" :rows="2" />
+                <n-input value="/api/domain, /api/domain/:id, /api/record/*, /api/cert/order, /quicklogin, /cron, /dmtask/status, /optimizeip/status" readonly type="textarea" :rows="2" />
               </n-form-item>
             </n-form>
             <n-alert v-if="(cfg.legacy_api_v1_enable || '0') === '1'" type="error" :show-icon="false" style="margin-top:8px">

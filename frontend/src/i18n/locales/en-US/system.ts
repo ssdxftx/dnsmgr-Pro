@@ -116,7 +116,7 @@ export default {
     legacyApiV1Enable: 'Allow legacy MD5 signatures',
     legacyApiV1Hint: 'The legacy "sign" value is not bound to the request path or parameters, so a captured request can be replayed against any legacy endpoint within 5 minutes. It is therefore disabled by default; enable it only while an old client still lacks sign2 + nonce support, and upgrade it as soon as possible.',
     legacyApiEndpoints: 'Compatible Endpoints',
-    legacyApiHint: 'Coverage: domain list/detail, quick-login links, record CRUD and batch actions, certificate order retrieval, and /cron?key= triggering. The target user must have API access enabled and retain the legacy apikey; the new /api/v1 API is unaffected.',
+    legacyApiHint: 'Coverage: domain list/detail, quick-login links, record CRUD and batch actions, certificate order retrieval, /cron?key= triggering, and failover/optimize status probes. The target user must have API access enabled and retain the legacy apikey; the new /api/v1 API is unaffected.',
     statCacheCardTitle: 'CDN Statistics Cache',
     statCacheAlert: 'When enabled, the system periodically pulls statistics by provider granularity and stores them on the server (daily for the last 30 days, hourly for the last 48 hours), so the statistics page loads quickly. This feature continuously consumes server resources in the background, so enable it only when needed. Viewing permission can also be granted per user in User Management.',
     statCacheEnable: 'Enable Statistics Cache',

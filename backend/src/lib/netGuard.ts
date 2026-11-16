@@ -298,6 +298,11 @@ export interface SafeFetchOptions {
    * 开启后，代理场景下只允许 IP 字面量目标，除非运维显式设置 DNSMGR_PROXY_ALLOW_REMOTE_DNS=1。
    */
   requirePinnedDns?: boolean;
+  /**
+   * 是否允许使用全局出站代理。调用方已显式选择直连 dispatcher 时必须关闭，
+   * 否则代理配置会让直连请求在 safeFetch 内再次被代理检查拒绝。
+   */
+  useProxy?: boolean;
 }
 
 // 统一的逐跳跳转处理：仅 http/https、逐跳复校目标、跨主机剥离敏感头、跨域 307/308 丢弃请求体、IP pin 防重绑定
@@ -378,7 +383,7 @@ export async function safeFetch(
   const resolve: PinResolver = privateFetchAllowed()
     ? async () => null
     : (u) => resolveForPin(u.hostname, isPrivateIp, '禁止访问内网地址');
-  return followFetch(raw, init, maxRedirects, resolve, true, opts);
+  return followFetch(raw, init, maxRedirects, resolve, opts.useProxy !== false, opts);
 }
 
 // 跳转时会随请求转发的敏感凭据头，跨主机跳转时必须剥离，避免被 302 带到攻击者/元数据地址

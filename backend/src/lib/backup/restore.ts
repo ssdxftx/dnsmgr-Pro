@@ -80,7 +80,6 @@ async function runRestore(opts: RunOptions): Promise<any> {
     // 使用归档头匹配当前/历史密钥，避免轮换后旧备份无法在线恢复并卡在维护模式
     const key = opts.key ?? (await keyForArchive(archivePath));
     if (!key) throw new Error('未设置备份密钥，无法恢复');
-    importStarted = true;
     const report = await importArchive(archivePath, {
       key,
       mode: opts.mode,
@@ -88,6 +87,11 @@ async function runRestore(opts: RunOptions): Promise<any> {
       actorIsAdmin: true,
       trusted: true,
       invalidateSessions: opts.mode === 'replace',
+      // importArchive 会先完成解密、解压与 checksum 校验；只有事务真正开始写库时才保留维护模式。
+      // 这样密钥错误/归档损坏不会在未改动任何数据的情况下把全站写入锁死。
+      onWriteStart: () => {
+        importStarted = true;
+      },
     });
     if (opts.mode === 'replace') {
       // 整站替换后，旧站点的所有备份都属于上一套数据；仅保留本次恢复前的快照，避免旧数据继续可下载。

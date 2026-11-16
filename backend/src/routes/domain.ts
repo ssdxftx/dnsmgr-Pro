@@ -11,7 +11,7 @@ import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { getEffectivePermissions, getVisibleAccount, isLegacyDomainSessionFor } from '../lib/accounts/visibility.js';
-import { asText, clampLimit, fmtDateTime } from '../lib/util.js';
+import { asText, clampLimit, clampOffset, fmtDateTime } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { getSysKey } from '../config.js';
 import { legacyApiAuth } from '../lib/legacyApi.js';
@@ -487,8 +487,13 @@ export default async function domainRoutes(app: FastifyInstance) {
     const permNames = acc.admin
       ? []
       : [...new Set(acc.perms.map((p) => domainKey(p.domain)).filter(Boolean))];
+    // 可选分页：默认保持返回全量以兼容现有前端统计；显式传 limit 时下推到 SQL。
+    const pageSize = req.query?.limit !== undefined ? clampLimit(req.query.limit, 200, 1000) : 0;
+    const pageOffset = clampOffset(req.query?.offset);
+    const pageSql = pageSize ? ' LIMIT ? OFFSET ?' : '';
+    const pageParams = pageSize ? [pageSize, pageOffset] : [];
     const rows = acc.admin
-      ? await query(`${select} ORDER BY A.id DESC`)
+      ? await query(`${select} ORDER BY A.id DESC${pageSql}`, pageParams)
       : permNames.length
         ? await query(`${select} WHERE LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)
         : [];
@@ -618,7 +623,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       }
       data = localHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
     }
-    return { code: 0, data };
+    return pageSize && acc.admin ? { code: 0, data, size: pageSize, offset: pageOffset } : { code: 0, data };
   });
 
   // 解析记录搜索：按主机记录（子域名）或备注跨域模糊检索，返回可编辑的解析记录条目
@@ -1665,7 +1670,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       where.push('B.type LIKE ?');
       params.push('%' + type + '%');
     }
-    if (cid !== '') {
+    if (!legacyEmpty(cid)) {
       where.push('A.cid = ?');
       params.push(Number(cid));
     }
@@ -1695,7 +1700,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const dir = asText(b.sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const order = sort ? `ORDER BY ${sort} ${dir}` : 'ORDER BY A.id DESC';
     const offset = Math.max(0, Math.floor(Number(b.offset) || 0));
-    const limit = Math.max(0, Math.min(1000, Math.floor(Number(b.limit) || 10)));
+    const limit = Math.max(0, Math.min(10000, Math.floor(Number(b.limit) || 10)));
     const from = `FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id`;
     const countRow: any = await queryOne(`SELECT COUNT(*) AS c ${from} WHERE ${where.join(' AND ')}`, params);
     const rows: any[] = await query(
@@ -1733,7 +1738,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     let minTTL = 1;
     try {
       const lines = await ctx.provider.getRecordLine();
-      if (lines) recordLine = Object.entries(lines).map(([name, lineId]) => ({ id: String(lineId), name, parent: 0 }));
+      if (lines) recordLine = Object.entries(lines).map(([name, lineId]) => ({ id: String(lineId), name, parent: null }));
     } catch {
       recordLine = [];
     }
@@ -1756,12 +1761,13 @@ export default async function domainRoutes(app: FastifyInstance) {
       const sysKey = await getSysKey();
       const token = randomUUID();
       const timestamp = Math.floor(Date.now() / 1000);
-      // 只读标记参与签名，避免被篡改为可写
-      const sign = md5(sysKey + ctx.info.domain.name + timestamp + token + String(readonly) + sysKey);
+      // 可写会话沿用原项目签名格式；只读标记参与签名，避免被篡改为可写
+      const readonlyParam = readonly ? '&ro=1' : '';
+      const sign = md5(sysKey + ctx.info.domain.name + timestamp + token + (readonly ? '1' : '') + sysKey);
       const proto = String(req.headers?.['x-forwarded-proto'] || req.protocol || 'http').split(',')[0].trim() || 'http';
       const host = String(req.headers?.host || '');
       const base = host ? `${proto}://${host}` : '';
-      data.loginurl = `${base}/quicklogin?domain=${encodeURIComponent(ctx.info.domain.name)}&timestamp=${timestamp}&token=${encodeURIComponent(token)}&ro=${readonly}&sign=${sign}`;
+      data.loginurl = `${base}/quicklogin?domain=${encodeURIComponent(ctx.info.domain.name)}&timestamp=${timestamp}&token=${encodeURIComponent(token)}${readonlyParam}&sign=${sign}`;
     }
     return { code: 0, data };
   });
@@ -1773,7 +1779,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const ctx = await legacyProvider(id, req);
     if ('error' in ctx) return { total: 0, rows: [] };
     const b = auth.body;
-    const limit = Math.max(0, Math.min(1000, Math.floor(Number(b.limit) || 10)));
+    const limit = Math.max(0, Math.min(10000, Math.floor(Number(b.limit) || 10)));
     const offset = Math.max(0, Math.floor(Number(b.offset) || 0));
     const page = limit > 0 ? Math.floor(offset / limit) + 1 : 1;
     const res = await ctx.provider.getDomainRecords(
@@ -1833,9 +1839,11 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (invalid) return { code: -1, msg: invalid };
     const err = writeErr(ctx.acc, ctx.info.domain.name, name);
     if (err) return { code: -1, msg: err };
+    // 未传 line 时保持各厂商默认线路，不能统一塞成 "default"（DNSPod/华为云默认值不同）
+    const line = asText(b.line);
     const rid = await ctx.provider.addDomainRecord(
-      name, type, value, asText(b.line) || 'default', legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
-      b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
+      name, type, value, line || undefined, legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
+      b.weight !== undefined && b.weight !== '' ? legacyNumber(b.weight, 0) : null, asText(b.remark) || null,
     );
     if (!rid) return { code: -1, msg: '添加解析记录失败，' + ctx.provider.getError() };
     await bumpRecordCount(id, 1);
@@ -1868,9 +1876,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     }
     const invalid = validateRecordInput(type, name, value);
     if (invalid) return { code: -1, msg: invalid };
+    const line = asText(b.line);
     const ok = await ctx.provider.updateDomainRecord(
-      recordid, name, type, value, asText(b.line) || 'default', legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
-      b.weight !== undefined && b.weight !== '' ? Number(b.weight) : null, asText(b.remark) || null,
+      recordid, name, type, value, line || undefined, legacyNumber(b.ttl, 600), legacyNumber(b.mx, 1),
+      b.weight !== undefined && b.weight !== '' ? legacyNumber(b.weight, 0) : null, asText(b.remark) || null,
     );
     if (!ok) return { code: -1, msg: '修改解析记录失败，' + ctx.provider.getError() };
     invalidateDomainRecordCaches(id);

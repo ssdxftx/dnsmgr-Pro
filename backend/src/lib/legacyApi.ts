@@ -58,13 +58,21 @@ function safeEqual(a: string, b: string): boolean {
 /** 参与 v2 签名计算时排除的字段（签名本身、一次性随机数） */
 const SIGN_EXCLUDE = new Set(['sign', 'sign2', 'nonce']);
 
-/** 参数规范化：按键名排序后拼接，避免参数顺序不同导致同一请求算出不同摘要 */
+/**
+ * 参数规范化：按键名排序后拼接，避免参数顺序不同导致同一请求算出不同摘要。
+ * 数组必须展开全部值（k=v1&k=v2），只取第一个会让攻击者在不改签名的情况下追加参数。
+ */
 function canonicalParams(body: Record<string, any>): string {
-  return Object.keys(body)
-    .filter((k) => !SIGN_EXCLUDE.has(k))
-    .sort()
-    .map((k) => k + '=' + scalar(body[k]))
-    .join('&');
+  const parts: string[] = [];
+  for (const key of Object.keys(body).filter((k) => !SIGN_EXCLUDE.has(k)).sort()) {
+    const value = body[key];
+    if (Array.isArray(value)) {
+      for (const item of value) parts.push(key + '=' + String(item ?? ''));
+    } else {
+      parts.push(key + '=' + String(value ?? ''));
+    }
+  }
+  return parts.join('&');
 }
 
 /** v2 签名：HMAC-SHA256(apikey, method\npath\nuid\ntimestamp\nnonce\nsha256(params)) */

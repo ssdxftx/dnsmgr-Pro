@@ -375,6 +375,54 @@ await new Promise((resolve) => setTimeout(resolve, 70));
 assert(await hitRateLimitDistributed('rate-rollover', 1, 50), '分布式限流跨窗口后重新计数');
 await db.query(`DELETE FROM dnsmgr_rate_limit WHERE bucket = 'rate-rollover'`);
 
+// 原项目兼容：快捷登录旧签名（不带 ro）仍可用，但同一链接只能消费一次，追加 ro=1 不能提权
+const jwt = (await import('@fastify/jwt')).default;
+const authApp = Fastify({ logger: false });
+await authApp.register(jwt, { secret: 'legacy-check-jwt-secret-at-least-32-chars' });
+await authApp.register((await import('../src/routes/auth.js')).default);
+await db.query(`UPDATE dnsmgr_domain SET is_sso = 1 WHERE name = 'example.com'`);
+await config.configSet('legacy_api_enable', '1');
+const sysKey = await config.getSysKey();
+const qlDomain = 'example.com';
+const qlTimestamp = String(Math.floor(Date.now() / 1000));
+const qlToken = 'quicklogin-check-token';
+const qlSign = createHash('md5').update(sysKey + qlDomain + qlTimestamp + qlToken + sysKey).digest('hex');
+const qlQuery = `domain=${qlDomain}&timestamp=${qlTimestamp}&token=${qlToken}&sign=${qlSign}`;
+const qlRes = await authApp.inject({ method: 'GET', url: '/quicklogin?' + qlQuery });
+assert(qlRes.statusCode === 200 && qlRes.body.includes('dnsmgr_token'), '旧版 quicklogin 无 ro 签名可用');
+const qlReplay = await authApp.inject({ method: 'GET', url: '/quicklogin?' + qlQuery });
+assert(qlReplay.statusCode === 403, '旧版 quicklogin 链接只能使用一次');
+const qlEscalate = await authApp.inject({ method: 'GET', url: '/quicklogin?' + qlQuery + '&ro=1' });
+assert(qlEscalate.statusCode === 400, '旧版 quicklogin 追加 ro=1 被签名校验拒绝');
+const qlRoToken = 'quicklogin-check-ro-token';
+const qlRoSign = createHash('md5').update(sysKey + qlDomain + qlTimestamp + qlRoToken + '1' + sysKey).digest('hex');
+const qlRoRes = await authApp.inject({
+  method: 'GET',
+  url: `/quicklogin?domain=${qlDomain}&timestamp=${qlTimestamp}&token=${qlRoToken}&ro=1&sign=${qlRoSign}`,
+});
+assert(qlRoRes.statusCode === 200 && qlRoRes.body.includes('dnsmgr_token'), '只读 quicklogin 签名可用');
+await authApp.close();
+
+// 原项目对外状态探测路径
+const fmtDateTime = (await import('../src/lib/util.js')).fmtDateTime;
+await config.configSet('run_time', fmtDateTime());
+const monitorApp = Fastify({ logger: false });
+await monitorApp.register((await import('../src/routes/dmonitor.js')).default);
+const dmStatus = await monitorApp.inject({ method: 'GET', url: '/dmtask/status' });
+assert(dmStatus.statusCode === 200 && dmStatus.body === 'ok', '/dmtask/status 返回 ok');
+await monitorApp.close();
+
+await db.query(
+  `INSERT INTO dnsmgr_optimizeip (did, rr, type, ip_type, cdn_type, recordnum, ttl, addtime, updatetime, active)
+   VALUES (?, 'www', 0, 'ipv4', 1, 2, 600, ?, ?, 1)`,
+  [sharedDomain.insertId, fmtDateTime(), fmtDateTime()],
+);
+const optimizeApp = Fastify({ logger: false });
+await optimizeApp.register((await import('../src/routes/optimizeip.js')).default);
+const opStatus = await optimizeApp.inject({ method: 'GET', url: '/optimizeip/status' });
+assert(opStatus.statusCode === 200 && opStatus.body === 'ok', '/optimizeip/status 返回 ok');
+await optimizeApp.close();
+
 await db.getDriver().close();
 assert(!fs.existsSync(path.join(dir, 'dnsmgr.sqlite.lock')), '关闭驱动后释放单实例锁');
 console.log('\nSQLite 自检全部通过');

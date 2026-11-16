@@ -1,6 +1,6 @@
 import { query, queryOne, table } from '../../db.js';
 import { getCdnProvider } from './factory.js';
-import { fmtDateTime } from '../util.js';
+import { calcDailyNextRun, fmtDateTime } from '../util.js';
 
 import { loadAccountConfig } from '../accounts/taskConfig.js';
 
@@ -150,10 +150,7 @@ export function calcNextRun(cycle: string, intervalMin: number, runTime: string 
   if (cycle === 'interval' && intervalMin > 0) {
     return new Date(now.getTime() + intervalMin * 60000);
   }
-  const [h, m] = String(runTime || '00:00').split(':').map((x) => Number(x) || 0);
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m, 0, 0);
-  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
-  return next;
+  return calcDailyNextRun(runTime, now);
 }
 
 /** 调度器入口：执行所有到期的自动预热任务 */

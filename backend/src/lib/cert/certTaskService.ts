@@ -16,6 +16,11 @@ const CONTINUE_LIMIT = 10;
 const DEPLOY_LIMIT = 10;
 // 与 CertDeployService.process() 的重试上限保持一致
 const DEPLOY_MAX_RETRY = 6;
+// 通知失败后的重试策略：只扫描最近 7 天记录，每个目标最多重试 5 次，间隔 5 分钟
+const NOTICE_RETRY_BATCH = 5;
+const NOTICE_MAX_ATTEMPTS = 5;
+const NOTICE_RETRY_DELAY_MS = 5 * 60_000;
+const NOTICE_RETRY_WINDOW_DAYS = 7;
 
 const FAIL_STATUSES = [-1, -2, -3, -4, -5, -6, -7];
 // 调度器会推进的订单状态：0 已排队、1/2 进行中、负数失败待重试
@@ -78,6 +83,81 @@ export async function findDeployTasks(q: QueryFn = query): Promise<any[]> {
   );
 }
 
+// 已成功但通知未发完的订单：状态 3 不会进入 findRunningOrders，需要单独扫描。
+export async function findUnsentOrderNotices(q: QueryFn = query): Promise<any[]> {
+  return q(
+    `SELECT id FROM ${table('cert_order')}
+      WHERE status = 3 AND issend = 0
+        AND COALESCE(updatetime, issuetime, addtime) >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        AND COALESCE(updatetime, issuetime, addtime) <= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+      ORDER BY COALESCE(updatetime, issuetime, addtime) ASC LIMIT ?`,
+    [NOTICE_RETRY_WINDOW_DAYS, NOTICE_RETRY_BATCH],
+  );
+}
+
+// 已部署成功但通知未发完的任务：同样不在 findDeployTasks 的待处理状态里。
+export async function findUnsentDeployNotices(q: QueryFn = query): Promise<any[]> {
+  return q(
+    `SELECT id FROM ${table('cert_deploy')}
+      WHERE status = 1 AND issend = 0
+        AND COALESCE(lasttime, issuetime, addtime) >= DATE_SUB(NOW(), INTERVAL ? DAY)
+        AND COALESCE(lasttime, issuetime, addtime) <= DATE_SUB(NOW(), INTERVAL 5 MINUTE)
+      ORDER BY COALESCE(lasttime, issuetime, addtime) ASC LIMIT ?`,
+    [NOTICE_RETRY_WINDOW_DAYS, NOTICE_RETRY_BATCH],
+  );
+}
+
+type NoticeKind = 'order' | 'deploy';
+const noticeRetryState = new Map<string, { attempts: number; nextAt: number }>();
+
+function noticeKey(kind: NoticeKind, id: number): string {
+  return `${kind}:${id}`;
+}
+
+function canSendNotice(kind: NoticeKind, id: number): boolean {
+  const state = noticeRetryState.get(noticeKey(kind, id));
+  if (!state) return true;
+  if (state.attempts >= NOTICE_MAX_ATTEMPTS) return false;
+  return Date.now() >= state.nextAt;
+}
+
+function noteNoticeResult(kind: NoticeKind, id: number, sent: boolean): void {
+  const key = noticeKey(kind, id);
+  if (sent) {
+    noticeRetryState.delete(key);
+    return;
+  }
+  const attempts = (noticeRetryState.get(key)?.attempts || 0) + 1;
+  if (noticeRetryState.size >= 1000 && !noticeRetryState.has(key)) {
+    const oldest = noticeRetryState.keys().next().value;
+    if (oldest) noticeRetryState.delete(oldest);
+  }
+  noticeRetryState.set(key, { attempts, nextAt: Date.now() + NOTICE_RETRY_DELAY_MS });
+  if (attempts >= NOTICE_MAX_ATTEMPTS) {
+    console.warn(`[notice] ${kind} ${id} 通知连续失败 ${attempts} 次，停止本轮重试`);
+  }
+}
+
+async function retryUnsentNotices(): Promise<number> {
+  const [orders, deploys] = await Promise.all([findUnsentOrderNotices(), findUnsentDeployNotices()]);
+  let sent = 0;
+  for (const row of orders as any[]) {
+    const id = Number(row.id);
+    if (!canSendNotice('order', id)) continue;
+    const ok = await certOrderSend(id, true).catch(() => false);
+    noteNoticeResult('order', id, ok);
+    if (ok) sent++;
+  }
+  for (const row of deploys as any[]) {
+    const id = Number(row.id);
+    if (!canSendNotice('deploy', id)) continue;
+    const ok = await certDeploySend(id, true).catch(() => false);
+    noteNoticeResult('deploy', id, ok);
+    if (ok) sent++;
+  }
+  return sent;
+}
+
 // 记录下一次推进时间点：全部使用数据库时钟，避免应用与数据库时区不一致
 async function ensureNextRun(id: number): Promise<void> {
   const row = await queryOne(`SELECT status, retrytime FROM ${table('cert_order')} WHERE id = ?`, [id]);
@@ -111,11 +191,19 @@ async function processOrder(id: number): Promise<void> {
   }
   if (Number(row.status) === 3) {
     // 每个处理周期只通知一次（续签重置时会把 issend 清 0）
-    certOrderSend(id, true).catch(() => undefined);
+    if (canSendNotice('order', id)) {
+      void certOrderSend(id, true)
+        .then((sent) => noteNoticeResult('order', id, sent))
+        .catch(() => noteNoticeResult('order', id, false));
+    }
     void emitEvent('cert.order.issued', { order_id: id });
     console.log(`[cert] 订单 ${id} 自动续签成功`);
   } else if (Number(row.status) < 0) {
-    certOrderSend(id, false).catch(() => undefined);
+    if (canSendNotice('order', id)) {
+      void certOrderSend(id, false)
+        .then((sent) => noteNoticeResult('order', id, sent))
+        .catch(() => noteNoticeResult('order', id, false));
+    }
     void emitEvent('cert.order.failed', { order_id: id, error: error?.message || row.error || '未知错误' });
     logOrderFailure(id, error?.message || row.error || '未知错误').catch(() => undefined);
     console.log(`[cert] 订单 ${id} 处理失败: ${error?.message || '未知错误'}`);
@@ -139,12 +227,20 @@ async function processDeployTask(id: number): Promise<void> {
     return;
   }
   if (Number(row.status) === 1) {
-    certDeploySend(id, true).catch(() => undefined);
+    if (canSendNotice('deploy', id)) {
+      void certDeploySend(id, true)
+        .then((sent) => noteNoticeResult('deploy', id, sent))
+        .catch(() => noteNoticeResult('deploy', id, false));
+    }
     void emitEvent('cert.deploy.success', { task_id: id });
     logDeployResult(id, 1).catch(() => undefined);
     console.log(`[cert] 部署任务 ${id} 自动部署成功`);
   } else if (Number(row.status) < 0) {
-    certDeploySend(id, false).catch(() => undefined);
+    if (canSendNotice('deploy', id)) {
+      void certDeploySend(id, false)
+        .then((sent) => noteNoticeResult('deploy', id, sent))
+        .catch(() => noteNoticeResult('deploy', id, false));
+    }
     void emitEvent('cert.deploy.failed', { task_id: id, error: error?.message || '未知错误' });
     logDeployResult(id, -1, error?.message || '未知错误').catch(() => undefined);
     console.log(`[cert] 部署任务 ${id} 部署失败: ${error?.message || '未知错误'}`);
@@ -207,6 +303,9 @@ export function kickOrderProcessing(id: number): void {
 }
 
 export async function certTaskRun(): Promise<void> {
+  // 通知重试不受签发时段限制：已成功但通知失败的记录只在状态 3，必须通过独立查询补发。
+  await retryUnsentNotices().catch((e: any) => console.warn('[notice] 通知重试失败：' + (e?.message || e)));
+
   const start = parseHour(await configGet('deploy_hour_start', '0'), 0);
   const end = parseHour(await configGet('deploy_hour_end', '23'), 23);
   if (!inRunWindow(new Date().getHours(), start, end)) return;

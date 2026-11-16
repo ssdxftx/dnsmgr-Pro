@@ -191,21 +191,29 @@ export async function addOrderCdnLinks(orderId: number, cdnDomainIds: number[], 
   const oid = Number(orderId);
   const dids = [...new Set((cdnDomainIds || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
   if (!oid || !dids.length) return [];
-  const rows: any = await q(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [oid]);
-  if (!rows[0]) return [];
-  const ids = cdnLinkIds(rows[0].link);
-  let changed = false;
-  for (const did of dids) {
-    if (!ids.includes(did)) {
-      ids.push(did);
-      changed = true;
+  // 先查后写必须使用 CAS：两个域名并发选择同一张证书时，
+  // 直接覆盖会把先写入的域名从联动列表中挤掉，导致该域名不再参与续签部署。
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const rows: any = await q(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [oid]);
+    if (!rows[0]) return [];
+    const previous = rows[0].link;
+    const ids = cdnLinkIds(previous);
+    let changed = false;
+    for (const did of dids) {
+      if (!ids.includes(did)) {
+        ids.push(did);
+        changed = true;
+      }
     }
-  }
-  if (changed) {
+    if (!changed) return ids;
     const link = JSON.stringify({ cdnDomainId: ids[0], cdnDomainIds: ids });
-    await q(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ?`, [link, oid]);
+    const res: any = await q(
+      `UPDATE ${table('cert_order')} SET link = ? WHERE id = ? AND (link = ? OR (link IS NULL AND ? IS NULL))`,
+      [link, oid, previous ?? null, previous ?? null],
+    );
+    if (Number(res?.affectedRows ?? res?.changes ?? 0) > 0) return ids;
   }
-  return ids;
+  throw new Error('证书联动关系更新冲突，请稍后重试');
 }
 
 /** 兼容旧调用：把订单关联到单个 CDN 域名 */

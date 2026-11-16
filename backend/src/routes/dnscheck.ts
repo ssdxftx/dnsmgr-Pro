@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel, matchPermission, sameDomain } from '../auth.js';
 import { checkDomainRecords, calcNextRun, listSubDomains } from '../lib/dns/checkService.js';
-import { fmtDateTime, escapeLike } from '../lib/util.js';
+import { fmtDateTime, escapeLike, parseRunTime } from '../lib/util.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
 import { withDistributedLock } from '../lib/scheduler/distLock.js';
 import { getEffectivePermissions } from '../lib/accounts/visibility.js';
@@ -137,6 +137,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const intervalMin = b.cycle === 'interval' ? Math.max(MIN_INTERVAL_MIN, Number(b.interval_min) || 0) : 0;
     const runTime = cycle === 'daily' ? String(b.run_time || '00:00') : null;
     const active = b.active == 0 ? 0 : 1;
+    if (cycle === 'daily' && !parseRunTime(runTime).valid) return { code: -1, msg: '执行时间格式不正确，应为 HH:mm' };
     // 修改周期/时间或重新启用后必须重算 next_run，否则会沿用旧时间点（甚至立即触发一次）
     const nextRun = active ? fmtDateTime(calcNextRun(cycle, intervalMin, runTime)) : row.next_run;
     await query(

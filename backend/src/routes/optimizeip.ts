@@ -258,15 +258,23 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   });
 
   // 运行状态
-  app.get('/api/optimize/status', auth, async () => {
+  async function optimizeRunState(): Promise<number> {
     const runTime = await queryOne<{ updatetime: string }>(
       `SELECT updatetime FROM ${table('optimizeip')} WHERE active = 1 ORDER BY updatetime DESC LIMIT 1`
     );
-    let runState = 0;
     if (runTime && runTime.updatetime) {
       const t = new Date(runTime.updatetime.replace(/-/g, '/')).getTime();
-      runState = Date.now() - t > 3600 * 1000 ? 0 : 1;
+      return Date.now() - t > 3600 * 1000 ? 0 : 1;
     }
-    return { code: 0, data: runState === 1 ? 'ok' : 'error' };
+    return 0;
+  }
+
+  app.get('/api/optimize/status', auth, async () => {
+    return { code: 0, data: (await optimizeRunState()) === 1 ? 'ok' : 'error' };
+  });
+
+  // 原项目对外状态探测路径，返回纯文本 ok/error
+  app.get('/optimizeip/status', async (_req: any, reply: any) => {
+    return reply.type('text/plain').send((await optimizeRunState()) === 1 ? 'ok' : 'error');
   });
 }

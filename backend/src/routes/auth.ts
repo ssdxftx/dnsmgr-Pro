@@ -485,14 +485,14 @@ export default async function authRoutes(app: FastifyInstance) {
     if (!domain || !timestamp || !token || !sign) return reply.code(400).type('text/plain').send('参数错误');
     const ts = Number(timestamp);
     const now = Math.floor(Date.now() / 1000);
-    // 时间窗只用来兜住"签发后多久还能用"，重放由下面的一次性票据拦截；
-    // 原来的 ±300s 窗口内同一张签名 URL 可以无限次换取 2 小时会话。
-    if (!Number.isFinite(ts) || ts < now - 120 || ts > now + 120) return reply.code(400).type('text/plain').send('时间戳无效');
+    // 与原项目保持 5 分钟窗口；链接只能消费一次，重放由下面的一次性票据拦截。
+    if (!Number.isFinite(ts) || ts < now - 300 || ts > now + 300) return reply.code(400).type('text/plain').send('时间戳无效');
     const sysKey = await getSysKey();
-    const expected = md5(sysKey + domain + timestamp + token + String(readonly) + sysKey);
-    const ha = createHash('sha256').update(expected).digest();
-    const hb = createHash('sha256').update(sign).digest();
-    if (!timingSafeEqual(ha, hb)) return reply.code(400).type('text/plain').send('签名错误');
+    // 可写会话与原项目签名完全一致（不带 ro）；只读标记参与签名，禁止追加 ro=1 提权
+    const expected = md5(sysKey + domain + timestamp + token + (readonly ? '1' : '') + sysKey);
+    const signHash = createHash('sha256').update(sign).digest();
+    const expectedHash = createHash('sha256').update(expected).digest();
+    if (!timingSafeEqual(expectedHash, signHash)) return reply.code(400).type('text/plain').send('签名错误');
     // 签名只覆盖域名名称，没有 domain id。若库中存在同名行（历史/导入数据只保证 aid+name 唯一），
     // LIMIT 1 会把会话绑定到任意账户（含他人私有账户）；这里要求名称全局唯一，否则 fail-closed。
     const rows: any[] = await query(

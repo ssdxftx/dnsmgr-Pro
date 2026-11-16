@@ -248,9 +248,8 @@ export default async function systemRoutes(app: FastifyInstance) {
     return result.ok ? { code: 0, data: 'success!' } : { code: -1, msg: result.msg };
   });
 
-  // 旧版 /cron?key= 明文输出，仅在兼容层开启时注册可用
+  // 旧版 /cron?key= 明文输出，沿用原项目的 cron_type + cron_key 校验
   app.get('/cron', async (req: any, reply: any) => {
-    if ((await configGet('legacy_api_enable', '0')) !== '1') return reply.code(404).type('text/plain').send('404 Not Found');
     const result = await runCron(req);
     return reply.type('text/plain').send(result.ok ? 'success!' : result.msg || '执行失败');
   });

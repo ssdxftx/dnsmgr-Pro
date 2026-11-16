@@ -65,7 +65,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useMessage } from 'naive-ui';
@@ -122,6 +122,12 @@ function onDomainSearch(kw: string) {
   // 250ms 防抖：避免每输入一个字符就发一次远程搜索
   domainSearchTimer = window.setTimeout(() => void loadDomains(kw), 250);
 }
+
+onBeforeUnmount(() => {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+  // 让已发出的请求结果失效，避免卸载后继续更新组件状态
+  domainSearchSeq++;
+});
 
 async function loadDomains(kw = '') {
   const seq = ++domainSearchSeq;

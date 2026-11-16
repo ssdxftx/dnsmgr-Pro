@@ -26,6 +26,8 @@ export interface ImportOptions {
   scopeOverride?: string;
   /** replace 恢复时在导入事务内自增全部 token_version，保证数据替换与会话失效原子提交 */
   invalidateSessions?: boolean;
+  /** 事务真正开始写库时回调；归档解密/校验失败时不会触发 */
+  onWriteStart?: () => void;
 }
 
 export interface TableReport {
@@ -258,6 +260,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
     const sysKey = await getSysKey();
 
     await withTransaction(async (q) => {
+      opts.onWriteStart?.();
       if (mode === 'replace') {
         for (const name of [...TABLES].reverse()) {
           if (DELETE_SKIP.has(name)) continue;

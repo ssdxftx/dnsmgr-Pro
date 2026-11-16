@@ -395,4 +395,15 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     }
     return runState === 1 ? { code: 0, data: 'ok' } : { code: 0, data: 'error' };
   });
+
+  // 原项目对外状态探测路径，返回纯文本 ok/error
+  app.get('/dmtask/status', async (_req: any, reply: any) => {
+    const runTime = await configGet('run_time');
+    let runState = 0;
+    if (runTime) {
+      const t = new Date(runTime.replace(/-/g, '/')).getTime();
+      runState = Date.now() - t > RUN_STATE_STALE_MS ? 0 : 1;
+    }
+    return reply.type('text/plain').send(runState === 1 ? 'ok' : 'error');
+  });
 }

@@ -30,7 +30,7 @@ import {
   uploadToDestination,
 } from '../lib/backup/destinations.js';
 import { saveUpload, releaseTemp } from '../lib/backup/upload.js';
-import { contentDisposition, clampLimit } from '../lib/util.js';
+import { contentDisposition, clampLimit, intInRange } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { requireLoginPassword } from '../lib/reauth.js';
 import { publicError } from '../lib/util.js';
@@ -50,14 +50,23 @@ function archiveMeta(name: string) {
   };
 }
 
+function scheduleTime(row: any) {
+  return {
+    hour: intInRange(row?.hour, 0, 23, 3),
+    minute: intInRange(row?.minute, 0, 59, 0),
+    weekday: intInRange(row?.weekday, 1, 7, 1),
+  };
+}
+
 function computeNextRun(row: any, from = new Date()): string {
   const p = (n: number) => String(n).padStart(2, '0');
   const fmt = (d: Date) => `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  const { hour, minute, weekday } = scheduleTime(row);
   const next = new Date(from);
   next.setSeconds(0, 0);
-  next.setHours(Number(row.hour || 3), Number(row.minute || 0));
+  next.setHours(hour, minute);
   if (String(row.freq) === 'weekly') {
-    const target = Math.max(1, Math.min(7, Number(row.weekday || 1)));
+    const target = weekday;
     const cur = next.getDay() === 0 ? 7 : next.getDay();
     let delta = target - cur;
     if (delta < 0 || (delta === 0 && next <= from)) delta += 7;
@@ -533,6 +542,7 @@ export default async function backupRoutes(app: FastifyInstance) {
   app.post('/api/backup/schedules', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     const b = req.body || {};
+    const time = scheduleTime(b);
     const next = computeNextRun(b);
     const r: any = await query(
       `INSERT INTO ${table('backup_schedule')}
@@ -542,9 +552,9 @@ export default async function backupRoutes(app: FastifyInstance) {
         String(b.name || '自动备份'),
         'site',
         b.freq === 'weekly' ? 'weekly' : 'daily',
-        Number(b.hour ?? 3),
-        Number(b.minute ?? 0),
-        Number(b.weekday ?? 1),
+        time.hour,
+        time.minute,
+        time.weekday,
         b.include_logs ? 1 : 0,
         Number(b.dest_id || 0),
         Math.max(1, Number(b.keep_count || 7)),
@@ -562,6 +572,7 @@ export default async function backupRoutes(app: FastifyInstance) {
     const row: any = await queryOne(`SELECT * FROM ${table('backup_schedule')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '计划不存在' };
     const b = { ...row, ...(req.body || {}) };
+    const time = scheduleTime(b);
     await query(
       `UPDATE ${table('backup_schedule')}
        SET name = ?, freq = ?, hour = ?, minute = ?, weekday = ?, include_logs = ?, dest_id = ?,
@@ -570,9 +581,9 @@ export default async function backupRoutes(app: FastifyInstance) {
       [
         String(b.name),
         b.freq === 'weekly' ? 'weekly' : 'daily',
-        Number(b.hour ?? 3),
-        Number(b.minute ?? 0),
-        Number(b.weekday ?? 1),
+        time.hour,
+        time.minute,
+        time.weekday,
         b.include_logs ? 1 : 0,
         Number(b.dest_id || 0),
         Math.max(1, Number(b.keep_count || 7)),
