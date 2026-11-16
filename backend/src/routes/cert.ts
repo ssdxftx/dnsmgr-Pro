@@ -403,6 +403,14 @@ export default async function certRoutes(app: FastifyInstance) {
       }
     }
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where}`, params))?.c || 0;
+    // 统计口径必须覆盖全部筛选结果：前端分页后不能再拿当前页推算遥测数字
+    const statRow: any = await queryOne(
+      `SELECT SUM(CASE WHEN A.status = 3 THEN 1 ELSE 0 END) AS issued,
+              SUM(CASE WHEN A.status IN (1, 2) THEN 1 ELSE 0 END) AS running,
+              SUM(CASE WHEN A.status = 3 AND A.expiretime IS NOT NULL AND A.expiretime <= DATE_ADD(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS expiring
+         FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where}`,
+      params,
+    );
     const rows = await query(
       // 显式列清单：排除 fullchain / privatekey / info / dns 等大字段，避免每页读回 1–3MB 无用 IO 并把私钥取出到应用内存
       `SELECT A.id, A.aid, A.keytype, A.keysize, A.status, A.error, A.isauto, A.issuetime, A.expiretime, A.issuer, A.addtime, A.updatetime, B.type FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
@@ -430,7 +438,17 @@ export default async function certRoutes(app: FastifyInstance) {
         end_day: r.expiretime ? Math.ceil((new Date(r.expiretime).getTime() - Date.now()) / 86400000) : null,
       });
     }
-    return { code: 0, total, data: list, status_label: STATUS_LABEL };
+    return {
+      code: 0,
+      total,
+      data: list,
+      status_label: STATUS_LABEL,
+      stats: {
+        issued: Number(statRow?.issued || 0),
+        in_progress: Number(statRow?.running || 0),
+        expiring: Number(statRow?.expiring || 0),
+      },
+    };
   });
 
   app.post('/api/cert/orders', auth, async (req: any) => {
@@ -801,8 +819,9 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessCertOrder(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     }
-    const row = await queryOne(`SELECT processid FROM ${table('cert_order')} WHERE id = ?`, [id]);
-    const processid = safeProcessId(row?.processid);
+    // processid 在释放租约时会清空，日志文件标识要回退到 last_processid
+    const row = await queryOne(`SELECT processid, last_processid FROM ${table('cert_order')} WHERE id = ?`, [id]);
+    const processid = safeProcessId(row?.processid) || safeProcessId(row?.last_processid);
     if (!processid) return { code: -1, msg: '无日志' };
     const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: -1, msg: '日志文件不存在' };
@@ -919,6 +938,15 @@ export default async function certRoutes(app: FastifyInstance) {
     where += ` AND A.aid IN (${visibleCertAids.map(() => '?').join(',')})`;
     params.push(...visibleCertAids);
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A WHERE ${where}`, params))?.c || 0;
+    const statRow: any = await queryOne(
+      `SELECT SUM(CASE WHEN A.active = 1 THEN 1 ELSE 0 END) AS active,
+              SUM(CASE WHEN A.status = 0 THEN 1 ELSE 0 END) AS pending,
+              SUM(CASE WHEN A.status = 1 THEN 1 ELSE 0 END) AS deployed,
+              SUM(CASE WHEN A.status < 0 THEN 1 ELSE 0 END) AS failed,
+              MAX(A.lasttime) AS last_time
+         FROM ${table('cert_deploy')} A WHERE ${where}`,
+      params,
+    );
     const rows = await query(
       `SELECT A.*, B.type, B.name AS aname, C.aid AS certaid FROM ${table('cert_deploy')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id LEFT JOIN ${table('cert_order')} C ON A.oid = C.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
       [...params, clampLimit(limit, 20), clampOffset(offset)],
@@ -944,7 +972,18 @@ export default async function certRoutes(app: FastifyInstance) {
         domains: oidDomains.get(r.oid) || [],
       });
     }
-    return { code: 0, total, data: list };
+    return {
+      code: 0,
+      total,
+      data: list,
+      stats: {
+        active: Number(statRow?.active || 0),
+        pending: Number(statRow?.pending || 0),
+        deployed: Number(statRow?.deployed || 0),
+        failed: Number(statRow?.failed || 0),
+        last_time: statRow?.last_time || null,
+      },
+    };
   });
 
   app.post('/api/deploy/tasks', auth, async (req: any, reply: any) => {
@@ -1086,8 +1125,8 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!(await canAccessDeployTask(id, req.user))) {
       return reply.code(404).send({ code: -1, msg: '部署任务不存在' });
     }
-    const row: any = await queryOne(`SELECT processid FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
-    const processid = safeProcessId(row?.processid);
+    const row: any = await queryOne(`SELECT processid, last_processid FROM ${table('cert_deploy')} WHERE id = ?`, [id]);
+    const processid = safeProcessId(row?.processid) || safeProcessId(row?.last_processid);
     if (!processid) return { code: 0, data: '' };
     const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: 0, data: '' };

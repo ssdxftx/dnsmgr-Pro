@@ -115,7 +115,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, watch } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useResponsive } from '../composables/useResponsive';
 import { useI18n } from 'vue-i18n';
 import { NButton, NDatePicker, NInput, NTag, useMessage, useDialog } from 'naive-ui';
@@ -524,6 +524,13 @@ async function toggleStatCache(row: any) {
   }
 }
 
+function rollbackUserRow(row: any, index: number) {
+  if (!row) return;
+  // 请求期间列表可能已刷新并重新包含该行，先按 id 判断，避免回滚出重复行
+  if (users.value.some((u: any) => Number(u.id) === Number(row.id))) return;
+  users.value.splice(Math.min(Math.max(index, 0), users.value.length), 0, row);
+}
+
 function del(row: any) {
   dialog.warning({
     title: t('userList.deleteTitle'),
@@ -543,16 +550,20 @@ function del(row: any) {
           message.success(t('userList.deleteSuccess'));
           if (pagination.itemCount > 0) pagination.itemCount--;
         } else {
-          if (removed) users.value.splice(idx, 0, removed); // 失败回滚
+          rollbackUserRow(removed, idx); // 失败回滚
           message.error(res.msg);
         }
       } catch (e: any) {
-        if (removed) users.value.splice(idx, 0, removed);
+        rollbackUserRow(removed, idx);
         message.error(e?.message || t('common.networkError'));
       }
     },
   });
 }
+
+onBeforeUnmount(() => {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+});
 
 onMounted(() => {
   loadUsers();

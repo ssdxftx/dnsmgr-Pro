@@ -12,7 +12,7 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="2 s:2 m:4" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="orders.length" tone="primary" :icon="ShieldCheckmarkOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('common.total')" :value="ordersTotal" tone="primary" :icon="ShieldCheckmarkOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('common.issued')" :value="issuedCount" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.inProgress')" :value="inProgressCount" tone="info" :icon="TimeOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d4"><TelemetryCard :label="t('common.expiringSoon')" :value="expiringCount" tone="warning" :icon="WarningOutline" :caption="t('common.last30d')" /></n-grid-item>
@@ -22,7 +22,15 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('certOrder.listTitle') }}</h3>
         </div>
-        <ResponsiveDataTable :columns="columns" :data="orders" title-key="domains" :loading="loadBusy" :empty-text="t('certOrder.empty')" :empty-description="t('certOrder.emptyHint')" />
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="orders"
+          title-key="domains"
+          :loading="loadBusy"
+          :empty-text="t('certOrder.empty')"
+          :empty-description="t('certOrder.emptyHint')"
+          :pagination="pagination"
+        />
       </div>
     </n-card>
 
@@ -124,8 +132,19 @@ const message = useMessage();
 const dialog = useDialog();
 const loadBusy = ref(false);
 const orders = ref<any[]>([]);
-// 遥测统计（基于完整订单列表，单次遍历计算）
+const ordersTotal = ref(0);
+const page = ref(1);
+const pageSize = ref(20);
+// 服务端统计覆盖全部筛选结果，避免分页后遥测只剩当前页
+const remoteStats = ref<any>(null);
 const orderStats = computed(() => {
+  if (remoteStats.value) {
+    return {
+      issued: Number(remoteStats.value.issued || 0),
+      inProgress: Number(remoteStats.value.in_progress || 0),
+      expiring: Number(remoteStats.value.expiring || 0),
+    };
+  }
   let issued = 0;
   let inProgress = 0;
   let expiring = 0;
@@ -140,6 +159,22 @@ const orderStats = computed(() => {
   }
   return { issued, inProgress, expiring };
 });
+const pagination = computed(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: ordersTotal.value,
+  showSizePicker: true,
+  pageSizes: [20, 50, 100],
+  onChange: (p: number) => {
+    page.value = p;
+    loadOrders();
+  },
+  onUpdatePageSize: (size: number) => {
+    pageSize.value = size;
+    page.value = 1;
+    loadOrders();
+  },
+}));
 const issuedCount = computed(() => orderStats.value.issued);
 const inProgressCount = computed(() => orderStats.value.inProgress);
 const expiringCount = computed(() => orderStats.value.expiring);
@@ -272,10 +307,20 @@ const columns = computed(() => [
 async function loadOrders() {
   loadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/cert/orders', { limit: 200 });
+    const res = await api<any>('GET', '/cert/orders', {
+      offset: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+    });
     if (res.code === 0) {
       orders.value = res.data;
+      ordersTotal.value = Number(res.total || 0);
+      remoteStats.value = res.stats || null;
       statusLabel.value = res.status_label || {};
+      // 删除最后一页最后一条后回收空页
+      if (!orders.value.length && page.value > 1) {
+        page.value -= 1;
+        await loadOrders();
+      }
     } else orders.value = [];
   } catch (e: any) {
     message.error(e?.message || t('common.networkError'));

@@ -452,9 +452,12 @@ export async function assertCertOrdersRemovable(cdnDomainId: number, user?: any)
 
 // 删除与指定 CDN 加速域名联动的证书订单：先吊销全部已签发证书，全部成功后才删除
 // （部署任务、订单、域名、联动日志）。任一吊销失败则抛出异常，不删除任何记录。
-export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, user?: any): Promise<{ orders: number; deployTasks: number }> {
+export async function removeCertOrdersLinkedToCdnDomain(
+  cdnDomainId: number,
+  user?: any,
+): Promise<{ orders: number; deployTasks: number; unlinked: number }> {
   const did = Number(cdnDomainId || 0);
-  if (!did) return { orders: 0, deployTasks: 0 };
+  if (!did) return { orders: 0, deployTasks: 0, unlinked: 0 };
   // link 现在可能保存多个 cdnDomainIds；生成列只覆盖主关联，不能只按 cdn_domain_id 查，
   // 否则第二域名解除联动时会漏掉订单。证书订单表规模有限，这里统一按 link 粗筛 + 解析。
   const candidates: any[] = await query(
@@ -475,12 +478,17 @@ export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, use
     }
   }
 
-  // 阶段一：先吊销所有已签发（status=3）的联动证书，任一失败则整体中止
+  // 阶段一：先吊销已签发（status=3）且不再被其他加速域名复用的证书，任一失败则整体中止。
+  // 仍被其他域名复用的证书只解除本域名的联动，不能吊销，否则会打断其他域名的 HTTPS。
   for (const o of targets) {
     if (Number(o.status) !== 3) continue;
+    if (cdnLinkIds(o.link).some((id) => id !== did)) continue;
     try {
       const svc = new CertOrderService(Number(o.id));
       await svc.withMutationLock(async () => {
+        // 锁内复检：加锁前可能有其他域名刚复用这张证书，此时不能吊销
+        const rows: any[] = await query(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [o.id]);
+        if (!rows[0] || cdnLinkIds(rows[0].link).some((id) => id !== did)) return;
         await svc.revoke();
       });
     } catch (e: any) {
@@ -488,11 +496,34 @@ export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, use
     }
   }
 
-  // 阶段二：吊销全部成功后，取消处理中的订单并删除部署任务与订单记录
+  // 阶段二：吊销全部成功后，取消处理中的订单并删除部署任务与订单记录。
+  // 共享订单只解绑当前域名，保留证书、部署任务与其他域名的联动。
   let deployTasks = 0;
+  let unlinked = 0;
   for (const o of targets) {
     const oid = Number(o.id);
     const service = new CertOrderService(oid);
+    // 共享订单只做「解除本域名联动」，不走 withMutationLock：后者会先清理订单的挑战
+    // 解析记录，可能打断其他域名正在进行的签发。这里用 link 原值做 CAS，避免覆盖并发合并。
+    let unlinkHandled = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const rows: any[] = await query(`SELECT link FROM ${table('cert_order')} WHERE id = ?`, [oid]);
+      if (!rows[0]) {
+        unlinkHandled = true;
+        break;
+      }
+      const oldLink = rows[0].link;
+      const remaining = cdnLinkIds(oldLink).filter((id) => id !== did);
+      if (!remaining.length) break;
+      const nextLink = JSON.stringify({ cdnDomainId: remaining[0], cdnDomainIds: remaining });
+      const res: any = await query(`UPDATE ${table('cert_order')} SET link = ? WHERE id = ? AND link = ?`, [nextLink, oid, oldLink]);
+      if (Number(res?.affectedRows || 0) > 0) {
+        unlinked++;
+        unlinkHandled = true;
+        break;
+      }
+    }
+    if (unlinkHandled) continue;
     await service.withMutationLock(async () => {
       if (Number(o.status) !== 3) {
         try {
@@ -509,5 +540,5 @@ export async function removeCertOrdersLinkedToCdnDomain(cdnDomainId: number, use
       await query(`DELETE FROM ${table('cert_link_log')} WHERE oid = ?`, [oid]);
     });
   }
-  return { orders: targets.length, deployTasks };
+  return { orders: targets.length - unlinked, deployTasks, unlinked };
 }

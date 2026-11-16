@@ -9,7 +9,7 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="2 s:2 m:4" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.deployTasks')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasksTotal" :label="t('common.deployTasks')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="pendingTasks" :label="t('common.pending')" tone="warning" :icon="TimeOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="deployedCount" :label="t('deployTask.deployed')" tone="success" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d4"><TelemetryCard :value="failedCount" :label="t('deployTask.failed')" tone="error" :icon="CloseCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
@@ -22,7 +22,7 @@
         <OverviewStats
           :items="[
             { label: t('common.enable'), value: activeTasks, tone: 'success' },
-            { label: t('common.disabled'), value: tasks.length - activeTasks },
+            { label: t('common.disabled'), value: Math.max(tasksTotal - activeTasks, 0) },
             { label: t('deployTask.lastDeploy'), value: lastDeployAt },
           ]"
         />
@@ -31,7 +31,14 @@
         <div class="app-panel__head">
           <h3 class="app-panel__title">{{ t('deployTask.listTitle') }}</h3>
         </div>
-        <ResponsiveDataTable :columns="columns" :data="tasks" title-key="domains" :loading="loadBusy" :empty-text="t('deployTask.empty')" />
+        <ResponsiveDataTable
+          :columns="columns"
+          :data="tasks"
+          title-key="domains"
+          :loading="loadBusy"
+          :empty-text="t('deployTask.empty')"
+          :pagination="pagination"
+        />
       </div>
     </n-card>
 
@@ -87,14 +94,44 @@ const dialog = useDialog();
 const { busy, run } = useAction();
 const loadBusy = ref(false);
 const tasks = ref<any[]>([]);
-const activeTasks = computed(() => tasks.value.filter((t: any) => t.active).length);
-const pendingTasks = computed(() => tasks.value.filter((t: any) => Number(t.status) === 0).length);
-const deployedCount = computed(() => tasks.value.filter((t: any) => t.status === 1).length);
-const failedCount = computed(() => tasks.value.filter((t: any) => Number(t.status) === -1).length);
+const tasksTotal = ref(0);
+const page = ref(1);
+const pageSize = ref(20);
+// 服务端统计覆盖全部筛选结果，避免分页后遥测只剩当前页
+const remoteStats = ref<any>(null);
+const activeTasks = computed(() =>
+  remoteStats.value ? Number(remoteStats.value.active || 0) : tasks.value.filter((t: any) => t.active).length,
+);
+const pendingTasks = computed(() =>
+  remoteStats.value ? Number(remoteStats.value.pending || 0) : tasks.value.filter((t: any) => Number(t.status) === 0).length,
+);
+const deployedCount = computed(() =>
+  remoteStats.value ? Number(remoteStats.value.deployed || 0) : tasks.value.filter((t: any) => t.status === 1).length,
+);
+const failedCount = computed(() =>
+  remoteStats.value ? Number(remoteStats.value.failed || 0) : tasks.value.filter((t: any) => Number(t.status) === -1).length,
+);
 const lastDeployAt = computed(() => {
+  if (remoteStats.value) return remoteStats.value.last_time || '-';
   const times = tasks.value.map((t: any) => t.lasttime).filter(Boolean).sort();
   return times.length ? times[times.length - 1] : '-';
 });
+const pagination = computed(() => ({
+  page: page.value,
+  pageSize: pageSize.value,
+  itemCount: tasksTotal.value,
+  showSizePicker: true,
+  pageSizes: [20, 50, 100],
+  onChange: (p: number) => {
+    page.value = p;
+    loadTasks();
+  },
+  onUpdatePageSize: (size: number) => {
+    pageSize.value = size;
+    page.value = 1;
+    loadTasks();
+  },
+}));
 const providers = ref<Record<string, any>>({});
 const accounts = ref<any[]>([]);
 const orders = ref<any[]>([]);
@@ -208,9 +245,25 @@ function fieldVisible(show: string | undefined, config: Record<string, any>): bo
 
 async function loadTasks() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/deploy/tasks', { limit: 200 });
-  tasks.value = res.code === 0 ? res.data : [];
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/deploy/tasks', {
+      offset: (page.value - 1) * pageSize.value,
+      limit: pageSize.value,
+    });
+    tasks.value = res.code === 0 ? res.data : [];
+    if (res.code === 0) {
+      tasksTotal.value = Number(res.total || 0);
+      remoteStats.value = res.stats || null;
+      if (!tasks.value.length && page.value > 1) {
+        page.value -= 1;
+        await loadTasks();
+      }
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function loadProviders() {

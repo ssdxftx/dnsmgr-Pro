@@ -284,11 +284,15 @@ function onCreateAid(aid: number) {
   if (type === 'aliyun_esa' || type === 'tencent_edgeone') loadPlans();
 }
 
+let planSeq = 0;
 async function loadPlans() {
   if (!createForm.aid) return;
+  // 快速切换账户时旧响应可能晚到：用序号丢弃过期结果，避免套餐列表与账户不一致
+  const seq = ++planSeq;
   planBusy.value = true;
   try {
     const res = await api<any>('GET', `/cdn/accounts/${createForm.aid}/plan-instances`);
+    if (seq !== planSeq) return;
     if (res.code !== 0) {
       message.error(res.msg);
       return;
@@ -303,7 +307,7 @@ async function loadPlans() {
     if (createIsEsa.value && !createForm.instanceId && planOptions.value.length) createForm.instanceId = planOptions.value[0].value;
     if (!createIsEsa.value && !createForm.planId && planOptions.value.length) createForm.planId = planOptions.value[0].value;
   } finally {
-    planBusy.value = false;
+    if (seq === planSeq) planBusy.value = false;
   }
 }
 
@@ -379,25 +383,31 @@ async function loadAll() {
     // 全账户拉取云端站点（含尚未接入域名的站点）。账号多时限制 4 并发，
     // 避免浏览器同时排队几十个请求、抢占当前页面带宽。
     const results = new Array<any[]>(targets.length);
+    const failed: string[] = [];
     let cursor = 0;
     const worker = async () => {
       while (cursor < targets.length) {
         const i = cursor++;
         const a = targets[i];
         const res = await api<any>('GET', '/cdn/zones', { aid: a.id });
-        results[i] = res.code === 0
-          ? (res.data || []).map((z: any) => ({
-              ...z,
-              typename: z.typename || a.typename || a.type,
-              accountName: a.name,
-              key: `${z.aid ?? a.id}:${z.zone_id}`,
-            }))
-          : [];
+        if (res.code === 0) {
+          results[i] = (res.data || []).map((z: any) => ({
+            ...z,
+            typename: z.typename || a.typename || a.type,
+            accountName: a.name,
+            key: `${z.aid ?? a.id}:${z.zone_id}`,
+          }));
+        } else {
+          // 失败账户保留上次已展示的站点，不能静默从列表里消失
+          failed.push(a.name);
+          results[i] = zoneList.value.filter((z: any) => String(z.key || '').startsWith(`${a.id}:`));
+        }
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
     if (seq !== loadAllSeq) return;
     zoneList.value = results.flat();
+    if (failed.length) message.warning(`${failed.join('、')}：${t('cdnZoneSetting.loadFailed')}`);
   } finally {
     if (seq === loadAllSeq) loadBusy.value = false;
   }

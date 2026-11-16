@@ -372,18 +372,24 @@ async function resolveCloudZone(acct: any, domainName: string): Promise<{ ok: bo
   if (!provider) return { ok: false };
   const key = (v: any) => String(v || '').trim().toLowerCase().replace(/\.$/, '');
   const want = key(domainName);
+  let fetched = 0;
   for (let page = 1; page <= 20; page++) {
     const res: any = await Promise.resolve()
       .then(() => provider.getDomainList(null, page, 100))
       .catch(() => false);
     if (res === false) return { ok: false };
     const list: any[] = Array.isArray(res?.list) ? res.list : [];
+    fetched += list.length;
     for (const row of list) {
       if (key(row?.name || row?.Domain || row?.domain) !== want) continue;
       const id = row.DomainId ?? row.domainId ?? row.ZoneId ?? row.zone_id ?? row.id ?? row.thirdid;
       return { ok: true, thirdid: id === undefined || id === null ? undefined : String(id) };
     }
-    if (list.length < 100) break;
+    // 厂商可能把每页条数压到 100 以下（Cloudflare per_page 上限为 50），
+    // 必须优先用 total 判断是否还有下一页，否则第 51 个之后的 Zone 永远搜不到。
+    const total = Number(res?.total || 0);
+    if (!list.length) break;
+    if (total > 0 ? fetched >= total : list.length < 100) break;
   }
   return { ok: false };
 }
@@ -754,8 +760,10 @@ export default async function domainRoutes(app: FastifyInstance) {
       if (page > 1 && signature === prevSignature) break;
       cloud.push(...list);
       prevSignature = signature;
-      if (!list.length || list.length < 100) break;
-      if (total > 0 && cloud.length >= total) break;
+      if (!list.length) break;
+      // 先看 total，再看本页条数：Cloudflare 会把 per_page 压到 50，
+      // 按 <100 提前结束会漏掉第 51 个之后的 Zone。
+      if (total > 0 ? cloud.length >= total : list.length < 100) break;
     }
     const res = { total: total || cloud.length, list: cloud };
     if (String(req.query?.diff || '') === '1') {
@@ -797,11 +805,15 @@ export default async function domainRoutes(app: FastifyInstance) {
     }
     // 云端返回的 Zone ID 优先于客户端传值，避免用错误 thirdid 操作到别人的 Zone
     const finalThirdid = zone.ok && zone.thirdid ? zone.thirdid : thirdid;
-    // 历史数据可能残留同名域名的权限行；重新接入前清掉，避免旧用户自动获得新域名权限
-    await clearDomainPermissions([domainName]);
-    const id = await query(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
-      aid, domainName, finalThirdid, recordcount,
-    ]).then((r: any) => r.insertId || 0);
+    // 清理历史权限与接入域名必须原子完成：否则 INSERT 失败（唯一键冲突/数据库异常）
+    // 会留下「旧授权已删、域名没接入」的半更新状态。
+    const id = await withTransaction(async (q) => {
+      await clearDomainPermissions([domainName], q);
+      const ins: any = await q(`INSERT INTO ${table('domain')} (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())`, [
+        aid, domainName, finalThirdid, recordcount,
+      ]);
+      return Number(ins?.insertId || 0);
+    });
     invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
@@ -1047,7 +1059,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const invalid = validateRecordInput(type, name, value);
     if (invalid) return { code: -1, msg: invalid };
     const remarkText = remark === undefined || remark === null || remark === '' ? null : asText(remark, 255);
-    const recordId = await provider.addDomainRecord(name, type, value, line || 'default', Number(ttl || 600), Number(mx || 1), weight ?? null, remarkText);
+    const recordId = await provider.addDomainRecord(name, type, value, line || 'default', Number(ttl || 600), mxOrDefault(mx), weight ?? null, remarkText);
     if (!recordId) return { code: -1, msg: provider.getError() };
     if (remarkText && typeof (provider as any).updateDomainRecordRemark === 'function') {
       await (provider as any).updateDomainRecordRemark(recordId, remarkText);
@@ -1137,7 +1149,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const invalid = validateRecordInput(type, name, value);
     if (invalid) return { code: -1, msg: invalid };
     const remarkText = remark === undefined || remark === null || remark === '' ? null : asText(remark, 255);
-    const ok = await provider.updateDomainRecord(recordId, name, type, value, line || 'default', Number(ttl || 600), Number(mx || 1), weight ?? null, remarkText);
+    const ok = await provider.updateDomainRecord(recordId, name, type, value, line || 'default', Number(ttl || 600), mxOrDefault(mx), weight ?? null, remarkText);
     if (!ok) return { code: -1, msg: provider.getError() };
     audit(req, {
       targetType: 'record',
@@ -1296,14 +1308,17 @@ export default async function domainRoutes(app: FastifyInstance) {
       success = results.filter(Boolean).length;
       fail = results.length - success;
       if (success) invalidateDomainRecordCaches(Number(id));
-      return { code: 0, msg: `成功${action === 'open' ? '启用' : '暂停'}${success}条解析记录` };
+      return {
+        code: success > 0 ? 0 : -1,
+        msg: `成功${action === 'open' ? '启用' : '暂停'}${success}条解析记录${fail ? `，失败${fail}条` : ''}`,
+      };
     }
     if (action === 'delete') {
       const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().deleteDomainRecord(r.RecordId)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       if (success) await bumpRecordCount(id, -success);
-      return { code: 0, msg: `成功删除${success}条解析记录` };
+      return { code: success > 0 ? 0 : -1, msg: `成功删除${success}条解析记录${fail ? `，失败${fail}条` : ''}` };
     }
     if (action === 'remark') {
       const remark = b.remark ? asText(b.remark, 255) : null;
@@ -1331,7 +1346,7 @@ export default async function domainRoutes(app: FastifyInstance) {
         const name = String(r.Name ?? '').trim();
         const bad = validateRecordInput(type, name, value);
         if (bad) return false;
-        return !!(await makeProvider().updateDomainRecord(r.RecordId, name, type, value, line || 'default', Number(r.TTL || 600), Number(r.MX || 1), r.Weight ?? null, r.Remark ?? null));
+        return !!(await makeProvider().updateDomainRecord(r.RecordId, name, type, value, line || 'default', Number(r.TTL || 600), mxOrDefault(r.MX), r.Weight ?? null, r.Remark ?? null));
       });
       success = results.filter(Boolean).length;
       fail = results.length - success;
@@ -1365,17 +1380,17 @@ export default async function domainRoutes(app: FastifyInstance) {
     const type = String(b.type ?? '').trim();
     const line = String(b.line ?? 'default');
     const ttl = Number(b.ttl || 600);
-    const mx = Number(b.mx || 1);
+    const mx = mxOrDefault(b.mx);
     const remark = b.remark ? String(b.remark) : null;
     const lines = raw.split('\n').map((s: string) => s.trim()).filter(Boolean);
     if (!lines.length) return { code: -1, msg: '参数不能为空' };
     if (lines.length > 500) return { code: -1, msg: '单次最多添加 500 条解析记录' };
-    // 格式非法的行（缺少主机记录或记录值）不计入失败数，与既有语义一致
+    // 只按第一个空白切分：TXT/MX/SRV 的记录值本身可能含空格，不能把剩余部分截断
     const parsed = lines.map((ln: string) => {
-      const [name, value] = ln.split(/\s+/);
-      return { ln, name, value };
+      const m = /^(\S+)\s+(.+)$/.exec(ln);
+      return { ln, name: m?.[1], value: m?.[2]?.trim() };
     });
-    const valid = parsed.filter((p) => p.name && p.value);
+    const valid = parsed.filter((p): p is { ln: string; name: string; value: string } => !!(p.name && p.value));
     const invalid = parsed.length - valid.length;
     const makeProvider = (): any => getDnsProvider(info.account.type, providerConfig, info.domain.name, info.domain.thirdid);
     const results = await runPool(valid, 8, async (p: { ln: string; name: string; value: string }) => {
@@ -1406,9 +1421,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
-    if (!acc.admin) {
-      const m = matchPermission(acc.perms, info.domain.name, '@');
-      if (m < 0) return { code: -1, msg: '无权限' };
+    if (!acc.admin && !acc.perms.some((p: any) => sameDomain(p.domain, info.domain.name))) {
+      return { code: -1, msg: '无权限' };
     }
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
@@ -1426,7 +1440,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
-    if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
+    if (!acc.admin && !acc.perms.some((p: any) => sameDomain(p.domain, info.domain.name))) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getRecordGroups !== 'function') return { code: -1, msg: '该DNS类型不支持分组' };
     const groups = await provider.getRecordGroups();
@@ -1444,7 +1458,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
-    if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
+    if (!acc.admin && !acc.perms.some((p: any) => sameDomain(p.domain, info.domain.name))) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getWeightSubDomains !== 'function') return { code: -1, msg: '该DNS类型不支持权重解析（仅阿里云）' };
     const res = await provider.getWeightSubDomains(1, clampLimit(req.query?.pagesize, 20, 500), req.query?.subdomain || null);
@@ -1522,6 +1536,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
+    // 别名是域名级对象，子域名授权的用户不应看到整个域名的别名配置
     if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.domainAliasList !== 'function') return { code: -1, msg: '该DNS类型不支持域名别名（仅DNSPod）' };
@@ -2001,6 +2016,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const info = await getDomainWithAccount(id, req.user);
     if (!info) return { code: -1, msg: '域名或账户不存在' };
     const acc = await getUserPerms(req);
+    // 解析日志含整个域名的记录名，保持整域名授权，避免子域名用户看到其他子域名
     if (!acc.admin && matchPermission(acc.perms, info.domain.name, '@') < 0) return { code: -1, msg: '无权限' };
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getDomainRecordLog !== 'function') return { code: -1, msg: '该DNS类型不支持解析日志' };
@@ -2014,6 +2030,13 @@ export default async function domainRoutes(app: FastifyInstance) {
 async function bumpRecordCount(domainId: number, delta: number) {
   await query(`UPDATE ${table('domain')} SET recordcount = GREATEST(recordcount + ?, 0) WHERE id = ?`, [delta, domainId]);
   invalidateDomainRecordCaches(domainId);
+}
+
+// MX 优先级 0 是合法值：旧写法 Number(mx || 1) 会把 0 静默改成 1
+function mxOrDefault(value: any): number {
+  if (value === undefined || value === null || value === '') return 1;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 1;
 }
 
 // 依据记录值推断记录类型（与原项目 getDnsType 一致）

@@ -136,21 +136,30 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const cycle = b.cycle === 'interval' ? 'interval' : 'daily';
     const intervalMin = b.cycle === 'interval' ? Math.max(MIN_INTERVAL_MIN, Number(b.interval_min) || 0) : 0;
     const runTime = cycle === 'daily' ? String(b.run_time || '00:00') : null;
+    const active = b.active == 0 ? 0 : 1;
+    // 修改周期/时间或重新启用后必须重算 next_run，否则会沿用旧时间点（甚至立即触发一次）
+    const nextRun = active ? fmtDateTime(calcNextRun(cycle, intervalMin, runTime)) : row.next_run;
     await query(
-      `UPDATE ${table('dns_check_task')} SET name = ?, did = ?, sub = ?, types = ?, cycle = ?, interval_min = ?, run_time = ?, notice_email = ?, active = ? WHERE id = ?`,
-      [String(b.name || ''), did, sub, String(b.types || ''), cycle, intervalMin, runTime, String(b.notice_email || ''), b.active == 0 ? 0 : 1, id],
+      `UPDATE ${table('dns_check_task')} SET name = ?, did = ?, sub = ?, types = ?, cycle = ?, interval_min = ?, run_time = ?, notice_email = ?, active = ?, next_run = ? WHERE id = ?`,
+      [String(b.name || ''), did, sub, String(b.types || ''), cycle, intervalMin, runTime, String(b.notice_email || ''), active, nextRun, id],
     );
     return { code: 0, msg: '保存成功' };
   });
 
   app.post('/api/dns-check/tasks/:id/toggle', auth, async (req: any) => {
     const id = Number(req.params.id);
-    const row: any = await queryOne(`SELECT uid, did FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT uid, did, cycle, interval_min, run_time FROM ${table('dns_check_task')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '任务不存在' };
     if (!checkLevel(req.user, 2) && Number(row.uid) !== req.user.uid) return { code: -1, msg: '无权限' };
     if (!(await canAccessDomain(req.user, Number(row.did)))) return { code: -1, msg: '无权限操作该域名的私有账户任务' };
     const active = (req.body || {}).active == 1 ? 1 : 0;
-    await query(`UPDATE ${table('dns_check_task')} SET active = ? WHERE id = ?`, [active, id]);
+    // 重新启用时重算 next_run：停用超过一个周期的任务不应在启用瞬间立即执行
+    if (active) {
+      const nextRun = fmtDateTime(calcNextRun(row.cycle, row.interval_min, row.run_time));
+      await query(`UPDATE ${table('dns_check_task')} SET active = 1, next_run = ? WHERE id = ?`, [nextRun, id]);
+    } else {
+      await query(`UPDATE ${table('dns_check_task')} SET active = 0 WHERE id = ?`, [id]);
+    }
     return { code: 0, msg: active ? '已启用' : '已停用' };
   });
 

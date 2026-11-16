@@ -40,7 +40,9 @@ export function inRunWindow(hour: number, start: number, end: number): boolean {
 export async function findRenewOrders(days: number, q: QueryFn = query): Promise<any[]> {
   return q(
     `SELECT id FROM ${table('cert_order')}
-      WHERE isauto = 1 AND status = 3 AND islock = 0 AND aid > 0
+      WHERE isauto = 1 AND status = 3
+        AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))
+        AND aid > 0
         AND expiretime IS NOT NULL AND expiretime <= DATE_ADD(NOW(), INTERVAL ? DAY)
       ORDER BY expiretime ASC LIMIT ?`,
     [days, RENEW_LIMIT],
@@ -52,7 +54,8 @@ export async function findRunningOrders(q: QueryFn = query): Promise<any[]> {
   const placeholders = ACTIVE_STATUSES.map(() => '?').join(',');
   return q(
     `SELECT id FROM ${table('cert_order')}
-       WHERE isauto = 1 AND islock = 0
+       WHERE isauto = 1
+         AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))
          AND status IN (${placeholders})
          AND (retrytime IS NULL OR retrytime <= NOW())
        ORDER BY retrytime ASC LIMIT ?`,
@@ -65,7 +68,9 @@ export async function findDeployTasks(q: QueryFn = query): Promise<any[]> {
   return q(
     `SELECT D.id FROM ${table('cert_deploy')} D
        JOIN ${table('cert_order')} O ON O.id = D.oid
-      WHERE D.active = 1 AND D.islock = 0 AND D.retry < ?
+      WHERE D.active = 1
+        AND (D.islock = 0 OR D.islock IS NULL OR D.locktime IS NULL OR D.locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))
+        AND D.retry < ?
         AND O.status = 3 AND O.fullchain IS NOT NULL AND O.privatekey IS NOT NULL
         AND (D.status = 0 OR (D.status < 0 AND D.retrytime IS NOT NULL AND D.retrytime <= NOW()))
       ORDER BY D.id ASC LIMIT ?`,

@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { domainToASCII } from 'node:url';
-import { query, queryOne, table, withTransaction } from '../db.js';
+import { query, queryOne, table, withTransaction, isDuplicateError } from '../db.js';
 import { hitRateLimit, hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
 import { configGet, configSet } from '../config.js';
@@ -4307,9 +4307,6 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (name !== dnsDomain.name && !name.endsWith(suffix)) {
       return { code: -1, msg: '加速域名必须属于所选域名的子域名' };
     }
-    if (await queryOne(`SELECT id FROM ${table('cdn_domain')} WHERE aid = ? AND name = ?`, [Number(aid), name])) {
-      return { code: -1, msg: '该加速域名已接入' };
-    }
     const acct = await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [aid]);
     if (!acct) return { code: -1, msg: 'CDN账户不存在' };
     const provider: any = getCdnProvider(acct.type, await accountConfigOf(acct));
@@ -4321,56 +4318,88 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (certMode === 'freecert' && !cdnConfig[acct.type]?.freecert) return { code: -1, msg: '该 CDN 类型不支持配置平台免费证书' };
     if (certMode === 'certapply' && !cdnConfig[acct.type]?.certapply) return { code: -1, msg: '该 CDN 类型不支持联动证书申请' };
     if (certMode === 'certlink' && !cdnConfig[acct.type]?.certlink) return { code: -1, msg: '该 CDN 类型不支持与项目联动' };
-    const cname = await provider.createDomain(name, origin, origin_type || 'ipaddr', service_area || 'mainland_china', zone_id || null);
-    if (!cname) return { code: -1, msg: '接入加速域名失败，' + provider.getError() };
+    // 同名域名接入串行化：若并发创建云端资源后才发现唯一键冲突，补偿删除会误删另一个
+    // 请求刚创建的那份。「先查后建」必须在锁内完成。
+    const createOutcome = await withDistributedLockResult(
+      `dnsmgr:cdn-add:${Number(aid)}:${String(name).toLowerCase()}`,
+      async () => {
+        if (await queryOne(`SELECT id FROM ${table('cdn_domain')} WHERE aid = ? AND name = ?`, [Number(aid), name])) {
+          return { code: -1, msg: '该加速域名已接入' } as any;
+        }
+        const cname = await provider.createDomain(name, origin, origin_type || 'ipaddr', service_area || 'mainland_china', zone_id || null);
+        if (!cname) return { code: -1, msg: '接入加速域名失败，' + provider.getError() } as any;
 
-    // 应用回源协议 / 端口 / HOST（非默认值时），失败不回滚，可在详情页重试
-    let originError = '';
-    const needOriginUpdate = !!(originHost || originProtocol !== 'follow' || httpPort !== 80 || httpsPort !== 443);
-    if (needOriginUpdate) {
-      try {
-        const ok = await provider.updateOrigin(name, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort);
-        if (!ok) originError = provider.getError() || '未知错误';
-      } catch (e: any) {
-        originError = e?.message || String(e);
-      }
+        // 应用回源协议 / 端口 / HOST（非默认值时），失败不回滚，可在详情页重试
+        let originError = '';
+        const needOriginUpdate = !!(originHost || originProtocol !== 'follow' || httpPort !== 80 || httpsPort !== 443);
+        if (needOriginUpdate) {
+          try {
+            const ok = await provider.updateOrigin(name, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort);
+            if (!ok) originError = provider.getError() || '未知错误';
+          } catch (e: any) {
+            originError = e?.message || String(e);
+          }
+        }
+
+        const recordName = calcRecordName(name, dnsDomain.name);
+        let dnsRecord: string | null = null;
+        let dnsError = '';
+        let dnsProvider: any = null;
+        const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
+        if (dnsAcct) {
+          dnsProvider = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
+          if (dnsProvider) {
+            const recordId = await dnsProvider.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
+            if (recordId) dnsRecord = String(recordId);
+            else dnsError = dnsProvider.getError();
+          } else dnsError = 'DNS模块不存在';
+        } else dnsError = 'DNS账户不存在';
+
+        let insertRes: any;
+        try {
+          insertRes = await query(
+            `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, cert_mode, addtime)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
+            [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort, service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
+          );
+        } catch (e: any) {
+          // 云端加速域名和 CNAME 已经创建，本地写库失败必须补偿删除，否则重试会再建一份。
+          await provider.deleteDomain(name).catch(() => undefined);
+          if (dnsProvider && dnsRecord) await dnsProvider.deleteDomainRecord(dnsRecord).catch(() => undefined);
+          return { code: -1, msg: '保存加速域名失败，已回滚云端资源：' + (e?.message || String(e)) } as any;
+        }
+        return {
+          code: 0,
+          cname,
+          newId: Number(insertRes?.insertId || 0),
+          originError,
+          dnsRecord,
+          dnsError,
+          recordName,
+        } as any;
+      },
+      10,
+    );
+    if (!createOutcome.locked || !createOutcome.result) {
+      return { code: -1, msg: '该域名正在接入，请稍后再试' };
     }
-
-    const recordName = calcRecordName(name, dnsDomain.name);
-    let dnsRecord: string | null = null;
-    let dnsError = '';
-    let dnsProvider: any = null;
-    const dnsAcct = await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [dnsDomain.aid]);
-    if (dnsAcct) {
-      dnsProvider = getDnsProvider(dnsAcct.type, await accountConfigOf(dnsAcct), dnsDomain.name, dnsDomain.thirdid);
-      if (dnsProvider) {
-        const recordId = await dnsProvider.addDomainRecord(recordName, 'CNAME', cname, undefined, 600);
-        if (recordId) dnsRecord = String(recordId);
-        else dnsError = dnsProvider.getError();
-      } else dnsError = 'DNS模块不存在';
-    } else dnsError = 'DNS账户不存在';
-
-    let insertRes: any;
-    try {
-      insertRes = await query(
-        `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, cert_mode, addtime)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'online', ?, NOW())`,
-        [aid, did, name, acct.type, zone_id || null, origin, origin_type || 'ipaddr', originHost, originProtocol, httpPort, httpsPort, service_area || 'mainland_china', cname, dnsRecord, certMode === 'none' ? null : certMode],
-      );
-    } catch (e: any) {
-      // 云端加速域名和 CNAME 已经创建，本地写库失败必须补偿删除，否则重试会再建一份。
-      await provider.deleteDomain(name).catch(() => undefined);
-      if (dnsProvider && dnsRecord) await dnsProvider.deleteDomainRecord(dnsRecord).catch(() => undefined);
-      return { code: -1, msg: '保存加速域名失败，已回滚云端资源：' + (e?.message || String(e)) };
-    }
-    const newId = Number(insertRes?.insertId || 0);
+    const created: any = createOutcome.result;
+    if (created.code !== 0) return { code: created.code, msg: created.msg };
+    const { cname, newId, originError, dnsRecord, dnsError, recordName } = created;
 
     let msg = dnsRecord
       ? `接入成功，已自动添加 CNAME 解析记录 ${recordName} → ${cname}`
       : `接入成功，但自动添加解析失败（${dnsError}），请手动添加 CNAME ${recordName} → ${cname}`;
     if (originError) msg += `；回源配置应用失败（${originError}），可在域名详情页重试`;
 
-    const sync = await syncFromCloud(aid, did, req.user);
+    // 同步与 /cdn/sync 共用账户级锁，避免并发同步对同一账户重复写库/写 DNS
+    let sync: any = { code: -1, added: 0 };
+    const syncOutcome = await withDistributedLockResult(
+      `dnsmgr:cdn-sync:${Number(aid)}`,
+      () => syncFromCloud(aid, did, req.user),
+      5,
+    );
+    if (syncOutcome.locked && syncOutcome.result) sync = syncOutcome.result;
     if (sync.code === 0 && sync.added > 0) msg += `；同时从云端同步了 ${sync.added} 个已有加速域名`;
 
     // 按接入时选择的证书配置处理：平台免费证书 / 联动证书申请 / 与项目联动
@@ -4423,7 +4452,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
 
     // 云端删除成功后再处理联动证书；避免云端删除失败时证书已经被误删。
-    let linked = { orders: 0, deployTasks: 0 };
+    let linked = { orders: 0, deployTasks: 0, unlinked: 0 };
     try {
       linked = await removeCertOrdersLinkedToCdnDomain(Number(id), req.user);
     } catch (e: any) {
@@ -4446,6 +4475,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     });
     let msg = deleteCloud ? '已删除加速域名（含云端）' : '已删除本地记录（云端加速域名保留）';
     if (linked.orders) msg += `；已吊销并删除联动证书 ${linked.orders} 个、自动部署任务 ${linked.deployTasks} 个`;
+    if (linked.unlinked) msg += `；已解除 ${linked.unlinked} 个共享证书的本域名联动（证书仍供其他域名使用）`;
     if (deleteDns) msg += `；${dnsMsg}`;
     audit(req, {
       targetType: 'cdn_domain',
@@ -4557,13 +4587,28 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
     // 下发的必须是校验/归一化后的列表：旧实现校验 normalized 却把原始 ruleList 发给厂商，
     // 可以写出「本地没有记录、云端却生效」的整站 TTL 规则（例如 path 为空但 ttl 极大）。
+    // 先取本地旧规则快照：本地写库失败时用它把云端回滚，避免「云端已生效、本地还是旧值」
+    const previousRows: any[] = await query(`SELECT path, ttl FROM ${table('cdn_cache_rule')} WHERE did = ? ORDER BY id ASC`, [id]);
     if (!(await provider.setCacheRules(row.name, normalized))) return { code: -1, msg: '缓存规则更新失败，' + provider.getError() };
-    await withTransaction(async (q) => {
-      await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
-      for (const r of normalized) {
-        await q(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, r.path, r.ttl]);
-      }
-    });
+    try {
+      await withTransaction(async (q) => {
+        await q(`DELETE FROM ${table('cdn_cache_rule')} WHERE did = ?`, [id]);
+        for (const r of normalized) {
+          await q(`INSERT INTO ${table('cdn_cache_rule')} (did, path, ttl, addtime) VALUES (?, ?, ?, NOW())`, [id, r.path, r.ttl]);
+        }
+      });
+    } catch (e: any) {
+      const restored = await provider
+        .setCacheRules(row.name, previousRows.map((r) => ({ path: r.path, ttl: Number(r.ttl) })))
+        .catch(() => false);
+      return {
+        code: -1,
+        msg:
+          '缓存规则已下发但保存失败：' +
+          (e?.message || String(e)) +
+          (restored ? '（已恢复云端旧规则）' : '（云端旧规则恢复失败，请手动重新保存一次）'),
+      };
+    }
     audit(req, {
       targetType: 'cdn_domain',
       targetId: id,
@@ -5901,7 +5946,8 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
   const list = await provider.listDomains();
   if (list === false) return { code: -1, msg: '获取云端加速域名失败，' + provider.getError(), added: 0, skipped: 0, updated: 0 };
 
-  const dnsRows = await query(`SELECT * FROM ${table('domain')}`);
+  // 只读取同步需要的列：整表 SELECT * 在大型账户上会把配置密文、证书等内容全部载入内存
+  const dnsRows = await query(`SELECT id, name, aid, thirdid FROM ${table('domain')}`);
   const dnsMap: Record<string, any> = {};
   for (const d of dnsRows) dnsMap[d.name] = d;
   // 只排序一次：放在每个云端域名循环内会退化为 O(M×N log N)
@@ -5909,9 +5955,11 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
 
   // 预加载已有加速域名与 DNS 账户，避免循环内逐条 SELECT（N+1）
   const cdnByName = new Map<string, any>();
-  for (const r of await query(`SELECT * FROM ${table('cdn_domain')}`)) cdnByName.set(r.name, r);
+  for (const r of await query(
+    `SELECT id, aid, name, origin, origin_type, origin_host, origin_protocol, http_port, https_port, cname, https_enabled, force_redirect FROM ${table('cdn_domain')}`,
+  )) cdnByName.set(r.name, r);
   const acctById = new Map<number, any>();
-  for (const a of await query(`SELECT * FROM ${table('account')}`)) acctById.set(Number(a.id), a);
+  for (const a of await query(`SELECT id, type, config, visibility, owner_uid FROM ${table('account')}`)) acctById.set(Number(a.id), a);
 
   let filterDnsName: string | null = null;
   for (const d of dnsRows as any[]) if (d.id == did) filterDnsName = d.name;
@@ -6024,29 +6072,39 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
       } else dnsFail++;
     }
 
-    const ins: any = await query(
-      `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, https_enabled, force_redirect, addtime)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        aid,
-        belongDomain ? belongDomain.id : 0,
-        name,
-        account.type,
-        item.zoneId || null,
-        item.origin || '',
-        item.origin_type || 'ipaddr',
-        item.origin_host || '',
-        item.origin_protocol || 'follow',
-        Number(item.http_port || 80),
-        Number(item.https_port || 443),
-        areaMap[item.area || ''] || 'mainland_china',
-        cname || null,
-        dnsRecord,
-        item.status === 'offline' ? 'offline' : 'online',
-        item.https_enabled ? 1 : 0,
-        item.force_redirect ? 1 : 0,
-      ],
-    );
+    let ins: any;
+    try {
+      ins = await query(
+        `INSERT INTO ${table('cdn_domain')} (aid, did, name, route, zone_id, origin, origin_type, origin_host, origin_protocol, http_port, https_port, service_area, cname, dns_record, status, https_enabled, force_redirect, addtime)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          aid,
+          belongDomain ? belongDomain.id : 0,
+          name,
+          account.type,
+          item.zoneId || null,
+          item.origin || '',
+          item.origin_type || 'ipaddr',
+          item.origin_host || '',
+          item.origin_protocol || 'follow',
+          Number(item.http_port || 80),
+          Number(item.https_port || 443),
+          areaMap[item.area || ''] || 'mainland_china',
+          cname || null,
+          dnsRecord,
+          item.status === 'offline' ? 'offline' : 'online',
+          item.https_enabled ? 1 : 0,
+          item.force_redirect ? 1 : 0,
+        ],
+      );
+    } catch (e: any) {
+      // 并发同步/唯一键冲突时跳过该条，避免整次同步返回 500（域名实际已创建）
+      if (isDuplicateError(e)) {
+        skipped++;
+        continue;
+      }
+      throw e;
+    }
     // 登记到内存映射，避免云端列表出现同名项时重复插入
     cdnByName.set(name, { id: ins.insertId, name, origin: item.origin || '', https_enabled: item.https_enabled ? 1 : 0, force_redirect: item.force_redirect ? 1 : 0 });
     added++;

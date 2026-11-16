@@ -802,62 +802,87 @@ async function loadCertMgrLog() {
 async function applyFreeCertMgr() {
   if (!certMgrTarget.value) return;
   certMgrBusy.value = true;
-  const res = await api<any>('POST', '/cdn/domains/freecert', { ids: [certMgrTarget.value.id] });
-  certMgrBusy.value = false;
-  if (res.code === 0) {
-    certMgrFree.value = res.data || [];
-    certMgrTarget.value.cert_mode = 'freecert';
-    message.success(res.msg);
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/cdn/domains/freecert', { ids: [certMgrTarget.value.id] });
+    if (res.code === 0) {
+      certMgrFree.value = res.data || [];
+      certMgrTarget.value.cert_mode = 'freecert';
+      message.success(res.msg);
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    certMgrBusy.value = false;
+  }
 }
 
 async function checkFreeCertMgr() {
   if (!certMgrTarget.value) return;
   certMgrBusy.value = true;
-  const res = await api<any>('POST', '/cdn/domains/freecert/check', { ids: [certMgrTarget.value.id] });
-  certMgrBusy.value = false;
-  if (res.code === 0) {
-    certMgrFree.value = res.data || [];
-    message.success(res.msg);
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/cdn/domains/freecert/check', { ids: [certMgrTarget.value.id] });
+    if (res.code === 0) {
+      certMgrFree.value = res.data || [];
+      message.success(res.msg);
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    certMgrBusy.value = false;
+  }
 }
 
 async function applyCertApplyMgr() {
   if (!certMgrTarget.value) return;
   certMgrBusy.value = true;
-  const res = await api<any>('POST', '/cdn/domains/cert', { ids: [certMgrTarget.value.id] });
-  certMgrBusy.value = false;
-  if (res.code === 0) {
-    certMgrApply.value = res.data || [];
-    certMgrTarget.value.cert_mode = 'certapply';
-    message.success(res.msg);
-  } else message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/cdn/domains/cert', { ids: [certMgrTarget.value.id] });
+    if (res.code === 0) {
+      certMgrApply.value = res.data || [];
+      certMgrTarget.value.cert_mode = 'certapply';
+      message.success(res.msg);
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    certMgrBusy.value = false;
+  }
 }
 
 async function applyLinkMgr() {
   if (!certMgrTarget.value || !certMgrChoice.value) return;
   certMgrBusy.value = true;
   certMgrError.value = '';
-  const res = await api<any>('POST', `/cdn/domains/${certMgrTarget.value.id}/certlink`, choiceExtra(certMgrChoice.value));
-  certMgrBusy.value = false;
-  if (res.code === 0) {
-    certMgrTarget.value.cert_mode = 'certlink';
-    message.success(res.msg);
-    await loadCertMgrLog();
-  } else {
-    certMgrError.value = res.msg || t('cdnDomain.certFailedRetry');
+  try {
+    const res = await api<any>('POST', `/cdn/domains/${certMgrTarget.value.id}/certlink`, choiceExtra(certMgrChoice.value));
+    if (res.code === 0) {
+      certMgrTarget.value.cert_mode = 'certlink';
+      message.success(res.msg);
+      await loadCertMgrLog();
+    } else {
+      certMgrError.value = res.msg || t('cdnDomain.certFailedRetry');
+    }
+  } catch (e: any) {
+    certMgrError.value = e?.message || t('common.networkError');
+  } finally {
+    certMgrBusy.value = false;
   }
 }
 
 async function applyNoneMgr() {
   if (!certMgrTarget.value) return;
   certMgrBusy.value = true;
-  const res = await api('POST', `/cdn/domains/${certMgrTarget.value.id}/cert_mode`, { mode: '' });
-  certMgrBusy.value = false;
-  if (res.code === 0) {
-    certMgrTarget.value.cert_mode = '';
-    message.success(res.msg);
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cdn/domains/${certMgrTarget.value.id}/cert_mode`, { mode: '' });
+    if (res.code === 0) {
+      certMgrTarget.value.cert_mode = '';
+      message.success(res.msg);
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    certMgrBusy.value = false;
+  }
 }
 
 function closeCertMgr() {
@@ -1555,6 +1580,13 @@ function del(row: any) {
   });
 }
 
+function rollbackDomainRow(row: any, index: number) {
+  if (!row) return;
+  // 请求期间列表可能已刷新并重新包含该行，先按 id 存在性判断，避免回滚出重复行
+  if (domains.value.some((d: any) => Number(d.id) === Number(row.id))) return;
+  domains.value.splice(Math.min(Math.max(index, 0), domains.value.length), 0, row);
+}
+
 async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
   const params = new URLSearchParams();
   if (deleteCloud) params.set('delete_cloud', '1');
@@ -1571,11 +1603,11 @@ async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
       checkedIds.value = checkedIds.value.filter((k: any) => Number(k) !== Number(row.id));
       message.success(res.msg);
     } else {
-      if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
+      rollbackDomainRow(removed, idx); // 失败回滚
       message.error(res.msg);
     }
   } catch (e: any) {
-    if (removed) domains.value.splice(idx, 0, removed);
+    rollbackDomainRow(removed, idx);
     message.error(e?.message || t('common.networkError'));
   }
 }

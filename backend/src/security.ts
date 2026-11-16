@@ -136,8 +136,9 @@ export function applySecurityHeaders(app: FastifyInstance): void {
     const isHtml = contentType.includes('text/html');
     const cacheableMethod = req.method === 'GET' || req.method === 'HEAD';
 
-    // 域名快捷登录页内含一次性会话令牌，禁止任何浏览器/CDN 缓存
-    if (apiUrl === '/quicklogin') {
+    // 域名快捷登录页内含一次性会话令牌，禁止任何浏览器/CDN 缓存；
+    // /cron 是执行调度任务的 GET 接口，若被 CDN 缓存会导致任务被跳过。
+    if (apiUrl === '/quicklogin' || apiUrl === '/cron') {
       setNoStore(reply);
       reply.header('Pragma', 'no-cache');
     } else if (reply.statusCode >= 400) {

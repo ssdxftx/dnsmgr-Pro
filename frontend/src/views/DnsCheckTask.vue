@@ -123,7 +123,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue';
+import { computed, h, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NButton, NTag, NDropdown, NTimePicker, useMessage, useDialog } from 'naive-ui';
 import { AddOutline, PulseOutline, CheckmarkCircleOutline, AlertCircleOutline, TimeOutline } from '@vicons/ionicons5';
@@ -458,6 +458,10 @@ function del(row: any) {
     },
   });
 }
+
+onBeforeUnmount(() => {
+  if (domainSearchTimer) window.clearTimeout(domainSearchTimer);
+});
 
 onMounted(() => {
   load();

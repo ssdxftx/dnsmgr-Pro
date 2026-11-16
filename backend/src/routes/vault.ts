@@ -22,6 +22,12 @@ function fail(reply: any, e: any) {
   return reply.code(500).send({ code: -1, msg: e?.message || '操作失败' });
 }
 
+// 保险库是账号接管级资产：API Key 是长期自动化凭据，不能用于改变保护方式或销毁数据，
+// 否则只读/受限 Key 结合登录密码即可绕过 TOTP 与人工确认。
+function apiKeyBlocked(req: any): string | null {
+  return String(req.user?.auth_type || '') === 'api_key' ? '该操作仅支持登录会话，请使用账号密码登录后再试' : null;
+}
+
 export default async function vaultRoutes(app: FastifyInstance) {
   const auth = { preHandler: (app as any).authenticate };
   // 保险库状态与账户列表禁止被代理缓存
@@ -37,6 +43,8 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/init', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     const b = req.body || {};
     // 建立保险库会确定「谁的密钥保护这些凭据」，是一次性的不可逆选择：
     // 被窃会话必须先证明自己是账号主人（登录密码或 X-Reauth-Token），否则攻击者
@@ -101,6 +109,8 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/upgrade', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     // 升级会清空 wrapped_dek_sys 并把 DEK 重新包进「攻击者已知的口令」，
     // 一旦被窃会话调用，原主人既没有口令也没有恢复码，私有凭据就永久不可读（只能 destroy）。
     // 因此这里必须先做二次确认，且把令牌限定到该操作。
@@ -121,6 +131,8 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/downgrade', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     try {
       await downgradeVault(Number(req.user.uid), jtiOf(req), String(req.body?.passphrase || ''));
       audit(req, { module: 'vault', action: 'vault.downgrade', summary: '保险库降级为便捷模式', scrubBody: true });
@@ -131,6 +143,8 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/recover', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     try {
       await recoverVault(
         Number(req.user.uid),
@@ -146,6 +160,8 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/recovery', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     try {
       const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.recovery');
       if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
@@ -169,6 +185,8 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/destroy', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     try {
       const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.destroy');
       if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });

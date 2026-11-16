@@ -95,13 +95,21 @@ export async function checkDomainRecords(
   // 权限范围：未传 uid / uid=0（旧库历史任务）视为管理员，否则按用户是否为管理员/是否开启检测整个域名决定
   let scopeAdmin = true;
   let userRow: any = null;
+  let perms: any[] = [];
   if (uid != null) {
     userRow = await queryOne(`SELECT id, level, check_whole FROM ${table('user')} WHERE id = ?`, [uid]);
     // uid=0 或用户已被删除时没有可用的权限主体；这类历史任务按站点级处理，
     // 否则会得到空权限集合并静默跳过所有记录。
     const isAdmin = !userRow || Number(uid) === 0 || Number(userRow.level ?? 0) >= 2;
-    const whole = Number(userRow?.check_whole ?? 0) === 1;
-    scopeAdmin = isAdmin || whole;
+    if (isAdmin) {
+      scopeAdmin = true;
+    } else {
+      perms = await getEffectivePermissions({ uid: Number(uid), level: Number(userRow?.level || 0) });
+      // check_whole 只是开关，不能替代授权：只有该用户确实被授予了整域名（sub 为空）时
+      // 才允许检测整个 Zone，否则仅有 www 授权的用户会读到其他子域名的记录。
+      const wholeGrant = perms.some((p: any) => sameDomain(p.domain, d.name) && !p.sub);
+      scopeAdmin = Number(userRow?.check_whole ?? 0) === 1 && wholeGrant;
+    }
   }
 
   const fetched = await fetchAllRecords(provider);
@@ -115,7 +123,6 @@ export async function checkDomainRecords(
     if (subNorm) targets = [`${subNorm}.${d.name}`.toLowerCase()];
     else targets = [];
   } else {
-    const perms = await getEffectivePermissions({ uid: Number(uid), level: Number(userRow?.level || 0) });
     const access = perms
       .filter((p) => sameDomain(p.domain, d.name))
       .map((p) => (p.sub ? `${p.sub}.${d.name}` : d.name).toLowerCase());

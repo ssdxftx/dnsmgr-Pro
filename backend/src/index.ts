@@ -135,7 +135,9 @@ app.addHook('onClose', async () => {
 app.setErrorHandler((err: any, req: any, reply: any) => {
   const requestId = String(req?.id || '');
   if (err instanceof ConfigDecryptError) {
-    return reply.send({ code: -1, msg: err.message, requestId });
+    // 账户配置无法解密属于「资源当前不可用」：用 423 让客户端/探针能识别失败，
+    // 同时保留可操作的中文提示。
+    return reply.code(423).send({ code: -1, msg: err.message, requestId });
   }
   const status = Number(err?.statusCode || err?.status || 500);
   // 5xx 不回传原始 message：SQL 片段、表名、约束名、内部路径都可能被客户端拿到
@@ -366,9 +368,10 @@ function touchApiKey(id: number, now: number): void {
       keyRow = null;
     }
     if (keyRow) {
-      if (keyRow.expires_at) {
+      if (keyRow.expires_at !== null && keyRow.expires_at !== undefined && keyRow.expires_at !== '') {
         const exp = new Date(String(keyRow.expires_at).replace(' ', 'T')).getTime();
-        if (Number.isFinite(exp) && exp <= Date.now()) {
+        // 过期时间存在但无法解析时必须拒绝：NaN 会让比较失效，等价于永不过期。
+        if (!Number.isFinite(exp) || exp <= Date.now()) {
           return reply.code(401).send({ code: -1, msg: 'API Key 已过期' });
         }
       }

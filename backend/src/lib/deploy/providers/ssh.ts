@@ -115,6 +115,11 @@ function safeRemotePath(p: any): string {
   return normalized;
 }
 
+function positiveMs(value: any, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export class SshDeploy implements DeployProvider {
   private config: Record<string, any>;
   private logger: ((txt: string) => void) | null = null;
@@ -137,6 +142,8 @@ export class SshDeploy implements DeployProvider {
       host: cfg.host,
       port: Number(cfg.port || 22),
       username: cfg.username,
+      // 目标主机接受 TCP 但不响应 SSH 握手时必须主动超时，避免任务长期持有部署锁
+      readyTimeout: positiveMs(cfg.connect_timeout || cfg.timeout, 20_000),
     };
     if (cfg.auth === '1') {
       connectConfig.privateKey = Buffer.from(cfg.privatekey);
@@ -233,14 +240,33 @@ export class SshDeploy implements DeployProvider {
         if (err) return reject(new Error('执行命令失败：' + err.message));
         let output = '';
         let errorOutput = '';
+        let settled = false;
+        const execTimeout = positiveMs(this.config.timeout, 120_000);
+        const finish = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fn();
+        };
+        // 命令无输出且不退出时不能无限等待：超时后主动关闭通道并让任务进入可重试状态
+        const timer = setTimeout(() => {
+          try {
+            stream.close();
+          } catch {
+            // ignore
+          }
+          finish(() => reject(new Error('执行命令超时（' + Math.round(execTimeout / 1000) + ' 秒）')));
+        }, execTimeout);
         stream.on('data', (d: Buffer) => (output += d.toString()));
         stream.stderr.on('data', (d: Buffer) => (errorOutput += d.toString()));
+        // 未监听 error 时，通道错误会升级为未捕获异常并中断整个部署进程
+        stream.on('error', (e: any) => finish(() => reject(new Error('执行命令失败：' + (e?.message || e)))));
         stream.on('close', (code: number) => {
           if (code !== 0) {
-            reject(new Error('执行命令失败：' + (errorOutput.trim() || '退出码 ' + code)));
+            finish(() => reject(new Error('执行命令失败：' + (errorOutput.trim() || '退出码 ' + code))));
           } else {
             this.log('执行命令成功：' + output.trim());
-            resolve(output);
+            finish(() => resolve(output));
           }
         });
       });

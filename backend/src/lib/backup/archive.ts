@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
-import { markTempActive, markTempDone } from './tmpRegistry.js';
+import { markTempActive, markTempDone, isTempActive } from './tmpRegistry.js';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -628,6 +628,8 @@ async function cleanStaleImportFiles(): Promise<void> {
   for (const name of names) {
     if (!name.startsWith('import-') || !name.endsWith('.json')) continue;
     const file = path.join(dir, name);
+    // 正在被 openArchive 读取的临时文件即使超过 TTL 也不能删，否则长时间导入会中途失败
+    if (isTempActive(name)) continue;
     try {
       const st = await stat(file);
       if (now - st.mtimeMs > IMPORT_TMP_TTL_MS) await unlink(file);

@@ -361,9 +361,9 @@ async function remeasure() {
   requestAnimationFrame(() => measureNaturalWidth());
 }
 
+let resizeTimer: number | undefined;
 onMounted(() => {
   if (!wrapRef.value) return;
-  let resizeTimer: number | undefined;
   ro = new ResizeObserver(([entry]) => {
     wrapW.value = entry.contentRect.width;
     // 容器宽度变化后必须重新测量自然宽度，否则变宽后仍保留不需要的横向滚动条
@@ -374,6 +374,7 @@ onMounted(() => {
   void remeasure();
 });
 onBeforeUnmount(() => {
+  if (resizeTimer) window.clearTimeout(resizeTimer);
   ro?.disconnect();
 });
 

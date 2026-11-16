@@ -908,6 +908,14 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
         }
         if (pendingRows.length) rep.inserted += await flushRows();
       }
+      // 整站替换后必须仍有可登录的管理员：归档缺 user 表、被裁剪或只含普通用户时，
+      // 提交后既无法登录也无法通过自助接口恢复，只能手工改库。
+      if (mode === 'replace' && scope === 'site') {
+        const adminRow = await q(`SELECT COUNT(*) AS c FROM ${table('user')} WHERE level >= 2 AND status = 1`);
+        if (Number((adminRow as any[])[0]?.c || 0) === 0) {
+          throw new Error('归档中没有可用的管理员账号，已取消恢复');
+        }
+      }
       if (opts.invalidateSessions) {
         // 与数据替换同事务：恢复提交即旧 JWT 失效，不会出现“数据已换、会话未失效”的窗口。
         await q(`UPDATE ${table('user')} SET token_version = token_version + 1`);

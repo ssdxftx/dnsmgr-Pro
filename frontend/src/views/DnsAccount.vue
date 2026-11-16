@@ -231,9 +231,15 @@ function del(row: any) {
   });
 }
 
-onMounted(() => {
-  loadProviders();
-  loadAccounts();
+onMounted(async () => {
+  // 先取厂商定义再取账户：openEdit 依赖 providers[type] 渲染密钥字段，
+  // 两者并发时过早点击编辑会得到空配置项。
+  try {
+    await loadProviders();
+    await loadAccounts();
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  }
 });
 </script>
 

@@ -237,12 +237,17 @@ function statusTag(v: string) {
 
 async function load() {
   loadBusy.value = true;
-  const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels`);
-  if (res.code === 0) {
-    rows.value = res.data;
-    accountName.value = res.account_name || '';
-  } else message.error(res.msg);
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels`);
+    if (res.code === 0) {
+      rows.value = res.data;
+      accountName.value = res.account_name || '';
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 function openAdd() {

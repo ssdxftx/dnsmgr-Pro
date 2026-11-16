@@ -174,6 +174,10 @@ export async function migrate(): Promise<void> {
 
   // 证书联动：签发成功后按 link 记录自动创建 CDN 部署任务
   await ensureColumn('cert_order', 'link', 'text DEFAULT NULL');
+  // 处理日志标识：processid 只用于租约锁，释放时清空；last_processid 保留最近一次运行的
+  // 日志文件名，供处理结束后查看与重置时清理历史日志。
+  await ensureColumn('cert_order', 'last_processid', 'varchar(32) DEFAULT NULL');
+  await ensureColumn('cert_deploy', 'last_processid', 'varchar(32) DEFAULT NULL');
 
   // CDN 加速域名的证书管理方式：freecert（平台免费证书）/ certlink（由本项目管理）/ certapply（项目申请证书）
   await ensureColumn('cdn_domain', 'cert_mode', 'varchar(20) DEFAULT NULL');

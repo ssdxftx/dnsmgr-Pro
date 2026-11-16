@@ -1,4 +1,5 @@
 import { join } from 'node:path';
+import { existsSync, unlinkSync } from 'node:fs';
 import { query, queryOne, table } from '../db.js';
 import { getDeployProvider } from './deploy/factory.js';
 import type { DeployProvider } from './deploy/types.js';
@@ -80,8 +81,8 @@ export class CertDeployService {
 
   private async releaseTaskLock(token: string): Promise<void> {
     await query(
-      `UPDATE ${table('cert_deploy')} SET islock = 0, processid = NULL WHERE id = ? AND processid = ? AND islock = 1`,
-      [this.tid, token],
+      `UPDATE ${table('cert_deploy')} SET islock = 0, processid = NULL, last_processid = ? WHERE id = ? AND processid = ? AND islock = 1`,
+      [token, this.tid, token],
     );
   }
 
@@ -129,6 +130,10 @@ export class CertDeployService {
 
     await this.lockTask();
     try {
+      // 加锁前读到的是旧状态：并发的手动/自动触发可能已在等锁期间完成部署，
+      // 拿到锁后必须复检，避免同一任务被重复上传证书。
+      const current: any = await queryOne(`SELECT status FROM ${table('cert_deploy')} WHERE id = ?`, [this.tid]);
+      if (!current || Number(current.status) >= 1) return;
       await this.deploy(order.fullchain, privateKey);
     } finally {
       await this.unlockTask();
@@ -169,10 +174,16 @@ export class CertDeployService {
     // 重置必须与调度器互斥：运行中的部署不能被管理员清锁后又被调度器/手工再次执行。
     const token = await this.takeTaskLock();
     try {
+      const prev: any = await queryOne(`SELECT last_processid FROM ${table('cert_deploy')} WHERE id = ?`, [this.tid]);
       await query(
-        `UPDATE ${table('cert_deploy')} SET status = 0, retry = 0, retrytime = NULL, issend = 0, islock = 0, processid = NULL WHERE id = ? AND processid = ?`,
+        `UPDATE ${table('cert_deploy')} SET status = 0, retry = 0, retrytime = NULL, issend = 0, islock = 0, processid = NULL, last_processid = NULL WHERE id = ? AND processid = ?`,
         [this.tid, token],
       );
+      for (const pid of [safeProcessId(prev?.last_processid)]) {
+        if (!pid) continue;
+        const f = join(LOG_DIR, pid + '.log');
+        if (existsSync(f)) unlinkSync(f);
+      }
     } finally {
       await this.releaseTaskLock(token).catch(() => undefined);
     }

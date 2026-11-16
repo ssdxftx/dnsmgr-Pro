@@ -130,9 +130,10 @@ export class CertOrderService {
 
   private async releaseLock(token: string): Promise<void> {
     // 只释放仍属于本次租约的锁；已被超时抢占/已被重置时不再误释放他人锁。
+    // 同时把本次令牌记为 last_processid，处理结束后仍能定位日志文件。
     await query(
-      `UPDATE ${table('cert_order')} SET islock = 0, processid = NULL WHERE id = ? AND processid = ? AND islock = 1`,
-      [this.oid, token],
+      `UPDATE ${table('cert_order')} SET islock = 0, processid = NULL, last_processid = ? WHERE id = ? AND processid = ? AND islock = 1`,
+      [token, this.oid, token],
     );
   }
 
@@ -477,12 +478,14 @@ export class CertOrderService {
   async reset() {
     // 与调度器共用租约锁：正在签发/验证的订单不能被管理员重置清锁。
     await this.withMutationLock(async () => {
+      const prev: any = await queryOne(`SELECT last_processid FROM ${table('cert_order')} WHERE id = ?`, [this.oid]);
       await query(
-        `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
+        `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retry2 = 0, retrytime = NULL, processid = NULL, last_processid = NULL, updatetime = NOW(), issend = 0, islock = 0 WHERE id = ?`,
         [this.oid],
       );
-      const pid = safeProcessId(this.order?.processid);
-      if (pid) {
+      // 本次租约令牌与上一次运行的日志都清理，避免同一订单残留多份历史日志
+      for (const pid of [safeProcessId(this.order?.processid), safeProcessId(prev?.last_processid)]) {
+        if (!pid) continue;
         const f = join(LOG_DIR, pid + '.log');
         if (existsSync(f)) unlinkSync(f);
       }

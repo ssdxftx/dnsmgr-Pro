@@ -70,6 +70,9 @@ async function runRestore(opts: RunOptions): Promise<any> {
   setRestoreStatus({ running: true, stage: 'snapshot', message: '正在创建恢复前快照', startedAt: Date.now(), finishedAt: 0, ok: false });
   await setMaintenance(true);
 
+  // 只有真正开始导入后才保留维护模式。快照/密钥校验等前置阶段失败时尚未改动任何数据，
+  // 必须解除维护模式，否则一次失败的恢复尝试会让全站写请求一直 503。
+  let importStarted = false;
   try {
     const snapshot = await exportBackup({ scope: 'site', kind: 'pre_restore', includeLogs: true });
     setRestoreStatus({ stage: 'import', message: `快照 ${snapshot.file} 已生成，正在导入` });
@@ -77,6 +80,7 @@ async function runRestore(opts: RunOptions): Promise<any> {
     // 使用归档头匹配当前/历史密钥，避免轮换后旧备份无法在线恢复并卡在维护模式
     const key = opts.key ?? (await keyForArchive(archivePath));
     if (!key) throw new Error('未设置备份密钥，无法恢复');
+    importStarted = true;
     const report = await importArchive(archivePath, {
       key,
       mode: opts.mode,
@@ -134,7 +138,8 @@ async function runRestore(opts: RunOptions): Promise<any> {
       finishedAt: Date.now(),
       ok: false,
     });
-    // 失败时仍停留在维护模式，由管理员重试或从 pre_restore 快照还原
+    // 导入开始后失败仍停留在维护模式：数据可能只写入一部分，需管理员重试或从快照还原。
+    if (!importStarted) await setMaintenance(false).catch(() => undefined);
     throw e;
   }
 }

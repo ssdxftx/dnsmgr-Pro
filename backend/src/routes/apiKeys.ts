@@ -170,6 +170,15 @@ export default async function apiKeyRoutes(app: FastifyInstance): Promise<void> 
     if (!(await canManageKey(req, row))) return { code: -1, msg: '无权限' };
     const pwErr = await requireWriteReauth(req);
     if (pwErr) return { code: -1, msg: pwErr };
+    // 启用、延长有效期、修改 IP 白名单都会改变这把 Key 的可用性：受限 Key 不能借此
+    // 重新激活或延续一把作用域比自身更宽的 Key。
+    if (
+      String(req.user?.auth_type || '') === 'api_key' &&
+      (req.body?.active !== undefined || req.body?.expires_at !== undefined || req.body?.ip_allowlist !== undefined)
+    ) {
+      const scopeErr = apiKeyScopeError(req, parseScopes(row.scopes));
+      if (scopeErr) return { code: -1, msg: scopeErr };
+    }
     const sets: string[] = [];
     const params: any[] = [];
     try {

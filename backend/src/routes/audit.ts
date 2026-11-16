@@ -31,7 +31,8 @@ export default async function auditRoutes(app: FastifyInstance) {
     let where = ' WHERE addtime >= ? AND addtime <= ?';
     const params: any[] = [startTime, endTime];
 
-    if (checkLevel(req.user, 2)) {
+    const isAdmin = checkLevel(req.user, 2);
+    if (isAdmin) {
       if (q.uid !== undefined && q.uid !== '') {
         where += ' AND uid = ?';
         params.push(Number(q.uid));
@@ -77,7 +78,13 @@ export default async function auditRoutes(app: FastifyInstance) {
         total,
         // 命中过多时提示缩小时间范围，避免前端误以为只有当前页
         truncated: total > 10000,
-        list: (rows as any[]).map((r) => ({ ...r, detail: parseJson(r.detail), changes: parseJson(r.changes) })),
+        // errmsg 可能包含 SQL 片段、表名、内部路径等 5xx 细节，只对管理员返回
+        list: (rows as any[]).map((r) => ({
+          ...r,
+          errmsg: isAdmin ? r.errmsg : '',
+          detail: parseJson(r.detail),
+          changes: parseJson(r.changes),
+        })),
       },
     };
   });
@@ -92,7 +99,8 @@ export default async function auditRoutes(app: FastifyInstance) {
     const endTime = TIME_RE.test(String(q.endTime || '')) ? String(q.endTime) : fmt(now);
     let where = ' WHERE addtime >= ? AND addtime <= ?';
     const params: any[] = [startTime, endTime];
-    if (checkLevel(req.user, 2)) {
+    const isAdmin = checkLevel(req.user, 2);
+    if (isAdmin) {
       if (q.uid !== undefined && q.uid !== '') {
         where += ' AND uid = ?';
         params.push(Number(q.uid));
@@ -122,6 +130,8 @@ export default async function auditRoutes(app: FastifyInstance) {
          FROM ${table('audit_log')}${where} ORDER BY id DESC LIMIT ?`,
       [...params, limit],
     );
+    // 与列表接口同口径：普通用户导出也不能带出内部错误信息
+    if (!isAdmin) for (const row of rows as any[]) row.errmsg = '';
     if (format === 'json') return { code: 0, data: { total: rows.length, list: rows } };
     const header = ['id', 'uid', 'username', 'auth_type', 'api_key_id', 'api_key_name', 'module', 'action', 'method', 'path', 'target_type', 'target_id', 'target_name', 'summary', 'result', 'errmsg', 'status', 'ip', 'ua', 'cost_ms', 'addtime'];
     const lines = [header.join(',')];

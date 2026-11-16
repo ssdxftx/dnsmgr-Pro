@@ -206,14 +206,15 @@ export async function flushAudit(): Promise<void> {
     failCount = 0;
     retryAfter = 0;
   } catch (e: any) {
-    // 审计失败不影响业务；批次回队重试，超过上限进入死信计数，避免静默丢数据
+    // 审计失败不影响业务；批次回队重试，超过重试上限后写入本地 spool，
+    // 数据库故障期间产生的证据不能在内存里被丢弃。
     failCount++;
     const retry: AuditRow[] = [];
     for (const row of batch) {
       const n = (retryTimes.get(row) || 0) + 1;
       retryTimes.set(row, n);
       if (n <= 3) retry.push(row);
-      else deadCount++;
+      else spoolRow(row);
     }
     if (retry.length) queue.unshift(...retry);
     retryAfter = Date.now() + 5000;

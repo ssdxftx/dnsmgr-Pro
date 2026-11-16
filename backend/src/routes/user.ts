@@ -8,6 +8,7 @@ import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 import { SECRET_MASK } from '../lib/secret.js';
 import { purgeUserData } from '../lib/users/purge.js';
 import { requireLoginPassword } from '../lib/reauth.js';
+import { clearVaultSession } from '../lib/vault/session.js';
 
 const authenticate = (app: FastifyInstance) => ({ preHandler: (app as any).authenticate });
 
@@ -390,7 +391,14 @@ export default async function userRoutes(app: FastifyInstance) {
     if (statusBlocked) return { code: -1, msg: statusBlocked };
     const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'user.status');
     if (pwErr) return { code: -1, msg: pwErr };
-    await query(`UPDATE ${table('user')} SET status = ? WHERE id = ?`, [status, id]);
+    // 封禁必须同时让已签发令牌失效并清掉保险库解锁状态：否则解封后封禁前的旧令牌
+    // 重新生效，攻击者还能继续读取该会话已解锁的私有凭据。
+    if (status === 0) {
+      await query(`UPDATE ${table('user')} SET status = 0, token_version = token_version + 1 WHERE id = ?`, [id]);
+      clearVaultSession(id);
+    } else {
+      await query(`UPDATE ${table('user')} SET status = 1 WHERE id = ?`, [id]);
+    }
     audit(req, {
       targetType: 'user',
       targetId: id,

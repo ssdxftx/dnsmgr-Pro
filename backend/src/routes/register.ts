@@ -232,6 +232,8 @@ export default async function registerRoutes(app: FastifyInstance) {
 
   app.get('/api/register/codes', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    // API Key 是长期自动化凭据：注册码列表与生成等价于账号签发能力，只允许登录会话操作
+    if (String(req.user?.auth_type || '') === 'api_key') return { code: -1, msg: '该操作仅支持登录会话' };
     const q = req.query || {};
     const offset = clampOffset(q.offset);
     // 注册码管理页单次最多取 500 条，与前端契约一致（clampLimit 默认上限 200）
@@ -246,6 +248,8 @@ export default async function registerRoutes(app: FastifyInstance) {
 
   app.post('/api/register/codes', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    // API Key 是长期自动化凭据：注册码列表与生成等价于账号签发能力，只允许登录会话操作
+    if (String(req.user?.auth_type || '') === 'api_key') return { code: -1, msg: '该操作仅支持登录会话' };
     const b = req.body || {};
     const count = Math.min(Math.max(Math.floor(Number(b.count) || 1), 1), 100);
     const days = Math.max(0, Math.min(36500, Math.floor(Number(b.days) || 0)));
@@ -272,6 +276,8 @@ export default async function registerRoutes(app: FastifyInstance) {
 
   app.post('/api/register/codes/:id/status', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    // API Key 是长期自动化凭据：注册码列表与生成等价于账号签发能力，只允许登录会话操作
+    if (String(req.user?.auth_type || '') === 'api_key') return { code: -1, msg: '该操作仅支持登录会话' };
     const id = Number(req.params.id);
     const status = Number(req.body?.status) === 0 ? 0 : 1;
     await query(`UPDATE ${table('reg_code')} SET status = ? WHERE id = ?`, [status, id]);
@@ -280,6 +286,8 @@ export default async function registerRoutes(app: FastifyInstance) {
 
   app.delete('/api/register/codes/:id', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    // API Key 是长期自动化凭据：注册码列表与生成等价于账号签发能力，只允许登录会话操作
+    if (String(req.user?.auth_type || '') === 'api_key') return { code: -1, msg: '该操作仅支持登录会话' };
     const id = Number(req.params.id);
     await query(`DELETE FROM ${table('reg_code')} WHERE id = ?`, [id]);
     return { code: 0, msg: '删除成功' };

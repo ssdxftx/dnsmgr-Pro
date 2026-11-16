@@ -113,7 +113,8 @@ function syncParts() {
   const value: [number, number] | null =
     customStart.value != null && customEnd.value != null ? [customStart.value, customEnd.value] : null;
   emit('update:customRange', value);
-  emit('change');
+  // 只选了一端时不触发查询：父组件会回退到默认 24 小时，页面显示与统计口径不一致。
+  if (value) emit('change');
 }
 
 function onCustomStart(value: number | null) {
