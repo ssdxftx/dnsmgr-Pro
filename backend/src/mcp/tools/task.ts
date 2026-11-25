@@ -10,6 +10,7 @@ import {
   pagingDefaults,
   requireArgs,
   boolValue,
+  McpToolError,
   type ToolArgs,
   type ToolDef,
   type McpContext,
@@ -52,6 +53,17 @@ const tools: ToolDef[] = [
         desc: '容灾监控进程运行状态与近24小时切换统计',
         scope: { module: 'monitor' },
         request: () => ({ method: 'GET', path: '/api/dmonitor/overview' }),
+      },
+      domains: {
+        desc: '可添加容灾切换策略的域名列表',
+        scope: { module: 'monitor' },
+        request: (args) => ({ method: 'GET', path: '/api/dmonitor/domains', query: { kw: args.kw } }),
+        after: (data) => listResponse(data),
+      },
+      status: {
+        desc: '容灾监控运行状态',
+        scope: { module: 'monitor' },
+        request: () => ({ method: 'GET', path: '/api/dmonitor/status' }),
       },
       list: {
         desc: '容灾切换策略列表',
@@ -227,6 +239,15 @@ const tools: ToolDef[] = [
         scope: { module: 'monitor', write: true },
         request: (args) => ({ method: 'POST', path: '/api/dmonitor/clean', body: { days: args.days } }),
       },
+      run: {
+        desc: '立即执行一次检测并返回最新检测日志（id 必填）',
+        scope: { module: 'monitor', write: true },
+        before: (args) => {
+          requireArgs(args, ['id']);
+          return args;
+        },
+        request: (args) => ({ method: 'POST', path: `/api/dmonitor/tasks/${Number(args.id)}/run` }),
+      },
     },
   },
   {
@@ -257,8 +278,24 @@ const tools: ToolDef[] = [
       },
       api_balance: {
         desc: '查询当前配置的优选IP接口积分余额',
-        scope: { module: 'optimize' },
+        scope: { module: 'optimize', write: true },
         handler: (_args, ctx) => optimizeBalance(ctx),
+      },
+      settings: {
+        desc: '优选IP设置（接口密钥以掩码返回）',
+        scope: { module: 'optimize' },
+        request: () => ({ method: 'GET', path: '/api/optimize/settings' }),
+      },
+      domains: {
+        desc: '可添加优选IP任务的域名列表（不含 Cloudflare）',
+        scope: { module: 'optimize' },
+        request: (args) => ({ method: 'GET', path: '/api/optimize/domains', query: { kw: args.kw } }),
+        after: (data) => listResponse(data),
+      },
+      status: {
+        desc: '优选IP调度运行状态',
+        scope: { module: 'optimize' },
+        request: () => ({ method: 'GET', path: '/api/optimize/status' }),
       },
     },
   },
@@ -278,6 +315,10 @@ const tools: ToolDef[] = [
       ttl: int('TTL，默认600'),
       remark: str('备注'),
       active: bool('set_active：是否启用'),
+      optimize_ip_api: str('优选IP接口类型：0=关闭，1=开启（save_settings/query_api 使用）'),
+      optimize_ip_key: str('优选IP接口密钥；传掩码表示沿用已保存值（save_settings/query_api 使用）'),
+      optimize_ip_proxy: str('优选IP接口代理地址；传掩码表示沿用已保存值（save_settings 使用）'),
+      optimize_ip_min: int('自动更新时间间隔，10-10080 分钟（save_settings 使用）'),
     },
     actions: {
       add: {
@@ -344,6 +385,41 @@ const tools: ToolDef[] = [
         scope: { module: 'optimize', write: true },
         request: (args) => ({ method: 'POST', path: `/api/optimize/tasks/${Number(args.id)}/run` }),
       },
+      save_settings: {
+        desc: '保存优选IP接口设置（仅提交需要变更的字段）',
+        scope: { module: 'optimize', write: true },
+        before: (args) => {
+          const keys = ['optimize_ip_api', 'optimize_ip_key', 'optimize_ip_proxy', 'optimize_ip_min'];
+          if (!keys.some((key) => args[key] !== undefined && args[key] !== null && args[key] !== '')) {
+            throw new McpToolError('缺少需要保存的设置字段');
+          }
+          return args;
+        },
+        request: (args) => ({
+          method: 'POST',
+          path: '/api/optimize/settings',
+          body: {
+            optimize_ip_api: args.optimize_ip_api,
+            optimize_ip_key: args.optimize_ip_key,
+            optimize_ip_proxy: args.optimize_ip_proxy,
+            optimize_ip_min: args.optimize_ip_min,
+          },
+        }),
+      },
+      query_api: {
+        desc: '查询优选IP接口积分余额；不传接口参数时使用已保存设置',
+        scope: { module: 'optimize', write: true },
+        handler: (args, ctx) => {
+          if (args.optimize_ip_api !== undefined || args.optimize_ip_key !== undefined) {
+            return callRoute(ctx, {
+              method: 'POST',
+              path: '/api/optimize/queryapi',
+              body: { optimize_ip_api: args.optimize_ip_api, optimize_ip_key: args.optimize_ip_key },
+            });
+          }
+          return optimizeBalance(ctx);
+        },
+      },
     },
   },
   {
@@ -358,6 +434,12 @@ const tools: ToolDef[] = [
       ...paging(),
     },
     actions: {
+      domains: {
+        desc: '可添加定时切换任务的域名列表',
+        scope: { module: 'schedule' },
+        request: (args) => ({ method: 'GET', path: '/api/schedule/domains', query: { kw: args.kw } }),
+        after: (data) => listResponse(data),
+      },
       list: {
         desc: '定时切换任务列表',
         scope: { module: 'schedule' },
@@ -485,6 +567,15 @@ const tools: ToolDef[] = [
         desc: '批量操作（ids、act 必填）',
         scope: { module: 'schedule', write: true },
         request: (args) => ({ method: 'POST', path: '/api/schedule/tasks/batch', body: { ids: args.ids, act: args.act } }),
+      },
+      run: {
+        desc: '立即执行一次定时切换（id 必填，任务必须已启用）',
+        scope: { module: 'schedule', write: true },
+        before: (args) => {
+          requireArgs(args, ['id']);
+          return args;
+        },
+        request: (args) => ({ method: 'POST', path: `/api/schedule/tasks/${Number(args.id)}/run` }),
       },
     },
   },

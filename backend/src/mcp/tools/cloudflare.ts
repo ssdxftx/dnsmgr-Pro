@@ -40,7 +40,7 @@ const tools: ToolDef[] = [
       },
       txt_targets: {
         desc: '查找可用于添加TXT验证记录的本地域名',
-        scope: { module: 'cloudflare' },
+        scope: { module: 'cloudflare', write: true },
         before: need('domain_id', 'hostname'),
         request: (args) => ({
           method: 'POST',

@@ -44,7 +44,7 @@ export interface ActionDef {
   request?: (args: ToolArgs, ctx: McpContext) => RouteSpec | RouteSpec[] | Promise<RouteSpec | RouteSpec[]>;
   handler?: (args: ToolArgs, ctx: McpContext) => Promise<any> | any;
   after?: (data: any, args: ToolArgs, ctx: McpContext) => any;
-  scope?: { module: string; write?: boolean };
+  scope?: { module: string; write?: boolean; path?: string };
 }
 
 export interface ToolDef {

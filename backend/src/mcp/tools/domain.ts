@@ -70,27 +70,117 @@ async function overviewDomains(ctx: McpContext): Promise<number> {
 }
 
 async function getOverview(ctx: McpContext): Promise<any> {
+  const admin = checkLevel(ctx.user, 2);
+  const dmWhere = admin ? '1=1' : "(C.visibility <> 'private' OR C.owner_uid = ?)";
+  const dmParams = admin ? [] : [ctx.uid];
+  const certWhere = admin ? '1=1' : "(A2.visibility = 'private' AND A2.owner_uid = ?)";
+  const certParams = admin ? [] : [ctx.uid];
   const domains = await overviewDomains(ctx);
   const [tasks, certs, deploys, dmActive, dm0, dm1, optActive, opt1, opt2, cert3, cert5, cert6, cert7, dep0, dep1, depM1] =
     await Promise.all([
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('dmtask')}`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_order')}`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')}`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('dmtask')} WHERE active = 1`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('dmtask')} WHERE status = 0`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('dmtask')} WHERE status = 1`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('optimizeip')} WHERE active = 1`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('optimizeip')} WHERE status = 1`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('optimizeip')} WHERE status = 2`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE status = 3`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE status < 0`),
       queryOne<{ c: number }>(
-        `SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE expiretime < DATE_ADD(NOW(), INTERVAL 7 DAY) AND expiretime >= NOW()`,
+        `SELECT COUNT(*) AS c FROM ${table('dmtask')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere}`,
+        dmParams,
       ),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_order')} WHERE expiretime < NOW()`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE status = 0`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE status = 1`),
-      queryOne<{ c: number }>(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} WHERE status = -1`),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_order')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere}`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere}`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('dmtask')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere} AND A.active = 1`,
+        dmParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('dmtask')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere} AND A.status = 0`,
+        dmParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('dmtask')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere} AND A.status = 1`,
+        dmParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('optimizeip')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere} AND A.active = 1`,
+        dmParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('optimizeip')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere} AND A.status = 1`,
+        dmParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('optimizeip')} A
+           JOIN ${table('domain')} B ON A.did = B.id
+           JOIN ${table('account')} C ON B.aid = C.id
+          WHERE ${dmWhere} AND A.status = 2`,
+        dmParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_order')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.status = 3`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_order')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.status < 0`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_order')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.expiretime < DATE_ADD(NOW(), INTERVAL 7 DAY) AND A.expiretime >= NOW()`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_order')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.expiretime < NOW()`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.status = 0`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.status = 1`,
+        certParams,
+      ),
+      queryOne<{ c: number }>(
+        `SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A
+           LEFT JOIN ${table('cert_account')} A2 ON A.aid = A2.id
+          WHERE ${certWhere} AND A.status = -1`,
+        certParams,
+      ),
     ]);
   const runTime = await configGet('run_time', null, true);
   const runAt = runTime ? new Date(String(runTime).replace(/-/g, '/')).getTime() : 0;
@@ -587,7 +677,14 @@ const tools: ToolDef[] = [
       stat: {
         desc: '获取统计数据',
         level: 1,
+        scope: { module: 'general' },
         handler: (_args, ctx) => getOverview(ctx),
+      },
+      dashboard: {
+        desc: '获取仪表盘汇总计数（域名、账户、CDN 域名）',
+        level: 1,
+        scope: { module: 'general' },
+        request: () => ({ method: 'GET', path: '/api/dashboard/summary' }),
       },
     },
   },
@@ -605,6 +702,7 @@ const tools: ToolDef[] = [
     actions: {
       query: {
         desc: '查询服务商类型',
+        scope: { module: 'general' },
         handler: (args) => listProviderTypes(args),
       },
     },
@@ -618,6 +716,7 @@ const tools: ToolDef[] = [
     actions: {
       list: {
         desc: '账户列表',
+        scope: { module: 'dns' },
         defaults: pagingDefaults(),
         handler: (args, ctx) => dnsAccountList(ctx, args),
       },

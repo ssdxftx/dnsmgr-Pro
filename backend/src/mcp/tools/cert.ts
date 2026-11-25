@@ -24,6 +24,11 @@ import {
 } from '../types.js';
 import { accountNameFromConfig, prefill } from '../helpers.js';
 
+const need = (...keys: string[]) => (args: ToolArgs) => {
+  requireArgs(args, keys);
+  return args;
+};
+
 function normalizeConfig(value: any): any {
   if (typeof value !== 'string') return value;
   try {
@@ -296,6 +301,7 @@ const tools: ToolDef[] = [
     actions: {
       list: {
         desc: '账户列表',
+        scope: { module: 'cert' },
         defaults: { ...pagingDefaults(), deploy: 0 },
         request: (args) => ({
           method: 'GET',
@@ -494,6 +500,16 @@ const tools: ToolDef[] = [
         scope: { module: 'cert', write: true },
         handler: (args, ctx) => orderBatch(ctx, args),
       },
+      batch_process: {
+        desc: '批量推进证书申请/验证（ids 必填，最多100个，创建异步任务）',
+        scope: { module: 'cert', write: true },
+        before: need('ids'),
+        request: (args) => ({
+          method: 'POST',
+          path: '/api/cert/orders/batch/process',
+          body: { ids: args.ids },
+        }),
+      },
     },
   },
   {
@@ -596,6 +612,16 @@ const tools: ToolDef[] = [
         desc: '批量操作（ids、act 必填）',
         scope: { module: 'deploy', write: true },
         handler: (args, ctx) => deployBatch(ctx, args),
+      },
+      batch_process: {
+        desc: '批量执行证书部署（ids 必填，最多100个，创建异步任务）',
+        scope: { module: 'deploy', write: true },
+        before: need('ids'),
+        request: (args) => ({
+          method: 'POST',
+          path: '/api/deploy/tasks/batch/process',
+          body: { ids: args.ids },
+        }),
       },
     },
   },

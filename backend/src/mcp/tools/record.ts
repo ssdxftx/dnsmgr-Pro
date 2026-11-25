@@ -63,6 +63,15 @@ async function subdomainRecords(ctx: McpContext, args: ToolArgs): Promise<any> {
   return { code: 0, data: filtered };
 }
 
+async function searchRecords(ctx: McpContext, args: ToolArgs): Promise<any> {
+  requireArgs(args, ['keyword']);
+  return callRoute(ctx, {
+    method: 'GET',
+    path: '/api/records/search',
+    query: { kw: args.keyword },
+  });
+}
+
 async function recordGroups(ctx: McpContext, args: ToolArgs): Promise<any> {
   const res = await callRoute(ctx, {
     method: 'GET',
@@ -168,16 +177,21 @@ async function editByName(ctx: McpContext, args: ToolArgs): Promise<any> {
   });
 }
 
+function requireDomainId(args: ToolArgs): ToolArgs {
+  requireArgs(args, ['domain_id']);
+  return args;
+}
+
 const tools: ToolDef[] = [
   {
     name: 'record_query',
     title: '查询解析记录',
     description:
-      '查询某个域名的DNS解析记录、解析日志、记录分组、权重配置，或检测解析是否生效。domain_id 为系统内的域名ID（可通过 domain_query list 获取）。',
+      '查询某个域名的DNS解析记录、解析日志、记录分组、权重配置，或检测解析是否生效；也可按关键词跨域名搜索解析记录。domain_id 为系统内的域名ID（可通过 domain_query list 获取），除 search 外的动作必填。',
     readOnly: true,
     properties: {
-      domain_id: int('域名ID'),
-      keyword: str('list/weight_list：关键词搜索'),
+      domain_id: int('域名ID（search 外的动作必填）'),
+      keyword: str('list/weight_list：关键词搜索；search：跨域名模糊匹配主机记录、完整子域名或备注'),
       subdomain: str('list：按主机记录精确筛选，如 www、@'),
       value: str('list：按记录值筛选；check：期望的记录值'),
       type: str('list：按记录类型筛选；check：记录类型，如 A、CNAME'),
@@ -188,13 +202,13 @@ const tools: ToolDef[] = [
       name: str('check：主机记录'),
       ...paging(),
     },
-    required: ['domain_id'],
     actions: {
       list: {
         desc: '解析记录列表（支持分页和筛选）',
         level: 1,
         scope: { module: 'dns' },
         defaults: pagingDefaults(),
+        before: requireDomainId,
         request: (args) => {
           const { page, pagesize } = pagingToPage(args, 20);
           return {
@@ -216,6 +230,13 @@ const tools: ToolDef[] = [
         },
         after: (data) => listResponse(data),
       },
+      search: {
+        desc: '跨域名搜索解析记录（keyword 必填，匹配主机记录、完整子域名或备注，最多返回 200 条）',
+        level: 1,
+        scope: { module: 'dns', path: '/api/records' },
+        handler: (args, ctx) => searchRecords(ctx, args),
+        after: (data) => listResponse(data),
+      },
       subdomain: {
         desc: '获取指定主机记录（rr）下的全部解析记录',
         level: 1,
@@ -227,6 +248,7 @@ const tools: ToolDef[] = [
         level: 1,
         scope: { module: 'dns' },
         defaults: pagingDefaults(),
+        before: requireDomainId,
         request: (args) => {
           const { page, pagesize } = pagingToPage(args, 20);
           return {
@@ -241,12 +263,13 @@ const tools: ToolDef[] = [
         desc: '解析记录分组列表（仅阿里云、腾讯云）',
         level: 1,
         scope: { module: 'dns' },
+        before: requireDomainId,
         handler: (args, ctx) => recordGroups(ctx, args),
       },
       check: {
         desc: '检测解析记录是否已生效（recordid、name、type、value 必填）',
         level: 1,
-        scope: { module: 'dns' },
+        scope: { module: 'dns', write: true },
         handler: (args, ctx) => checkRecord(ctx, args),
       },
       weight_list: {
@@ -254,6 +277,7 @@ const tools: ToolDef[] = [
         level: 1,
         scope: { module: 'dns' },
         defaults: pagingDefaults(),
+        before: requireDomainId,
         request: (args) => {
           const { pagesize } = pagingToPage(args, 20);
           return {

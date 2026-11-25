@@ -456,7 +456,7 @@ README.md
 已按本报告第一阶段到第三阶段一次性落地服务器版：
 
 - 新增 `/mcp` JSON-RPC 2.0 端点，支持 `initialize`、`ping`、`tools/list`、`tools/call`、批量请求、通知 202、Origin 校验、405/401/429 和解析错误处理。
-- 工具契约与上游 v2.22 对齐：28 个工具、124 个动作；普通用户 6 个工具、27 个动作，`domain_manage` 仅保留 `update_date`、`alias_add`、`alias_delete`。
+- 工具契约与上游 v2.22 对齐：28 个工具、124 个动作；普通用户 6 个工具、27 个动作，`domain_manage` 仅保留 `update_date`、`alias_add`、`alias_delete`。后续 Pro 第一批扩展新增 17 个只读工具，第二批新增 13 个受控写工具，第三批新增 11 个 CDN 高级工具，当前为管理员 69 个工具、452 个动作，普通用户 27 个工具、149 个动作，详见 `MCP_MODULE_COVERAGE_REPORT.md`。
 - 认证同时支持 `X-API-Key`、`Authorization: Bearer <API Key>` 和兼容旧版的 `Authorization: Bearer <uid>:<apikey>`；API Key 继续执行作用域、有效期与 IP 白名单校验。
 - 工具执行通过 Fastify `app.inject()` 调用现有 `/api/*`，保留路由级权限、审计、幂等和限流；MCP 层额外记录工具、动作、Key、用户、IP 与参数摘要。
 - 证书私钥、PFX、长任务等行为按 Pro 安全模型调整：API Key 读取私钥仍要求登录密码确认；旧版 `uid:apikey` 保持上游行为。

@@ -6,11 +6,16 @@ import recordTools from './tools/record.js';
 import certTools from './tools/cert.js';
 import cloudflareTools from './tools/cloudflare.js';
 import taskTools from './tools/task.js';
+import cdnTools from './tools/cdn.js';
+import cdnManageTools from './tools/cdnManage.js';
+import cdnAdvancedTools from './tools/cdnAdvanced.js';
+import operationsTools from './tools/operations.js';
+import operationsManageTools from './tools/operationsManage.js';
 
 const SUPPORTED_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 const INSTRUCTIONS =
-  '聚合DNS管理系统MCP接口。通常先调用 domain_query(action=list) 获取域名ID，再用 record_query / record_manage 管理解析记录。添加账户或部署任务前可调用 list_provider_types 查看各服务商需要的配置字段。';
+  '聚合DNS管理系统MCP接口。通常先调用 domain_query(action=list) 获取域名ID，再用 record_query / record_manage 管理解析记录。添加账户或部署任务前可调用 list_provider_types 查看各服务商需要的配置字段。CDN 先调用 cdn_account_query(action=list) 获取账户ID，再用 cdn_domain_query / cdn_zone_query / cdn_cache_query / cdn_statistics_query；写操作使用 cdn_account_manage / cdn_domain_manage / cdn_zone_manage / cdn_cache_manage；规则、安全、边缘、流量、计费分别使用 cdn_rule_* / cdn_security_* / cdn_edge_* / cdn_traffic_* / cdn_billing_*，阿里云 ESA 通用接口使用 cdn_esa_api。运维查询可使用 dnscheck_query、audit_query、job_query、backup_query、system_query，写操作使用对应的 *_manage 工具。';
 
 function error(id: any, code: number, message: string): any {
   return { jsonrpc: '2.0', id: id ?? null, error: { code, message } };
@@ -26,6 +31,11 @@ export class McpServer {
       ...certTools,
       ...cloudflareTools,
       ...taskTools,
+      ...cdnTools,
+      ...cdnManageTools,
+      ...cdnAdvancedTools,
+      ...operationsTools,
+      ...operationsManageTools,
     ]);
   }
 

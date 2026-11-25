@@ -8,6 +8,7 @@ const SCOPE_PATHS: Record<string, string> = {
   cert: '/api/cert',
   deploy: '/api/deploy',
   cloudflare: '/api/cloudflare',
+  dnscheck: '/api/dns-check',
   monitor: '/api/dmonitor',
   optimize: '/api/optimize',
   schedule: '/api/schedule',
@@ -30,10 +31,12 @@ function scopePath(module: string): string {
 }
 
 export function checkActionScope(ctx: McpContext, action: ActionDef): void {
-  if (ctx.mode !== 'api_key' || !action.scope) return;
+  if (ctx.mode !== 'api_key') return;
+  if (!action.scope) throw new McpToolError('该操作未配置作用域');
   if (!ctx.scopes.length) throw new McpToolError('API Key 未配置可用的权限范围');
   const method = action.scope.write ? 'POST' : 'GET';
-  if (!scopeAllows(ctx.scopes, method, scopePath(action.scope.module))) {
+  const path = action.scope.path || scopePath(action.scope.module);
+  if (!scopeAllows(ctx.scopes, method, path)) {
     throw new McpToolError('API Key 缺少该操作所需的作用域');
   }
 }
