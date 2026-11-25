@@ -54,7 +54,7 @@ async function handle(row: any): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const prevStatus = Number(row.status || 0);
 
-  if (![1, 2, 3].includes(Number(row.type))) {
+  if (![0, 1, 2, 3].includes(Number(row.type))) {
     // 非法类型不会命中任何 DNS 操作分支，但旧逻辑仍会把 status 改掉并记录“切换成功”，
     // 实际 DNS 未变。直接停用并记录原因，避免每个 tick 空转。
     await query(`UPDATE ${table('dmtask')} SET active = 0 WHERE id = ?`, [row.id]).catch(() => undefined);

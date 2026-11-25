@@ -6,6 +6,7 @@ import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { matchPermission, isRecordInScope, checkLevel, md5, permissionMatchesDomain, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
 import { detectCloudflareProxy } from '../lib/dns/cloudflare.js';
+import { defaultRecordLine } from '../lib/dns/defaultLine.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig } from '../lib/secret.js';
 import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
@@ -706,8 +707,12 @@ export default async function domainRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const name = asText(b.name, 64);
     const remark = asText(b.remark, 255);
+    const sort = Math.trunc(Number(b.sort) || 0);
     if (!name) return { code: -1, msg: '分类名不能为空' };
-    await query(`INSERT INTO ${table('domain_category')} (name, remark, sort, addtime) VALUES (?, ?, 0, NOW())`, [name, remark]);
+    if (await queryOne(`SELECT id FROM ${table('domain_category')} WHERE name = ?`, [name])) {
+      return { code: -1, msg: '分类名称已存在' };
+    }
+    await query(`INSERT INTO ${table('domain_category')} (name, remark, sort, addtime) VALUES (?, ?, ?, NOW())`, [name, remark, sort]);
     audit(req, { targetType: 'domain', targetName: name, summary: `新建域名分组 ${name}` });
     return { code: 0, msg: '添加分类成功' };
   });
@@ -723,6 +728,9 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (b.name !== undefined) {
       const name = asText(b.name, 64);
       if (!name) return { code: -1, msg: '分类名不能为空' };
+      if (await queryOne(`SELECT id FROM ${table('domain_category')} WHERE name = ? AND id <> ?`, [name, id])) {
+        return { code: -1, msg: '分类名称已存在' };
+      }
       sets.push('name = ?');
       params.push(name);
     }
@@ -968,6 +976,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     const pageSize = clampLimit(q.pagesize, 20, 500);
     const provider = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
+    const sortFields = new Set(['Name', 'Type', 'LineName', 'Value', 'UpdateTime']);
+    const sortName = String(q.sortName || '').trim();
+    const sortField = sortFields.has(sortName) && dnsProviders[info.account.type]?.sort ? sortName : null;
+    const sortOrder = String(q.sortOrder || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
     const res = await provider.getDomainRecords(
       page,
       pageSize,
@@ -977,8 +989,8 @@ export default async function domainRoutes(app: FastifyInstance) {
       q.type || null,
       q.line || null,
       q.status || null,
-      null,
-      null,
+      sortField,
+      sortField ? sortOrder : null,
       q.groupid || null,
     );
     if (res === false) return { code: -1, msg: provider.getError() };
@@ -1069,7 +1081,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const invalid = validateRecordInput(type, name, value);
     if (invalid) return { code: -1, msg: invalid };
     const remarkText = remark === undefined || remark === null || remark === '' ? null : asText(remark, 255);
-    const recordId = await provider.addDomainRecord(name, type, value, line || 'default', Number(ttl || 600), mxOrDefault(mx), weight ?? null, remarkText);
+    const recordLine = line === undefined || line === null || line === '' ? defaultRecordLine(info.account.type) : String(line);
+    const recordId = await provider.addDomainRecord(name, type, value, recordLine, Number(ttl || 600), mxOrDefault(mx), weight ?? null, remarkText);
     if (!recordId) return { code: -1, msg: provider.getError() };
     if (remarkText && typeof (provider as any).updateDomainRecordRemark === 'function') {
       await (provider as any).updateDomainRecordRemark(recordId, remarkText);
@@ -1159,7 +1172,8 @@ export default async function domainRoutes(app: FastifyInstance) {
     const invalid = validateRecordInput(type, name, value);
     if (invalid) return { code: -1, msg: invalid };
     const remarkText = remark === undefined || remark === null || remark === '' ? null : asText(remark, 255);
-    const ok = await provider.updateDomainRecord(recordId, name, type, value, line || 'default', Number(ttl || 600), mxOrDefault(mx), weight ?? null, remarkText);
+    const recordLine = line === undefined || line === null || line === '' ? defaultRecordLine(info.account.type) : String(line);
+    const ok = await provider.updateDomainRecord(recordId, name, type, value, recordLine, Number(ttl || 600), mxOrDefault(mx), weight ?? null, remarkText);
     if (!ok) return { code: -1, msg: provider.getError() };
     audit(req, {
       targetType: 'record',
@@ -1388,7 +1402,13 @@ export default async function domainRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const raw = String(b.record ?? '');
     const type = String(b.type ?? '').trim();
-    const line = String(b.line ?? 'default');
+    const rawLine = b.line;
+    const lineProvided = rawLine !== undefined && rawLine !== null && rawLine !== '';
+    const line = lineProvided
+      ? String(rawLine)
+      : info.account.type === 'cloudflare' && Number(b.proxy) === 1
+        ? '1'
+        : defaultRecordLine(info.account.type);
     const ttl = Number(b.ttl || 600);
     const mx = mxOrDefault(b.mx);
     const remark = b.remark ? String(b.remark) : null;
@@ -1480,7 +1500,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     }
     const provider: any = getDnsProvider(info.account.type, await accountConfigOf(info.account), info.domain.name, info.domain.thirdid);
     if (!provider || typeof provider.getWeightSubDomains !== 'function') return { code: -1, msg: '该DNS类型不支持权重解析（仅阿里云）' };
-    const res = await provider.getWeightSubDomains(1, clampLimit(req.query?.pagesize, 20, 500), requested);
+    const pageSize = clampLimit(req.query?.pagesize, 20, 500);
+    const offset = clampOffset(req.query?.offset);
+    const page = Math.floor(offset / pageSize) + 1;
+    const res = await provider.getWeightSubDomains(page, pageSize, requested);
     if (res === false) return { code: -1, msg: '获取权重列表失败，' + provider.getError() };
     if (!fullAccess) {
       const list = (res.list || []).filter((r: any) => {

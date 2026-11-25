@@ -75,6 +75,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
         run_error: await configGet('run_error'),
         switch_count: switchCount?.c ?? 0,
         fail_count: failCount?.c ?? 0,
+        swoole: false,
       },
     };
   });
@@ -180,7 +181,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.recordid || !task.main_value || !task.frequency || !task.cycle) {
       return { code: -1, msg: '必填项不能为空' };
     }
-    if (![1, 2, 3].includes(task.type)) return { code: -1, msg: '任务类型不合法' };
+    if (![0, 1, 2, 3].includes(task.type)) return { code: -1, msg: '任务类型不合法' };
     if (![0, 1, 2].includes(task.checktype)) return { code: -1, msg: '检测方式不合法' };
     if (!Number.isInteger(task.cycle) || task.cycle < 1 || task.cycle > 100) return { code: -1, msg: '确认次数需为 1-100' };
     if (!Number.isInteger(task.frequency) || task.frequency < 1 || task.frequency > 86400) {
@@ -245,7 +246,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     if (!task.did || !task.rr || !task.recordid || !task.main_value || !task.frequency || !task.cycle) {
       return { code: -1, msg: '必填项不能为空' };
     }
-    if (![1, 2, 3].includes(task.type)) return { code: -1, msg: '任务类型不合法' };
+    if (![0, 1, 2, 3].includes(task.type)) return { code: -1, msg: '任务类型不合法' };
     if (![0, 1, 2].includes(task.checktype)) return { code: -1, msg: '检测方式不合法' };
     if (!Number.isInteger(task.cycle) || task.cycle < 1 || task.cycle > 100) return { code: -1, msg: '确认次数需为 1-100' };
     if (!Number.isInteger(task.frequency) || task.frequency < 1 || task.frequency > 86400) {

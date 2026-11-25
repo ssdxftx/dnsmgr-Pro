@@ -183,6 +183,11 @@ export function mergeMaskedConfig(input: any, existing: any, depth = 0): any {
   const ex = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {};
   const next: Record<string, any> = { ...input };
 
+  // 未传入的字段沿用原值（编辑账号时只提交变更字段），显式传 null/空串仍可清空
+  for (const k of Object.keys(ex)) {
+    if (!(k in next)) next[k] = ex[k];
+  }
+
   // 敏感字段：请求里缺失、掩码或空值时一律沿用原值（遍历原配置，避免缺键即丢值）
   for (const k of Object.keys(ex)) {
     if (!isSecretKey(k)) continue;

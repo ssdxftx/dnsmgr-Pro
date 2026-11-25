@@ -30,6 +30,9 @@ jobs:
       - name: Typecheck backend
         run: cd backend && npx tsc --noEmit
 
+      - name: MCP self-check
+        run: cd backend && npm run check:mcp
+
       - name: SQLite smoke test
         run: cd backend && npm run check:sqlite
 

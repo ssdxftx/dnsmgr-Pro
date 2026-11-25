@@ -214,7 +214,7 @@ export default async function certRoutes(app: FastifyInstance) {
 
   // ============ 证书账户 ============
   app.get('/api/cert/accounts', auth, async (req: any) => {
-    const { kw, offset = 0, limit = 20, deploy = 0 } = req.query || {};
+    const { kw, offset = 0, limit = 20, deploy = 0, sortName = '', sortOrder = 'desc' } = req.query || {};
     const isDeploy = Number(deploy) === 1;
     const admin = checkLevel(req.user, 2);
     // 管理员：共享账户 + 自己的私有；普通用户：仅自己的私有
@@ -229,7 +229,10 @@ export default async function certRoutes(app: FastifyInstance) {
       params.push('%' + escapeLike(kw) + '%', '%' + escapeLike(kw) + '%', kw);
     }
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_account')} WHERE ${where}`, params))?.c || 0;
-    const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, clampLimit(limit, 20), clampOffset(offset)]);
+    const accountSort: Record<string, string> = { id: 'id', typename: 'type', name: 'name', remark: 'remark', addtime: 'addtime' };
+    const sortKey = accountSort[String(sortName)] || 'id';
+    const sortDir = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+    const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY ${sortKey} ${sortDir} LIMIT ? OFFSET ?`, [...params, clampLimit(limit, 20), clampOffset(offset)]);
     const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
     const list = rows.map((r: any) => {
       const { config, state } = readAccountConfig(r.config, dek);
@@ -399,7 +402,7 @@ export default async function certRoutes(app: FastifyInstance) {
 
   // ============ 证书订单 ============
   app.get('/api/cert/orders', auth, async (req: any) => {
-    const { domain, id, aid, type, status, offset = 0, limit = 20 } = req.query || {};
+    const { domain, id, aid, type, status, offset = 0, limit = 20, sortName = '', sortOrder = 'desc' } = req.query || {};
     let where = '1=1';
     const params: any[] = [];
     // 与账户列表同口径：管理员看共享 + 自己的私有，普通用户只看自己的私有
@@ -442,9 +445,15 @@ export default async function certRoutes(app: FastifyInstance) {
          FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where}`,
       params,
     );
+    const orderSort: Record<string, string> = {
+      id: 'A.id', typename: 'B.type', keytype: 'A.keytype', isauto: 'A.isauto',
+      issuetime: 'A.issuetime', end_day: 'A.expiretime', status: 'A.status',
+    };
+    const orderKey = orderSort[String(sortName)] || 'A.id';
+    const orderDir = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const rows = await query(
       // 显式列清单：排除 fullchain / privatekey / info / dns 等大字段，避免每页读回 1–3MB 无用 IO 并把私钥取出到应用内存
-      `SELECT A.id, A.aid, A.keytype, A.keysize, A.status, A.error, A.isauto, A.issuetime, A.expiretime, A.issuer, A.addtime, A.updatetime, B.type FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
+      `SELECT A.id, A.aid, A.keytype, A.keysize, A.status, A.error, A.isauto, A.issuetime, A.expiretime, A.issuer, A.addtime, A.updatetime, B.type FROM ${table('cert_order')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id WHERE ${where} ORDER BY ${orderKey} ${orderDir} LIMIT ? OFFSET ?`,
       [...params, clampLimit(limit, 20), clampOffset(offset)],
     );
     const list = [];
@@ -538,8 +547,8 @@ export default async function certRoutes(app: FastifyInstance) {
         await q(`INSERT INTO ${table('cert_domain')} (oid, domain, sort) VALUES ${values}`, params);
       }
     });
-    // 待处理订单立即在后台开始申请，无需用户手动点「处理」
-    if (Number(order.status) === 0) kickOrderProcessing(id);
+    // 待处理订单默认立即在后台开始申请；MCP 等调用方可传 defer=1 保持上游「先添加、后 process」语义
+    if (Number(order.status) === 0 && String(req.query?.defer || '') !== '1') kickOrderProcessing(id);
     audit(req, {
       targetType: 'cert_order',
       targetId: id,
@@ -575,7 +584,8 @@ export default async function certRoutes(app: FastifyInstance) {
         expiretime: certInfo.expiretime,
         issuer: certInfo.issuer,
         status: 3,
-        isauto: 0,
+        // 编辑上传证书不应意外关闭已有的自动续期开关
+        isauto: Number(row.isauto ?? 0),
         issend: 0,
         info: null,
         dns: null,
@@ -862,20 +872,30 @@ export default async function certRoutes(app: FastifyInstance) {
 
   // ============ CNAME 代理 ============
   app.get('/api/cert/cnames', auth, async (req: any) => {
-    const size = clampLimit(req.query?.size, 200, 200);
-    const offset = Math.min(clampOffset(req.query?.offset), 1_000_000);
-    const where = `(C.visibility IS NULL OR C.visibility <> 'private' OR C.owner_uid = ?)`;
+    const q = req.query || {};
+    const size = clampLimit(q.size ?? q.limit, 200, 500);
+    const offset = Math.min(clampOffset(q.offset), 1_000_000);
+    const kw = String(q.kw || '').trim();
+    let where = `(C.visibility IS NULL OR C.visibility <> 'private' OR C.owner_uid = ?)`;
+    const params: any[] = [Number(req.user.uid)];
+    if (kw) {
+      where += " AND A.domain LIKE ? ESCAPE '!'";
+      params.push('%' + escapeLike(kw) + '%');
+    }
+    const sortMap: Record<string, string> = { id: 'A.id', domain: 'A.domain', status: 'A.status', addtime: 'A.addtime' };
+    const sortKey = sortMap[String(q.sortName || '')] || 'A.id';
+    const sortDir = String(q.sortOrder || 'desc').toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const rows: any[] = await query(
       `SELECT A.*, B.name AS cnamedomain, C.visibility AS account_visibility, C.owner_uid AS account_owner
          FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id
          LEFT JOIN ${table('account')} C ON B.aid = C.id
-        WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
-      [Number(req.user.uid), size, offset],
+        WHERE ${where} ORDER BY ${sortKey} ${sortDir} LIMIT ? OFFSET ?`,
+      [...params, size, offset],
     );
     const totalRow: any = await queryOne(
       `SELECT COUNT(*) AS c FROM ${table('cert_cname')} A LEFT JOIN ${table('domain')} B ON A.did = B.id
         LEFT JOIN ${table('account')} C ON B.aid = C.id WHERE ${where}`,
-      [Number(req.user.uid)],
+      params,
     );
     return { code: 0, data: rows, total: Number(totalRow?.c || 0), size };
   });
@@ -954,7 +974,10 @@ export default async function certRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/deploy/tasks', auth, async (req: any) => {
-    const { offset = 0, limit = 20, status, oid } = req.query || {};
+    const {
+      offset = 0, limit = 20, status, oid, aid, type, domain, remark,
+      sortName = '', sortOrder = 'desc',
+    } = req.query || {};
     let where = '1=1';
     const params: any[] = [];
     if (status !== undefined && status !== '') {
@@ -965,23 +988,50 @@ export default async function certRoutes(app: FastifyInstance) {
       where += ' AND A.oid = ?';
       params.push(oid);
     }
+    if (aid) {
+      where += ' AND A.aid = ?';
+      params.push(aid);
+    }
+    if (type) {
+      where += ' AND B.type = ?';
+      params.push(type);
+    }
+    if (domain) {
+      where += ` AND EXISTS (SELECT 1 FROM ${table('cert_domain')} CD WHERE CD.oid = A.oid AND CD.domain LIKE ? ESCAPE '!')`;
+      params.push('%' + escapeLike(String(domain)) + '%');
+    }
+    if (remark) {
+      where += ' AND A.remark = ?';
+      params.push(remark);
+    }
     const visibleCertAids = (await listVisibleAccounts('cert_account', req.user)).map((a: any) => Number(a.id));
     if (!visibleCertAids.length) return { code: 0, total: 0, data: [] };
     const certAidPlaceholders = visibleCertAids.map(() => '?').join(',');
     where += ` AND A.aid IN (${certAidPlaceholders}) AND A.oid IN (SELECT id FROM ${table('cert_order')} WHERE aid = 0 OR aid IN (${certAidPlaceholders}))`;
     params.push(...visibleCertAids, ...visibleCertAids);
-    const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A WHERE ${where}`, params))?.c || 0;
+    const from = `FROM ${table('cert_deploy')} A
+      LEFT JOIN ${table('cert_account')} B ON A.aid = B.id
+      LEFT JOIN ${table('cert_order')} C ON A.oid = C.id
+      LEFT JOIN ${table('cert_account')} D ON C.aid = D.id`;
+    const total = (await queryOne(`SELECT COUNT(*) AS c ${from} WHERE ${where}`, params))?.c || 0;
     const statRow: any = await queryOne(
       `SELECT SUM(CASE WHEN A.active = 1 THEN 1 ELSE 0 END) AS active,
               SUM(CASE WHEN A.status = 0 THEN 1 ELSE 0 END) AS pending,
               SUM(CASE WHEN A.status = 1 THEN 1 ELSE 0 END) AS deployed,
               SUM(CASE WHEN A.status < 0 THEN 1 ELSE 0 END) AS failed,
               MAX(A.lasttime) AS last_time
-         FROM ${table('cert_deploy')} A WHERE ${where}`,
+         ${from} WHERE ${where}`,
       params,
     );
+    const sortMap: Record<string, string> = {
+      id: 'A.id', typename: 'B.type', remark: 'A.remark', active: 'A.active',
+      lasttime: 'A.lasttime', status: 'A.status',
+    };
+    const sortKey = sortMap[String(sortName)] || 'A.id';
+    const sortDir = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
     const rows = await query(
-      `SELECT A.*, B.type, B.name AS aname, C.aid AS certaid FROM ${table('cert_deploy')} A LEFT JOIN ${table('cert_account')} B ON A.aid = B.id LEFT JOIN ${table('cert_order')} C ON A.oid = C.id WHERE ${where} ORDER BY A.id DESC LIMIT ? OFFSET ?`,
+      `SELECT A.*, B.type, B.remark AS aremark, B.name AS aname, C.aid AS certaid, D.type AS certtype ${from}
+        WHERE ${where} ORDER BY ${sortKey} ${sortDir} LIMIT ? OFFSET ?`,
       [...params, clampLimit(limit, 20), clampOffset(offset)],
     );
     const list = [];
@@ -993,7 +1043,12 @@ export default async function certRoutes(app: FastifyInstance) {
         oid: r.oid,
         type: r.type,
         typename: r.type ? deployConfig[r.type]?.name || '' : '',
+        icon: r.type ? deployConfig[r.type]?.icon || '' : '',
         aname: r.aname,
+        aremark: r.aremark,
+        certaid: r.certaid,
+        certtype: r.certtype,
+        certtypename: r.certtype ? certConfig[r.certtype]?.name || '' : '手动续期',
         // 回显掩码，编辑保存时后端按掩码保留原密钥
         config: maskConfig(decryptConfig(r.config)),
         remark: r.remark,

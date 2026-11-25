@@ -61,6 +61,7 @@ import { beginIdempotent, completeIdempotent } from './lib/idempotency.js';
 import { hitRateLimit } from './lib/rateLimit.js';
 import { registerOpenApi } from './lib/openapi.js';
 import apiKeyRoutes from './routes/apiKeys.js';
+import mcpRoutes from './routes/mcp.js';
 import jobRoutes from './routes/jobs.js';
 import { resetStaleJobs } from './lib/jobs.js';
 import eventRoutes from './routes/events.js';
@@ -225,10 +226,17 @@ app.addContentTypeParser('application/json', { parseAs: 'string' }, (req: any, b
   // 只有 QQ Webhook 需要原始报文做 Ed25519 验签，其余 JSON 请求不保留第二份 body
   const url = String(req.raw?.url || '').split('?')[0];
   if (url === '/api/qqbot/webhook') req.rawBody = body;
-  if (!body) return done(null, {});
+  if (!body) {
+    if (url === '/mcp') req.mcpParseError = true;
+    return done(null, {});
+  }
   try {
     done(null, JSON.parse(body));
   } catch (err) {
+    if (url === '/mcp') {
+      req.mcpParseError = true;
+      return done(null, {});
+    }
     done(err as Error, undefined);
   }
 });
@@ -259,7 +267,7 @@ if (allowedOrigins.length) {
   await app.register(cors, {
     origin: allowedOrigins,
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Confirm-Password', 'X-Confirm-Password-B64', 'X-Request-Id', 'X-Cron-Key'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key', 'Idempotency-Key', 'X-Reauth-Token', 'X-Confirm-Password', 'X-Confirm-Password-B64', 'X-Pfx-Pass', 'X-Pfx-Pass-B64', 'X-Request-Id', 'X-Cron-Key'],
     exposedHeaders: ['X-Request-Id', 'X-API-Version', 'X-Idempotency-Replayed', 'Retry-After'],
     maxAge: 86400,
   });
@@ -576,6 +584,7 @@ if (installed) {
   await app.register(apiKeyRoutes);
   await app.register(jobRoutes);
   await app.register(eventRoutes);
+  await app.register(mcpRoutes);
 }
 
 // 静态资源与 SPA 回退（容器内 serve 前端构建产物；本地未构建则不注册）

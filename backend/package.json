@@ -1,6 +1,6 @@
 {
   "name": "dnsmgr-backend",
-  "version": "1.35.10",
+  "version": "1.35.11",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,8 @@
     "check:backup": "tsx scripts/check-backup.ts",
     "check:sqlite": "tsx scripts/check-sqlite.ts",
     "check:mysql": "tsx scripts/check-mysql.ts",
-    "check:cross": "tsx scripts/check-cross.ts"
+    "check:cross": "tsx scripts/check-cross.ts",
+    "check:mcp": "tsx scripts/check-mcp.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1153.0",

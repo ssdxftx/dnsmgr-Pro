@@ -61,6 +61,30 @@
       <n-empty v-else :description="t('preferences.noKeys')" />
     </n-card>
 
+    <n-card :bordered="false" :title="t('preferences.mcpTitle')" size="small" style="max-width:920px">
+      <p class="pref-hint">{{ t('preferences.mcpHint') }}</p>
+      <n-form label-placement="top">
+        <n-form-item :label="t('preferences.mcpEndpoint')">
+          <n-input :value="mcpUrl" readonly />
+        </n-form-item>
+      </n-form>
+      <div class="mcp-block">
+        <div class="mcp-block-head">
+          <span>{{ t('preferences.mcpApiKeyMode') }}</span>
+          <n-button size="tiny" quaternary type="primary" @click="copyMcp(mcpApiConfig)">{{ t('preferences.copy') }}</n-button>
+        </div>
+        <pre class="mcp-config">{{ mcpApiConfig }}</pre>
+      </div>
+      <div class="mcp-block">
+        <div class="mcp-block-head">
+          <span>{{ t('preferences.mcpLegacyMode') }}</span>
+          <n-button size="tiny" quaternary type="primary" @click="copyMcp(mcpLegacyConfig)">{{ t('preferences.copy') }}</n-button>
+        </div>
+        <pre class="mcp-config">{{ mcpLegacyConfig }}</pre>
+        <p class="pref-hint">{{ t('preferences.mcpLegacyHint', { uid: auth.user?.id || '<UID>' }) }}</p>
+      </div>
+    </n-card>
+
     <n-modal v-model:show="createShow" preset="card" :title="t('preferences.createKey')" style="max-width:640px">
       <n-form label-placement="top">
         <n-form-item :label="t('preferences.keyName')">
@@ -124,6 +148,7 @@ import PageHeader from '../components/PageHeader.vue';
 import { useLocale } from '../composables/useLocale';
 import type { AppLocale } from '../i18n';
 import { api } from '../api';
+import { useAuthStore } from '../stores/auth';
 
 interface ApiKeyRow {
   id: number;
@@ -140,9 +165,13 @@ interface ApiKeyRow {
 
 const { t } = useI18n();
 const { locale, setLocale } = useLocale();
+const auth = useAuthStore();
 const message = useMessage();
 
 const keys = ref<ApiKeyRow[]>([]);
+const mcpUrl = computed(() => `${window.location.origin}/mcp`);
+const mcpApiConfig = computed(() => JSON.stringify({ mcpServers: { dnsmgr: { url: mcpUrl.value, headers: { 'X-API-Key': '<YOUR_API_KEY>' } } } }, null, 2));
+const mcpLegacyConfig = computed(() => JSON.stringify({ mcpServers: { dnsmgr: { url: mcpUrl.value, headers: { Authorization: `Bearer ${auth.user?.id || '<UID>'}:<LEGACY_API_KEY>` } } } }, null, 2));
 const legacy = reactive({ enabled: false, prefix: '' });
 const modules = ref<string[]>([]);
 const createShow = ref(false);
@@ -288,6 +317,15 @@ async function submitReauth() {
   }
 }
 
+async function copyMcp(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    message.success(t('preferences.copied'));
+  } catch {
+    message.warning(t('preferences.copyManual'));
+  }
+}
+
 async function copyCreated() {
   try {
     await navigator.clipboard.writeText(createdKey.value);
@@ -321,5 +359,27 @@ onMounted(load);
 }
 .secret-box {
   margin-top: 12px;
+}
+.mcp-block {
+  margin-top: 14px;
+}
+.mcp-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.mcp-config {
+  margin: 0;
+  padding: 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--app-fill-2);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
 }
 </style>
