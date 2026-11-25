@@ -138,7 +138,7 @@ export class SpaceshipDns implements DnsProvider {
     let list: RecordInfo[] = rawItems.map((row: any) => {
       const { address, mx } = this.extractAddress(row);
       return {
-        RecordId: `${row.type}|${row.name}|${address}|${mx}`,
+        RecordId: this.encodeRecordId(row.type, row.name, address, mx),
         Domain: this.domain,
         Name: row.name,
         Type: row.type,
@@ -212,9 +212,43 @@ export class SpaceshipDns implements DnsProvider {
     return data !== false;
   }
 
+  private encodeRecordId(type: string, name: string, address: string, mx: number): string {
+    return Buffer.from(JSON.stringify({ type, name, address, mx }), 'utf8').toString('base64url');
+  }
+
+  private decodeRecordId(RecordId: string): { type: string; name: string; address: string; mx: number } | null {
+    const raw = String(RecordId ?? '');
+    if (raw.includes('|')) {
+      const parts = raw.split('|');
+      if (parts.length < 4) return null;
+      return {
+        type: parts[0],
+        name: parts[1],
+        address: parts.slice(2, -1).join('|'),
+        mx: Number(parts[parts.length - 1]) || 0,
+      };
+    }
+    try {
+      const obj = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+      if (!obj || typeof obj !== 'object' || obj.type === undefined || obj.name === undefined) return null;
+      return {
+        type: String(obj.type),
+        name: String(obj.name ?? ''),
+        address: String(obj.address ?? ''),
+        mx: Number(obj.mx) || 0,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   async deleteDomainRecord(RecordId: string) {
-    const [type, name, address, mx] = String(RecordId).split('|');
-    const item = this.convertRecordItem(name, type, address, Number(mx));
+    const old = this.decodeRecordId(RecordId);
+    if (!old) {
+      this.error = '记录ID无效';
+      return false;
+    }
+    const item = this.convertRecordItem(old.name, old.type, old.address, old.mx);
     const data = await this.sendRequest('DELETE', '/dns/records/' + this.domain, [item]);
     return data !== false;
   }

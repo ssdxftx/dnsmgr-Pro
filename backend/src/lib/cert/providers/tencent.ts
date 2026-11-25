@@ -101,9 +101,9 @@ export class TencentCert implements CertProvider {
       // 下载文件名来自服务端响应，使用固定名避免其中的 ../ 穿越临时目录
       const zipPath = join(dir, 'cert.zip');
       writeFileSync(zipPath, buf);
-      unzip(zipPath, dir);
-      const keyFile = findFileByExt(dir, ['.key']);
-      const crtFile = findFileByExt(dir, ['.crt']);
+      await unzip(zipPath, dir);
+      const keyFile = await findFileByExt(dir, ['.key']);
+      const crtFile = await findFileByExt(dir, ['.crt']);
       if (!keyFile || !crtFile) throw new Error('解压后的证书文件夹内未找到证书文件');
       const private_key = readFileSync(keyFile, 'utf8');
       const fullchain = readFileSync(crtFile, 'utf8');

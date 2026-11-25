@@ -31,8 +31,12 @@ export function buildLabels(start: Date, end: Date): { labels: string[]; interva
   return { labels, interval: 'hour' };
 }
 
-/** 将任意长度的数值序列对齐到目标长度：点过多则按桶求和，过少补 0。 */
-export function alignSeries(values: number[], targetLen: number): number[] {
+/** 将任意长度的数值序列对齐到目标长度：点过多时按指标语义聚合到桶，过少补 0。 */
+export function alignSeries(
+  values: number[],
+  targetLen: number,
+  agg: 'sum' | 'max' | 'avg' = 'sum',
+): number[] {
   const result = new Array(targetLen).fill(0);
   if (targetLen <= 0) return result;
   if (values.length <= targetLen) {
@@ -43,9 +47,19 @@ export function alignSeries(values: number[], targetLen: number): number[] {
   for (let i = 0; i < targetLen; i++) {
     const from = Math.floor(i * perBucket);
     const to = Math.min(values.length, Math.floor((i + 1) * perBucket));
+    if (agg === 'max') {
+      let peak = 0;
+      for (let j = from; j < to; j++) peak = Math.max(peak, values[j] || 0);
+      result[i] = peak;
+      continue;
+    }
     let sum = 0;
-    for (let j = from; j < to; j++) sum += values[j] || 0;
-    result[i] = sum;
+    let count = 0;
+    for (let j = from; j < to; j++) {
+      sum += values[j] || 0;
+      count++;
+    }
+    result[i] = agg === 'avg' && count > 0 ? sum / count : sum;
   }
   return result;
 }

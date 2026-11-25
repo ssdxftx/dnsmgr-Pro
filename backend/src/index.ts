@@ -10,7 +10,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { configGet, encryptLegacyConfigSecrets, getSysKey } from './config.js';
 import { isInstalled, getInstallState } from './installer.js';
 import { initSetupToken } from './lib/setupToken.js';
-import { findUserByApiKey, findUserById } from './auth.js';
+import { findUserById, rejectLegacyApiKey } from './auth.js';
 import { ConfigDecryptError, setSecretKey } from './lib/secret.js';
 import { migrate } from './migrate.js';
 import authRoutes from './routes/auth.js';
@@ -356,9 +356,9 @@ function touchApiKey(id: number, now: number): void {
     const keyHash = hashApiKey(apiKey);
     let keyRow: any = null;
     let dbUser: any = null;
-    let scopes: string[] = ['*'];
+    let scopes: string[] = [];
     let apiKeyId = 0;
-    let apiKeyName = 'legacy';
+    let apiKeyName = '';
     try {
       keyRow = await queryOne(
         `SELECT * FROM ${table('api_key')} WHERE key_hash = ? AND active = 1 AND revoked_at IS NULL LIMIT 1`,
@@ -367,35 +367,35 @@ function touchApiKey(id: number, now: number): void {
     } catch {
       keyRow = null;
     }
-    if (keyRow) {
-      if (keyRow.expires_at !== null && keyRow.expires_at !== undefined && keyRow.expires_at !== '') {
-        const exp = new Date(String(keyRow.expires_at).replace(' ', 'T')).getTime();
-        // 过期时间存在但无法解析时必须拒绝：NaN 会让比较失效，等价于永不过期。
-        if (!Number.isFinite(exp) || exp <= Date.now()) {
-          return reply.code(401).send({ code: -1, msg: 'API Key 已过期' });
-        }
-      }
-      let allowlist: string[] = [];
-      let allowlistInvalid = false;
-      try {
-        const parsed = typeof keyRow.ip_allowlist === 'string' ? JSON.parse(keyRow.ip_allowlist) : keyRow.ip_allowlist;
-        allowlist = Array.isArray(parsed) ? parsed.map(String) : [];
-      } catch {
-        allowlistInvalid = true;
-      }
-      if (allowlistInvalid) {
-        return reply.code(403).send({ code: -1, msg: 'API Key 的 IP 白名单配置无效' });
-      }
-      if (!ipAllowed(String(req.ip || ''), allowlist)) {
-        return reply.code(403).send({ code: -1, msg: 'API Key 不允许从当前 IP 使用' });
-      }
-      dbUser = await findUserById(Number(keyRow.uid));
-      scopes = parseScopes(keyRow.scopes);
-      apiKeyId = Number(keyRow.id || 0);
-      apiKeyName = String(keyRow.name || '');
-    } else {
-      dbUser = await findUserByApiKey(apiKey);
+    if (!keyRow) {
+      rejectLegacyApiKey(apiKey);
+      return reply.code(401).send({ code: -1, msg: 'API Key 无效或已弃用，请重新生成' });
     }
+    if (keyRow.expires_at !== null && keyRow.expires_at !== undefined && keyRow.expires_at !== '') {
+      const exp = new Date(String(keyRow.expires_at).replace(' ', 'T')).getTime();
+      // 过期时间存在但无法解析时必须拒绝：NaN 会让比较失效，等价于永不过期。
+      if (!Number.isFinite(exp) || exp <= Date.now()) {
+        return reply.code(401).send({ code: -1, msg: 'API Key 已过期' });
+      }
+    }
+    let allowlist: string[] = [];
+    let allowlistInvalid = false;
+    try {
+      const parsed = typeof keyRow.ip_allowlist === 'string' ? JSON.parse(keyRow.ip_allowlist) : keyRow.ip_allowlist;
+      allowlist = Array.isArray(parsed) ? parsed.map(String) : [];
+    } catch {
+      allowlistInvalid = true;
+    }
+    if (allowlistInvalid) {
+      return reply.code(403).send({ code: -1, msg: 'API Key 的 IP 白名单配置无效' });
+    }
+    if (!ipAllowed(String(req.ip || ''), allowlist)) {
+      return reply.code(403).send({ code: -1, msg: 'API Key 不允许从当前 IP 使用' });
+    }
+    dbUser = await findUserById(Number(keyRow.uid));
+    scopes = parseScopes(keyRow.scopes);
+    apiKeyId = Number(keyRow.id || 0);
+    apiKeyName = String(keyRow.name || '');
     if (!dbUser || Number(dbUser.status) === 0) return reply.code(401).send({ code: -1, msg: 'API Key 无效' });
     const path = String(req.url || req.raw?.url || '').split('?')[0];
     const exempt = path === '/api/auth/me' || path === '/api/auth/reauth' || path === '/api/auth/logout';
@@ -445,7 +445,8 @@ function touchApiKey(id: number, now: number): void {
     const d: any = await queryOne(`SELECT id, name, is_sso FROM ${table('domain')} WHERE id = ?`, [did]);
     if (!d || Number(d.is_sso) !== 1) return reply.code(401).send({ code: -1, msg: '未登录或登录已过期' });
     const jti = String(req.user.jti || '');
-    if (jti && (await isTokenRevoked(jti))) return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
+    if (!jti) return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
+    if (await isTokenRevoked(jti)) return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
     req.user = {
       uid: -did,
       username: `domain:${d.name}`,
@@ -509,9 +510,10 @@ function touchApiKey(id: number, now: number): void {
     authUserCache.delete(uid);
     return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
   }
-  // 单会话吊销：登出后 jti 进入吊销表，未过期的同一令牌不得继续使用
+  // 单会话吊销：所有会话令牌都必须携带 jti，否则无法精确吊销，按失效处理
   const jti = String(req.user.jti || '');
-  if (jti && (await isTokenRevoked(jti))) {
+  if (!jti) return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
+  if (await isTokenRevoked(jti)) {
     return reply.code(401).send({ code: -1, msg: '登录状态已失效，请重新登录' });
   }
   // 保险库会话绑定 jti：下游私有凭证解密通过请求上下文取当前会话密钥

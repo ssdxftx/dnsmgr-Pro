@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // 安装令牌：未配置环境变量时，首次未安装启动会生成一次性随机令牌并打印到日志，
 // 避免公网暴露的安装接口被任意人调用（探测内网数据库/抢先创建管理员）。
@@ -16,11 +16,15 @@ export function initSetupToken(): void {
   console.warn('');
 }
 
+function digestToken(value: string): Buffer {
+  return createHash('sha256').update(value, 'utf8').digest();
+}
+
 export function verifySetupToken(input: any): boolean {
-  if (revoked) return false;
-  const got = Buffer.from(String(input || ''), 'utf8');
-  const want = Buffer.from(current, 'utf8');
-  if (!want.length || got.length !== want.length) return false;
+  if (revoked || !current) return false;
+  // 先做定长哈希再比较：避免直接比字符串长度时通过提前返回泄露令牌长度
+  const got = digestToken(String(input || ''));
+  const want = digestToken(current);
   return timingSafeEqual(got, want);
 }
 

@@ -9,7 +9,7 @@ import {
   isValidCidr,
   normalizeHostname,
 } from '../lib/cloudflare/enhance.js';
-import { fmtDateTime } from '../lib/util.js';
+import { fmtDateTime, publicError } from '../lib/util.js';
 import { getVisibleAccount } from '../lib/accounts/visibility.js';
 import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
 import { withDistributedLockResult } from '../lib/scheduler/distLock.js';
@@ -444,7 +444,7 @@ async function addLog(uid: number, domain: string, action: string, data: string)
 
 function unwrap(e: any): { code: number; msg: string } {
   if (e instanceof EnhanceError) return { code: -1, msg: e.message };
-  return { code: -1, msg: e?.message || '操作失败' };
+  return { code: -1, msg: publicError(e, '操作失败') };
 }
 
 export default async function cloudflareRoutes(app: FastifyInstance) {

@@ -1,5 +1,4 @@
 import os from 'node:os';
-import { createHash } from 'node:crypto';
 import { query, queryOne, table, withDistributedLockResult } from '../db.js';
 
 /** 当前进程标识：多副本部署时便于排查任务归属 */
@@ -39,9 +38,8 @@ async function failStaleJobs(): Promise<void> {
  */
 export async function createJob(uid: number, type: string, total: number, detail?: any): Promise<number> {
   // 「查重 + 全局并发上限 + 插入」必须串行，否则双击/多副本会在 SELECT 与 INSERT 之间各插一行。
-  // MySQL GET_LOCK 名称上限 64 字符，uid+type 可能超长，使用哈希固定长度。
-  const lockName = 'dnsmgr:job:create:' + createHash('sha256').update(`${uid}:${type}`).digest('hex').slice(0, 32);
-  const outcome = await withDistributedLockResult(lockName, async () => {
+  // 全局并发额度按所有任务统计，锁必须使用同一个全局键；按 uid+type 分锁时不同任务仍会并发越过上限。
+  const outcome = await withDistributedLockResult('dnsmgr:job:create', async () => {
     // 先清理失联任务，避免旧行永久占用同类任务去重名额和全局并发额度。
     await failStaleJobs();
     const existing: any = await queryOne(

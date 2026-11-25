@@ -58,8 +58,8 @@ export class LuckyDeploy implements DeployProvider {
       throw new Error('获取证书列表失败：' + e.message);
     }
 
-    let success = 0;
-    let errmsg: string | null = null;
+    let deployed = 0;
+    const failures: string[] = [];
     if (data.list && data.list.length > 0) {
       for (const row of data.list) {
         if (!row.CertsInfo || !row.CertsInfo.Domains) continue;
@@ -78,16 +78,20 @@ export class LuckyDeploy implements DeployProvider {
           try {
             await this.request('/api/ssl', params, 'PUT');
             this.log('证书ID:' + row.Key + '更新成功！');
-            success++;
+            deployed++;
           } catch (e: any) {
-            errmsg = e.message;
-            this.log('证书ID:' + row.Key + '更新失败：' + errmsg);
+            const msg = e.message || String(e);
+            failures.push(`${row.Key}: ${msg}`);
+            this.log('证书ID:' + row.Key + '更新失败：' + msg);
           }
         }
       }
     }
-    if (success === 0) {
-      throw new Error(errmsg || '没有要更新的证书');
+    if (failures.length) {
+      throw new Error(`证书部署部分失败（${failures.length} 个证书）：${failures.join('；')}`);
+    }
+    if (!deployed) {
+      throw new Error('没有要更新的证书');
     }
   }
 

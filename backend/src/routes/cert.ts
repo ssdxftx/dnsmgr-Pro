@@ -1,7 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { createPrivateKey, randomBytes, X509Certificate } from 'node:crypto';
 import { domainToASCII } from 'node:url';
-import { existsSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { checkLevel } from '../auth.js';
@@ -11,7 +12,7 @@ import { certConfig, certClassConfig } from '../lib/cert/factory.js';
 import { getCertProvider } from '../lib/cert/factory.js';
 import { assertStrictCertPem, assertStrictKeyPem, getMainDomain } from '../lib/cert/utils.js';
 import { CertOrderService, buildPfx, STATUS_LABEL } from '../lib/certService.js';
-import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
+import { kickOrderProcessing, validateRenewDays } from '../lib/cert/certTaskService.js';
 import { processOrderLink } from '../lib/cdn/certLink.js';
 import { deployConfig, deployClassConfig, isDeployImplemented, getDeployProvider } from '../lib/deploy/factory.js';
 import { CertDeployService } from '../lib/deployService.js';
@@ -30,18 +31,23 @@ const LOG_DIR = logDir();
 const LOG_TAIL_BYTES = 500_000;
 
 /** 只读取日志末尾，避免证书/部署日志增长后阻塞事件循环并占用大量内存 */
-function readLogTail(file: string, maxBytes = LOG_TAIL_BYTES): string {
-  const st = statSync(file);
-  const size = Math.min(st.size, maxBytes);
-  if (size <= 0) return '';
-  const buf = Buffer.alloc(size);
-  const fd = openSync(file, 'r');
+async function readLogTail(file: string, maxBytes = LOG_TAIL_BYTES): Promise<string> {
+  const fh = await open(file, 'r');
   try {
-    readSync(fd, buf, 0, size, st.size - size);
+    const st = await fh.stat();
+    const size = Math.min(st.size, maxBytes);
+    if (size <= 0) return '';
+    const buf = Buffer.alloc(size);
+    let offset = 0;
+    while (offset < size) {
+      const { bytesRead } = await fh.read(buf, offset, size - offset, st.size - size + offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    return buf.subarray(0, offset).toString('utf8');
   } finally {
-    closeSync(fd);
+    await fh.close();
   }
-  return buf.toString('utf8');
 }
 
 // 密钥类型/长度白名单：防止超大 keysize 同步生成 RSA 密钥阻塞事件循环（DoS）
@@ -73,12 +79,13 @@ async function fetchDomainMap(oids: number[]): Promise<Map<number, string[]>> {
   return map;
 }
 
-/** 部署任务越权守卫：任务绑定的证书账户对当前用户不可见时按不存在处理 */
+/** 部署任务越权守卫：部署账户与证书订单均需对当前用户可见，否则按不存在处理 */
 async function canAccessDeployTask(id: any, user: any): Promise<boolean> {
-  const row: any = await queryOne(`SELECT aid FROM ${table('cert_deploy')} WHERE id = ?`, [Number(id)]);
+  const row: any = await queryOne(`SELECT aid, oid FROM ${table('cert_deploy')} WHERE id = ?`, [Number(id)]);
   if (!row) return false;
-  if (!Number(row.aid)) return checkLevel(user, 2);
-  return !!(await getVisibleAccount('cert_account', Number(row.aid), user));
+  const accountOk = !Number(row.aid) ? checkLevel(user, 2) : !!(await getVisibleAccount('cert_account', Number(row.aid), user));
+  if (!accountOk) return false;
+  return canAccessCertOrder(Number(row.oid), user);
 }
 
 function parseCertKey(fullchain: string, privatekey: string) {
@@ -118,9 +125,23 @@ function parseCertKey(fullchain: string, privatekey: string) {
 
   const domains: string[] = [];
   for (const line of san.split(',')) {
-    let d = line.trim();
-    if (d.startsWith('DNS:')) d = d.slice(4).trim();
-    if (d && !domains.includes(d)) domains.push(d);
+    const raw = line.trim();
+    if (!raw.startsWith('DNS:')) continue;
+    const d = raw.slice(4).trim().toLowerCase().replace(/\.$/, '');
+    const wildcard = d.startsWith('*.');
+    const candidate = wildcard ? d.slice(2) : d;
+    if (!candidate || candidate.includes('*')) continue;
+    const labels = candidate.split('.');
+    const validLabel = (label: string) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label);
+    // TLD 允许 punycode（xn--）与数字，不能限定为纯字母，否则合法 IDN 证书会被拒绝
+    if (
+      candidate.length > 253 ||
+      labels.length < 2 ||
+      !labels.every(validLabel) ||
+      labels[labels.length - 1].length < 2 ||
+      /^[0-9]+$/.test(labels[labels.length - 1])
+    ) continue;
+    if (!domains.includes(d)) domains.push(d);
   }
   if (!domains.length) return { code: -1, msg: '证书绑定域名不能为空' };
 
@@ -134,6 +155,16 @@ function parseCertKey(fullchain: string, privatekey: string) {
     issuer,
     domains,
   };
+}
+
+/** 读取库中私钥：仅历史明文允许原样返回，密文解密失败时明确报错 */
+function readStoredPrivateKey(raw: any): string | null {
+  const value = String(raw ?? '');
+  if (!value) return '';
+  if (!value.toLowerCase().startsWith('enc:')) return value;
+  const plain = decryptText(value);
+  if (plain === null || plain.toLowerCase().startsWith('enc:')) return null;
+  return plain;
 }
 
 async function checkOrder(order: any, domains: string[]) {
@@ -772,7 +803,8 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!row) return reply.code(404).send({ code: -1, msg: '证书订单不存在' });
     const domains = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
     // 私钥为加密存储，读取时解密（兼容历史明文）
-    const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
+    const privateKey = readStoredPrivateKey(row.privatekey);
+    if (privateKey === null) return reply.code(400).send({ code: -1, msg: '私钥解密失败，请重新保存证书' });
     let pfx = null;
     let pfxPassOut: string | null = null;
     if (row.fullchain && privateKey) {
@@ -825,7 +857,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!processid) return { code: -1, msg: '无日志' };
     const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: -1, msg: '日志文件不存在' };
-    return { code: 0, data: readLogTail(file) };
+    return { code: 0, data: await readLogTail(file) };
   });
 
   // ============ CNAME 代理 ============
@@ -935,8 +967,9 @@ export default async function certRoutes(app: FastifyInstance) {
     }
     const visibleCertAids = (await listVisibleAccounts('cert_account', req.user)).map((a: any) => Number(a.id));
     if (!visibleCertAids.length) return { code: 0, total: 0, data: [] };
-    where += ` AND A.aid IN (${visibleCertAids.map(() => '?').join(',')})`;
-    params.push(...visibleCertAids);
+    const certAidPlaceholders = visibleCertAids.map(() => '?').join(',');
+    where += ` AND A.aid IN (${certAidPlaceholders}) AND A.oid IN (SELECT id FROM ${table('cert_order')} WHERE aid = 0 OR aid IN (${certAidPlaceholders}))`;
+    params.push(...visibleCertAids, ...visibleCertAids);
     const total = (await queryOne(`SELECT COUNT(*) AS c FROM ${table('cert_deploy')} A WHERE ${where}`, params))?.c || 0;
     const statRow: any = await queryOne(
       `SELECT SUM(CASE WHEN A.active = 1 THEN 1 ELSE 0 END) AS active,
@@ -1130,7 +1163,7 @@ export default async function certRoutes(app: FastifyInstance) {
     if (!processid) return { code: 0, data: '' };
     const file = join(LOG_DIR, processid + '.log');
     if (!existsSync(file)) return { code: 0, data: '' };
-    const text = readLogTail(file);
+    const text = await readLogTail(file);
     return { code: 0, data: text };
   });
 
@@ -1190,7 +1223,8 @@ export default async function certRoutes(app: FastifyInstance) {
     if (pfxPass.length < 8) {
       return reply.code(400).send({ code: -1, msg: '请通过 pfx_pass 提供至少 8 位的 PFX 口令' });
     }
-    const privateKey = decryptText(row.privatekey) ?? row.privatekey ?? '';
+    const privateKey = readStoredPrivateKey(row.privatekey);
+    if (privateKey === null) return reply.code(400).send({ code: -1, msg: '私钥解密失败，请重新保存证书' });
     let pfx: string | null = null;
     if (row.fullchain && privateKey) {
       try {
@@ -1225,6 +1259,10 @@ export default async function certRoutes(app: FastifyInstance) {
 
   app.post('/api/cert/settings', auth, async (req: any) => {
     const body = req.body || {};
+    if ('cert_renewdays' in body) {
+      const err = validateRenewDays(body.cert_renewdays);
+      if (err) return { code: -1, msg: err };
+    }
     for (const k of SETTINGS_KEYS) {
       if (k in body) await configSet(k, String(body[k] ?? ''));
     }

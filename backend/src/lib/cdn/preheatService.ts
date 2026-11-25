@@ -19,7 +19,18 @@ function dedupe(list: string[]): string[] {
 
 /** 把任务里保存的 URL 文本解析为数组（支持换行/逗号/分号分隔） */
 export function loadUrls(text: string): string[] {
-  return dedupe(String(text || '').split(/\r?\n/).flatMap((s) => s.split(/[;,]/)));
+  return dedupe(
+    String(text || '')
+      .split(/\r?\n/)
+      .flatMap((line) => {
+        const value = line.trim();
+        if (!value) return [];
+        // 含协议的整行默认保留，避免 query 中的逗号被拆开；只有分隔符后紧跟新协议时才拆分
+        if (!value.includes('://')) return value.split(/[;,]/);
+        const parts = value.split(/\s*[,;]\s*(?=[A-Za-z][A-Za-z0-9+.-]*:\/\/)/);
+        return parts.length > 1 ? parts : [value];
+      }),
+  );
 }
 
 async function cdnForZone(aid: number, zoneId: string | null) {

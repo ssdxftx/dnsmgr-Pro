@@ -112,7 +112,12 @@ async function consumeNonce(nonce: string, uid: number): Promise<boolean> {
 export async function consumeOneTimeTicket(key: string, uid: number): Promise<boolean> {
   const id = String(key || '').trim();
   if (!id) return false;
-  return consumeNonce(`t:${id}`, uid);
+  let nonce = `t:${id}`;
+  if (Buffer.byteLength(nonce, 'utf8') > 64) {
+    const digest = createHash('sha256').update(nonce, 'utf8').digest('hex');
+    nonce = `t:h:${digest.slice(0, 60)}`;
+  }
+  return consumeNonce(nonce, uid);
 }
 
 export async function legacyApiAuth(req: any): Promise<LegacyAuthResult> {

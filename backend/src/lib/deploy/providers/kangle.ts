@@ -74,21 +74,25 @@ export class KangleDeploy implements DeployProvider {
 
     if (config.type === '1' && config.domains) {
       const domains = String(config.domains).split('\n');
-      let success = 0;
-      let errmsg: string | null = null;
+      const failures: string[] = [];
+      let deployed = 0;
       for (const raw of domains) {
         const domain = raw.trim();
         if (!domain) continue;
         try {
           await this.deployDomain(domain, fullchain, privatekey);
           this.log('域名 ' + domain + ' 证书部署成功');
-          success++;
+          deployed++;
         } catch (e: any) {
-          errmsg = e.message;
-          this.log('域名 ' + domain + ' 证书部署失败：' + errmsg);
+          const msg = e.message || String(e);
+          failures.push(`${domain}: ${msg}`);
+          this.log('域名 ' + domain + ' 证书部署失败：' + msg);
         }
       }
-      if (success === 0) throw new Error(errmsg || '要部署的域名不存在');
+      if (failures.length) {
+        throw new Error(`证书部署部分失败（${failures.length} 个域名）：${failures.join('；')}`);
+      }
+      if (!deployed) throw new Error('要部署的域名不存在');
     } else {
       await this.deployAccount(fullchain, privatekey);
       this.log('账号级SSL证书部署成功');
@@ -148,7 +152,7 @@ export class KangleDeploy implements DeployProvider {
 
   private async loginBySkey2(cookie: string, sessKey: string): Promise<boolean> {
     const s = createHash('md5').update(sessKey + this.username + sessKey + this.skey).digest('hex');
-    const url = this.url + '/vhost/index.php?c=sso&a=login&name=' + this.username + '&r=' + sessKey + '&s=' + s;
+    const url = this.url + '/vhost/index.php?c=sso&a=login&name=' + encodeURIComponent(this.username) + '&r=' + sessKey + '&s=' + s;
     const response = await this.request(url, 'GET', { cookie });
     if (response.code === 302) return true;
     if (response.body.length > 3 && response.body.length < 50) throw new Error('SSO登录失败 (' + this.htmlspecialchars(response.body) + ')');

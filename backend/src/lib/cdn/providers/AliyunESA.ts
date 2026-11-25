@@ -365,16 +365,23 @@ export class AliyunESA implements CdnProvider {
     return String(s).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
 
+  private esaRegexEscape(s: string): string {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
   // dnsmgr 的 path 规则 → ESA 规则表达式的补充条件（不含 host 前缀，返回闭括号结尾的片段）
   private esaPathCondition(parsed: { type: PathRuleType; value: string }): string {
     if (parsed.type === 'file_extension') {
       const exts = fileExtensions(parsed.value);
       if (!exts.length) throw new Error('文件后缀缓存规则内容不能为空');
-      return ' and http.request.uri.path matches "\\.(' + exts.map((e) => this.esaEscape(e)).join('|') + ')$")';
+      return ' and http.request.uri.path matches "\\.(' + exts.map((e) => this.esaEscape(this.esaRegexEscape(e))).join('|') + ')$")';
     }
     if (parsed.type === 'catalog') {
       const path = catalogPath(parsed.value);
-      return ' and starts_with(http.request.uri.path, "' + this.esaEscape(path) + '"))';
+      if (path === '/') {
+        return ' and http.request.uri.path matches "^/.*$")';
+      }
+      return ' and http.request.uri.path matches "^(?:' + this.esaEscape(this.esaRegexEscape(path)) + ')(?:/.*)?$")';
     }
     // full_path
     const v = normalizeValue(parsed.value);
@@ -433,6 +440,7 @@ export class AliyunESA implements CdnProvider {
       });
     }
     try {
+      const targetNames = new Set(targets.map((t) => t.ruleName));
       // 同步目标规则（创建或更新）
       for (let i = 0; i < targets.length; i++) {
         const t = targets[i];
@@ -452,14 +460,32 @@ export class AliyunESA implements CdnProvider {
           if (!(await this.call({ Action: 'CreateCacheRule', SiteId: sid, ...base }))) return false;
         }
       }
-      // 清理多余的旧规则（_N+1 起，直到查不到）
-      let extra = idx + 1;
-      for (let guard = 0; guard < 100; guard++, extra++) {
-        const name = this.esaRuleName(domain, '_' + extra);
-        const existing = await this.findEsaRule('ListCacheRules', sid, name);
-        if (existing === undefined) return false;
-        if (!existing) break;
-        if (!(await this.call({ Action: 'DeleteCacheRule', SiteId: sid, ConfigId: existing.ConfigId }))) return false;
+      const baseName = this.esaRuleName(domain);
+      const stale: { name: string; configId: string }[] = [];
+      const size = 100;
+      for (let page = 1; page <= 50; page++) {
+        const data = await this.call({ Action: 'ListCacheRules', SiteId: sid, PageNumber: page, PageSize: size });
+        if (!data) return false;
+        const configs = data.Configs || [];
+        for (const c of configs) {
+          const name = String(c?.RuleName || '');
+          const numbered = name.startsWith(baseName + '_') && /^\d+$/.test(name.slice(baseName.length + 1));
+          if (name !== baseName && !numbered) continue;
+          if (targetNames.has(name)) continue;
+          stale.push({ name, configId: String(c?.ConfigId || '') });
+        }
+        const total = Number(data.TotalCount || 0);
+        if (configs.length < size || page * size >= total) break;
+      }
+      for (const item of stale) {
+        if (!item.configId) {
+          this.error = '清理阿里云 ESA 旧缓存规则失败：缺少配置 ID（' + item.name + '）';
+          return false;
+        }
+        if (!(await this.call({ Action: 'DeleteCacheRule', SiteId: sid, ConfigId: item.configId }))) {
+          this.error = '清理阿里云 ESA 旧缓存规则失败：' + item.name;
+          return false;
+        }
       }
       return true;
     } catch (e: any) {

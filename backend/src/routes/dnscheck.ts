@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
-import { checkLevel, matchPermission, sameDomain } from '../auth.js';
+import { checkLevel, matchPermission, permissionMatchesDomain } from '../auth.js';
 import { checkDomainRecords, calcNextRun, listSubDomains } from '../lib/dns/checkService.js';
 import { fmtDateTime, escapeLike, parseRunTime } from '../lib/util.js';
 import { hitRateLimit } from '../lib/rateLimit.js';
@@ -58,18 +58,47 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
       const params = kw ? ['%' + escapeLike(kw) + '%'] : [];
       const rows = await query(
         `SELECT D.id, D.name FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
-          WHERE (A.visibility <> 'private' OR A.owner_uid = ?)${where} ORDER BY D.id DESC LIMIT 2000`,
+          WHERE (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)${where} ORDER BY D.id DESC LIMIT 2000`,
         [Number(req.user.uid), ...params],
       );
       return { code: 0, data: rows };
     }
     const perms = await getEffectivePermissions(req.user);
-    const names = [...new Set(perms.map((p: any) => p.domain))];
-    if (!names.length) return { code: 0, data: [] };
+    const names = new Set<string>();
+    const ids = new Set<number>();
+    const aidNames: { aid: number; name: string }[] = [];
+    for (const p of perms) {
+      const name = String(p.domain || '');
+      if (!name) continue;
+      const hasAid = p.aid !== undefined && p.aid !== null;
+      const hasDomainId = p.domainId !== undefined && p.domainId !== null;
+      if (!hasAid && !hasDomainId) {
+        names.add(name);
+        continue;
+      }
+      const did = Number(p.domainId);
+      if (hasDomainId && Number.isInteger(did) && did > 0) ids.add(did);
+      else if (hasAid) aidNames.push({ aid: Number(p.aid), name });
+    }
+    const conds: string[] = [];
+    const args: any[] = [];
+    if (names.size) {
+      conds.push(`D.name IN (${[...names].map(() => '?').join(',')})`);
+      args.push(...names);
+    }
+    if (ids.size) {
+      conds.push(`D.id IN (${[...ids].map(() => '?').join(',')})`);
+      args.push(...ids);
+    }
+    for (const x of aidNames) {
+      conds.push('(D.aid = ? AND D.name = ?)');
+      args.push(x.aid, x.name);
+    }
+    if (!conds.length) return { code: 0, data: [] };
     const rows: any[] = await query(
       `SELECT D.id, D.name FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id
-        WHERE D.name IN (${names.map(() => '?').join(',')}) AND (A.visibility <> 'private' OR A.owner_uid = ?) ORDER BY D.id DESC`,
-      [...names, Number(req.user.uid)],
+        WHERE (${conds.join(' OR ')}) AND (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?) ORDER BY D.id DESC`,
+      [...args, Number(req.user.uid)],
     );
     return { code: 0, data: rows };
   });
@@ -79,7 +108,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     const did = Number(req.params.id);
     if (!did) return { code: -1, msg: '参数错误' };
     const d: any = await queryOne(
-      `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+      `SELECT D.id, D.aid, D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
       [did],
     );
     if (!d || (d.visibility === 'private' && Number(d.owner_uid) !== Number(req.user.uid))) return { code: 0, data: [] };
@@ -89,8 +118,8 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
     }
     const perms = await getEffectivePermissions(req.user);
     const subs = perms
-      .filter((p: any) => sameDomain(p.domain, d.name) && p.sub)
-      .map((p: any) => String(p.sub).toLowerCase().replace(/\.+$/, ''));
+      .filter((p) => permissionMatchesDomain(p, d.name, d) && p.sub)
+      .map((p) => String(p.sub).toLowerCase().replace(/\.+$/, ''));
     return { code: 0, data: [...new Set(subs)] };
   });
 
@@ -202,7 +231,7 @@ export default async function dnsCheckRoutes(app: FastifyInstance) {
 
 async function canAccessDomain(user: any, did: number): Promise<boolean> {
   const d: any = await queryOne(
-    `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    `SELECT D.id, D.aid, D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
     [did],
   );
   if (!d) return false;
@@ -210,18 +239,18 @@ async function canAccessDomain(user: any, did: number): Promise<boolean> {
   if (checkLevel(user, 2)) return true;
   const perms = await getEffectivePermissions(user);
   // 只读授权不能创建/修改检测任务（会周期发起外部解析并发送邮件）
-  return perms.some((p: any) => sameDomain(p.domain, d.name) && Number(p.readonly) !== 1);
+  return perms.some((p) => permissionMatchesDomain(p, d.name, d) && Number(p.readonly) !== 1);
 }
 
 /** 校验普通用户选择的子域名是否落在其接入域名范围内 */
 async function canAccessSub(user: any, did: number, sub: string): Promise<boolean> {
   const d: any = await queryOne(
-    `SELECT D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
+    `SELECT D.id, D.aid, D.name, A.visibility, A.owner_uid FROM ${table('domain')} D LEFT JOIN ${table('account')} A ON D.aid = A.id WHERE D.id = ?`,
     [did],
   );
   if (!d) return false;
   if (d.visibility === 'private' && Number(d.owner_uid) !== Number(user.uid)) return false;
   if (checkLevel(user, 2)) return true;
   const perms = await getEffectivePermissions(user);
-  return matchPermission(perms, d.name, sub.trim().replace(/\.+$/, '')) === 0;
+  return matchPermission(perms, d.name, sub.trim().replace(/\.+$/, ''), d) === 0;
 }

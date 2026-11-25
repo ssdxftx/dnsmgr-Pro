@@ -1,5 +1,5 @@
 import { findUserById, verifyPassword } from '../auth.js';
-import { isTokenRevoked } from './auth/revocation.js';
+import { isTokenRevoked, revokeToken } from './auth/revocation.js';
 import { hitRateLimitDistributed } from './rateLimit.js';
 
 /**
@@ -54,6 +54,7 @@ async function verifyReauthToken(
   if (Number(decoded.token_version || 0) !== Number(user.token_version || 0)) {
     return { present: true, error: '登录状态已变更，请重新验证' };
   }
+  await revokeToken(String(decoded.jti), Number(uid), decoded.exp ? new Date(Number(decoded.exp) * 1000) : undefined);
   return { present: true, error: null };
 }
 

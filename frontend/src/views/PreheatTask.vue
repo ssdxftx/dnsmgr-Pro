@@ -64,7 +64,7 @@
           <n-time-picker v-model:value="form.runTime" format="HH:mm" value-format="HH:mm" :clearable="false" />
         </n-form-item>
         <n-form-item v-if="form.cycle === 'interval'" :label="t('preheat.intervalMinLabel')">
-          <n-input-number v-model:value="form.intervalMin" :min="1" :max="10080" style="width: 200px" />
+          <n-input-number v-model:value="form.intervalMin" :min="5" :max="10080" style="width: 200px" />
         </n-form-item>
         <n-form-item :label="t('common.enable')">
           <n-switch v-model:value="form.active" />
@@ -224,7 +224,7 @@ function openEdit(row: any) {
 
 async function save() {
   if (!form.urls.trim()) return message.warning(t('preheat.pleaseInputUrls'));
-  if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 1)) return message.warning(t('preheat.pleaseInputInterval'));
+  if (form.cycle === 'interval' && (!form.intervalMin || form.intervalMin < 5)) return message.warning(t('preheat.pleaseInputInterval'));
   saveBusy.value = true;
   try {
     const runTime = form.cycle === 'daily' ? normalizeHm(form.runTime) : null;

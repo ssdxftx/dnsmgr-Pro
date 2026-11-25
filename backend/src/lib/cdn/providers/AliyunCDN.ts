@@ -1,8 +1,8 @@
 import { Aliyun } from '../../clients/Aliyun.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
-import { fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
+import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
-import { cachedDetail } from '../detailCache.js';
+import { cachedDetail, credentialCacheId } from '../detailCache.js';
 
 const scopeMap: Record<string, string> = { mainland_china: 'domestic', overseas: 'overseas', global: 'global' };
 
@@ -18,7 +18,7 @@ export class AliyunCDN implements CdnProvider {
 
   constructor(config: Record<string, any>) {
     this.client = new Aliyun(config.AccessKeyId, config.AccessKeySecret, 'cdn.aliyuncs.com', '2018-05-10');
-    this.cacheId = String(config.AccessKeyId || '');
+    this.cacheId = credentialCacheId(config.AccessKeyId, config.AccessKeySecret);
   }
 
   getError() {
@@ -81,7 +81,8 @@ export class AliyunCDN implements CdnProvider {
       const pageData = data.Domains?.PageData || [];
       // 单个域名的详情/配置查询彼此独立，用 4 并发替代逐域名串行 2N 次请求
       const pageItems = await mapPool(pageData, 8, async (d: any) => {
-        const detailRaw = await cachedDetail(`aliyun:${this.cacheId}:detail:${d.DomainName}`, 30_000, async () => {
+        const detailKey = this.cacheId ? `aliyun:${this.cacheId}:detail:${d.DomainName}` : '';
+        const detailRaw = await cachedDetail(detailKey, 30_000, async () => {
           const dr = await this.call({ Action: 'DescribeCdnDomainDetail', DomainName: d.DomainName });
           return dr ? dr.GetDomainDetailModel || {} : null;
         });
@@ -100,7 +101,8 @@ export class AliyunCDN implements CdnProvider {
         }
         let forceRedirect = false;
         const httpsEnabled = String(detail.ServerCertificateStatus || '').toLowerCase() === 'on';
-        const cfg = await cachedDetail(`aliyun:${this.cacheId}:https-force:${d.DomainName}`, 30_000, () =>
+        const cfgKey = this.cacheId ? `aliyun:${this.cacheId}:https-force:${d.DomainName}` : '';
+        const cfg = await cachedDetail(cfgKey, 30_000, () =>
           this.call({ Action: 'DescribeCdnDomainConfigs', DomainName: d.DomainName, FunctionNames: 'https_force' }),
         );
         if (cfg) {
@@ -188,7 +190,7 @@ export class AliyunCDN implements CdnProvider {
       return p === '*' || p === '';
     });
     const functions: any[] = [];
-    let weight = list.length + (globalRule ? 1 : 0);
+    let weight = 1;
     const buildTtlFunction = (functionName: string, argName: string, argValue: string, ttl: number, w: number) => ({
       functionName,
       functionArgs: [
@@ -201,21 +203,36 @@ export class AliyunCDN implements CdnProvider {
     if (globalRule) {
       const ttl = Math.max(0, Number(globalRule.ttl) || 0);
       // 全部文件规则等价于全站路径 '/'
-      functions.push(buildTtlFunction('path_based_ttl_set', 'path', '/', ttl, weight--));
+      functions.push(buildTtlFunction('path_based_ttl_set', 'path', '/', ttl, 1));
     }
     for (const r of list) {
       const parsed = parsePathRule(r?.path);
       const ttl = Math.max(0, Number(r?.ttl) || 0);
+      let functionName: string;
+      let argName: string;
+      let argValue: string;
       if (parsed.type === 'file_extension') {
         const exts = fileExtensions(parsed.value);
-        if (!exts.length) {
-          weight--;
-          continue;
-        }
-        functions.push(buildTtlFunction('filetype_based_ttl_set', 'file_type', exts.join(','), ttl, weight--));
+        if (!exts.length) continue;
+        functionName = 'filetype_based_ttl_set';
+        argName = 'file_type';
+        argValue = exts.join(',');
+      } else if (parsed.type === 'catalog') {
+        const dir = catalogPath(parsed.value);
+        functionName = 'path_based_ttl_set';
+        argName = 'path';
+        argValue = dir === '/' ? '/' : dir + '/';
       } else {
-        functions.push(buildTtlFunction('path_based_ttl_set', 'path', normalizeValue(parsed.value), ttl, weight--));
+        functionName = 'path_based_ttl_set';
+        argName = 'path';
+        argValue = normalizeValue(parsed.value);
       }
+      weight += 1;
+      if (weight > 99) {
+        this.error = '阿里云 CDN 缓存规则数量超出权重范围（1-99），最多支持 98 条具体规则';
+        return false;
+      }
+      functions.push(buildTtlFunction(functionName, argName, argValue, ttl, weight));
     }
     if (!functions.length) {
       await this.deleteDomainConfig(domain, managedNames.join(','));

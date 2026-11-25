@@ -113,13 +113,14 @@ export class WestDns implements DnsProvider {
     return data && data.id ? String(data.id) : false;
   }
 
-  async updateDomainRecord(RecordId: string, _Name: string, Type: string, Value: string, Line = '', TTL = 600, MX = 1, _Weight: number | null = null, _Remark: string | null = null) {
+  async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '', TTL = 600, MX = 1, _Weight: number | null = null, _Remark: string | null = null) {
     const line = Line === 'default' ? '' : Line;
     return (
       (await this.execute({
         act: 'moddnsrecord',
         domain: this.domain,
         id: RecordId,
+        host: Name,
         type: Type,
         value: Value,
         level: Number(MX),

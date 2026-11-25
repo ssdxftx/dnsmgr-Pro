@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { configGet, configSet } from '../config.js';
 import { QqBot } from '../lib/monitor/qqbot.js';
 import { audit } from '../lib/audit/context.js';
@@ -7,6 +8,12 @@ import { consumeOneTimeTicket } from '../lib/legacyApi.js';
 
 const BIND_REPLY = '# 绑定成功\n\n您已成功绑定QQ机器人消息通知，聚合DNS管理系统通知将通过本机器人发送。';
 const UNBIND_NOTICE = '# 绑定已变更\n\n您的QQ机器人消息通知绑定已被其他账号替换。若非本人操作，请立即检查系统账号安全。';
+
+function safeEqual(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(String(a), 'utf8').digest();
+  const hb = createHash('sha256').update(String(b), 'utf8').digest();
+  return timingSafeEqual(ha, hb);
+}
 
 /**
  * QQ 机器人开放平台 Webhook：
@@ -72,23 +79,26 @@ export default async function qqbotRoutes(app: FastifyInstance) {
 
       if (String(payload.t || '').toUpperCase() === 'C2C_MESSAGE_CREATE') {
         const d = payload.d && typeof payload.d === 'object' ? payload.d : {};
-        const openid = String(d.author?.user_openid || '');
+        const openid = String(d.author?.user_openid || '').trim();
+        // 先确认来源 openid，再处理一次性口令：无有效来源的消息不能触发口令清理
+        if (!openid) return reply.send('');
         const old = String((await configGet('qqbot_openid', '')) || '');
         // 绑定必须携带管理员在系统设置中配置的口令，避免任意 QQ 用户发消息抢占通知绑定
         const bindCode = String((await configGet('qqbot_bind_code', '')) || '').trim();
         const content = String(d.content || '').trim();
-        if (bindCode === '' || content !== bindCode) {
-          // 绑定口令不允许弱口令；尝试次数按全局桶限流，避免攻击者用不同 QQ 号分摊爆破。
+        if (bindCode === '' || !safeEqual(content, bindCode)) {
+          // 绑定口令不允许弱口令；尝试次数按来源拆分，避免单账号爆破或全局桶互相拖累
           if (bindCode.length > 0 && bindCode.length < 8) return reply.send('');
           if (bindCode !== '') {
-            const ok = await hitRateLimitDistributed('qqbot:bind-attempt', 20, 10 * 60_000);
+            const source = openid || String(req.ip || 'unknown');
+            const ok = await hitRateLimitDistributed(`qqbot:bind-attempt:${source}`, 20, 10 * 60_000);
             if (!ok) return reply.send('');
           }
           return reply.send('');
         }
-        // 口令一次性使用：绑定成功后立即清空，换绑必须由管理员重新生成。
+        // 口令一次性使用：校验通过且 openid 已确认后立即清空，换绑必须由管理员重新生成。
         await configSet('qqbot_bind_code', '');
-        if (openid !== '' && old !== openid) {
+        if (old !== openid) {
           await configSet('qqbot_openid', openid);
           console.warn('[qqbot] 通知绑定 openid 变更：' + (old || '(空)') + ' -> ' + openid);
           // 绑定变更是安全敏感配置：必须留痕（来源 IP、旧值掩码），否则被换绑后无从追溯

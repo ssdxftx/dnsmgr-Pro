@@ -194,8 +194,8 @@ export async function queryTencentEdgeOneStatistics(
   const hitFlux = new Array(len).fill(0);
   const bsNum = new Array(len).fill(0);
 
-  const add = (target: number[], values: number[]) => {
-    const aligned = alignSeries(values, len);
+  const add = (target: number[], values: number[], agg: 'sum' | 'max' | 'avg' = 'sum') => {
+    const aligned = alignSeries(values, len, agg);
     for (let i = 0; i < len; i++) target[i] += aligned[i] || 0;
   };
 
@@ -212,13 +212,13 @@ export async function queryTencentEdgeOneStatistics(
       if (hourlyPeaks.length) bwSeries = { values: hourlyPeaks, hasDetail: true };
       // 带宽的 Sum 是整段之和，不能画进曲线
       if (bwSeries.hasDetail) {
-        add(bw, bwSeries.values);
+        add(bw, bwSeries.values, 'max');
         bwHasDetail = true;
       }
       add(outFlux, extractSeries(accessRecords, ACCESS_OUT_FLUX, len).values);
       const originRecords = await origin(zoneId, [ORIGIN_FLUX, ORIGIN_BANDWIDTH]);
       add(bsFlux, extractSeries(originRecords, ORIGIN_FLUX, len).values);
-      add(bsBw, extractSeries(originRecords, ORIGIN_BANDWIDTH, len).values);
+      add(bsBw, extractSeries(originRecords, ORIGIN_BANDWIDTH, len).values, 'max');
     }
     if (type === 'Visits' || type === 'All') {
       const accessRecords = await access(zoneId, [ACCESS_REQUEST]);

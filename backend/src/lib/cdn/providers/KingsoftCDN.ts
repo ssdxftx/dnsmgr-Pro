@@ -106,35 +106,46 @@ export class KingsoftCDN implements CdnProvider {
   }
 
   async listDomains(): Promise<CdnDomainItem[] | false> {
-    const data = await this.get('GetCdnDomains', '2019-06-01', '/2019-06-01/domain/GetCdnDomains', { PageSize: '100', PageNumber: '1' });
-    if (!data) return false;
-    const domains = pick(data, 'Domains', 'domains') || [];
+    const pageSize = 100;
     const list: CdnDomainItem[] = [];
-    for (const d of domains) {
-      const name = pick(d, 'DomainName', 'domainName') || '';
-      const id = pick(d, 'DomainId', 'domainId') || '';
-      if (!name) continue;
-      const info = id ? await this.basicInfo(String(id)) : false;
-      const origin = info ? String(pick(info, 'Origin', 'origin') || '') : '';
-      const originType = info && String(pick(info, 'OriginType', 'originType') || '') === 'domain' ? 'domain' : 'ipaddr';
-      const protocol = info ? String(pick(info, 'OriginProtocol', 'originProtocol') || 'follow') : 'follow';
-      const httpPort = info ? Number(pick(info, 'OriginHttpPort', 'originHttpPort') || 80) : 80;
-      const httpsPort = info ? Number(pick(info, 'OriginHttpsPort', 'originHttpsPort') || 443) : 443;
-      const rawStatus = String(pick(d, 'DomainStatus', 'domainStatus') || '').toLowerCase();
-      list.push({
-        domain: name,
-        cname: String(pick(d, 'Cname', 'cname') || ''),
-        status: statusMap[rawStatus] || 'online',
-        area: 'mainland_china',
-        origin,
-        origin_type: originType,
-        origin_host: '',
-        origin_protocol: protocol,
-        http_port: httpPort,
-        https_port: httpsPort,
-        https_enabled: false,
-        force_redirect: false,
+    const seen = new Set<string>();
+    for (let page = 1; page <= 100; page++) {
+      const data = await this.get('GetCdnDomains', '2019-06-01', '/2019-06-01/domain/GetCdnDomains', {
+        PageSize: String(pageSize),
+        PageNumber: String(page),
       });
+      if (!data) return false;
+      const domains = pick(data, 'Domains', 'domains') || [];
+      for (const d of domains) {
+        const name = pick(d, 'DomainName', 'domainName') || '';
+        const id = pick(d, 'DomainId', 'domainId') || '';
+        if (!name || seen.has(String(name))) continue;
+        seen.add(String(name));
+        const info = id ? await this.basicInfo(String(id)) : false;
+        const origin = info ? String(pick(info, 'Origin', 'origin') || '') : '';
+        const originType = info && String(pick(info, 'OriginType', 'originType') || '') === 'domain' ? 'domain' : 'ipaddr';
+        const protocol = info ? String(pick(info, 'OriginProtocol', 'originProtocol') || 'follow') : 'follow';
+        const httpPort = info ? Number(pick(info, 'OriginHttpPort', 'originHttpPort') || 80) : 80;
+        const httpsPort = info ? Number(pick(info, 'OriginHttpsPort', 'originHttpsPort') || 443) : 443;
+        const rawStatus = String(pick(d, 'DomainStatus', 'domainStatus') || '').toLowerCase();
+        list.push({
+          domain: name,
+          cname: String(pick(d, 'Cname', 'cname') || ''),
+          status: statusMap[rawStatus] || 'online',
+          area: 'mainland_china',
+          origin,
+          origin_type: originType,
+          origin_host: '',
+          origin_protocol: protocol,
+          http_port: httpPort,
+          https_port: httpsPort,
+          https_enabled: false,
+          force_redirect: false,
+        });
+      }
+      const total = Number(pick(data, 'TotalCount', 'totalCount') || 0);
+      if (domains.length < pageSize) break;
+      if (total > 0 && page * pageSize >= total) break;
     }
     return list;
   }

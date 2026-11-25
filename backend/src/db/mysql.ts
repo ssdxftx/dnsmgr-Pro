@@ -1,6 +1,6 @@
 import mysql from 'mysql2/promise';
 import type { DbConfig } from '../config-loader.js';
-import type { ColumnInfo, DbDriver, LockOutcome, QueryFn } from './types.js';
+import type { ColumnInfo, DbDriver, LockOutcome, QueryFn, TransactionFn } from './types.js';
 
 const LOCK_POOL_SIZE = Math.max(4, Number(process.env.DNSMGR_LOCK_POOL_SIZE || 8) || 8);
 const LOCK_ACQUIRE_TIMEOUT_MS = Math.max(1000, Number(process.env.DNSMGR_LOCK_ACQUIRE_TIMEOUT_MS || 10000) || 10000);
@@ -67,14 +67,14 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
     return Array.isArray(rows) ? (rows[0] as T | undefined) : undefined;
   }
 
-  async function withTransaction<T>(fn: (q: QueryFn) => Promise<T>): Promise<T> {
+  async function withTransaction<T>(fn: (q: TransactionFn) => Promise<T>): Promise<T> {
     const conn = await pool.getConnection();
     try {
       await conn.beginTransaction();
-      const q: QueryFn = async <R = any>(sql: string, params: any[] = []): Promise<R[]> => {
+      const q = (async (sql: string, params: any[] = []) => {
         const [rows] = await conn.query(sql, params);
-        return rows as R[];
-      };
+        return rows as any;
+      }) as TransactionFn;
       const result = await fn(q);
       await conn.commit();
       return result;
@@ -164,6 +164,7 @@ export function createMysqlDriver(cfg: DbConfig): DbDriver {
   }
 
   async function listColumns(tableName: string, q: QueryFn = query): Promise<ColumnInfo[]> {
+    if (!/^[A-Za-z0-9_]+$/.test(String(tableName))) throw new Error('非法的表名：' + tableName);
     return (await q<ColumnInfo>(`SHOW COLUMNS FROM ${tableName}`)) as any;
   }
 

@@ -8,25 +8,35 @@ const EXTRA_SECRET = /^(code|vcode|reg_code|regcode|invite_code|pre_token|custom
 const MAX_STR = 500;
 const MAX_ITEMS = 20;
 const MAX_DETAIL_BYTES = 4000;
+const MAX_DEPTH = 4;
+const MAX_NODES = 2000;
+const DEPTH_OMIT = '[深层对象已省略]';
+const SIZE_OMIT = '[对象过大已省略]';
 
-export function maskValue(key: string, value: any): any {
+interface MaskState {
+  nodes: number;
+}
+
+export function maskValue(key: string, value: any, depth = 0, state?: MaskState): any {
   if (EXTRA_SECRET.test(String(key)) || isSecretKey(String(key))) {
     return value === '' || value == null ? value : SECRET_MASK;
   }
-  return truncate(value, 0);
+  return truncate(value, depth, state);
 }
 
-function truncate(v: any, depth: number): any {
+function truncate(v: any, depth: number, state?: MaskState): any {
   if (v === null || v === undefined) return v;
   if (typeof v === 'string') {
     return v.length > MAX_STR ? v.slice(0, MAX_STR) + `…(共${v.length}字)` : v;
   }
   if (typeof v === 'number' || typeof v === 'boolean') return v;
-  if (depth >= 4) return '[深层对象已省略]';
-  if (Array.isArray(v)) return v.slice(0, MAX_ITEMS).map((x) => truncate(x, depth + 1));
+  if (depth >= MAX_DEPTH) return DEPTH_OMIT;
+  const st = state ?? { nodes: 0 };
+  if (++st.nodes > MAX_NODES) return SIZE_OMIT;
+  if (Array.isArray(v)) return v.slice(0, MAX_ITEMS).map((x) => truncate(x, depth + 1, st));
   if (typeof v === 'object') {
     const out: Record<string, any> = {};
-    for (const [k, val] of Object.entries(v)) out[k] = maskValue(k, val);
+    for (const [k, val] of Object.entries(v)) out[k] = maskValue(k, val, depth + 1, st);
     return out;
   }
   return String(v);

@@ -12,6 +12,10 @@
       <n-alert v-else-if="checked" type="success" class="mb-4">
         {{ t('setup.dbConnected') }}
       </n-alert>
+      <n-alert v-if="statusError" type="error" class="mb-4" :show-icon="true">
+        <div>{{ t('common.loadFailedHint') }}</div>
+        <n-button size="small" type="primary" class="mt-2" @click="probeStatus">{{ t('common.retry') }}</n-button>
+      </n-alert>
 
       <n-form :model="form" label-placement="top">
         <n-form-item :label="t('setup.dbType')">
@@ -89,11 +93,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useMessage } from 'naive-ui';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { api } from '../api';
+import { markSetupInstalled } from '../router';
 import AuthShell from '../components/AuthShell.vue';
 
 const { t } = useI18n();
@@ -110,6 +115,7 @@ const importKey = ref('');
 const fileEl = ref<HTMLInputElement | null>(null);
 const checked = ref(false);
 const detected = ref(false);
+const statusError = ref(false);
 const sqliteAvailable = ref(false);
 const sqlitePath = ref('');
 const dataDir = ref('');
@@ -145,10 +151,6 @@ function validateConnection(): boolean {
     return false;
   }
   return true;
-}
-
-function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms));
 }
 
 async function onCheck() {
@@ -237,26 +239,50 @@ async function doImport() {
 async function skipImport() {
   importBusy.value = true;
   try {
-    await fetch('/api/setup/skip', {
+    const res = await fetch('/api/setup/skip', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ install_token: installToken.value }),
     });
+    const json = await res.json().catch(() => ({}));
+    if (json.code !== 0) {
+      message.error(json.msg || t('setup.importFailed'));
+      return;
+    }
     await waitRestart();
+  } catch (e: any) {
+    message.error(e?.message || t('setup.networkError'));
   } finally {
     importBusy.value = false;
   }
 }
 
+let waitStopped = false;
+let waitTimer: ReturnType<typeof setTimeout> | null = null;
+
+function waitSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    waitTimer = setTimeout(() => {
+      waitTimer = null;
+      resolve();
+    }, ms);
+  });
+}
+
 async function waitRestart() {
+  waitStopped = false;
   // 服务端会先退出再被编排拉起，先等待退出，避免读到重启前的状态
-  await sleep(2500);
+  await waitSleep(2500);
+  if (waitStopped) return;
   for (let i = 0; i < 60; i++) {
-    await sleep(2000);
+    await waitSleep(2000);
+    if (waitStopped) return;
     try {
       const res = await fetch('/api/setup/status');
       const json = await res.json();
       if (json?.data?.installed) {
+        if (waitStopped) return;
+        markSetupInstalled();
         message.success(t('setup.installDone'));
         router.push('/login');
         return;
@@ -265,10 +291,11 @@ async function waitRestart() {
       // 进程重启中，继续等待
     }
   }
-  message.warning(t('setup.stillStarting'));
+  if (!waitStopped) message.warning(t('setup.stillStarting'));
 }
 
-onMounted(async () => {
+async function probeStatus() {
+  statusError.value = false;
   try {
     const res = await api<any>('GET', '/setup/status');
     if (res.code === 0 && res.data?.installed) {
@@ -282,7 +309,17 @@ onMounted(async () => {
     sqliteReason.value = String(data.sqlite_reason || '');
     form.db_type = data.default_db_type === 'sqlite' && sqliteAvailable.value ? 'sqlite' : 'mysql';
   } catch {
+    statusError.value = true;
     sqliteReason.value = t('setup.networkError');
+  }
+}
+
+onMounted(probeStatus);
+onBeforeUnmount(() => {
+  waitStopped = true;
+  if (waitTimer) {
+    clearTimeout(waitTimer);
+    waitTimer = null;
   }
 });
 </script>

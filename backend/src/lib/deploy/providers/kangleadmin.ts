@@ -72,21 +72,25 @@ export class KangleadminDeploy implements DeployProvider {
 
     if (config.type === '1' && config.domains) {
       const domains = String(config.domains).split('\n');
-      let success = 0;
-      let errmsg: string | null = null;
+      const failures: string[] = [];
+      let deployed = 0;
       for (const raw of domains) {
         const domain = raw.trim();
         if (!domain) continue;
         try {
           await this.deployDomain(domain, fullchain, privatekey);
           this.log('域名 ' + domain + ' 证书部署成功');
-          success++;
+          deployed++;
         } catch (e: any) {
-          errmsg = e.message;
-          this.log('域名 ' + domain + ' 证书部署失败：' + errmsg);
+          const msg = e.message || String(e);
+          failures.push(`${domain}: ${msg}`);
+          this.log('域名 ' + domain + ' 证书部署失败：' + msg);
         }
       }
-      if (success === 0) throw new Error(errmsg || '要部署的域名不存在');
+      if (failures.length) {
+        throw new Error(`证书部署部分失败（${failures.length} 个域名）：${failures.join('；')}`);
+      }
+      if (!deployed) throw new Error('要部署的域名不存在');
     } else {
       await this.deployAccount(fullchain, privatekey);
       this.log('账号级SSL证书部署成功');

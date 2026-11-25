@@ -182,6 +182,7 @@ export default {
     destroyHint: 'Deletes the vault and all private credentials permanently',
     destroyConfirm: 'Type DESTROY to confirm',
     destroyPass: 'Enter the vault passphrase to confirm destruction',
+    totpCode: 'Authenticator code (required when 2FA is enabled)',
     loginPass: 'Login password',
     destroyed: 'Vault destroyed',
     excludeBackup: 'Exclude from site backups',

@@ -1,4 +1,4 @@
-import { fetch as undiciFetch } from 'undici';
+import { Agent, fetch as undiciFetch } from 'undici';
 import { domainToASCII } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { getConfiguredProxyAgent } from '../proxy.js';
@@ -28,9 +28,19 @@ function normalizeHostname(hostname: any): string {
   return (ascii || trimmed).toLowerCase();
 }
 
-async function getDispatcher(proxy: boolean): Promise<any> {
+function normalizeProxyFlag(proxy: any): boolean {
+  return proxy === true || Number(proxy) === 1;
+}
+
+let directAgent: Agent | undefined;
+
+async function getDispatcher(proxy: any): Promise<any> {
+  if (!normalizeProxyFlag(proxy)) {
+    if (!directAgent) directAgent = new Agent();
+    return directAgent;
+  }
   const agent = await getConfiguredProxyAgent();
-  if (proxy && !agent) throw new EnhanceError('代理服务器或端口未配置', 400);
+  if (!agent) throw new EnhanceError('代理服务器或端口未配置', 400);
   return agent;
 }
 
@@ -45,7 +55,7 @@ export class CloudflareEnhanceService {
     this.email = String(config.email ?? '').trim();
     this.apiKey = String(config.apikey ?? '').trim().replace(/\s+/g, '');
     this.auth = config.auth !== undefined ? Number(config.auth) : /^[0-9a-f]+$/i.test(this.apiKey) ? 0 : 1;
-    this.proxy = String(config.proxy ?? '') === '1';
+    this.proxy = normalizeProxyFlag(config.proxy);
     // 允许通过环境变量覆盖 API 基址（用于本地/联调环境，默认官方地址）
     if (process.env.DNSMGR_CF_API_BASE) this.baseUrl = process.env.DNSMGR_CF_API_BASE.replace(/\/+$/, '');
   }

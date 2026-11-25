@@ -359,11 +359,17 @@ function statusTag(v: string) {
 
 async function load() {
   loadBusy.value = true;
-  const res = await api<any>('GET', `/cloudflare/domains/${domainId}/hostnames`);
-  loadError.value = res.code !== 0;
-  if (res.code === 0) rows.value = res.data;
-  else message.error(res.msg);
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/cloudflare/domains/${domainId}/hostnames`);
+    loadError.value = res.code !== 0;
+    if (res.code === 0) rows.value = res.data;
+    else message.error(res.msg);
+  } catch (e: any) {
+    loadError.value = true;
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 async function loadDomainInfo() {
@@ -402,16 +408,21 @@ function openEdit(row: any) {
 async function save() {
   if (!editingId.value && !form.hostname) return message.warning(t('cfHostnames.hostnameRequired'));
   saveBusy.value = true;
-  const body = { custom_origin_server: form.custom_origin_server, ssl_method: form.ssl_method, min_tls_version: form.min_tls_version };
-  const res = editingId.value
-    ? await api('PUT', `/cloudflare/domains/${domainId}/hostnames/${editingId.value}`, body)
-    : await api('POST', `/cloudflare/domains/${domainId}/hostnames`, { ...body, hostname: form.hostname });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    load();
-  } else message.error(res.msg);
+  try {
+    const body = { custom_origin_server: form.custom_origin_server, ssl_method: form.ssl_method, min_tls_version: form.min_tls_version };
+    const res = editingId.value
+      ? await api('PUT', `/cloudflare/domains/${domainId}/hostnames/${editingId.value}`, body)
+      : await api('POST', `/cloudflare/domains/${domainId}/hostnames`, { ...body, hostname: form.hostname });
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function openBatchAdd() {
@@ -422,13 +433,18 @@ function openBatchAdd() {
 async function saveBatchAdd() {
   if (!batchAddForm.hostnames.trim()) return message.warning(t('cfHostnames.hostnamesRequired'));
   saveBusy.value = true;
-  const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_add`, { ...batchAddForm });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showBatchAdd.value = false;
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_add`, { ...batchAddForm });
+    if (res.code === 0) {
+      message.success(res.msg);
+      showBatchAdd.value = false;
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function openBatchEdit() {
@@ -438,30 +454,43 @@ function openBatchEdit() {
 
 async function saveBatchEdit() {
   saveBusy.value = true;
-  const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_update`, {
-    hostname_ids: selection.value.join(','),
-    ...batchEditForm,
-  });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showBatchEdit.value = false;
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_update`, {
+      hostname_ids: selection.value.join(','),
+      ...batchEditForm,
+    });
+    if (res.code === 0) {
+      message.success(res.msg);
+      showBatchEdit.value = false;
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function refreshOne(row: any) {
   dialog.info({ title: t('cfHostnames.refreshVerify'), content: t('cfHostnames.refreshVerifyConfirm', { hostname: row.hostname }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/${row.id}/refresh`);
-    if (res.code === 0) { message.success(res.msg); load(); } else message.error(res.msg);
+    try {
+      const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/${row.id}/refresh`);
+      if (res.code === 0) { message.success(res.msg); load(); } else message.error(res.msg);
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
 function batchRefresh() {
   dialog.info({ title: t('cfHostnames.batchRefreshVerify'), content: t('cfHostnames.batchRefreshConfirm', { count: selection.value.length }), positiveText: t('common.confirm'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    await mapPool([...selection.value], 5, (id) => api('POST', `/cloudflare/domains/${domainId}/hostnames/${id}/refresh`));
-    message.success(t('cfHostnames.refreshReinitiated'));
-    load();
+    try {
+      await mapPool([...selection.value], 5, (id) => api('POST', `/cloudflare/domains/${domainId}/hostnames/${id}/refresh`));
+      message.success(t('cfHostnames.refreshReinitiated'));
+      load();
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -471,12 +500,17 @@ function delOne(row: any) {
     const idx = rows.value.findIndex((r: any) => Number(r.id) === Number(row.id));
     const removed = idx >= 0 ? rows.value[idx] : null;
     if (idx >= 0) rows.value.splice(idx, 1);
-    const res = await api('DELETE', `/cloudflare/domains/${domainId}/hostnames/${row.id}?hostname=${encodeURIComponent(row.hostname)}`);
-    if (res.code === 0) {
-      // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
-      selection.value = selection.value.filter((k: any) => Number(k) !== Number(row.id));
-      message.success(res.msg);
-    } else { if (removed) rows.value.splice(idx, 0, removed); message.error(res.msg); }
+    try {
+      const res = await api('DELETE', `/cloudflare/domains/${domainId}/hostnames/${row.id}?hostname=${encodeURIComponent(row.hostname)}`);
+      if (res.code === 0) {
+        // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
+        selection.value = selection.value.filter((k: any) => Number(k) !== Number(row.id));
+        message.success(res.msg);
+      } else { if (removed) rows.value.splice(idx, 0, removed); message.error(res.msg); }
+    } catch (e: any) {
+      if (removed) rows.value.splice(idx, 0, removed);
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -485,9 +519,14 @@ function confirmBatchDelete() {
     const ids = selection.value.map(Number);
     const snapshot = [...rows.value];
     rows.value = rows.value.filter((r: any) => !ids.includes(Number(r.id)));
-    const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_delete`, { hostname_ids: selection.value });
-    if (res.code === 0) { message.success(res.msg); selection.value = []; }
-    else { rows.value = snapshot; message.error(res.msg); }
+    try {
+      const res = await api('POST', `/cloudflare/domains/${domainId}/hostnames/batch_delete`, { hostname_ids: selection.value });
+      if (res.code === 0) { message.success(res.msg); selection.value = []; }
+      else { rows.value = snapshot; message.error(res.msg); }
+    } catch (e: any) {
+      rows.value = snapshot;
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -499,15 +538,24 @@ function openFallback() {
 async function saveFallback() {
   if (!fallbackForm.origin.trim()) return message.warning(t('cfHostnames.originRequired'));
   saveBusy.value = true;
-  const res = await api('PUT', `/cloudflare/domains/${domainId}/fallback`, { origin: fallbackForm.origin });
-  saveBusy.value = false;
-  if (res.code === 0) { message.success(res.msg); fallbackOrigin.value = res.data.origin; showFallback.value = false; } else message.error(res.msg);
+  try {
+    const res = await api('PUT', `/cloudflare/domains/${domainId}/fallback`, { origin: fallbackForm.origin });
+    if (res.code === 0) { message.success(res.msg); fallbackOrigin.value = res.data.origin; showFallback.value = false; } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function clearFallback() {
   dialog.warning({ title: t('cfHostnames.clearFallbackTitle'), content: t('cfHostnames.clearFallbackConfirm'), positiveText: t('cfHostnames.clear'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cloudflare/domains/${domainId}/fallback`);
-    if (res.code === 0) { message.success(res.msg); fallbackOrigin.value = ''; showFallback.value = false; } else message.error(res.msg);
+    try {
+      const res = await api('DELETE', `/cloudflare/domains/${domainId}/fallback`);
+      if (res.code === 0) { message.success(res.msg); fallbackOrigin.value = ''; showFallback.value = false; } else message.error(res.msg);
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -595,28 +643,33 @@ async function runBatchRecord() {
     if (!g.domainId) return message.warning(t('cfHostnames.selectProviderRequired'));
   }
   batchRecord.runBusy = true;
-  const jobs: any[] = [];
-  for (const g of batchRecord.groups) for (const it of g.items) jobs.push({ g, it });
-  const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
-    const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
-    if (!cand) return { ok: false, msg: `${it.label}: ${t('cfHostnames.domainNotFound')}` };
-    const line = await getDefaultLine(g.domainId!);
-    const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: it.type, value: it.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfVerifyRemark') });
-    return res.code === 0 ? { ok: true, msg: '' } : { ok: false, msg: `${it.label}: ${res.msg}` };
-  });
-  let ok = 0;
-  let fail = 0;
-  const errors: string[] = [];
-  for (const r of results) {
-    if (r.ok) ok++;
-    else {
-      fail++;
-      if (r.msg) errors.push(r.msg);
+  try {
+    const jobs: any[] = [];
+    for (const g of batchRecord.groups) for (const it of g.items) jobs.push({ g, it });
+    const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
+      const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
+      if (!cand) return { ok: false, msg: `${it.label}: ${t('cfHostnames.domainNotFound')}` };
+      const line = await getDefaultLine(g.domainId!);
+      const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: it.type, value: it.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfVerifyRemark') });
+      return res.code === 0 ? { ok: true, msg: '' } : { ok: false, msg: `${it.label}: ${res.msg}` };
+    });
+    let ok = 0;
+    let fail = 0;
+    const errors: string[] = [];
+    for (const r of results) {
+      if (r.ok) ok++;
+      else {
+        fail++;
+        if (r.msg) errors.push(r.msg);
+      }
     }
+    showBatchRecord.value = false;
+    dialog.info({ title: t('cfHostnames.processDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    batchRecord.runBusy = false;
   }
-  batchRecord.runBusy = false;
-  showBatchRecord.value = false;
-  dialog.info({ title: t('cfHostnames.processDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
 }
 
 const lineCache = new Map<string, string>();
@@ -688,6 +741,8 @@ async function openCfOptimized(single: boolean, hostname?: string) {
       showCfOptimized.value = false;
       message.warning(t('cfHostnames.noHostnames'));
     }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     cfOptimized.loading = false;
   }
@@ -696,10 +751,14 @@ async function openCfOptimized(single: boolean, hostname?: string) {
 async function loadGroupLines(g: CfGroup) {
   g.lineOptions = [];
   if (!g.domainId) return;
-  const res = await api<any>('GET', `/domains/${g.domainId}/lines`);
-  if (res.code === 0 && res.data) {
-    g.lineOptions = Object.entries(res.data).map(([label, code]) => ({ label, value: code as string }));
-    if (g.lineOptions.length) g.line = g.lineOptions[0].value;
+  try {
+    const res = await api<any>('GET', `/domains/${g.domainId}/lines`);
+    if (res.code === 0 && res.data) {
+      g.lineOptions = Object.entries(res.data).map(([label, code]) => ({ label, value: code as string }));
+      if (g.lineOptions.length) g.line = g.lineOptions[0].value;
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -719,28 +778,33 @@ async function runCfOptimized() {
     if (!g.domainId) return message.warning(t('cfHostnames.selectProviderRequired'));
   }
   cfOptimized.runBusy = true;
-  const jobs: any[] = [];
-  for (const g of cfOptimized.groups) for (const it of g.items) jobs.push({ g, it });
-  const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
-    const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
-    if (!cand) return { ok: false, msg: `${it.hostname}: ${t('cfHostnames.domainNotFound')}` };
-    const line = g.line || (await getDefaultLine(g.domainId!));
-    const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: target.type, value: target.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfOptimizedRemark') });
-    return res.code === 0 ? { ok: true, msg: '' } : { ok: false, msg: `${it.hostname}: ${res.msg}` };
-  });
-  let ok = 0;
-  let fail = 0;
-  const errors: string[] = [];
-  for (const r of results) {
-    if (r.ok) ok++;
-    else {
-      fail++;
-      if (r.msg) errors.push(r.msg);
+  try {
+    const jobs: any[] = [];
+    for (const g of cfOptimized.groups) for (const it of g.items) jobs.push({ g, it });
+    const results = await mapPool(jobs, 5, async ({ g, it }: any) => {
+      const cand = it.candidates.find((c: any) => String(c.domain_id) === String(g.domainId));
+      if (!cand) return { ok: false, msg: `${it.hostname}: ${t('cfHostnames.domainNotFound')}` };
+      const line = g.line || (await getDefaultLine(g.domainId!));
+      const res = await api('POST', `/domains/${g.domainId}/records`, { name: cand.record_name, type: target.type, value: target.value, line, ttl: 600, mx: 1, weight: 0, remark: t('cfHostnames.cfOptimizedRemark') });
+      return res.code === 0 ? { ok: true, msg: '' } : { ok: false, msg: `${it.hostname}: ${res.msg}` };
+    });
+    let ok = 0;
+    let fail = 0;
+    const errors: string[] = [];
+    for (const r of results) {
+      if (r.ok) ok++;
+      else {
+        fail++;
+        if (r.msg) errors.push(r.msg);
+      }
     }
+    showCfOptimized.value = false;
+    dialog.info({ title: t('cfHostnames.optimizeDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    cfOptimized.runBusy = false;
   }
-  cfOptimized.runBusy = false;
-  showCfOptimized.value = false;
-  dialog.info({ title: t('cfHostnames.optimizeDone'), content: t('cfHostnames.doneCount', { ok, fail }) + (errors.length ? '\n\n' + t('cfHostnames.failDetails') + errors.join('\n') : ''), positiveText: t('common.confirm') });
 }
 
 onMounted(() => {

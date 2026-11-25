@@ -16,6 +16,9 @@ import {
 } from '../lib/vault/service.js';
 import { clearVaultSession } from '../lib/vault/session.js';
 import { requireLoginPassword } from '../lib/reauth.js';
+import { findUserById } from '../auth.js';
+import { decryptText } from '../lib/secret.js';
+import { verifyTOTP } from '../lib/totp.js';
 
 function fail(reply: any, e: any) {
   if (e instanceof VaultError) return reply.code(e.status).send({ code: -1, msg: e.message });
@@ -26,6 +29,29 @@ function fail(reply: any, e: any) {
 // 否则只读/受限 Key 结合登录密码即可绕过 TOTP 与人工确认。
 function apiKeyBlocked(req: any): string | null {
   return String(req.user?.auth_type || '') === 'api_key' ? '该操作仅支持登录会话，请使用账号密码登录后再试' : null;
+}
+
+/**
+ * 改变保险库保护方式或重置口令前必须证明账号主人身份：
+ * 登录密码（或绑定当前会话的 X-Reauth-Token）之外，已开启 TOTP 的用户还需提供当前动态口令。
+ */
+async function requireVaultConfirm(
+  uid: number,
+  password: any,
+  req: any,
+  op: string,
+  totpCode: any,
+): Promise<string | null> {
+  const passwordErr = await requireLoginPassword(uid, password, req, op);
+  if (passwordErr) return passwordErr;
+  const user: any = await findUserById(uid);
+  if (!user || Number(user.status) === 0) return '用户不存在或已禁用';
+  if (Number(user.totp_open) !== 1) return null;
+  const code = String(totpCode ?? '').trim();
+  if (!code) return '请输入当前动态口令';
+  const secret = String(decryptText(user.totp_secret) || '');
+  if (!secret) return '二次验证配置异常，请联系管理员重置';
+  return verifyTOTP(secret, code) ? null : '当前动态口令错误';
 }
 
 export default async function vaultRoutes(app: FastifyInstance) {
@@ -94,6 +120,16 @@ export default async function vaultRoutes(app: FastifyInstance) {
   });
 
   app.post('/api/vault/passphrase', auth, async (req: any, reply: any) => {
+    const apiBlocked = apiKeyBlocked(req);
+    if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
+    const passwordErr = await requireVaultConfirm(
+      Number(req.user.uid),
+      req.body?.password,
+      req,
+      'vault.passphrase',
+      req.body?.current_code ?? req.body?.totp_code,
+    );
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     try {
       await changePassphrase(
         Number(req.user.uid),
@@ -133,6 +169,14 @@ export default async function vaultRoutes(app: FastifyInstance) {
   app.post('/api/vault/downgrade', auth, async (req: any, reply: any) => {
     const apiBlocked = apiKeyBlocked(req);
     if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
+    const passwordErr = await requireVaultConfirm(
+      Number(req.user.uid),
+      req.body?.password,
+      req,
+      'vault.downgrade',
+      req.body?.current_code ?? req.body?.totp_code,
+    );
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     try {
       await downgradeVault(Number(req.user.uid), jtiOf(req), String(req.body?.passphrase || ''));
       audit(req, { module: 'vault', action: 'vault.downgrade', summary: '保险库降级为便捷模式', scrubBody: true });
@@ -145,6 +189,14 @@ export default async function vaultRoutes(app: FastifyInstance) {
   app.post('/api/vault/recover', auth, async (req: any, reply: any) => {
     const apiBlocked = apiKeyBlocked(req);
     if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
+    const passwordErr = await requireVaultConfirm(
+      Number(req.user.uid),
+      req.body?.password,
+      req,
+      'vault.recover',
+      req.body?.current_code ?? req.body?.totp_code,
+    );
+    if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     try {
       await recoverVault(
         Number(req.user.uid),

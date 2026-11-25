@@ -6,7 +6,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync } from 'node:sqlite';
 import { resolveSqliteFile, type DbConfig } from '../config-loader.js';
 import { detectDataPersistence } from '../lib/persistence.js';
-import type { ColumnInfo, DbDriver, LockOutcome, QueryFn, WriteResult } from './types.js';
+import type { ColumnInfo, DbDriver, LockOutcome, QueryFn, TransactionFn, WriteResult } from './types.js';
 import { expandParams, translateSql } from './sqlite-dialect.js';
 
 const READ_RE = /^\s*(SELECT|WITH|PRAGMA|EXPLAIN)\b/i;
@@ -286,14 +286,12 @@ export function createSqliteDriver(cfg: DbConfig): DbDriver {
     return Array.isArray(rows) ? (rows[0] as T | undefined) : undefined;
   }
 
-  async function withTransaction<T>(fn: (q: QueryFn) => Promise<T>): Promise<T> {
+  async function withTransaction<T>(fn: (q: TransactionFn) => Promise<T>): Promise<T> {
     return writeMutex.run(async () => {
       const tx = openDatabase(file);
       try {
         tx.exec('BEGIN IMMEDIATE');
-        const q: QueryFn = async <R = any>(sql: string, params: any[] = []): Promise<R[]> => {
-          return runStatement(tx, sql, params) as R[];
-        };
+        const q = (async (sql: string, params: any[] = []) => runStatement(tx, sql, params) as any) as TransactionFn;
         const result = await txStore.run(tx, () => fn(q));
         tx.exec('COMMIT');
         return result;

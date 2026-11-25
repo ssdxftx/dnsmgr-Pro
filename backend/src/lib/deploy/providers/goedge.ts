@@ -68,7 +68,7 @@ export class GoedgeDeploy implements DeployProvider {
       return result.data ?? null;
     }
     if (result && result.message !== undefined) throw new Error(result.message);
-    if (text) this.log('Response:' + text);
+    this.log('Response: HTTP ' + res.status + '，返回内容无法解析');
     throw new Error('返回数据解析失败');
   }
 

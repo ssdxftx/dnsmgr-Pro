@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
-import { checkLevel } from '../auth.js';
+import { checkLevel, sameDomain } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
@@ -38,6 +38,7 @@ async function validateTaskRecord(did: number, recordid: string): Promise<string
     .then(() => provider.getDomainRecordInfo(String(recordid)))
     .catch(() => false);
   if (!info) return '所选解析记录不属于当前域名，请重新选择';
+  if (!info.Domain || !sameDomain(info.Domain, d.name)) return '所选解析记录不属于当前域名，请重新选择';
   if (!info.Type || info.Value === null || info.Value === undefined) return '请选择具体解析记录（主机汇总行不可用）';
   return null;
 }
@@ -305,6 +306,9 @@ function buildTask(b: Record<string, any>) {
     remark: (b.remark || '').trim(),
     recordinfo: (b.recordinfo || '').trim(),
   };
+  // 0 是前端「修改解析」的既有取值，4 保留兼容显式修改解析的任务
+  if (![0, 1, 2, 3, 4].includes(val.switchtype)) throw new Error('切换类型需为启用、暂停、删除或修改解析');
+  if ((val.switchtype === 0 || val.switchtype === 4) && !val.value) throw new Error('修改解析时必须填写记录值');
   // 周期任务的下标必须在这里就校验：switchdate 越界（如 cycle=2 传 0）会让
   // updateNexttime 算出「永远已到期」的时刻，任务被每 60s 反复执行。
   if (val.type === 1) {

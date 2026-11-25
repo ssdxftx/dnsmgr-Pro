@@ -329,7 +329,7 @@ async function ensureCertOrderCdnDomainId(): Promise<void> {
     try {
       if (getDbType() === 'sqlite') {
         await query(
-          `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INTEGER GENERATED ALWAYS AS (CAST(json_extract(link, '$.cdnDomainId') AS INTEGER)) VIRTUAL`
+          `ALTER TABLE ${table('cert_order')} ADD COLUMN cdn_domain_id INTEGER GENERATED ALWAYS AS (CAST(CASE WHEN json_valid(link) THEN json_extract(link, '$.cdnDomainId') END AS INTEGER)) VIRTUAL`
         );
       } else {
         await query(
@@ -364,35 +364,54 @@ async function ensureIndex(tableName: string, indexName: string, columns: string
   }
 }
 
-// 为单列补唯一索引：已存在唯一索引则跳过；存在重复数据导致失败时记录并继续，避免启动中断
+function noCaseColumn(tableName: string, column: string): boolean {
+  const specs: Array<[string, string[]]> = [
+    ['user', ['username', 'email']],
+    ['reg_code', ['code']],
+    ['domain', ['name']],
+    ['cdn_domain', ['name']],
+    ['cert_domain', ['domain']],
+    ['cert_cname', ['domain']],
+    ['domain_alias', ['name']],
+  ];
+  const hit = specs
+    .filter(([name]) => tableName === name || tableName.endsWith('_' + name))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  return !!hit && hit[1].includes(column);
+}
+
+// 为单列补唯一索引：已存在唯一索引则跳过；创建失败时终止迁移，避免唯一约束长期缺失
 async function ensureUniqueIndex(tableName: string, column: string, indexName: string): Promise<void> {
   if (await uniqueIndexExists(table(tableName), column)) return;
   try {
     if (getDbType() === 'sqlite') {
       const actualName = sqliteIndexName(table(tableName), indexName);
-      await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} (${column})`);
+      const expr = noCaseColumn(tableName, column) ? `\`${column}\` COLLATE NOCASE` : `\`${column}\``;
+      await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} (${expr})`);
     } else {
       await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${column})`);
     }
   } catch (e: any) {
-    console.log(`[migrate] 为 ${tableName}.${column} 添加唯一索引失败（可能存在重复数据）：${e?.message || e}`);
+    throw new Error(`迁移失败：为 ${tableName}.${column} 创建唯一索引 ${indexName} — ${e?.message || e}`);
   }
 }
 
-// 复合唯一索引：消除「先查后插」在并发/双击下的重复数据；已有重复数据时记录并继续
+// 复合唯一索引：消除「先查后插」在并发/双击下的重复数据；创建失败时终止迁移
 async function ensureCompositeUniqueIndex(tableName: string, columns: string[], indexName: string): Promise<void> {
   try {
     const sqlite = getDbType() === 'sqlite';
     const actualName = sqlite ? sqliteIndexName(table(tableName), indexName) : indexName;
     if (await indexExists(table(tableName), actualName)) return;
-    const cols = columns.map((c) => `\`${c}\``).join(', ');
+    const cols = columns
+      .map((c) => (sqlite && noCaseColumn(tableName, c) ? `\`${c}\` COLLATE NOCASE` : `\`${c}\``))
+      .join(', ');
     if (sqlite) {
       await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualName}\` ON ${table(tableName)} (${cols})`);
     } else {
       await query(`ALTER TABLE ${table(tableName)} ADD UNIQUE INDEX ${indexName} (${cols})`);
     }
   } catch (e: any) {
-    console.log(`[migrate] 为 ${tableName}(${columns.join(',')}) 添加唯一索引失败（可能存在重复数据）：${e?.message || e}`);
+    throw new Error(`迁移失败：为 ${tableName}(${columns.join(',')}) 创建唯一索引 ${indexName} — ${e?.message || e}`);
   }
 }
 
@@ -420,37 +439,30 @@ async function migrateTaskRecordIds(): Promise<void> {
   for (const name of ['dmtask', 'sctask']) {
     const oldIndexes = name === 'dmtask' ? ['uniq_recordid'] : ['uniq_record_switch'];
     const newIndex = name === 'dmtask' ? 'uniq_did_recordid' : 'uniq_did_record_switch';
-    // 必须先删旧索引，再改列类型：MySQL 不允许把被索引的 varchar 直接改成无前缀的 TEXT。
-    // 新索引只在缺失时创建；把它一起删掉会导致每次启动重建大表索引，并留下唯一性空窗。
-    for (const idx of oldIndexes) {
-      const actual = sqlite ? sqliteIndexName(table(name), idx) : idx;
-      try {
-        if (!(await indexExists(table(name), actual))) continue;
-        if (sqlite) await query(`DROP INDEX \`${actual}\``);
-        else await query(`ALTER TABLE ${table(name)} DROP INDEX ${idx}`);
-      } catch (e: any) {
-        console.log(`[migrate] 删除索引 ${name}.${idx} 失败（跳过）：${e?.message || e}`);
-      }
-    }
+    const actualNew = sqlite ? sqliteIndexName(table(name), newIndex) : newIndex;
+    let needTypeChange = false;
     if (!sqlite) {
-      try {
-        const cols = await listColumns(table(name));
-        const rec = cols.find((c) => String(c.Field) === 'recordid');
-        const type = String(rec?.Type || '').toLowerCase();
-        if (/^(?:var)?char\(\d+\)$/.test(type)) {
-          await query(`ALTER TABLE ${table(name)} MODIFY COLUMN recordid TEXT NOT NULL`);
-          console.log(`[migrate] ${name}.recordid 已放宽为 TEXT`);
-        }
-      } catch (e: any) {
-        console.log(`[migrate] 放宽 ${name}.recordid 失败（跳过）：${e?.message || e}`);
-      }
+      const cols = await listColumns(table(name));
+      const rec = cols.find((c) => String(c.Field) === 'recordid');
+      needTypeChange = /^(?:var)?char\(\d+\)$/.test(String(rec?.Type || '').toLowerCase());
     }
-    try {
-      const actual = sqlite ? sqliteIndexName(table(name), newIndex) : newIndex;
-      if (await indexExists(table(name), actual)) continue;
+    const dropOld = async (): Promise<void> => {
+      for (const idx of oldIndexes) {
+        const actual = sqlite ? sqliteIndexName(table(name), idx) : idx;
+        try {
+          if (!(await indexExists(table(name), actual))) continue;
+          if (sqlite) await query(`DROP INDEX \`${actual}\``);
+          else await query(`ALTER TABLE ${table(name)} DROP INDEX ${idx}`);
+        } catch (e: any) {
+          console.log(`[migrate] 删除索引 ${name}.${idx} 失败（跳过）：${e?.message || e}`);
+        }
+      }
+    };
+    const createNew = async (): Promise<void> => {
+      if (await indexExists(table(name), actualNew)) return;
       if (sqlite) {
         const cols = name === 'dmtask' ? '(`did`, `recordid`)' : '(`did`, `recordid`, `switchtype`, `switchtime`)';
-        await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actual}\` ON ${table(name)} ${cols}`);
+        await query(`CREATE UNIQUE INDEX IF NOT EXISTS \`${actualNew}\` ON ${table(name)} ${cols}`);
       } else {
         const cols =
           name === 'dmtask'
@@ -458,8 +470,27 @@ async function migrateTaskRecordIds(): Promise<void> {
             : '(`did`, `recordid`(255), `switchtype`, `switchtime`)';
         await query(`ALTER TABLE ${table(name)} ADD UNIQUE INDEX ${newIndex} ${cols}`);
       }
-    } catch (e: any) {
-      console.log(`[migrate] 创建任务唯一索引 ${name}.${newIndex} 失败（可能存在重复数据）：${e?.message || e}`);
+    };
+    if (sqlite || !needTypeChange) {
+      try {
+        await createNew();
+      } catch (e: any) {
+        throw new Error(`迁移失败：创建任务唯一索引 ${name}.${newIndex} — ${e?.message || e}`);
+      }
+      await dropOld();
+    } else {
+      await dropOld();
+      try {
+        await query(`ALTER TABLE ${table(name)} MODIFY COLUMN recordid TEXT NOT NULL`);
+        console.log(`[migrate] ${name}.recordid 已放宽为 TEXT`);
+      } catch (e: any) {
+        throw new Error(`迁移失败：放宽 ${name}.recordid — ${e?.message || e}`);
+      }
+      try {
+        await createNew();
+      } catch (e: any) {
+        throw new Error(`迁移失败：创建任务唯一索引 ${name}.${newIndex} — ${e?.message || e}`);
+      }
     }
   }
 }
@@ -480,15 +511,23 @@ async function ensureColumn(tableName: string, column: string, definition: strin
 
 // 旧版 API v2 签名的一次性 nonce 表：同一 nonce 只能成功落库一次，借此拒绝重放
 async function migrateLegacyNonce(): Promise<void> {
+  const sqlite = getDbType() === 'sqlite';
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('legacy_nonce')} (
-      nonce varchar(64) NOT NULL,
+      nonce varchar(128) NOT NULL,
       uid int(11) unsigned NOT NULL,
       created_at datetime NOT NULL,
       PRIMARY KEY (nonce),
       KEY idx_created (created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
   );
+  if (!sqlite) {
+    const cols = await listColumns(table('legacy_nonce'));
+    const def = cols.find((c) => String(c.Field) === 'nonce');
+    if (def && !/varchar\(128\)/i.test(String(def.Type || ''))) {
+      await query(`ALTER TABLE ${table('legacy_nonce')} MODIFY COLUMN nonce varchar(128) NOT NULL`);
+    }
+  }
 }
 
 // API 机器身份、幂等请求、统一异步任务与事件回调（幂等）

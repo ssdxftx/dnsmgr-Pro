@@ -154,7 +154,11 @@ export default async function registerRoutes(app: FastifyInstance) {
       const codeRow = await queryOne<any>(`SELECT * FROM ${table('reg_code')} WHERE code = ? LIMIT 1`, [regCode]);
       if (!codeRow) return { code: -1, msg: '注册码无效' };
       if (codeRow.status !== 1) return { code: -1, msg: '该注册码已停用' };
-      if (codeRow.expiretime && new Date(codeRow.expiretime).getTime() < Date.now()) return { code: -1, msg: '该注册码已过期' };
+      if (codeRow.expiretime) {
+        const exp = new Date(codeRow.expiretime).getTime();
+        // 非法日期时 getTime() 为 NaN，比较恒为 false 会让过期时间被绕过；按已过期处理。
+        if (!Number.isFinite(exp) || exp < Date.now()) return { code: -1, msg: '该注册码已过期' };
+      }
       if (codeRow.max_use > 0 && codeRow.used >= codeRow.max_use) return { code: -1, msg: '该注册码使用次数已用完' };
       // 占用推迟到事务内执行：在 UPDATE 中再次校验状态/有效期/剩余次数（TOCTOU），
       // 且与建号同事务，撞名回滚时不会把 max_use=1 的注册码白白烧掉。
@@ -254,23 +258,27 @@ export default async function registerRoutes(app: FastifyInstance) {
     const count = Math.min(Math.max(Math.floor(Number(b.count) || 1), 1), 100);
     const days = Math.max(0, Math.min(36500, Math.floor(Number(b.days) || 0)));
     const maxUse = Math.max(0, Math.min(1_000_000, Math.floor(Number(b.max_use) || 0)));
-    const remark = String(b.remark ?? '').trim();
+    // remark 列为 varchar(100)，超长会导致整批插入失败
+    const remark = String(b.remark ?? '').trim().slice(0, 100);
 
     const codes: string[] = [];
-    for (let i = 0; i < count; i++) {
-      let code = genRegCode();
-      let guard = 0;
-      while ((await queryOne(`SELECT id FROM ${table('reg_code')} WHERE code = ?`, [code])) && guard++ < 10) {
-        code = genRegCode();
+    // 整批注册码在同一事务内写入：中途失败全部回滚，不留下部分已生成的注册码。
+    await withTransaction(async (q) => {
+      for (let i = 0; i < count; i++) {
+        let code = genRegCode();
+        let guard = 0;
+        while ((await q(`SELECT id FROM ${table('reg_code')} WHERE code = ?`, [code])).length && guard++ < 10) {
+          code = genRegCode();
+        }
+        const expireSql = days > 0 ? 'DATE_ADD(NOW(), INTERVAL ? DAY)' : 'NULL';
+        const params = days > 0 ? [code, days, maxUse, remark || null] : [code, maxUse, remark || null];
+        await q(
+          `INSERT INTO ${table('reg_code')} (code, expiretime, max_use, used, status, remark, addtime) VALUES (?, ${expireSql}, ?, 0, 1, ?, NOW())`,
+          params
+        );
+        codes.push(code);
       }
-      codes.push(code);
-      const expireSql = days > 0 ? 'DATE_ADD(NOW(), INTERVAL ? DAY)' : 'NULL';
-      const params = days > 0 ? [code, days, maxUse, remark || null] : [code, maxUse, remark || null];
-      await query(
-        `INSERT INTO ${table('reg_code')} (code, expiretime, max_use, used, status, remark, addtime) VALUES (?, ${expireSql}, ?, 0, 1, ?, NOW())`,
-        params
-      );
-    }
+    });
     return { code: 0, msg: '注册码生成成功', data: { codes } };
   });
 

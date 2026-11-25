@@ -42,7 +42,10 @@ export async function beginIdempotent(req: any, reply: any): Promise<any> {
     bodyText = '';
   }
   const requestHash = createHash('sha256')
-    .update(`${method}\n${rawUrl.slice(0, 2048)}\n${bodyText.slice(0, 65536)}`)
+    .update(`${method}\n`)
+    .update(rawUrl)
+    .update('\n')
+    .update(bodyText)
     .digest('hex');
 
   let row: any = await queryOne(

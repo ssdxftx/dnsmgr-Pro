@@ -1,9 +1,18 @@
+import { createHash } from 'node:crypto';
+
 /** CDN 列表补详情用的短 TTL 缓存：同一账户短时间反复刷新列表时不再逐域名重发请求 */
 const store = new Map<string, { at: number; value: any }>();
 const inflight = new Map<string, Promise<any>>();
 const MAX_ENTRIES = 5000;
 
+export function credentialCacheId(...values: any[]): string {
+  const parts = values.map((v) => String(v ?? '').trim());
+  if (parts.some((v) => !v)) return '';
+  return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 24);
+}
+
 export async function cachedDetail<T>(key: string, ttlMs: number, fn: () => Promise<T>): Promise<T> {
+  if (!key) return fn();
   const hit = store.get(key);
   if (hit && Date.now() - hit.at < ttlMs) return hit.value;
   const running = inflight.get(key);

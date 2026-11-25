@@ -29,7 +29,7 @@ function validatePrefix(prefix: string): string {
 function isMissingTableError(e: any): boolean {
   const code = String(e?.code || '');
   const message = String(e?.message || '');
-  return code === 'ER_NO_SUCH_TABLE' || /no such table/i.test(message);
+  return code === 'ER_NO_SUCH_TABLE' || Number(e?.errno) === 1146 || /no such table/i.test(message);
 }
 
 function friendlyDbError(e: any): string {
@@ -137,7 +137,7 @@ export interface InstallResult {
 }
 
 // 安装后导入备份的一次性令牌：内存保存，绑定数据库标识，用完即删
-const installTokens = new Map<string, { identity: string; exp: number }>();
+const installTokens = new Map<string, { identity: string; exp: number; busy?: boolean }>();
 
 function issueInstallToken(identity: string): string {
   const token = randomBytes(24).toString('hex');
@@ -145,18 +145,40 @@ function issueInstallToken(identity: string): string {
   return token;
 }
 
-export function consumeInstallToken(token: string, identity: string): boolean {
+function validInstallToken(token: string, identity: string): { id: string; hit: { identity: string; exp: number; busy?: boolean } } | null {
   const id = String(token || '');
   const hit = installTokens.get(id);
-  if (!hit) return false;
+  if (!hit) return null;
   // 必须先用后删：身份不匹配/已过期的请求不能消耗合法令牌，否则攻击者可用错误 identity
   // 反复使安装令牌失效，阻断正常安装流程。
   if (hit.exp <= Date.now()) {
     installTokens.delete(id);
-    return false;
+    return null;
   }
-  if (hit.identity !== identity) return false;
-  installTokens.delete(id);
+  if (hit.identity !== identity) return null;
+  return { id, hit };
+}
+
+export function verifyInstallToken(token: string, identity: string): boolean {
+  return !!validInstallToken(token, identity);
+}
+
+export function claimInstallToken(token: string, identity: string): boolean {
+  const found = validInstallToken(token, identity);
+  if (!found || found.hit.busy) return false;
+  found.hit.busy = true;
+  return true;
+}
+
+export function releaseInstallToken(token: string): void {
+  const hit = installTokens.get(String(token || ''));
+  if (hit) hit.busy = false;
+}
+
+export function consumeInstallToken(token: string, identity: string): boolean {
+  const found = validInstallToken(token, identity);
+  if (!found) return false;
+  installTokens.delete(found.id);
   return true;
 }
 
@@ -271,12 +293,14 @@ async function mysqlInstall(cfg: DbConfig, prefix: string, existed: boolean, adm
         [adminUsername, hash],
       );
     }
+    const [adminRows] = await conn.query(`SELECT 1 FROM \`${prefix}user\` WHERE level >= 2 LIMIT 1`);
+    if ((adminRows as any[]).length === 0) throw new Error('安装后未检测到管理员账号');
   } finally {
     await conn.end().catch(() => undefined);
   }
 }
 
-/** 已有库是否至少存在一个管理员；查询失败时按“有管理员”处理，避免瞬时故障触发重复建号 */
+/** 已有库是否至少存在一个管理员；用户表不存在视为无管理员，其他查询失败向上抛出 */
 async function dbHasAdmin(cfg: DbConfig, prefix: string): Promise<boolean> {
   // SQLite 必须单独分支：旧实现只建 MySQL 连接，SQLite 部署下必然抛错并落到 return true，
   // 结果是「config 表在、但没有任何 level>=2 账号」的半成品实例永远不建管理员，
@@ -292,10 +316,8 @@ async function dbHasAdmin(cfg: DbConfig, prefix: string): Promise<boolean> {
       const row = db.prepare(`SELECT 1 FROM "${prefix}user" WHERE level >= 2 LIMIT 1`).get();
       return !!row;
     } catch (e: any) {
-      // 只有「表不存在」才说明还没有管理员；busy/locked、文件损坏等查询失败必须
-      // 保守按已有管理员处理，否则会向半成品库重复插入 level 2 账号。
-      if (/no such table/i.test(String(e?.message || e))) return false;
-      return true;
+      if (isMissingTableError(e)) return false;
+      throw new Error('检查管理员账号失败：' + (e?.message || String(e)));
     } finally {
       db?.close?.();
     }
@@ -303,14 +325,15 @@ async function dbHasAdmin(cfg: DbConfig, prefix: string): Promise<boolean> {
   let conn: mysql.Connection;
   try {
     conn = await createConnection(cfg);
-  } catch {
-    return true;
+  } catch (e) {
+    throw new Error(friendlyDbError(e));
   }
   try {
     const [rows] = await conn.query(`SELECT 1 FROM \`${prefix}user\` WHERE level >= 2 LIMIT 1`);
     return (rows as any[]).length > 0;
-  } catch {
-    return true;
+  } catch (e: any) {
+    if (isMissingTableError(e)) return false;
+    throw new Error('检查管理员账号失败：' + (e?.message || String(e)));
   } finally {
     await conn.end().catch(() => undefined);
   }
@@ -332,7 +355,12 @@ export async function performInstall(cfg: DbConfig, adminUsername: string, admin
   const existed = test.initialized;
   const username = String(adminUsername || '').trim();
   // 已初始化但缺少管理员的“半成品库”同样需要补建管理员
-  const needAdmin = !existed || !(await dbHasAdmin(cfg, prefix));
+  let needAdmin: boolean;
+  try {
+    needAdmin = !existed || !(await dbHasAdmin(cfg, prefix));
+  } catch (e: any) {
+    return { ok: false, bound: false, message: (e?.message || String(e)).slice(0, 300) };
+  }
   if (needAdmin && (!username || !adminPassword)) {
     return { ok: false, bound: false, message: '需要设置管理员账号和密码' };
   }

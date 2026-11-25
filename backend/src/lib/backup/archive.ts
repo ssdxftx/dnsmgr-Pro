@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import { markTempActive, markTempDone, isTempActive } from './tmpRegistry.js';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, readdir, stat, unlink } from 'node:fs/promises';
+import { mkdir, open, readdir, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
 import { Transform } from 'node:stream';
@@ -12,7 +12,12 @@ export const MAGIC = Buffer.from('DNSMGRBK', 'utf8');
 export const FORMAT_VERSION = 1;
 const TAG_LEN = 16;
 const IMPORT_TMP_TTL_MS = 3600_000;
-const MAX_IMPORT_JSON_BYTES = Number(process.env.DNSMGR_MAX_IMPORT_BYTES || 128 * 1024 * 1024);
+const DEFAULT_MAX_IMPORT_BYTES = 128 * 1024 * 1024;
+const configuredMaxImportBytes = Number(process.env.DNSMGR_MAX_IMPORT_BYTES);
+const MAX_IMPORT_JSON_BYTES =
+  Number.isFinite(configuredMaxImportBytes) && configuredMaxImportBytes > 0
+    ? configuredMaxImportBytes
+    : DEFAULT_MAX_IMPORT_BYTES;
 // 旧格式归档没有头签名，scope/ownerUid 可被篡改；默认拒绝，仅在明确信任旧文件时通过环境变量临时放行
 const ALLOW_LEGACY_ARCHIVE = String(process.env.DNSMGR_ALLOW_LEGACY_BACKUP || '').trim() === '1';
 
@@ -135,7 +140,9 @@ async function writeChunk(
 export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: string): Promise<WriteResult> {
   await ensureDataDirs();
   const tmp = outPath + '.tmp';
+  const finalTmp = outPath + '.enc.tmp';
   markTempActive(tmp);
+  markTempActive(finalTmp);
   const stats: ArchiveStats = { tables: {} };
   const hash = createHash('sha256');
   let size = 0;
@@ -222,7 +229,7 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     header.sig = headerSignature(key, header).toString('base64');
     const headerBuf = Buffer.from(JSON.stringify(header), 'utf8');
 
-    const fd = await open(outPath, 'w');
+    const fd = await open(finalTmp, 'w', 0o600);
     try {
       await fd.write(Buffer.concat([MAGIC, Buffer.from([FORMAT_VERSION]), u32le(headerBuf.length), headerBuf]));
       const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -237,14 +244,16 @@ export async function writeArchive(draft: ArchiveDraft, key: Buffer, outPath: st
     } finally {
       await fd.close();
     }
+    await rename(finalTmp, outPath);
   } catch (e) {
-    // 目标归档可能已创建但未写完，失败时删除半成品，避免占满备份目录
-    await unlink(outPath).catch(() => undefined);
+    await unlink(finalTmp).catch(() => undefined);
     throw e;
   } finally {
     // 无论成功失败都清理包含明文的 gzip 临时文件
     await unlink(tmp).catch(() => undefined);
+    await unlink(finalTmp).catch(() => undefined);
     markTempDone(tmp);
+    markTempDone(finalTmp);
   }
   const st = await stat(outPath);
   return { size: st.size, checksum, plainSize: size, stats };

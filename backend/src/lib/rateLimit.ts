@@ -14,14 +14,23 @@ export function hitRateLimit(key: string, max: number, windowMs: number): boolea
     }
     lastSweep = now;
   }
-  let arr = buckets.get(key);
+  let bucketKey = key;
+  let arr = buckets.get(bucketKey);
   if (!arr) {
     if (buckets.size >= MAX_BUCKETS) {
-      const oldest = buckets.keys().next().value;
-      if (oldest !== undefined) buckets.delete(oldest);
+      // 只清理过期桶；容量仍满时新 key 降级到共享溢出桶，避免挤掉未过期桶
+      for (const [k, v] of buckets) {
+        if (!v.length || v[v.length - 1] <= now - windowMs) buckets.delete(k);
+      }
+      if (buckets.size >= MAX_BUCKETS) {
+        bucketKey = '\u0000overflow';
+        arr = buckets.get(bucketKey);
+      }
     }
-    arr = [];
-    buckets.set(key, arr);
+    if (!arr) {
+      arr = [];
+      buckets.set(bucketKey, arr);
+    }
   }
   const cutoff = now - windowMs;
   while (arr.length && arr[0] <= cutoff) arr.shift();

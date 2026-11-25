@@ -23,6 +23,7 @@ export function invalidateDomainNamesCache(): void {
 }
 
 import { decryptConfig, encryptConfig, encryptText } from './secret.js';
+import { loadAccountConfig } from './accounts/taskConfig.js';
 
 function safeJson(s: string | null): any {
   if (!s) return null;
@@ -47,6 +48,7 @@ export class CertOrderService {
   private domainList!: string[];
   private cnameDomainList: number[] = [];
   private domainsAliasList: Record<string, string> = {};
+  private leaseToken: string | null = null;
 
   constructor(private oid: number) {}
 
@@ -61,7 +63,7 @@ export class CertOrderService {
     this.atype = account.type;
     // 证书账户的归属用户：同名域名存在于多个云账户时，用它选择正确的 DNS 账户
     this.ownerUid = Number(account.owner_uid || 0);
-    const config = safeJson(account.config) || {};
+    const config = await loadAccountConfig(account);
     const ext = safeJson(account.ext);
     this.client = getCertProvider(account.type, config, ext);
     if (!this.client) throw new Error('该证书类型不存在');
@@ -97,7 +99,16 @@ export class CertOrderService {
       this.order.retry = (this.order.retry || 0) + 1;
       update.retry = this.order.retry;
     }
-    await query(`UPDATE ${table('cert_order')} SET ? WHERE id = ?`, [update, this.oid]);
+    const token = this.leaseToken;
+    if (token) {
+      const res: any = await query(`UPDATE ${table('cert_order')} SET ? WHERE id = ? AND processid = ?`, [update, this.oid, token]);
+      if (!res || !res.affectedRows) {
+        if (err) this.saveLog('[Error] ' + err);
+        throw new Error('订单处理锁已失效，结果未写入');
+      }
+    } else {
+      await query(`UPDATE ${table('cert_order')} SET ? WHERE id = ?`, [update, this.oid]);
+    }
     if (err) this.saveLog('[Error] ' + err);
   }
 
@@ -115,34 +126,40 @@ export class CertOrderService {
     }
   }
 
-  private async takeLock(): Promise<string> {
+  private async takeLock(expectedStatus?: number): Promise<string> {
     // 每次加锁都必须换新租约令牌。若沿用数据库里旧 worker 的 processid，
     // 超时抢占后旧 worker 的 unlock 仍能匹配并释放新锁，导致第三个 worker 再次处理同一订单。
     const token = genSid();
+    const statusCond = expectedStatus === undefined ? '' : ' AND status = ?';
+    const params = expectedStatus === undefined ? [token, this.oid] : [token, this.oid, expectedStatus];
     const res: any = await query(
-      `UPDATE ${table('cert_order')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ? AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
-      [token, this.oid],
+      `UPDATE ${table('cert_order')} SET islock = 1, locktime = NOW(), processid = ? WHERE id = ?${statusCond} AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
+      params,
     );
-    if (!res || !res.affectedRows) throw new Error('订单正在处理中，请稍后再试');
+    if (!res || !res.affectedRows) throw new Error(expectedStatus === undefined ? '订单正在处理中，请稍后再试' : '订单状态已变化或正在处理中，请稍后再试');
+    this.leaseToken = token;
     if (this.order) this.order.processid = token;
     return token;
   }
 
   private async releaseLock(token: string): Promise<void> {
-    // 只释放仍属于本次租约的锁；已被超时抢占/已被重置时不再误释放他人锁。
-    // 同时把本次令牌记为 last_processid，处理结束后仍能定位日志文件。
-    await query(
-      `UPDATE ${table('cert_order')} SET islock = 0, processid = NULL, last_processid = ? WHERE id = ? AND processid = ? AND islock = 1`,
-      [token, this.oid, token],
-    );
+    try {
+      // 只释放仍属于本次租约的锁；已被超时抢占/已被重置时不再误释放他人锁。
+      // 同时把本次令牌记为 last_processid，处理结束后仍能定位日志文件。
+      await query(
+        `UPDATE ${table('cert_order')} SET islock = 0, processid = NULL, last_processid = ? WHERE id = ? AND processid = ? AND islock = 1`,
+        [token, this.oid, token],
+      );
+    } finally {
+      if (this.leaseToken === token) this.leaseToken = null;
+    }
   }
 
-  private async lockOrder() {
-    await this.takeLock();
+  private async lockOrder(expectedStatus?: number): Promise<string> {
+    return this.takeLock(expectedStatus);
   }
 
-  private async unlockOrder() {
-    const token = safeProcessId(this.order.processid);
+  private async unlockOrder(token: string) {
     if (token) await this.releaseLock(token);
   }
 
@@ -182,9 +199,7 @@ export class CertOrderService {
         if (domain.startsWith('*.')) domain = domain.slice(2);
         const cnameRow = await queryOne(`SELECT id FROM ${table('cert_cname')} WHERE domain = ? AND status = 1`, [domain]);
         if (!cname || !cnameRow) {
-          const errmsg = '域名' + domain + '未在本系统添加';
-          await query(`UPDATE ${table('cert_order')} SET error = ? WHERE id = ?`, [errmsg, this.oid]);
-          throw new Error(errmsg);
+          throw new Error('域名' + domain + '未在本系统添加');
         } else {
           this.cnameDomainList.push(cnameRow.id);
         }
@@ -214,37 +229,71 @@ export class CertOrderService {
   }
 
   async process(isManual = false): Promise<number> {
-    await this.load();
+    const pre: any = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [this.oid]);
+    if (!pre) throw new Error('该证书订单不存在');
+    this.order = pre;
     // 已签发：直接返回成功；已吊销（4）不得被当作成功，否则会误发「签发成功」通知并创建 CDN 联动部署
-    if (this.order.status === 4) {
+    if (Number(pre.status) === 4) {
       this.saveLog('证书订单已吊销，跳过处理');
       return 4;
     }
-    if (this.order.status === 3) return 3;
-    if (this.order.retry2 >= 3 && !isManual) throw new Error('已超出最大重试次数(' + this.order.error + ')');
-    if (this.order.status != 1 && this.order.status != 2 && this.order.retry >= 3 && !isManual) {
-      if ([-1, -2, -3, -4, -5, -6, -7].includes(this.order.status)) {
-        await this.cancel();
-        // -3/-4 可能已写入过挑战记录，一并清理，避免残留 TXT
-        if (this.order.status <= -3) await this.delDns();
-        await query(
-          `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retrytime = NULL, updatetime = NOW(), retry2 = retry2 + 1 WHERE id = ?`,
-          [this.oid],
-        );
-        this.order.status = 0;
-        this.order.retry = 0;
-        this.order.retry2 = (this.order.retry2 || 0) + 1;
-      } else {
-        throw new Error('已超出最大重试次数(' + this.order.error + ')');
-      }
-    }
+    if (Number(pre.status) === 3) return 3;
 
-    await this.checkDomains();
-    await this.lockOrder();
+    const expectedStatus = Number(pre.status);
+    const token = await this.lockOrder(expectedStatus);
     try {
+      try {
+        await this.load();
+      } catch (e: any) {
+        if (this.order) await this.saveResult(-1, e?.message || '证书订单加载失败').catch(() => undefined);
+        throw e;
+      }
+      if (Number(this.order.status) !== expectedStatus) return Number(this.order.status);
+
+      if ((this.order.retry2 || 0) >= 3 && !isManual) {
+        const msg = '已超出最大重试次数(' + (this.order.error || '未知错误') + ')';
+        await this.saveResult(Number(this.order.status) < 0 ? Number(this.order.status) : -7, msg);
+        await query(`UPDATE ${table('cert_order')} SET retry2 = 3, retrytime = NULL, updatetime = NOW() WHERE id = ? AND processid = ?`, [this.oid, token]);
+        this.order.retry2 = 3;
+        throw new Error(msg);
+      }
+
+      if (this.order.status != 1 && this.order.status != 2 && this.order.retry >= 3 && !isManual) {
+        if ([-1, -2, -3, -4, -5, -6, -7].includes(this.order.status)) {
+          await this.cancel();
+          // -3/-4 可能已写入过挑战记录，一并清理，避免残留 TXT
+          if (this.order.status <= -3) await this.delDns();
+          const nextRetry2 = (this.order.retry2 || 0) + 1;
+          if (nextRetry2 >= 3) {
+            const msg = '已超出最大重试次数(' + (this.order.error || '未知错误') + ')';
+            await this.saveResult(this.order.status, msg);
+            await query(`UPDATE ${table('cert_order')} SET retry2 = ?, retrytime = NULL, updatetime = NOW() WHERE id = ? AND processid = ?`, [nextRetry2, this.oid, token]);
+            this.order.retry2 = nextRetry2;
+            throw new Error(msg);
+          }
+          const res: any = await query(
+            `UPDATE ${table('cert_order')} SET status = 0, retry = 0, retrytime = NULL, updatetime = NOW(), retry2 = retry2 + 1 WHERE id = ? AND processid = ?`,
+            [this.oid, token],
+          );
+          if (!res || !res.affectedRows) throw new Error('订单处理锁已失效，结果未写入');
+          this.order.status = 0;
+          this.order.retry = 0;
+          this.order.retry2 = nextRetry2;
+        } else {
+          throw new Error('已超出最大重试次数(' + this.order.error + ')');
+        }
+      }
+
+      try {
+        await this.checkDomains();
+      } catch (e: any) {
+        await this.saveResult(-3, e?.message || '域名前置校验失败');
+        throw e;
+      }
+
       return await this.processOrder(isManual);
     } finally {
-      await this.unlockOrder();
+      await this.unlockOrder(token);
     }
   }
 
@@ -297,7 +346,7 @@ export class CertOrderService {
 
   async buyCert() {
     try {
-      const res = await this.client.buyCert(this.domainList);
+      const res = await this.client.buyCert(this.domainList, this.info);
       if (res) this.info = res;
     } catch (e: any) {
       await this.saveResult(-1, e.message);

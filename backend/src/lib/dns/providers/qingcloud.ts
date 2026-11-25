@@ -4,6 +4,8 @@ import { findRecordById } from '../recordLookup.js';
 
 import { fetchWithProxy } from '../../http.js';
 export class QingcloudDns implements DnsProvider {
+  // getDomainRecords 会先拉全部主机再本地切片，调用方不应逐页重复请求上游
+  readonly clientPaged = true;
   private access_key_id: string;
   private secret_access_key: string;
   // 注意：上游 routewize 仅提供 HTTP 端点（HTTPS 不可用），签名凭据在传输层存在被中间人窃取/重放的风险。
@@ -124,7 +126,7 @@ export class QingcloudDns implements DnsProvider {
           }
           list.push({
             RecordId: record.domain_record_id + '_' + row.record_value_id,
-            Domain: record.domain_name,
+            Domain: this.domain,
             Name: name,
             Type: record.rd_type,
             Value: value,
@@ -142,6 +144,23 @@ export class QingcloudDns implements DnsProvider {
     return { total: data.total_count || 0, list };
   }
 
+  private async getAllHosts(KeyWord: string | null): Promise<any[] | false> {
+    const hosts: any[] = [];
+    const pageSize = 100;
+    for (let page = 1; page <= 200; page++) {
+      const param: Record<string, any> = { zone_name: this.domainid, offset: (page - 1) * pageSize, limit: pageSize };
+      if (KeyWord) param.search_word = KeyWord;
+      const data = await this.execute('GET', '/v1/dns/host/', param);
+      if (!data) return false;
+      const batch = Array.isArray(data.domains) ? data.domains : [];
+      hosts.push(...batch);
+      const total = Number(data.total_count || 0);
+      if (!batch.length) break;
+      if (total > 0 ? hosts.length >= total : batch.length < pageSize) break;
+    }
+    return hosts;
+  }
+
   async getDomainRecords(
     PageNumber = 1,
     PageSize = 20,
@@ -157,29 +176,20 @@ export class QingcloudDns implements DnsProvider {
       }
       return this.getHostRecords(host.replace(/\.$/, ''));
     }
-    const param: Record<string, any> = { zone_name: this.domainid, offset: (PageNumber - 1) * PageSize, limit: PageSize };
-    if (KeyWord) param.search_word = KeyWord;
-    const data = await this.execute('GET', '/v1/dns/host/', param);
-    if (!data) return false;
-    const list: any[] = (data.domains || []).map((row: any) => {
-      const name = String(row.domain_name || '').slice(0, -(String(row.zone_name || '').length + 1));
-      return {
-        RecordId: row.domain_name,
-        Domain: this.domain,
-        Name: name === '' ? '@' : name,
-        Type: null,
-        Value: null,
-        Line: null,
-        TTL: null,
-        MX: null,
-        Status: row.status === 'enabled' ? '1' : '0',
-        Weight: null,
-        Remark: row.description ?? null,
-        UpdateTime: row.create_time ?? null,
-        Count: row.count,
-      };
-    });
-    return { total: data.total_count || 0, list };
+    // 主机汇总行没有 Type/Value/真实 RecordId，不能直接作为解析记录返回；
+    // 先取全部主机，再逐个展开成可编辑的具体记录，最后在本地按页切片。
+    const hosts = await this.getAllHosts(KeyWord);
+    if (hosts === false) return false;
+    const all: RecordInfo[] = [];
+    for (const row of hosts) {
+      const host = String(row.domain_name || '').replace(/\.+$/, '');
+      if (!host) continue;
+      const expanded = await this.getHostRecords(host);
+      if (expanded === false) return false;
+      all.push(...expanded.list);
+    }
+    const start = Math.max(0, (Number(PageNumber) - 1) * Number(PageSize));
+    return { total: all.length, list: all.slice(start, start + Number(PageSize)) };
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {

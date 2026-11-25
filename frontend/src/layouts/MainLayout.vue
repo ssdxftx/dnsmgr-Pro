@@ -13,7 +13,7 @@
         <div class="brand-mark">
           <n-icon size="20" :component="GlobeOutline" />
         </div>
-        <span v-if="!collapsed" class="brand-name font-display">聚合 DNS</span>
+        <span v-if="!collapsed" class="brand-name font-display">{{ t('layout.brandName') }}</span>
       </div>
 
       <div class="app-sidebar__nav">
@@ -58,7 +58,7 @@
           <div class="brand-mark">
             <n-icon size="20" :component="GlobeOutline" />
           </div>
-          <span class="brand-name font-display">聚合 DNS</span>
+          <span class="brand-name font-display">{{ t('layout.brandName') }}</span>
         </div>
         <n-menu
           :value="activeKey"
@@ -87,7 +87,7 @@
           </n-button>
           <div class="app-header__titles">
             <div class="app-header__title font-display">{{ pageTitle }}</div>
-            <div v-if="!isMobile" class="app-header__crumb">聚合 DNS · {{ groupLabel }}</div>
+            <div v-if="!isMobile" class="app-header__crumb">{{ t('layout.brandName') }} · {{ groupLabel }}</div>
           </div>
         </div>
         <div class="app-header__right">
@@ -124,7 +124,6 @@ import { useRoute, useRouter } from 'vue-router';
 import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
 import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, ArchiveOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
-import { clearToken } from '../api';
 import { isAdminUser, requiresAdmin } from '../lib/admin';
 import { useResponsive } from '../composables/useResponsive';
 import { useThemeMode } from '../composables/useThemeMode';
@@ -375,7 +374,6 @@ function onUserSelect(key: string) {
   } else if (key === 'totp') {
     router.push('/totp');
   } else if (key === 'logout') {
-    clearToken();
     auth.logout();
     router.push('/login');
   }

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { getToken, getUser, clearToken } from '../api';
+import { getToken, getUser, setToken, clearToken } from '../api';
 import { useLocale } from '../composables/useLocale';
 
 export const useAuthStore = defineStore('auth', () => {
@@ -26,6 +26,10 @@ export const useAuthStore = defineStore('auth', () => {
     user.value = u;
     if (u?.lang) applyUserLocale(u.lang);
   }
+  function applyToken(t: string) {
+    token.value = t;
+    setToken(t);
+  }
   function logout() {
     // 先通知服务端吊销当前 jti（失败不阻塞本地登出）
     const t = token.value;
@@ -38,5 +42,5 @@ export const useAuthStore = defineStore('auth', () => {
     clearToken();
   }
 
-  return { token, user, setAuth, logout };
+  return { token, user, setAuth, applyToken, logout };
 });

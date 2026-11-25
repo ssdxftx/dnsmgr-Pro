@@ -23,6 +23,14 @@ function shape(row: any): any {
   return out;
 }
 
+function encryptEventSecret(secret: string): string {
+  const encrypted = encryptText(secret);
+  if (Buffer.byteLength(encrypted, 'utf8') > 128) {
+    throw new Error('事件密钥过长（加密后最多 128 字节），请缩短密钥');
+  }
+  return encrypted;
+}
+
 async function validateUrl(value: any): Promise<string> {
   const url = String(value || '').trim();
   if (!url) throw new Error('回调地址不能为空');
@@ -57,13 +65,17 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
     }
     const name = String(req.body?.name || 'Webhook').trim().slice(0, 100) || 'Webhook';
     const secret = String(req.body?.secret || '').trim();
-    // secret 会先加密再写入 varchar(128)：明文超过 48 字符时密文必然溢出。
-    if (secret.length > 48) return { code: -1, msg: '事件密钥最多 48 个字符' };
     const active = req.body?.active === false || Number(req.body?.active) === 0 ? 0 : 1;
+    let encryptedSecret: string;
+    try {
+      encryptedSecret = encryptEventSecret(secret || newEventSecret());
+    } catch (e: any) {
+      return { code: -1, msg: e.message || '事件密钥不合法' };
+    }
     const res: any = await query(
       `INSERT INTO ${table('event_subscription')}
         (name, url, secret, events, active, created_at) VALUES (?, ?, ?, ?, ?, NOW())`,
-      [name, url, encryptText(secret || newEventSecret()), JSON.stringify(events), active],
+      [name, url, encryptedSecret, JSON.stringify(events), active],
     );
     audit(req, {
       targetType: 'event_subscription',
@@ -105,9 +117,8 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
       }
       if (req.body?.secret !== undefined) {
         const secret = String(req.body.secret || '').trim();
-        if (secret.length > 48) return { code: -1, msg: '事件密钥最多 48 个字符' };
         sets.push('secret = ?');
-        params.push(encryptText(secret || newEventSecret()));
+        params.push(encryptEventSecret(secret || newEventSecret()));
       }
       if (req.body?.active !== undefined) {
         sets.push('active = ?');

@@ -1,4 +1,3 @@
-import { isIP } from 'node:net';
 import { query, queryOne, table } from '../db.js';
 import { getDnsProvider } from './dns/factory.js';
 import { getDnsRecords, queryDnsDoh } from './dnsQuery.js';
@@ -21,10 +20,72 @@ async function accountConfig(drow: any): Promise<Record<string, any>> {
 
 // 归一化记录名（小写、去首尾空白与结尾点），用于精确比对，避免上游模糊匹配误伤同名相似记录
 function normName(s: any): string {
-  return String(s ?? '').trim().toLowerCase().replace(/\.$/, '');
+  return String(s ?? '').trim().toLowerCase().replace(/\.+$/, '');
+}
+
+// DNS 值同样归一化后比较：CNAME 尾点、大小写差异不应导致验证永久失败
+function normValue(s: any): string {
+  return String(s ?? '').trim().toLowerCase().replace(/\.+$/, '');
 }
 
 type DnsList = Record<string, DnsRecord[]>;
+
+const RECORD_PAGE_SIZE = 100;
+const RECORD_MAX_PAGES = 200;
+
+/**
+ * 完整翻页抓取指定主机记录（可按类型收窄），避免记录数超过单页上限时重复添加或漏删挑战记录。
+ * 本地切片型厂商一次返回整个 Zone，避免逐页把一次下载放大成数十次请求。
+ */
+async function fetchAllRecords(provider: any, name: string, type: string | null): Promise<any[] | false> {
+  if (provider.clientPaged) {
+    const all = await provider.getDomainRecords(1, 1_000_000, null, name, null, type, null, null);
+    return all === false ? false : all.list;
+  }
+  const all: any[] = [];
+  let actualSize = RECORD_PAGE_SIZE;
+  for (let page = 1; page <= RECORD_MAX_PAGES; page++) {
+    const res = await provider.getDomainRecords(page, RECORD_PAGE_SIZE, null, name, null, type, null, null);
+    if (res === false) return false;
+    all.push(...res.list);
+    if (!res.list.length) break;
+    if (page === 1) actualSize = res.list.length;
+    if (typeof res.total === 'number' && page * actualSize >= res.total) break;
+    if (res.list.length < actualSize) break;
+  }
+  return all;
+}
+
+function recordMatches(v: any, row: DnsRecord): boolean {
+  if (normName(v.Name) !== normName(row.name)) return false;
+  if (String(v.Type) !== String(row.type)) return false;
+  const val = Array.isArray(v.Value) ? v.Value.join(',') : v.Value;
+  return normValue(val) === normValue(row.value);
+}
+
+// CNAME 代理记录可能挂在未入库的父 Zone 上：同时尝试完整挑战域名与去掉 _acme-challenge 后的证书域名
+function cnameCandidates(row: DnsRecord, mainDomain: string): string[] {
+  const out = new Set<string>();
+  const prefix = '_acme-challenge';
+  if (row.name === prefix) {
+    out.add(mainDomain);
+  } else if (String(row.name).startsWith(prefix + '.')) {
+    out.add(String(row.name).slice(prefix.length + 1) + '.' + mainDomain);
+  }
+  out.add(row.name + '.' + mainDomain);
+  return [...out].map((d) => d.trim().toLowerCase().replace(/\.+$/, '')).filter(Boolean);
+}
+
+async function findCnameRow(domains: string[]): Promise<any | null> {
+  for (const domain of domains) {
+    const row = await queryOne(
+      `SELECT A.*, B.name AS cnamedomain FROM ${table('cert_cname')} A JOIN ${table('domain')} B ON A.did = B.id WHERE A.domain = ?`,
+      [domain],
+    );
+    if (row) return row;
+  }
+  return null;
+}
 
 function getHuaweiDnsRecords(list: DnsRecord[]): DnsRecord[] {
   const txtRecords: Record<string, string[]> = {};
@@ -82,18 +143,14 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
       if (cname) {
         for (let i = list.length - 1; i >= 0; i--) {
           const row = list[i];
-          const domain = row.name === '_acme-challenge' ? mainDomain : row.name.replace('_acme-challenge.', '') + '.' + mainDomain;
-          const cnameRow = await queryOne(
-            `SELECT A.*, B.name AS cnamedomain FROM ${table('cert_cname')} A JOIN ${table('domain')} B ON A.did = B.id WHERE A.domain = ?`,
-            [domain],
-          );
+          const cnameRow = await findCnameRow(cnameCandidates(row, mainDomain));
           if (cnameRow) {
             row.name = cnameRow.rr;
             if (!cnameDomainList[cnameRow.cnamedomain]) cnameDomainList[cnameRow.cnamedomain] = [];
             cnameDomainList[cnameRow.cnamedomain].push(row);
             list.splice(i, 1);
           } else {
-            throw new Error('域名' + domain + '未在本系统添加');
+            throw new Error('域名' + row.name + '.' + mainDomain + '未配置 CNAME 代理，未在本系统添加');
           }
         }
       } else {
@@ -109,22 +166,20 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
     let records = list.slice().sort((a, b) => a.name.localeCompare(b.name));
     if (drow.type === 'huawei') records = getHuaweiDnsRecords(records);
 
-    const cache: Record<string, any> = {};
+    const cache: Record<string, any[]> = {};
     for (const row of records) {
       const domain = row.name + '.' + mainDomain;
-      if (!cache[row.name]) {
-        cache[row.name] = await provider.getDomainRecords(1, 100, null, row.name, null, null, null);
+      const cacheKey = row.name + '\0' + row.type;
+      if (!cache[cacheKey]) {
+        const fetched = await fetchAllRecords(provider, row.name, row.type);
+        if (fetched === false) throw new Error('获取' + domain + '记录列表失败，' + provider.getError());
+        cache[cacheKey] = fetched;
       }
-      if (!cache[row.name]) throw new Error('获取' + domain + '记录列表失败，' + provider.getError());
 
-      const list2 = cache[row.name].list;
-      const matched = list2.filter((v: any) => {
-        if (normName(v.Name) !== normName(row.name)) return false;
-        const val = Array.isArray(v.Value) ? v.Value.join(',') : v.Value;
-        return v.Type === row.type && (val === row.value || String(val).replace(/\.$/, '') === row.value);
-      });
+      const list2 = cache[cacheKey];
+      const matched = list2.filter((v: any) => recordMatches(v, row));
       if (matched.length) {
-        cache[row.name].list = list2.filter((v: any) => !matched.includes(v));
+        cache[cacheKey] = list2.filter((v: any) => !matched.includes(v));
         continue;
       }
 
@@ -135,6 +190,7 @@ export async function addDns(dnsList: DnsList, log: (txt: string) => void, cname
       const line = lineDef[drow.type] ?? 'default';
       const res = await provider.addDomainRecord(row.name, row.type, row.value, line, ttl);
       if (!res && row.type !== 'CAA') throw new Error('添加' + domain + '解析记录失败，' + provider.getError());
+      if (res) cache[cacheKey].push({ RecordId: res, Name: row.name, Type: row.type, Value: row.value });
       log('Add DNS Record: ' + domain + ' ' + row.type + ' ' + row.value);
     }
   }
@@ -151,11 +207,7 @@ export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname
       if (cname) {
         for (let i = list.length - 1; i >= 0; i--) {
           const row = list[i];
-          const domain = row.name === '_acme-challenge' ? mainDomain : row.name.replace('_acme-challenge.', '') + '.' + mainDomain;
-          const cnameRow = await queryOne(
-            `SELECT A.*, B.name AS cnamedomain FROM ${table('cert_cname')} A JOIN ${table('domain')} B ON A.did = B.id WHERE A.domain = ?`,
-            [domain],
-          );
+          const cnameRow = await findCnameRow(cnameCandidates(row, mainDomain));
           if (cnameRow) {
             row.name = cnameRow.rr;
             if (!cnameDomainList[cnameRow.cnamedomain]) cnameDomainList[cnameRow.cnamedomain] = [];
@@ -176,22 +228,22 @@ export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname
     let records = list.slice().sort((a, b) => a.name.localeCompare(b.name));
     if (drow.type === 'huawei') records = getHuaweiDnsRecords(records);
 
-    const cache: Record<string, any> = {};
+    const cache: Record<string, any[]> = {};
     for (const row of records) {
       const domain = row.name + '.' + mainDomain;
-      if (!cache[row.name]) {
-        cache[row.name] = await provider.getDomainRecords(1, 100, null, row.name, null, null, null);
+      const cacheKey = row.name + '\0' + row.type;
+      if (!cache[cacheKey]) {
+        const fetched = await fetchAllRecords(provider, row.name, row.type);
+        if (fetched === false) continue;
+        cache[cacheKey] = fetched;
       }
-      if (!cache[row.name]) continue;
-      const matched = cache[row.name].list.filter((v: any) => {
-        if (normName(v.Name) !== normName(row.name)) return false;
-        const val = Array.isArray(v.Value) ? v.Value.join(',') : v.Value;
-        return v.Type === row.type && (val === row.value || String(val).replace(/\.$/, '') === row.value);
-      });
+      const matched = cache[cacheKey].filter((v: any) => recordMatches(v, row));
       for (const rec of matched) {
         await provider.deleteDomainRecord(rec.RecordId);
         log('Delete DNS Record: ' + domain + ' ' + row.type + ' ' + row.value);
       }
+      // 同一次清理中多个相同值只删除一次，避免对已删除的 RecordId 重复发起请求
+      if (matched.length) cache[cacheKey] = cache[cacheKey].filter((v: any) => !matched.includes(v));
     }
   }
   if (Object.keys(cnameDomainList).length) {
@@ -201,12 +253,8 @@ export async function delDns(dnsList: DnsList, log: (txt: string) => void, cname
 
 function valueMatches(expected: string, result: string[] | false): boolean {
   if (!result || !result.length) return false;
-  if (result.includes(expected) || result.includes(expected.toLowerCase())) return true;
-  if (isIP(expected)) {
-    const normalized = result.map((v) => String(v).toLowerCase());
-    return normalized.includes(expected.toLowerCase());
-  }
-  return false;
+  const exp = normValue(expected);
+  return result.some((v) => normValue(v) === exp);
 }
 
 export async function verifyDns(dnsList: DnsList): Promise<boolean> {

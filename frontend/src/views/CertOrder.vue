@@ -30,6 +30,8 @@
           :empty-text="t('certOrder.empty')"
           :empty-description="t('certOrder.emptyHint')"
           :pagination="pagination"
+          :error="loadError"
+          @retry="loadOrders"
         />
       </div>
     </n-card>
@@ -131,6 +133,7 @@ const { busy, run } = useAction();
 const message = useMessage();
 const dialog = useDialog();
 const loadBusy = ref(false);
+const loadError = ref(false);
 const orders = ref<any[]>([]);
 const ordersTotal = ref(0);
 const page = ref(1);
@@ -304,14 +307,18 @@ const columns = computed(() => [
   },
 ]);
 
+let loadSeq = 0;
 async function loadOrders() {
+  const seq = ++loadSeq;
   loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/cert/orders', {
       offset: (page.value - 1) * pageSize.value,
       limit: pageSize.value,
     });
+    if (seq !== loadSeq) return;
     if (res.code === 0) {
+      loadError.value = false;
       orders.value = res.data;
       ordersTotal.value = Number(res.total || 0);
       remoteStats.value = res.stats || null;
@@ -321,11 +328,18 @@ async function loadOrders() {
         page.value -= 1;
         await loadOrders();
       }
-    } else orders.value = [];
+    } else {
+      // 请求失败保留旧列表，避免快速翻页时被空响应覆盖
+      loadError.value = true;
+      message.error(res.msg);
+    }
   } catch (e: any) {
-    message.error(e?.message || t('common.networkError'));
+    if (seq === loadSeq) {
+      loadError.value = true;
+      message.error(e?.message || t('common.networkError'));
+    }
   } finally {
-    loadBusy.value = false;
+    if (seq === loadSeq) loadBusy.value = false;
   }
 }
 
@@ -383,10 +397,14 @@ async function save() {
 
 // 防重复提交由 useAction 的 busy 键保证（签发为耗时操作，重复触发会重复下单）
 async function process(row: any) {
-  const res = await api('POST', `/cert/orders/${row.id}/process`, {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-  loadOrders();
+  try {
+    const res = await api('POST', `/cert/orders/${row.id}/process`, {});
+    if (res.code === 0) message.success(res.msg);
+    else message.error(res.msg);
+    loadOrders();
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  }
 }
 
 function reset(row: any) {
@@ -396,10 +414,14 @@ function reset(row: any) {
     positiveText: t('certOrder.reset'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('POST', `/cert/orders/${row.id}/reset`, {});
-      if (res.code === 0) message.success(t('certOrder.resetSuccess'));
-      else message.error(res.msg);
-      loadOrders();
+      try {
+        const res = await api('POST', `/cert/orders/${row.id}/reset`, {});
+        if (res.code === 0) message.success(t('certOrder.resetSuccess'));
+        else message.error(res.msg);
+        loadOrders();
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }
@@ -411,10 +433,14 @@ function revoke(row: any) {
     positiveText: t('certOrder.revoke'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('POST', `/cert/orders/${row.id}/revoke`, {});
-      if (res.code === 0) message.success(t('certOrder.revokeSuccess'));
-      else message.error(res.msg);
-      loadOrders();
+      try {
+        const res = await api('POST', `/cert/orders/${row.id}/revoke`, {});
+        if (res.code === 0) message.success(t('certOrder.revokeSuccess'));
+        else message.error(res.msg);
+        loadOrders();
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }
@@ -505,6 +531,9 @@ async function viewLog(row: any) {
       showLog.value = false;
       message.info(res.msg || t('certOrder.noLog'));
     }
+  } catch (e: any) {
+    showLog.value = false;
+    message.error(e?.message || t('common.networkError'));
   } finally {
     logBusy.value = false;
   }

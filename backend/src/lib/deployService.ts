@@ -10,6 +10,7 @@ const LOG_DIR = logDir();
 
 import { ConfigDecryptError, decryptConfig, encryptConfig, decryptText } from './secret.js';
 import { assertDeployConfigAllowed } from './netGuard.js';
+import { loadAccountConfig } from './accounts/taskConfig.js';
 
 function safeJson(s: string | null): any {
   if (!s) return null;
@@ -30,7 +31,7 @@ export class CertDeployService {
 
     const account = await queryOne(`SELECT * FROM ${table('cert_account')} WHERE id = ?`, [task.aid]);
     if (!account) throw new Error('该自动部署账户不存在');
-    const cfg = safeJson(account.config) || {};
+    const cfg = await loadAccountConfig(account);
     // 拒绝指向链路本地/云元数据地址的部署目标，避免凭据被诱导窃取
     await assertDeployConfigAllowed(cfg);
     const client = getDeployProvider(account.type, cfg);
@@ -45,25 +46,33 @@ export class CertDeployService {
     appendLog(join(LOG_DIR, processid + '.log'), txt + '\n');
   }
 
-  private async saveResult(status: number, error: string | null = null, retrytime: string | null = null) {
+  private async saveResult(status: number, error: string | null = null, retryAfterSeconds: number | null = null) {
     this.task.status = status;
     let err = error;
     if (err && err.length > 300) err = err.slice(0, 300);
     // 单点保证：失败态必须带 retrytime，否则 findDeployTasks 不会再调度该任务，也永远没有终态
-    if (status < 0 && !retrytime) {
-      const iv = [60, 300, 600, 1800, 3600][this.task.retry] ?? 3600;
-      retrytime = new Date(Date.now() + iv * 1000).toISOString().slice(0, 19).replace('T', ' ');
+    let retrySeconds = retryAfterSeconds;
+    if (status < 0 && retrySeconds === null) {
+      retrySeconds = [60, 300, 600, 1800, 3600][this.task.retry] ?? 3600;
     }
-    const update: any = { status, error: err ? err.replace(/[\r\n]/g, '') : null, retrytime: retrytime ? new Date(retrytime) : null };
+    // retrytime 一律用数据库时钟计算，避免应用进程与数据库时区不同导致的重试时间漂移
+    const sets = ['status = ?', 'error = ?'];
+    const params: any[] = [status, err ? err.replace(/[\r\n]/g, '') : null];
+    if (retrySeconds === null) {
+      sets.push('retrytime = NULL');
+    } else {
+      sets.push('retrytime = DATE_ADD(NOW(), INTERVAL ? SECOND)');
+      params.push(retrySeconds);
+    }
     if (status === 1) {
-      update.retry = 0;
-      update.lasttime = new Date();
+      sets.push('retry = 0', 'lasttime = NOW()');
     }
-    if (status < 0 || retrytime) {
+    if (status < 0 || retrySeconds !== null) {
       this.task.retry = (this.task.retry || 0) + 1;
-      update.retry = this.task.retry;
+      sets.push('retry = ?');
+      params.push(this.task.retry);
     }
-    await query(`UPDATE ${table('cert_deploy')} SET ? WHERE id = ?`, [update, this.tid]);
+    await query(`UPDATE ${table('cert_deploy')} SET ${sets.join(', ')} WHERE id = ?`, [...params, this.tid]);
     if (err) this.saveLog('[Error] ' + err);
   }
 
@@ -154,7 +163,7 @@ export class CertDeployService {
       this.saveLog('[Success] 证书部署成功');
     } catch (e: any) {
       const iv = [60, 300, 600, 1800, 3600][this.task.retry] ?? 3600;
-      await this.saveResult(-1, e.message, new Date(Date.now() + iv * 1000).toISOString().slice(0, 19).replace('T', ' '));
+      await this.saveResult(-1, e.message, iv);
       throw e;
     } finally {
       if (this.info && typeof this.info === 'object') {

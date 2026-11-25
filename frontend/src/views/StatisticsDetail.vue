@@ -273,6 +273,7 @@ function onTopDim(value: string) {
 
 let loadSeq = 0;
 let loadAbort: AbortController | null = null;
+let optionsSeq = 0;
 
 async function loadGroup(group: string) {
   const seq = ++loadSeq;
@@ -343,17 +344,20 @@ function onTab(value: string) {
 
 async function loadOptions() {
   if (!isAdmin.value) return;
+  const seq = ++optionsSeq;
+  const aid = selectedAid.value;
   const loadAllCdnDomains = async (): Promise<{ code: number; data: any[] }> => {
     const all: any[] = [];
     for (let page = 1; page <= 50; page++) {
       const query: Record<string, any> = { page, size: 500 };
-      if (selectedAid.value) query.aid = selectedAid.value;
+      if (aid) query.aid = aid;
       const res = await api<any>('GET', '/cdn/domains', query);
       if (res.code !== 0) throw new Error(res.msg || '加载加速域名失败');
-      const list = res.data || [];
+      const raw = res.data || [];
+      const list = aid ? raw.filter((x: any) => Number(x.aid) === aid) : raw;
       all.push(...list);
       const total = Number(res.total || 0);
-      if (!list.length || list.length < 500 || (total > 0 && all.length >= total)) break;
+      if (!raw.length || raw.length < 500 || (total > 0 && all.length >= total)) break;
     }
     return { code: 0, data: all };
   };
@@ -361,6 +365,7 @@ async function loadOptions() {
     api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] })),
     loadAllCdnDomains().catch(() => ({ code: -1, data: [] })),
   ]);
+  if (seq !== optionsSeq) return;
   // 只保留当前服务商的账户，避免选到其他服务商后查询为空
   accountOptions.value = (a.data || [])
     .filter((x: any) => String(x.type) === routeKey)
@@ -368,7 +373,7 @@ async function loadOptions() {
   // 域名同样按服务商收敛；已选账户时再按 aid 收敛
   domainOptions.value = (d.data || [])
     .filter((x: any) => String(x.route) === routeKey)
-    .filter((x: any) => !selectedAid.value || Number(x.aid) === selectedAid.value)
+    .filter((x: any) => !aid || Number(x.aid) === aid)
     .map((x: any) => ({ label: x.name, value: x.name }));
 }
 
@@ -384,10 +389,17 @@ function stopAutoRefresh() {
     timer = null;
   }
 }
+async function refreshLoadedGroups() {
+  if (tab.value === 'analytics') return;
+  const groups = Array.from(loaded.value);
+  if (!groups.includes(tab.value)) groups.push(tab.value);
+  loaded.value = new Set();
+  for (const g of groups) await loadGroup(g);
+}
 function startAutoRefresh() {
   if (!autoRefresh.value || timer || document.hidden) return;
   timer = setInterval(() => {
-    if (!document.hidden && tab.value !== 'analytics') loadGroup(tab.value);
+    if (!document.hidden && !busy.value) void refreshLoadedGroups();
   }, 60_000);
 }
 function onVisibilityChange() {

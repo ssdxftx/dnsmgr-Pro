@@ -1,5 +1,5 @@
 import { loadDbConfig, type DbConfig } from './config-loader.js';
-import type { DbDriver, QueryFn } from './db/types.js';
+import type { DbDriver, QueryFn, TransactionFn } from './db/types.js';
 import { createMysqlDriver } from './db/mysql.js';
 
 let currentPrefix = 'dnsmgr_';
@@ -69,7 +69,7 @@ export async function queryOne<T = any>(sql: string, params: any[] = []): Promis
 
 // 事务执行：将「先删后插」等需要原子性的多步操作包在同一连接的事务里，
 // 中途失败整体回滚，避免数据半更新（权限/域名/规则部分丢失）。
-export async function withTransaction<T>(fn: (q: QueryFn) => Promise<T>): Promise<T> {
+export async function withTransaction<T>(fn: (q: TransactionFn) => Promise<T>): Promise<T> {
   return driver.withTransaction(fn);
 }
 

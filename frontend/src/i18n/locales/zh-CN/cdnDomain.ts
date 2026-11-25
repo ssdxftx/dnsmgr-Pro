@@ -137,6 +137,8 @@ export default {
     refreshed: '已刷新云端证书状态',
     fetchCandidatesFailed: '获取证书候选失败',
     certFailedRetry: '操作失败，请重试或更换证书',
+    confirmDisableCert: '确认移除证书配置？',
+    confirmDisableCertContent: '移除后仅停用「由本项目管理」的自动部署，可能导致 HTTPS 不可用。',
     pleaseSelectAccount: '请选择 CDN 账户',
     pleaseSelectZone: '请选择{label}',
     pleaseSelectArea: '请选择服务区域',

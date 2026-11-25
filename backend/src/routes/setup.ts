@@ -1,6 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import type { FastifyInstance } from 'fastify';
-import { beginInstall, consumeInstallToken, endInstall, getInstallState, performInstall, testConnection } from '../installer.js';
+import { beginInstall, claimInstallToken, consumeInstallToken, endInstall, getInstallState, performInstall, releaseInstallToken, testConnection } from '../installer.js';
 import { getDbConfig, query, queryOne, table } from '../db.js';
 import { dbIdentity, resolveSqliteFile, type DbConfig } from '../config-loader.js';
 import { detectDataPersistence } from '../lib/persistence.js';
@@ -138,7 +138,11 @@ export default async function setupRoutes(app: FastifyInstance) {
     if ((await getInstallState()) !== 'installed') return { code: -1, msg: '系统尚未完成安装' };
     const cfg = getDbConfig();
     const token = String(req.body?.install_token || '');
+    if (!claimInstallToken(token, dbIdentity(cfg))) {
+      return { code: -1, msg: '安装令牌已失效' };
+    }
     if (!consumeInstallToken(token, dbIdentity(cfg))) {
+      releaseInstallToken(token);
       return { code: -1, msg: '安装令牌已失效' };
     }
     setTimeout(() => process.exit(0), 300);
@@ -150,15 +154,18 @@ export default async function setupRoutes(app: FastifyInstance) {
     if ((await getInstallState()) !== 'installed') return { code: -1, msg: '系统尚未完成安装' };
     const cfg = getDbConfig();
     let tmp = '';
+    let token = '';
+    let claimed = false;
     try {
       // 令牌必须在落盘前校验：saveUpload 会把最多 200MB 的请求体写入数据卷，
       // 若先落盘再验令牌，未认证请求可用 15 次/分钟的配额持续写入临时文件耗尽磁盘。
       // 令牌只从请求头读取（multipart 字段必须等文件流消费完才可读）。
-      const token = String(req.headers['x-install-token'] || req.headers['install-token'] || '');
+      token = String(req.headers['x-install-token'] || req.headers['install-token'] || '');
       if (!token) return { code: -1, msg: '缺少安装令牌' };
-      if (!consumeInstallToken(token, dbIdentity(cfg))) {
+      if (!claimInstallToken(token, dbIdentity(cfg))) {
         return { code: -1, msg: '导入令牌无效或已过期，请跳过此步' };
       }
+      claimed = true;
       const up = await saveUpload(req);
       tmp = up.file;
       // 安装后 sys_key 才写入数据库，必须刷新缓存并重置进程内密钥，否则导入时写入的密文重启后无法解密
@@ -175,6 +182,8 @@ export default async function setupRoutes(app: FastifyInstance) {
         key = await keyForArchive(tmp, pass ? String(pass) : undefined, { allowPassphraseForSite: true });
       }
       const report = await importArchive(tmp, { key, mode: 'install', trusted: true });
+      consumeInstallToken(token, dbIdentity(cfg));
+      claimed = false;
       // 旧归档可能带 maintenance=1，安装完成后必须归零
       await setMaintenance(false);
 
@@ -192,6 +201,7 @@ export default async function setupRoutes(app: FastifyInstance) {
     } catch (e: any) {
       return reply.send({ code: -1, msg: publicError(e) });
     } finally {
+      if (claimed) releaseInstallToken(token);
       if (tmp) {
         releaseTemp(tmp);
         await unlink(tmp).catch(() => undefined);

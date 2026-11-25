@@ -35,12 +35,14 @@ export async function getEffectivePermissions(user: any): Promise<SubPermission[
   // 旧版域名快捷登录：只授予该域名整域名权限，绝不回落到用户级授权。
   // 只读标记来自签发时写入令牌的授权快照（lro），不能由客户端或会话内容改写。
   if (user?.legacy_domain) {
+    const legacyId = Number(user.legacy_domain_id || 0);
     return [
       {
         domain: String(user.legacy_domain),
         sub: null,
         readonly: Number(user.legacy_domain_readonly || 0) === 1 ? 1 : 0,
         expiretime: null,
+        ...(Number.isInteger(legacyId) && legacyId > 0 ? { domainId: legacyId } : {}),
       },
     ];
   }
@@ -48,17 +50,22 @@ export async function getEffectivePermissions(user: any): Promise<SubPermission[
   const perms = await getUserPermissions(Number(user.uid));
   if (checkLevel(user, 2)) return perms;
   const owned: any[] = await query(
-    `SELECT D.name FROM ${table('domain')} D
+    `SELECT D.id, D.aid, D.name FROM ${table('domain')} D
        JOIN ${table('account')} A ON D.aid = A.id
       WHERE A.visibility = 'private' AND A.owner_uid = ?`,
     [Number(user.uid)],
   );
-  const seen = new Set(perms.map((p) => String(p.domain || '').trim().toLowerCase().replace(/\.$/, '')));
+  const explicitNames = new Set(perms.map((p) => String(p.domain || '').trim().toLowerCase().replace(/\.$/, '')));
+  const seen = new Set<string>();
   for (const r of owned) {
     const name = String(r.name || '').trim().toLowerCase().replace(/\.$/, '');
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    perms.push({ domain: name, sub: null, readonly: 0, expiretime: null });
+    const aid = Number(r.aid);
+    const domainId = Number(r.id);
+    if (!name || explicitNames.has(name)) continue;
+    const key = `${aid}:${domainId}:${name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    perms.push({ domain: name, sub: null, readonly: 0, expiretime: null, aid, domainId });
   }
   return perms;
 }

@@ -138,6 +138,8 @@ export function isSecretKey(key: string): boolean {
   // backup_key_prev 是历史备份密钥数组：必须与 backup_key 一样按凭据处理，
   // 否则它会明文入库并随整站归档外泄，轮换备份密钥的安全目标随之失效
   if (k === 'backup_key_prev') return true;
+  // 优选 IP 代理地址可能包含 http://user:pass@host，按凭据加密并在回显时掩码
+  if (k === 'optimize_ip_proxy') return true;
   return ['SecretId', 'AccessKeyId', 'access_key_id', 'api_password', 'skey', 'passphrase', 'kubeconfig', 'kube_config', 'pfx_pass', 'qqbot_bind_code', 'custom_webhook_headers'].includes(k);
 }
 

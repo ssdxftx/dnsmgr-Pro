@@ -32,7 +32,7 @@ export class LecdnDeploy implements DeployProvider {
     if (result && result.token) {
       this.accessToken = result.token;
     } else {
-      throw new Error('登录成功，获取access_token失败');
+      throw new Error('登录失败，获取access_token失败');
     }
   }
 

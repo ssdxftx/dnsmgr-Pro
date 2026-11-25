@@ -44,6 +44,7 @@ export class BaishanDeploy implements DeployProvider {
 
   async check(): Promise<void> {
     if (!this.token) throw new Error('token不能为空');
+    await this.request('/v2/domain?token=' + encodeURIComponent(this.token));
   }
 
   async deploy(fullchain: string, privatekey: string, config: Record<string, any>, _info: any): Promise<void> {

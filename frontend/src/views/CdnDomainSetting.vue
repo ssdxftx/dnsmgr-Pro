@@ -208,6 +208,8 @@ async function saveCache() {
       message.success(res.msg);
       load();
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     saveCacheBusy.value = false;
   }
@@ -224,6 +226,8 @@ async function saveHttps() {
       message.success(res.msg);
       load();
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     saveHttpsBusy.value = false;
   }
@@ -237,6 +241,8 @@ async function saveAccess() {
       message.success(res.msg);
       loadAccess();
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     saveAccessBusy.value = false;
   }
@@ -250,6 +256,8 @@ async function setStatus(status: string) {
       message.success(res.msg);
       load();
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     statusBusy.value = false;
   }

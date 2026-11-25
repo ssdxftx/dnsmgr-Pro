@@ -56,7 +56,8 @@ export async function fetchTencentCdnDetail(
   const defs = catalog.metrics.filter((m) => isBasicWanted(ctx.groups, m) && m.api);
 
   const collected = new Map<string, (number | null)[]>();
-  const rateLists = new Map<string, (number | null)[][]>();
+  const rateLists = new Map<string, Array<{ domain: string; area: string; values: (number | null)[] }>>();
+  const scopedTotals = new Map<string, Map<string, (number | null)[]>>();
   const domainTotals = new Map<string, number>();
 
   type Job = { key: string; domain: string; area: string; interval: string; metric: string; origin: boolean };
@@ -94,11 +95,18 @@ export async function fetchTencentCdnDetail(
         const def = defs.find((m) => m.key === job.key);
         if (def?.agg === 'rate') {
           const list = rateLists.get(job.key) || [];
-          list.push(values);
+          list.push({ domain: job.domain, area: job.area, values });
           rateLists.set(job.key, list);
         } else {
           const prev = collected.get(job.key);
           collected.set(job.key, prev ? combineSeries([prev, values], 'sum', len) : values);
+          if (job.key === 'flux' || job.key === 'req') {
+            const scope = `${job.domain}\u0000${job.area}`;
+            const byScope = scopedTotals.get(job.key) || new Map<string, (number | null)[]>();
+            const prevScope = byScope.get(scope);
+            byScope.set(scope, prevScope ? combineSeries([prevScope, values], 'sum', len) : values);
+            scopedTotals.set(job.key, byScope);
+          }
         }
         if (job.key === 'flux') {
           const total = aggregate(values, 'sum') || 0;
@@ -113,15 +121,16 @@ export async function fetchTencentCdnDetail(
 
   // 百分比指标跨域名按流量加权，避免直接求和把命中率放大数倍
   for (const [key, list] of rateLists) {
-    const weight = collected.get('flux');
+    const weights = scopedTotals.get(key === 'hit_rate_req' ? 'req' : 'flux');
     const out = new Array<number | null>(len).fill(null);
     for (let i = 0; i < len; i++) {
       let num = 0;
       let den = 0;
-      for (const arr of list) {
-        const v = arr[i];
+      for (const entry of list) {
+        const v = entry.values[i];
         if (v == null) continue;
-        const w = weight?.[i] ?? 1;
+        const w = weights ? weights.get(`${entry.domain}\u0000${entry.area}`)?.[i] : 1;
+        if (w == null) continue;
         num += v * w;
         den += w;
       }

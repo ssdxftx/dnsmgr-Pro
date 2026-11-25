@@ -17,29 +17,29 @@
             <n-icon size="26" :component="GlobeOutline" />
           </div>
           <div class="auth-brand__text">
-            <div class="auth-brand__name font-display">聚合 DNS Pro</div>
+            <div class="auth-brand__name font-display">{{ t('auth.brandName') }}</div>
             <div class="auth-brand__sub">{{ t('auth.brandSub') }}</div>
           </div>
         </div>
 
-        <p class="auth-hero__eyebrow eyebrow rise d2">DNS · CDN · SSL · Control Tower</p>
-        <h1 class="auth-hero__title font-display rise d3">域名基础设施<br />控制塔</h1>
+        <p class="auth-hero__eyebrow eyebrow rise d2">{{ t('auth.heroEyebrow') }}</p>
+        <h1 class="auth-hero__title font-display rise d3">{{ t('auth.heroTitle1') }}<br />{{ t('auth.heroTitle2') }}</h1>
         <p class="auth-hero__desc rise d4">
-          在一个平台完成「域名 → 解析 → 证书 → 加速 → 上线」全流程，统一纳管多云 DNS 与 CDN 边缘规则。
+          {{ t('auth.heroDesc') }}
         </p>
 
         <ul class="auth-hero__stats rise d5">
           <li>
             <span class="stat-num font-mono">{{ n1 }}<i>+</i></span>
-            <span class="stat-label">DNS 平台</span>
+            <span class="stat-label">{{ t('auth.statDns') }}</span>
           </li>
           <li>
             <span class="stat-num font-mono">{{ n2 }}<i>+</i></span>
-            <span class="stat-label">部署商</span>
+            <span class="stat-label">{{ t('auth.statDeploy') }}</span>
           </li>
           <li>
             <span class="stat-num font-mono">{{ n3 }}</span>
-            <span class="stat-label">CDN 引擎</span>
+            <span class="stat-label">{{ t('auth.statCdn') }}</span>
           </li>
         </ul>
       </section>
@@ -69,7 +69,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref } from 'vue';
 import { NIcon } from 'naive-ui';
 import { GlobeOutline } from '@vicons/ionicons5';
 import { useI18n } from 'vue-i18n';
@@ -84,10 +84,7 @@ withDefaults(defineProps<{ maxWidth?: string; announcements?: boolean }>(), {
 const { t } = useI18n();
 const { locale, setLocale } = useLocale();
 
-const platforms = [
-  '阿里云', '腾讯云', '华为云', '百度云', 'Cloudflare', 'DNSPod',
-  'EdgeOne', '阿里云 ESA', '火山引擎', '西部数码', 'Namesilo', 'GoEdge',
-];
+const platforms = computed(() => String(t('auth.platforms')).split(',').filter(Boolean));
 
 /* 遥测数字：计数动画 */
 const n1 = ref(0);

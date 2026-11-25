@@ -110,9 +110,14 @@ export async function executeOne(row: any): Promise<void> {
   const dns = getDnsProvider(drow.account_type, accountConfig, drow.name, drow.thirdid);
   if (!dns) throw new Error('DNS模块不存在');
 
+  const switchtype = Number(row.switchtype);
+  // 0 是历史/前端使用的「修改解析」，4 保留给显式修改解析的任务
+  if (![0, 1, 2, 3, 4].includes(switchtype)) throw new PermanentTaskError('切换类型不合法');
+  if ((switchtype === 0 || switchtype === 4) && isNullOrEmpty(row.value)) throw new PermanentTaskError('修改解析时必须填写记录值');
+
   let opOk = true;
   let opErr = '';
-  if (row.switchtype === 1) {
+  if (switchtype === 1) {
     const res = await dns.setDomainRecordStatus(row.recordid, '1');
     if (res) await addLog(domain, '启用解析', '定时启用解析成功');
     else {
@@ -120,7 +125,7 @@ export async function executeOne(row: any): Promise<void> {
       opErr = dns.getError();
       await addLog(domain, '启用解析失败', opErr);
     }
-  } else if (row.switchtype === 2) {
+  } else if (switchtype === 2) {
     const res = await dns.setDomainRecordStatus(row.recordid, '0');
     if (res) await addLog(domain, '暂停解析', '定时暂停解析成功');
     else {
@@ -128,7 +133,7 @@ export async function executeOne(row: any): Promise<void> {
       opErr = dns.getError();
       await addLog(domain, '暂停解析失败', opErr);
     }
-  } else if (row.switchtype === 3) {
+  } else if (switchtype === 3) {
     const res = await dns.deleteDomainRecord(row.recordid);
     if (res) await addLog(domain, '删除解析', '定时删除解析成功');
     else {
@@ -154,7 +159,7 @@ export async function executeOne(row: any): Promise<void> {
     }
   }
 
-  const opText: Record<number, string> = { 1: '启用解析', 2: '暂停解析', 3: '删除解析' };
+  const opText: Record<number, string> = { 0: '修改解析', 4: '修改解析', 1: '启用解析', 2: '暂停解析', 3: '删除解析' };
   enqueueAudit({
     uid: 0,
     username: 'system',
@@ -173,7 +178,7 @@ export async function executeOne(row: any): Promise<void> {
     detail: null,
     changes: JSON.stringify([
       { field: '操作', to: opText[Number(row.switchtype)] || '修改解析' },
-      ...(row.switchtype >= 4 && row.value ? [{ field: '记录值', to: String(row.value) }] : []),
+      ...((Number(row.switchtype) === 0 || Number(row.switchtype) === 4) && row.value ? [{ field: '记录值', to: String(row.value) }] : []),
     ]),
     result: opOk ? 1 : 0,
     errmsg: opOk ? '' : String(opErr || '').slice(0, 500),

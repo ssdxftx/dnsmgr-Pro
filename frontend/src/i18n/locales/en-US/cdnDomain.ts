@@ -137,6 +137,8 @@ export default {
     refreshed: 'Cloud certificate status refreshed',
     fetchCandidatesFailed: 'Failed to fetch certificate candidates',
     certFailedRetry: 'Operation failed. Please retry or switch the certificate',
+    confirmDisableCert: 'Remove certificate configuration?',
+    confirmDisableCertContent: 'Removing it only disables auto-deployment managed by this project and may make HTTPS unavailable.',
     pleaseSelectAccount: 'Please select a CDN account',
     pleaseSelectZone: 'Please select {label}',
     pleaseSelectArea: 'Please select service area',

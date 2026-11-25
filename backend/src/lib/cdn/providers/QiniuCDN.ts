@@ -2,7 +2,7 @@ import { Qiniu } from '../../clients/Qiniu.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
-import { cachedDetail } from '../detailCache.js';
+import { cachedDetail, credentialCacheId } from '../detailCache.js';
 
 const geoCoverMap: Record<string, string> = { mainland_china: 'china', global: 'global' };
 
@@ -22,7 +22,7 @@ export class QiniuCDN implements CdnProvider {
 
   constructor(config: Record<string, any>) {
     this.client = new Qiniu(config.AccessKey, config.SecretKey, 'api.qiniu.com');
-    this.cacheId = String(config.AccessKey || '');
+    this.cacheId = credentialCacheId(config.AccessKey, config.SecretKey);
   }
 
   getError() {
@@ -90,7 +90,8 @@ export class QiniuCDN implements CdnProvider {
       const items = await mapPool(domains, 8, async (d: any) => {
         const name = d.name || '';
         if (!name) return null;
-        const detail = await cachedDetail(`qiniu:${this.cacheId}:detail:${name}`, 30_000, () => this.call('GET', `/domain/${name}`));
+        const detailKey = this.cacheId ? `qiniu:${this.cacheId}:detail:${name}` : '';
+        const detail = await cachedDetail(detailKey, 30_000, () => this.call('GET', `/domain/${name}`));
         return detail ? this.mapDomain(detail) : null;
       });
       list.push(...items.filter((x): x is CdnDomainItem => !!x));

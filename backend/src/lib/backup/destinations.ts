@@ -115,6 +115,21 @@ async function webdavPut(cfg: any, url: string, localPath: string): Promise<Resp
   } as any);
 }
 
+async function cleanupWebdavProbe(cfg: any, url: string): Promise<void> {
+  let lastErr: any = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await webdavFetch(cfg, url, { method: 'DELETE' });
+      if (res.status === 404 || res.ok) return;
+      lastErr = new Error('HTTP ' + res.status);
+    } catch (e: any) {
+      lastErr = e;
+    }
+    if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+  console.warn('[backup] WebDAV 探测文件清理失败：' + urlPath(url) + '：' + (lastErr?.message || lastErr));
+}
+
 export async function testDestination(row: DestinationRow): Promise<{ ok: boolean; message: string }> {
   try {
     if (row.type === 'webdav') {
@@ -138,7 +153,7 @@ export async function testDestination(row: DestinationRow): Promise<{ ok: boolea
       if (put.status >= 300) {
         return { ok: false, message: `目录可读但无法写入（HTTP ${put.status}）${await responseSnippet(put)}` };
       }
-      await webdavFetch(row.config, probeUrl, { method: 'DELETE' }).catch(() => undefined);
+      await cleanupWebdavProbe(row.config, probeUrl);
       return { ok: true, message: '连接成功（可读写）' };
     }
     const client = await s3Client(row.config);
@@ -169,7 +184,11 @@ async function s3Client(cfg: any): Promise<import('@aws-sdk/client-s3').S3Client
     .update([cfg.region || '', cfg.endpoint || '', cfg.accessKeyId || '', cfg.secretAccessKey || ''].join('\u0000'))
     .digest('hex');
   const cached = s3Clients.get(fingerprint);
-  if (cached) return cached;
+  if (cached) {
+    s3Clients.delete(fingerprint);
+    s3Clients.set(fingerprint, cached);
+    return cached;
+  }
   const task = (async () => {
     const { S3Client } = await s3Module();
     return new S3Client({

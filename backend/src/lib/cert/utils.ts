@@ -1,11 +1,12 @@
 import { createHash, X509Certificate } from 'node:crypto';
-import { execFile, execFileSync } from 'node:child_process';
-import { readdirSync, realpathSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { query, table } from '../../db.js';
+
+const execFileAsync = promisify(execFile);
 
 let domainsCache: string[] | null = null;
 let domainsCacheAt = 0;
@@ -92,11 +93,12 @@ export function parseCertPem(pem: string): { issuer: string; subject: string; va
   };
 }
 
-export function unzip(zipPath: string, destDir: string): void {
+export async function unzip(zipPath: string, destDir: string): Promise<void> {
   // 预检压缩包条目：拒绝绝对路径、盘符/UNC、含 .. 段的条目，防止 zip-slip 越界落盘
   let listing: string;
   try {
-    listing = execFileSync('unzip', ['-Z1', zipPath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+    const { stdout } = await execFileAsync('unzip', ['-Z1', zipPath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+    listing = String(stdout);
   } catch (e: any) {
     // 安全校验应 fail-closed：无法列出条目即拒绝解压
     throw new Error('无法读取压缩包目录，已拒绝解压：' + (e?.message || String(e)));
@@ -111,18 +113,16 @@ export function unzip(zipPath: string, destDir: string): void {
   // 条目名检查不够：符号链接条目本身名字合法，但解压后可在后续条目中写穿目录。
   // 用 zipinfo 长格式识别 lrwx 条目；命令不支持时保持原有行为（仍受 findFileByExt 的 realpath 校验保护）。
   try {
-    const long = execFileSync('unzip', ['-Z', '-l', zipPath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
-    for (const line of long.split(/\r?\n/)) {
+    const { stdout } = await execFileAsync('unzip', ['-Z', '-l', zipPath], { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 });
+    for (const line of String(stdout).split(/\r?\n/)) {
       if (/^l[rwxStTs-]{9}\s/.test(line.trim())) throw new Error('压缩包包含符号链接条目，已拒绝解压');
     }
   } catch (e: any) {
     if (String(e?.message || '').includes('符号链接')) throw e;
     // zipinfo 不可用/输出格式不同：不阻断正常证书包
   }
-  execFileSync('unzip', ['-o', zipPath, '-d', destDir], { stdio: 'ignore' });
+  await execFileAsync('unzip', ['-o', zipPath, '-d', destDir]);
 }
-
-const execFileAsync = promisify(execFile);
 
 // 同一订单的 PFX 结果缓存（按 fullchain + 私钥 + 密码哈希）：避免证书详情/批量部署反复重新生成
 const pfxCache = new Map<string, { at: number; buf: Buffer }>();
@@ -162,29 +162,17 @@ export async function buildPfx(fullchain: string, privatekey: string, pwd: strin
   }
 }
 
-export function findFileByExt(dir: string, exts: string[], root: string = dir): string | null {
-  const rootReal = (() => {
-    try {
-      return realpathSync(root);
-    } catch {
-      return root;
-    }
-  })();
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+export async function findFileByExt(dir: string, exts: string[], root: string = dir): Promise<string | null> {
+  const rootReal = await realpath(root).catch(() => root);
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
     // 拒绝符号链接，避免读取解压目录之外的文件
     if (entry.isSymbolicLink()) continue;
     const p = join(dir, entry.name);
     if (entry.isDirectory()) {
-      const r = findFileByExt(p, exts, root);
+      const r = await findFileByExt(p, exts, root);
       if (r) return r;
     } else if (exts.some((e) => entry.name.endsWith(e))) {
-      const real = (() => {
-        try {
-          return realpathSync(p);
-        } catch {
-          return p;
-        }
-      })();
+      const real = await realpath(p).catch(() => p);
       if (rootReal && !(real === rootReal || real.startsWith(rootReal + sep))) continue;
       return p;
     }

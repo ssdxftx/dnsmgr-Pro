@@ -2,7 +2,7 @@ import { query, queryOne, table } from '../../db.js';
 import { getDnsProvider } from './factory.js';
 import { localResolve, recordValueMatches } from './localResolve.js';
 import { detectCloudflareProxy } from './cloudflare.js';
-import { matchPermission, sameDomain } from '../../auth.js';
+import { matchPermission, permissionMatchesDomain } from '../../auth.js';
 import { getEffectivePermissions } from '../accounts/visibility.js';
 import { configGet } from '../../config.js';
 import { sendMail } from '../monitor/msgNotice.js';
@@ -107,7 +107,7 @@ export async function checkDomainRecords(
       perms = await getEffectivePermissions({ uid: Number(uid), level: Number(userRow?.level || 0) });
       // check_whole 只是开关，不能替代授权：只有该用户确实被授予了整域名（sub 为空）时
       // 才允许检测整个 Zone，否则仅有 www 授权的用户会读到其他子域名的记录。
-      const wholeGrant = perms.some((p: any) => sameDomain(p.domain, d.name) && !p.sub);
+      const wholeGrant = perms.some((p: any) => permissionMatchesDomain(p, d.name, d) && !p.sub);
       scopeAdmin = Number(userRow?.check_whole ?? 0) === 1 && wholeGrant;
     }
   }
@@ -124,12 +124,12 @@ export async function checkDomainRecords(
     else targets = [];
   } else {
     const access = perms
-      .filter((p) => sameDomain(p.domain, d.name))
+      .filter((p) => permissionMatchesDomain(p, d.name, d))
       .map((p) => (p.sub ? `${p.sub}.${d.name}` : d.name).toLowerCase());
     if (subNorm) {
       // 不能只信任任务里保存的 sub：导入/历史任务可能带着越权子域名。
       // 只读权限允许检测，但必须落在当前用户的授权范围内。
-      const m = matchPermission(perms, d.name, subNorm);
+      const m = matchPermission(perms, d.name, subNorm, d);
       targets = m >= 0 ? [`${subNorm}.${d.name}`.toLowerCase()] : [];
     } else {
       targets = access;

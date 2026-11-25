@@ -21,6 +21,18 @@ function isNullOrEmpty(v: any): boolean {
   return v === null || v === undefined || v === '';
 }
 
+function proxyHasCredentials(value: string): boolean {
+  const v = String(value || '').trim();
+  if (!v) return false;
+  try {
+    const u = new URL(v);
+    if (u.username || u.password) return true;
+  } catch {
+    // 非标准 URL 由正则兜底判断是否带 userinfo
+  }
+  return /\/\/[^/@\s]+@/.test(v);
+}
+
 export default async function optimizeRoutes(app: FastifyInstance) {
   const auth = authenticate(app);
 
@@ -43,13 +55,15 @@ export default async function optimizeRoutes(app: FastifyInstance) {
   // 设置
   app.get('/api/optimize/settings', auth, async () => {
     const key = (await configGet('optimize_ip_key', '')) || '';
+    const proxy = (await configGet('optimize_ip_proxy', '')) || '';
     return {
       code: 0,
       data: {
         optimize_ip_api: (await configGet('optimize_ip_api', '0')) || '0',
         // 密钥不回显明文，以掩码返回
         optimize_ip_key: key ? SECRET_MASK : '',
-        optimize_ip_proxy: (await configGet('optimize_ip_proxy', '')) || '',
+        // 代理地址含账号密码时不回显明文，提交掩码表示沿用原值
+        optimize_ip_proxy: proxyHasCredentials(proxy) ? SECRET_MASK : proxy,
         optimize_ip_min: (await configGet('optimize_ip_min', '30')) || '30',
       },
     };
@@ -62,10 +76,15 @@ export default async function optimizeRoutes(app: FastifyInstance) {
     for (const key of allowed) {
       if (!(key in b)) continue;
       const value = b[key];
-      // 掩码表示未修改密钥，沿用原值
-      if (key === 'optimize_ip_key' && String(value) === SECRET_MASK) continue;
-      if (key === 'optimize_ip_min' && parseInt(String(value)) < 10) {
-        return { code: -1, msg: '自动更新时间间隔不能小于10分钟' };
+      // 掩码表示未修改密钥/代理地址，沿用原值
+      if ((key === 'optimize_ip_key' || key === 'optimize_ip_proxy') && String(value) === SECRET_MASK) continue;
+      if (key === 'optimize_ip_min') {
+        const minute = Number(value);
+        if (!Number.isInteger(minute) || minute < 10 || minute > 10080) {
+          return { code: -1, msg: '自动更新时间间隔需为 10-10080 分钟之间的整数' };
+        }
+        await configSet(key, String(minute));
+        continue;
       }
       await configSet(key, String(value));
     }

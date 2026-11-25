@@ -150,9 +150,15 @@ async function loadProviders() {
 
 async function loadAccounts() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/dns/accounts');
-  accounts.value = res.code === 0 ? res.data : [];
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/dns/accounts');
+    if (res.code === 0) accounts.value = res.data;
+    else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 function onTypeChange() {
@@ -222,11 +228,15 @@ function del(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('DELETE', `/dns/accounts/${row.id}`);
-      if (res.code === 0) {
-        message.success(t('dnsAccount.deleteSuccess'));
-        loadAccounts();
-      } else message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/dns/accounts/${row.id}`);
+        if (res.code === 0) {
+          message.success(t('dnsAccount.deleteSuccess'));
+          loadAccounts();
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }

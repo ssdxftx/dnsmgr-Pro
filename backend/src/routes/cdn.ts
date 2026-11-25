@@ -44,7 +44,7 @@ import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
 import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
-import { checkLevel, isRecordInScope, matchPermission } from '../auth.js';
+import { checkLevel, matchPermission } from '../auth.js';
 import { ConfigDecryptError, decryptConfig, isEncryptedConfig, readAccountConfig, readConfigSafe } from '../lib/secret.js';
 import { canAccessCertOrder, canAccessDomainAccount, getEffectivePermissions, getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { findVaultDekForRequest } from '../lib/vault/service.js';
@@ -137,13 +137,7 @@ async function assertDnsDomainUsable(user: any, did: number, accelName: string):
   const recordName = name === base ? '@' : name.slice(0, name.length - base.length - 1);
   const perms = await getEffectivePermissions(user);
   // 权限表可能存小写域名，比较时统一大小写；只读授权不能写入
-  const hit = perms.find(
-    (p: any) =>
-      String(p.domain).toLowerCase() === base &&
-      Number(p.readonly) !== 1 &&
-      isRecordInScope(recordName, p.sub || null),
-  );
-  return hit ? d : null;
+  return matchPermission(perms, d.name, recordName, d) === 0 ? d : null;
 }
 
 function calcRecordName(accelDomain: string, dnsDomain: string): string {
@@ -513,9 +507,9 @@ function mergeBreakdowns(list: BreakdownItem[]): BreakdownItem[] {
 /** 旧缓存结构 → 新详情结构（非管理员只读缓存） */
 function detailFromCache(route: string, cached: any, start: Date, end: Date, delayMinutes: number): DetailResponse {
   const catalog = getCatalog(route);
-  const labels: string[] = cached?.labels || [];
   const isDay = end.getTime() - start.getTime() > 86400000;
-  const interval: 'hour' | 'day' = isDay ? 'day' : 'hour';
+  const interval: 'hour' | 'day' = cached?.interval === 'day' || isDay ? 'day' : 'hour';
+  const labels: string[] = buildTimeline(start, end, interval).labels;
   const len = labels.length;
   const rs = cached?.resource?.resource_detail || {};
   const rsum = cached?.resource?.resource_summary || {};
@@ -536,10 +530,13 @@ function detailFromCache(route: string, cached: any, start: Date, end: Date, del
       stack: def.stack,
     });
   };
-  const outFlux = rs.out_flux || rs.flux || [];
-  const hitFlux = vs.hit_flux || [];
+  const outFlux: any[] = rs.out_flux || [];
+  const fluxFallback: any[] = rs.flux || [];
+  const hasOutFlux = outFlux.some((v) => Number(v || 0) > 0);
+  const denominator = hasOutFlux ? outFlux : fluxFallback;
+  const hitFlux: any[] = vs.hit_flux || [];
   const hitRate = hitFlux.map((h: number, i: number) => {
-    const den = Number(outFlux[i] || 0);
+    const den = Number(denominator[i] || 0);
     return den > 0 ? (Number(h || 0) / den) * 100 : null;
   });
   const fluxVals = rs.flux || new Array(len).fill(null);
@@ -582,20 +579,22 @@ function detailFromCache(route: string, cached: any, start: Date, end: Date, del
   };
 }
 
-function basicsFromCache(cached: any): Array<{ key: string; unit: any; value: number | null }> {
+function basicsFromCache(cached: any, keys: readonly string[] = BASIC_KEYS): Array<{ key: string; unit: any; value: number | null }> {
   const rs = cached?.resource?.resource_summary || {};
   const vs = cached?.visits?.visits_summary || {};
   const den = Number(rs.out_flux || 0) || Number(rs.flux || 0);
-  const hit = Number(vs.hit_flux || 0);
-  const hitRate = den > 0 ? (hit / den) * 100 : null;
+  const hit = vs.hit_flux == null ? null : Number(vs.hit_flux);
+  const hitRate = den > 0 && hit != null ? (hit / den) * 100 : null;
   const values: Record<string, number | null> = {
     flux: rs.flux ?? null,
     bw: rs.bw ?? null,
     bs_flux: rs.bs_flux ?? null,
     req: vs.req_num ?? null,
+    req_flux: rs.req_flux ?? null,
+    pv: vs.pv ?? null,
     hit_rate: hitRate,
   };
-  return BASIC_KEYS.map((key) => ({ key, unit: basicUnit(key), value: values[key] ?? null }));
+  return keys.map((key) => ({ key, unit: basicUnit(key), value: values[key] ?? null }));
 }
 
 export default async function cdnRoutes(app: FastifyInstance) {
@@ -4588,6 +4587,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
     }
     const row = await loadCdnDomain(id);
     if (!row) return { code: -1, msg: '加速域名不存在' };
+    if (row.route === 'aliyun_cdn' && normalized.filter((r) => r.path !== '*').length > 98) {
+      return { code: -1, msg: '阿里云 CDN 缓存规则最多支持 98 条具体规则（权重范围 1-99）' };
+    }
     const provider = await cdnForRow(row);
     if (!provider) return { code: -1, msg: 'CDN账户不存在' };
     // 下发的必须是校验/归一化后的列表：旧实现校验 normalized 却把原始 ruleList 发给厂商，
@@ -5315,23 +5317,32 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const routeFilter = String(q.route || '').trim();
       const dataUntil = fmtStatTime(end);
 
-      // 各服务商的接入规模：按当前用户可见账户统计，避免普通用户读到他人私有账户规模
       const routeStats = new Map<string, { accounts: number; domains: number }>();
       const visibleAccts = await listVisibleAccounts('cdn_account', req.user);
-      const visibleAids = (visibleAccts as any[]).map((a) => Number(a.id)).filter((id) => id > 0);
-      const acctCountRows: any[] = visibleAids.length
+      // 统计账户集合 = 全部共享账户 + 当前用户自己的私有账户；
+      // 其他用户的私有账户既无法解密也不应计入，避免私有凭证解密失败或数据串户
+      const sharedRows = (await query(`SELECT id FROM ${table('cdn_account')} WHERE visibility = 'shared'`)) as any[];
+      const statAids = [
+        ...new Set([
+          ...(visibleAccts as any[])
+            .filter((a) => a.visibility !== 'private' || Number(a.owner_uid) === Number(req.user.uid))
+            .map((a) => Number(a.id)),
+          ...sharedRows.map((a) => Number(a.id)),
+        ]),
+      ].filter((id) => id > 0);
+      const acctCountRows: any[] = statAids.length
         ? await query(
-            `SELECT type, COUNT(*) c FROM ${table('cdn_account')} WHERE id IN (${visibleAids.map(() => '?').join(',')}) GROUP BY type`,
-            visibleAids,
+            `SELECT type, COUNT(*) c FROM ${table('cdn_account')} WHERE id IN (${statAids.map(() => '?').join(',')}) GROUP BY type`,
+            statAids,
           )
         : [];
       for (const r of acctCountRows) {
         routeStats.set(String(r.type), { accounts: Number(r.c), domains: 0 });
       }
-      const domCountRows: any[] = visibleAids.length
+      const domCountRows: any[] = statAids.length
         ? await query(
-            `SELECT route, COUNT(*) c, COUNT(DISTINCT aid) a FROM ${table('cdn_domain')} WHERE aid IN (${visibleAids.map(() => '?').join(',')}) GROUP BY route`,
-            visibleAids,
+            `SELECT route, COUNT(*) c, COUNT(DISTINCT aid) a FROM ${table('cdn_domain')} WHERE aid IN (${statAids.map(() => '?').join(',')}) GROUP BY route`,
+            statAids,
           )
         : [];
       for (const r of domCountRows) {
@@ -5362,7 +5373,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
               ? await loadCachedStatistics(start, end, 'All', ids).catch(() => null)
               : null;
             if (cached?.labels?.length) {
-              basics = basicsFromCache(cached);
+              basics = basicsFromCache(cached, catalog.basicKeys || BASIC_KEYS);
               status = 'ok';
             }
           }
@@ -5384,9 +5395,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
       // 按当前用户可见账户取数：普通用户含共享 + 自己的私有账户；
       // 之前写死 visibility = 'shared'，私有账户（自建的 ESA/EO 账户）在统计页永远不出现
-      if (!visibleAids.length) return { code: 0, data: { dataUntil, providers: [] } };
-      const acctWhere: string[] = [`id IN (${visibleAids.map(() => '?').join(',')})`];
-      const acctParams: any[] = [...visibleAids];
+      if (!statAids.length) return { code: 0, data: { dataUntil, providers: [] } };
+      const acctWhere: string[] = [`id IN (${statAids.map(() => '?').join(',')})`];
+      const acctParams: any[] = [...statAids];
       if (aid) {
         acctWhere.push('id = ?');
         acctParams.push(aid);
@@ -5400,8 +5411,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
         acctParams,
       );
 
-      const domWhere: string[] = [`aid IN (${visibleAids.map(() => '?').join(',')})`];
-      const domParams: any[] = [...visibleAids];
+      const domWhere: string[] = [`aid IN (${statAids.map(() => '?').join(',')})`];
+      const domParams: any[] = [...statAids];
       if (aid) {
         domWhere.push('aid = ?');
         domParams.push(aid);
@@ -5808,22 +5819,29 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const addtime = new Date();
     for (const g of grouped.values()) {
       const fn = g.provider ? g.provider[op] : undefined;
-      if (typeof fn !== 'function') {
-        for (const u of g.urls) failed.push({ url: u, msg: '该厂商暂不支持此操作' });
-        continue;
-      }
-      const taskId = op === 'purge' ? await g.provider[op](g.urls, type) : await g.provider[op](g.urls);
-      const status = taskId === false ? 1 : 0;
-      const errMsg = taskId === false ? g.provider.getError?.() || '提交失败' : null;
       const taskType = type === 'dir' ? 'dir' : op === 'preheat' ? 'preheat' : 'url';
+      let taskId: string | false = false;
+      let errMsg: string | null = null;
+      try {
+        if (typeof fn !== 'function') {
+          errMsg = '该厂商暂不支持此操作';
+        } else {
+          taskId = op === 'purge' ? await g.provider[op](g.urls, type) : await g.provider[op](g.urls);
+          if (taskId === false) errMsg = g.provider.getError?.() || '提交失败';
+        }
+      } catch (e: any) {
+        taskId = false;
+        errMsg = e?.message || '提交失败';
+      }
+      const status = taskId === false ? 1 : 0;
       for (const u of g.urls) {
         if (taskId === false) failed.push({ url: u, msg: errMsg || '提交失败' });
-        else success.push({ url: u, taskId: typeof taskId === 'string' ? taskId : null });
+        else success.push({ url: u, taskId });
         taskRows.push([
           u,
           taskType,
           g.route,
-          typeof taskId === 'string' ? taskId : null,
+          taskId === false ? null : taskId,
           status,
           errMsg,
           addtime,
@@ -6054,7 +6072,7 @@ async function syncFromCloud(aid: number, did: number, user?: any): Promise<any>
     }
 
     if (perms) {
-      if (!belongDomain || matchPermission(perms, belongDomain.name, recordName) !== 0) {
+      if (!belongDomain || matchPermission(perms, belongDomain.name, recordName, belongDomain) !== 0) {
         // 无权限或只读授权：不落 cdn_domain，也不写 DNS 记录
         skipped++;
         continue;

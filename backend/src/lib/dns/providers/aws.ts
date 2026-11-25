@@ -145,16 +145,38 @@ export class AwsDns implements DnsProvider {
     if (sets === false) return false;
     let list: RecordListResult['list'] = [];
     for (const row of sets) {
-      if (row.AliasTarget || row.SetIdentifier) continue;
       const type = str(row.Type);
       if (type === 'SOA') continue;
       const name = this.fromFqdn(str(row.Name));
       const ttl = parseInt(str(row.TTL)) || 300;
+      const setIdentifier = str(row.SetIdentifier);
+      // Alias 与带 SetIdentifier 的路由策略记录在「不可见」时会被误判为记录缺失；
+      // 这里至少把云端实际存在的记录展示出来，同时用锁定标记阻止面板直接改写成普通记录。
+      if (row.AliasTarget) {
+        const target = str(row.AliasTarget.DNSName).replace(/\.+$/, '');
+        list.push({
+          RecordId: this.encodeLockedRecordId(name, type, target, ttl, 'alias', setIdentifier),
+          Domain: this.domain,
+          Name: name,
+          Type: type,
+          Value: target,
+          Line: 'default',
+          TTL: ttl,
+          MX: null,
+          Status: '1',
+          Weight: null,
+          Remark: setIdentifier ? `别名记录（路由策略 ${setIdentifier}，不可编辑）` : '别名记录（不可编辑）',
+          UpdateTime: null,
+        });
+        continue;
+      }
       for (const record of asList(row.ResourceRecords?.ResourceRecord)) {
         const raw = str(record.Value);
         const parsed = this.parseValue(type, raw);
         list.push({
-          RecordId: this.encodeRecordId(name, type, raw, ttl),
+          RecordId: setIdentifier
+            ? this.encodeLockedRecordId(name, type, raw, ttl, 'policy', setIdentifier)
+            : this.encodeRecordId(name, type, raw, ttl),
           Domain: this.domain,
           Name: name,
           Type: type,
@@ -164,7 +186,7 @@ export class AwsDns implements DnsProvider {
           MX: parsed.mx,
           Status: '1',
           Weight: null,
-          Remark: null,
+          Remark: setIdentifier ? `路由策略 ${setIdentifier}（不可编辑）` : null,
           UpdateTime: null,
         });
       }
@@ -179,7 +201,9 @@ export class AwsDns implements DnsProvider {
       if (Value) list = list.filter((v) => str(v.Value) === String(Value));
       if (Type) list = list.filter((v) => v.Type === String(Type));
     }
-    return { total: list.length, list };
+    const total = list.length;
+    const start = Math.max(0, (Number(_PageNumber) - 1) * Number(_PageSize));
+    return { total, list: list.slice(start, start + Number(_PageSize)) };
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
@@ -197,7 +221,11 @@ export class AwsDns implements DnsProvider {
       MX: parsed.mx,
       Status: '1',
       Weight: null,
-      Remark: null,
+      Remark: old.Locked
+        ? old.Kind === 'alias'
+          ? old.SetIdentifier ? `别名记录（路由策略 ${old.SetIdentifier}，不可编辑）` : '别名记录（不可编辑）'
+          : `路由策略 ${old.SetIdentifier}（不可编辑）`
+        : null,
       UpdateTime: null,
     };
   }
@@ -223,6 +251,10 @@ export class AwsDns implements DnsProvider {
     const old = this.decodeRecordId(RecordId);
     if (!old) {
       this.error = '记录ID无效';
+      return false;
+    }
+    if (old.Locked) {
+      this.error = 'Alias/路由策略记录不支持在面板编辑，请到 AWS 控制台修改';
       return false;
     }
     const type = this.convertType(Type);
@@ -290,6 +322,10 @@ export class AwsDns implements DnsProvider {
     const old = this.decodeRecordId(RecordId);
     if (!old) {
       this.error = '记录ID无效';
+      return false;
+    }
+    if (old.Locked) {
+      this.error = 'Alias/路由策略记录不支持在面板删除，请到 AWS 控制台操作';
       return false;
     }
     const fqdn = this.toFqdn(old.Name);
@@ -440,10 +476,26 @@ export class AwsDns implements DnsProvider {
     return Buffer.from(body, 'utf8').toString('base64url');
   }
 
-  private decodeRecordId(recordId: string): { Name: string; Type: string; Value: string; TTL?: number } | null {
+  private encodeLockedRecordId(name: string, type: string, value: string, ttl: number, kind: 'alias' | 'policy', setIdentifier = ''): string {
+    const body = `${name}\x1e${type}\x1e${value}\x1e${Number(ttl)}\x1e${kind}\x1e${setIdentifier}`;
+    return Buffer.from(body, 'utf8').toString('base64url');
+  }
+
+  private decodeRecordId(recordId: string): { Name: string; Type: string; Value: string; TTL?: number; Locked?: boolean; Kind?: string; SetIdentifier?: string } | null {
     try {
       const decoded = Buffer.from(String(recordId), 'base64url').toString('utf8');
       const parts = decoded.split('\x1e');
+      if (parts.length === 6 && (parts[4] === 'alias' || parts[4] === 'policy')) {
+        return {
+          Name: parts[0],
+          Type: parts[1],
+          Value: parts[2],
+          TTL: Number(parts[3]) || undefined,
+          Locked: true,
+          Kind: parts[4],
+          SetIdentifier: parts[5] || undefined,
+        };
+      }
       if (parts.length !== 3 && parts.length !== 4) return null;
       return {
         Name: parts[0],

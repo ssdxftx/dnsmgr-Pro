@@ -2,7 +2,7 @@ import { configGet, configSet } from '../../../config.js';
 import { query, table } from '../../../db.js';
 import { decryptConfig } from '../../secret.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from './index.js';
-import { buildLabels } from './util.js';
+import { buildTimeline } from './detail/shared.js';
 
 interface BucketData {
   flux: number;
@@ -184,21 +184,13 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
   // 显式传入空账户列表表示“没有任何可见账户”，不能退化为读取全部账户
   if (aids && aids.length === 0) return null;
   const spanDays = (end.getTime() - start.getTime()) / 86400000;
-  const granularity = spanDays > 1 ? 'day' : 'hour';
-  const { labels } = buildLabels(start, end);
+  const granularity: 'hour' | 'day' = spanDays > 1 ? 'day' : 'hour';
+  const timeline = buildTimeline(start, end, granularity);
+  const labels = timeline.labels;
   if (!labels.length) return null;
 
-  // 缓存桶按整点/整日写入，查询起点先对齐到桶边界再构造索引表，
-  // 否则非整点起点会与所有桶都对不上，整条曲线被平移。
-  // 天视图标签是日期，必须从 start 当天开始；小时视图在桶数超出标签数时
-  // 后移起点，保证最新一小时不被截掉。
-  const stepMs = granularity === 'day' ? 86400000 : 3600000;
-  let alignedStart = granularity === 'hour' ? startOfHour(start) : startOfDay(start);
-  if (granularity === 'hour') {
-    const buckets = Math.floor((end.getTime() - alignedStart.getTime()) / stepMs) + 1;
-    const shift = Math.max(0, buckets - labels.length);
-    if (shift > 0) alignedStart = new Date(alignedStart.getTime() + shift * stepMs);
-  }
+  const stepMs = timeline.stepMs;
+  const alignedStart = timeline.start;
   const alignedEnd = new Date(alignedStart.getTime() + labels.length * stepMs);
   const params: any[] = [granularity, fmt(alignedStart), fmt(alignedEnd)];
   let aidClause = '';
@@ -290,5 +282,6 @@ export async function loadCached(start: Date, end: Date, type: string, aids?: nu
       bs_status_summary: bs_status_detail.map(sum),
     };
   }
+  result.interval = granularity;
   return result;
 }

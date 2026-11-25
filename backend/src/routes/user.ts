@@ -76,6 +76,12 @@ function isSuper(req: any): boolean {
   return Number(req.user.is_super) === 1;
 }
 
+async function revokeTargetCredentials(uid: number): Promise<void> {
+  clearVaultSession(uid);
+  await query(`UPDATE ${table('api_key')} SET active = 0, revoked_at = NOW() WHERE uid = ? AND active = 1`, [uid]);
+  await query(`UPDATE ${table('user')} SET apikey = '', is_api = 0 WHERE id = ?`, [uid]);
+}
+
 // 用户管理写操作是账号接管级能力：API Key 是长期自动化凭据，不能用于创建/提升/封禁/删除账号。
 // 否则一把带 users:write 的 Key 可在不知道登录密码、不经过 TOTP 的情况下铸造持久化管理员。
 function apiKeyWriteBlocked(req: any): string | null {
@@ -287,6 +293,15 @@ export default async function userRoutes(app: FastifyInstance) {
     // 密码重置同样是账号接管级操作：API Key 会话必须先证明持有登录密码，
     // 否则一把泄露的 users:write Key 可以直接改密并持久化控制账号。
     const passwordReset = !!repwd;
+    const resetOther = passwordReset && Number(id) !== Number(req.user.uid);
+    if (resetOther) {
+      if (!isSuper(req)) return { code: -1, msg: '仅超级管理员可重置其他用户密码' };
+      const confirmed =
+        b.confirm_reset_password === true ||
+        Number(b.confirm_reset_password) === 1 ||
+        (b.confirm_username !== undefined && String(b.confirm_username).trim() === String(row.username));
+      if (!confirmed) return { code: -1, msg: '重置其他用户密码需要明确确认目标用户' };
+    }
     if ((apikeyChanging || isApiChanging || passwordReset) && String(req.user.auth_type || '') === 'api_key') {
       return { code: -1, msg: '该操作仅支持登录会话，请使用账号密码登录后再试' };
     }
@@ -331,6 +346,7 @@ export default async function userRoutes(app: FastifyInstance) {
     if (repwd) {
       // 改密同时自增 token_version，使该用户已签发的旧 JWT 立即失效
       await query(`UPDATE ${table('user')} SET password = ?, token_version = token_version + 1 WHERE id = ?`, [await bcrypt.hash(repwd, 10), id]);
+      if (resetOther) await revokeTargetCredentials(id);
     }
     const after: Record<string, any> = {
       username,

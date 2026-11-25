@@ -69,13 +69,18 @@ async function add() {
     return;
   }
   saveBusy.value = true;
-  const res = await api('POST', `/domains/${domainId}/aliases`, { alias: alias.value.trim() });
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    alias.value = '';
-    load();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/domains/${domainId}/aliases`, { alias: alias.value.trim() });
+    if (res.code === 0) {
+      message.success(res.msg);
+      alias.value = '';
+      load();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function del(r: any) {
@@ -85,20 +90,28 @@ function del(r: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('DELETE', `/domains/${domainId}/aliases/${r.DomainAliasId}`);
-      if (res.code === 0) {
-        message.success(res.msg);
-        load();
-      } else message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/domains/${domainId}/aliases/${r.DomainAliasId}`);
+        if (res.code === 0) {
+          message.success(res.msg);
+          load();
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }
 
 async function loadDomainName() {
-  const dl = await api<any>('GET', '/domains?basic=1', undefined, { cache: true });
-  if (dl.code === 0) {
-    const d = (dl.data || []).find((x: any) => x.id === domainId);
-    if (d) domainName.value = d._base_name || d.name;
+  try {
+    const dl = await api<any>('GET', '/domains?basic=1', undefined, { cache: true });
+    if (dl.code === 0) {
+      const d = (dl.data || []).find((x: any) => x.id === domainId);
+      if (d) domainName.value = d._base_name || d.name;
+    }
+  } catch {
+    // 名称仅用于标题展示，加载失败时保留 ID 占位
   }
 }
 

@@ -20,7 +20,7 @@ export interface CreateOrderResult {
 
 export interface CertProvider {
   register(): Promise<any>;
-  buyCert(domainList: string[]): Promise<any>;
+  buyCert(domainList: string[], order?: any): Promise<any>;
   createOrder(domainList: string[], keytype: string, keysize: string, order?: any): Promise<CreateOrderResult>;
   authOrder(domainList: string[], order: any): Promise<void>;
   getAuthStatus(domainList: string[], order: any): Promise<boolean>;

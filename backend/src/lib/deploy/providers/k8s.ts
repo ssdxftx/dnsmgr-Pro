@@ -122,8 +122,16 @@ export class K8sDeploy implements DeployProvider {
         },
         (res) => {
           let data = '';
+          let settled = false;
+          const finish = (result: { code: number; body: string; err: string }) => {
+            if (settled) return;
+            settled = true;
+            resolve(result);
+          };
           res.on('data', (d) => (data += d.toString()));
-          res.on('end', () => resolve({ code: res.statusCode || 0, body: data, err: '' }));
+          res.on('end', () => finish({ code: res.statusCode || 0, body: data, err: '' }));
+          // 连接中断时响应流可能发出 error，未监听会升级为未捕获异常
+          res.on('error', (e: any) => finish({ code: 0, body: '', err: e?.message || String(e) }));
         }
       );
       req.on('timeout', () => {

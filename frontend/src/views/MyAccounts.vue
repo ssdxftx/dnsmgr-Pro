@@ -121,6 +121,12 @@
       <n-form label-placement="top">
         <n-form-item :label="t('vault.oldPass')"><n-input v-model:value="passForm.old" type="password" show-password-on="click" /></n-form-item>
         <n-form-item :label="t('vault.newPass')"><n-input v-model:value="passForm.next" type="password" show-password-on="click" /></n-form-item>
+        <n-form-item :label="t('vault.loginPass')">
+          <n-input v-model:value="confirmLoginPass" type="password" show-password-on="click" :placeholder="t('vault.loginPass')" />
+        </n-form-item>
+        <n-form-item :label="t('vault.totpCode')">
+          <n-input v-model:value="vaultTotp" maxlength="6" :placeholder="t('vault.totpCode')" />
+        </n-form-item>
       </n-form>
       <template #footer>
         <n-space justify="end">
@@ -150,6 +156,8 @@
     <n-modal v-model:show="downgradeOpen" preset="card" :title="t('vault.downgrade')" class="modal-md" :mask-closable="false">
       <n-alert type="warning" class="mb-3">{{ t('vault.modeNoneHint') }}</n-alert>
       <n-input v-model:value="downgradePass" type="password" show-password-on="click" :placeholder="t('vault.oldPass')" />
+      <n-input v-model:value="confirmLoginPass" type="password" show-password-on="click" class="mt-3" :placeholder="t('vault.loginPass')" />
+      <n-input v-model:value="vaultTotp" maxlength="6" class="mt-3" :placeholder="t('vault.totpCode')" />
       <template #footer>
         <n-space justify="end">
           <n-button @click="downgradeOpen = false">{{ t('backup.cancel') }}</n-button>
@@ -270,6 +278,7 @@ const noneAck = ref(false);
 const unlockPass = ref('');
 const downgradePass = ref('');
 const upgradePass = ref('');
+const vaultTotp = ref('');
 const recoveryOpen = ref(false);
 const recoveryCode = ref('');
 const recoveryAck = ref(false);
@@ -286,11 +295,11 @@ const ready = computed(() => status.value.unlocked || status.value.mode === 'non
 
 // 各弹窗关闭时清空口令，避免在解锁/降级/升级之间残留明文
 watch(unlockOpen, (v) => { if (!v) unlockPass.value = ''; });
-watch(downgradeOpen, (v) => { if (!v) downgradePass.value = ''; });
+watch(downgradeOpen, (v) => { if (!v) { downgradePass.value = ''; confirmLoginPass.value = ''; vaultTotp.value = ''; } });
 watch(recoveryOpen, (v) => { if (!v) { recoveryPass.value = ''; recoveryCode.value = ''; recoveryAck.value = false; } });
 watch(destroyOpen, (v) => { if (!v) { destroyConfirm.value = ''; destroyLoginPass.value = ''; destroyPass.value = ''; } });
 watch(upgradeOpen, (v) => { if (!v) { upgradePass.value = ''; confirmLoginPass.value = ''; } });
-watch(passOpen, (v) => { if (!v) { passForm.old = ''; passForm.next = ''; } });
+watch(passOpen, (v) => { if (!v) { passForm.old = ''; passForm.next = ''; confirmLoginPass.value = ''; vaultTotp.value = ''; } });
 watch(initOpen, (v) => { if (!v) { initForm.passphrase = ''; initForm.confirm = ''; confirmLoginPass.value = ''; } });
 watch(noneOpen, (v) => { if (!v) confirmLoginPass.value = ''; });
 
@@ -373,7 +382,12 @@ async function lock() {
 async function changePass() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/passphrase', { old_passphrase: passForm.old, new_passphrase: passForm.next });
+    const res = await api<any>('POST', '/vault/passphrase', {
+      old_passphrase: passForm.old,
+      new_passphrase: passForm.next,
+      password: confirmLoginPass.value,
+      current_code: vaultTotp.value,
+    });
     if (res.code !== 0) return message.error(res.msg);
     passOpen.value = false;
     message.success(t('vault.passwordChanged'));
@@ -398,7 +412,11 @@ async function upgrade() {
 async function downgrade() {
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/vault/downgrade', { passphrase: downgradePass.value });
+    const res = await api<any>('POST', '/vault/downgrade', {
+      passphrase: downgradePass.value,
+      password: confirmLoginPass.value,
+      current_code: vaultTotp.value,
+    });
     if (res.code !== 0) return message.error(res.msg);
     downgradeOpen.value = false;
     message.success(t('vault.saved'));

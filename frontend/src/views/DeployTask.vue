@@ -38,6 +38,8 @@
           :loading="loadBusy"
           :empty-text="t('deployTask.empty')"
           :pagination="pagination"
+          :error="loadError"
+          @retry="loadTasks"
         />
       </div>
     </n-card>
@@ -93,6 +95,7 @@ const message = useMessage();
 const dialog = useDialog();
 const { busy, run } = useAction();
 const loadBusy = ref(false);
+const loadError = ref(false);
 const tasks = ref<any[]>([]);
 const tasksTotal = ref(0);
 const page = ref(1);
@@ -243,26 +246,37 @@ function fieldVisible(show: string | undefined, config: Record<string, any>): bo
   return evalShow(show, config);
 }
 
+let loadSeq = 0;
 async function loadTasks() {
+  const seq = ++loadSeq;
   loadBusy.value = true;
   try {
     const res = await api<any>('GET', '/deploy/tasks', {
       offset: (page.value - 1) * pageSize.value,
       limit: pageSize.value,
     });
-    tasks.value = res.code === 0 ? res.data : [];
+    if (seq !== loadSeq) return;
     if (res.code === 0) {
+      loadError.value = false;
+      tasks.value = res.data;
       tasksTotal.value = Number(res.total || 0);
       remoteStats.value = res.stats || null;
       if (!tasks.value.length && page.value > 1) {
         page.value -= 1;
         await loadTasks();
       }
+    } else {
+      // 请求失败保留旧列表，避免瞬时错误把整张表清空
+      loadError.value = true;
+      message.error(res.msg);
     }
   } catch (e: any) {
-    message.error(e?.message || t('common.networkError'));
+    if (seq === loadSeq) {
+      loadError.value = true;
+      message.error(e?.message || t('common.networkError'));
+    }
   } finally {
-    loadBusy.value = false;
+    if (seq === loadSeq) loadBusy.value = false;
   }
 }
 
@@ -306,21 +320,30 @@ function openAdd() {
 async function save() {
   if (!form.aid || !form.oid) return message.warning(t('deployTask.fillWarning'));
   saveBusy.value = true;
-  const body = { aid: form.aid, oid: form.oid, config: form.config, remark: form.remark };
-  const res = editingId.value ? await api('PUT', `/deploy/tasks/${editingId.value}`, body) : await api('POST', '/deploy/tasks', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    loadTasks();
-  } else message.error(res.msg);
+  try {
+    const body = { aid: form.aid, oid: form.oid, config: form.config, remark: form.remark };
+    const res = editingId.value ? await api('PUT', `/deploy/tasks/${editingId.value}`, body) : await api('POST', '/deploy/tasks', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      loadTasks();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 async function process(row: any) {
-  const res = await api('POST', `/deploy/tasks/${row.id}/process`, {});
-  if (res.code === 0) message.success(res.msg);
-  else message.error(res.msg);
-  loadTasks();
+  try {
+    const res = await api('POST', `/deploy/tasks/${row.id}/process`, {});
+    if (res.code === 0) message.success(res.msg);
+    else message.error(res.msg);
+    loadTasks();
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  }
 }
 
 function reset(row: any) {
@@ -330,19 +353,27 @@ function reset(row: any) {
     positiveText: t('deployTask.reset'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('POST', `/deploy/tasks/${row.id}/reset`, {});
-      if (res.code === 0) message.success(t('deployTask.resetSuccess'));
-      else message.error(res.msg);
-      loadTasks();
+      try {
+        const res = await api('POST', `/deploy/tasks/${row.id}/reset`, {});
+        if (res.code === 0) message.success(t('deployTask.resetSuccess'));
+        else message.error(res.msg);
+        loadTasks();
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }
 
 async function toggleActive(row: any) {
-  const res = await api('POST', `/deploy/tasks/${row.id}/setactive`, { active: row.active ? 0 : 1 });
-  if (res.code === 0) message.success(t('common.success'));
-  else message.error(res.msg);
-  loadTasks();
+  try {
+    const res = await api('POST', `/deploy/tasks/${row.id}/setactive`, { active: row.active ? 0 : 1 });
+    if (res.code === 0) message.success(t('common.success'));
+    else message.error(res.msg);
+    loadTasks();
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  }
 }
 
 function del(row: any) {
@@ -352,11 +383,15 @@ function del(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('DELETE', `/deploy/tasks/${row.id}`);
-      if (res.code === 0) {
-        message.success(t('deployTask.deleteSuccess'));
-        loadTasks();
-      } else message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/deploy/tasks/${row.id}`);
+        if (res.code === 0) {
+          message.success(t('deployTask.deleteSuccess'));
+          loadTasks();
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }

@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Ucloud } from '../../clients/Ucloud.js';
@@ -37,7 +37,12 @@ export class UcloudCert implements CertProvider {
     return true;
   }
 
-  async buyCert(_domainList: string[]): Promise<any> {
+  async buyCert(_domainList: string[], order: any = null): Promise<any> {
+    // 失败重试时复用已购买的 CertificateID，避免每次重试都重复购买一张证书
+    if (order && order.CertificateID) {
+      this.log('Reuse CertificateID: ' + order.CertificateID);
+      return order;
+    }
     const data = await this.request('PurchaseCertificate', {
       CertificateBrand: 'TrustAsia',
       CertificateName: 'TrustAsiaC1DVFree',
@@ -109,18 +114,18 @@ export class UcloudCert implements CertProvider {
     const res = await safeFetch(data.CertificateUrl);
     const buf = Buffer.from(await res.arrayBuffer());
 
-    const dir = mkdtempSync(join(tmpdir(), 'cert_'));
+    const dir = await mkdtemp(join(tmpdir(), 'cert_'));
     try {
       // CertificateID 来自接口响应，仅保留安全字符再拼入文件名，避免路径穿越
       const safeId = String(order.CertificateID ?? '').replace(/[^A-Za-z0-9_-]/g, '');
       const zipPath = join(dir, 'USSL_' + safeId + '.zip');
-      writeFileSync(zipPath, buf);
-      unzip(zipPath, dir);
-      const keyFile = findFileByExt(dir, ['.key'], dir);
-      const pemFile = findFileByExt(dir, ['.pem'], dir);
+      await writeFile(zipPath, buf);
+      await unzip(zipPath, dir);
+      const keyFile = await findFileByExt(dir, ['.key'], dir);
+      const pemFile = await findFileByExt(dir, ['.pem'], dir);
       if (!keyFile || !pemFile) throw new Error('解压后的证书文件夹内未找到证书文件');
-      const private_key = readFileSync(keyFile, 'utf8');
-      const fullchain = readFileSync(pemFile, 'utf8');
+      const private_key = await readFile(keyFile, 'utf8');
+      const fullchain = await readFile(pemFile, 'utf8');
       return {
         private_key,
         fullchain,
@@ -130,7 +135,7 @@ export class UcloudCert implements CertProvider {
         validTo: info.CertificateInfo.ExpiredDate,
       };
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true });
     }
   }
 

@@ -1,6 +1,12 @@
 <template>
   <div class="app-stack">
     <PageHeader :title="(isEdit ? t('common.edit') : t('common.add')) + ' ' + t('optimize.taskTitle')" :subtitle="t('optimize.formSubtitle')" back="/optimize-tasks" />
+    <n-alert v-if="initError" type="error" :show-icon="false">
+      <div class="load-error">
+        <span>{{ t('common.loadFailedHint') }}</span>
+        <n-button size="small" :loading="initBusy" @click="loadInitial">{{ t('common.retry') }}</n-button>
+      </div>
+    </n-alert>
     <n-card :bordered="false">
       <n-form label-placement="left" label-width="110" style="max-width: 720px">
         <n-form-item :label="t('optimize.domainSelect')" required>
@@ -83,6 +89,8 @@ const editId = computed(() => Number(route.params.id));
 const domainOptions = ref<any[]>([]);
 const domainLoadBusy = ref(false);
 const saveBusy = ref(false);
+const initBusy = ref(false);
+const initError = ref(false);
 const optimizeIpApi = ref('0');
 const ipTypeSelect = ref<string[]>(['v4']);
 
@@ -182,14 +190,40 @@ async function submit() {
   }
 }
 
-onMounted(async () => {
-  // 设置与域名选项相互独立，并行拉取
-  await Promise.all([loadSettings(), loadDomains()]);
-  if (isEdit.value) await loadTask();
-});
+async function loadInitial() {
+  initBusy.value = true;
+  initError.value = false;
+  try {
+    await Promise.all([
+      loadSettings().catch((e: any) => {
+        initError.value = true;
+        message.error(e?.message || t('common.networkError'));
+      }),
+      loadDomains().catch((e: any) => {
+        initError.value = true;
+        message.error(e?.message || t('common.networkError'));
+      }),
+    ]);
+    if (isEdit.value) {
+      await loadTask().catch((e: any) => {
+        initError.value = true;
+        message.error(e?.message || t('common.networkError'));
+      });
+    }
+  } finally {
+    initBusy.value = false;
+  }
+}
+
+onMounted(loadInitial);
 </script>
 
 <style scoped>
+.load-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
 .tip-text {
   color: var(--app-text-3);
   font-size: 12px;

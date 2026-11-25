@@ -59,8 +59,8 @@ export class SafelineDeploy implements DeployProvider {
       throw new Error('获取证书列表失败：' + e.message);
     }
 
-    let success = 0;
-    let errmsg: string | null = null;
+    let deployed = 0;
+    const failures: string[] = [];
     for (const row of data.nodes || []) {
       if (!row.domains) continue;
       const flag = row.domains.some((domain: string) => {
@@ -77,14 +77,18 @@ export class SafelineDeploy implements DeployProvider {
         try {
           await this.request('/api/open/cert', params);
           this.log('证书ID:' + row.id + '更新成功！');
-          success++;
+          deployed++;
         } catch (e: any) {
-          errmsg = e.message;
-          this.log('证书ID:' + row.id + '更新失败：' + errmsg);
+          const msg = e.message || String(e);
+          failures.push(`${row.id}: ${msg}`);
+          this.log('证书ID:' + row.id + '更新失败：' + msg);
         }
       }
     }
-    if (success === 0) {
+    if (failures.length) {
+      throw new Error(`证书部署部分失败（${failures.length} 个证书）：${failures.join('；')}`);
+    }
+    if (!deployed) {
       const params = {
         manual: { crt: fullchain, key: privatekey },
         type: 2,

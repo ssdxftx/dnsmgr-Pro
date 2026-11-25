@@ -361,6 +361,8 @@ function onBatchMore(key: string) {
       } else {
         message.error(res.msg);
       }
+    }).catch((e: any) => {
+      message.error(e?.message || t('common.networkError'));
     });
     return;
   }
@@ -627,23 +629,31 @@ async function saveRecord() {
 async function checkRecord(row: any) {
   const did = rowDid(row);
   if (!did) return;
-  const value = Array.isArray(row.Value) ? row.Value[0] : row.Value;
-  const res = await api<any>('POST', `/domains/${did}/records/check`, { name: row.Name, type: row.Type, value });
-  if (res.code === 0) {
-    checkResult.value = { ...res.data, name: row.Name, domainName: rowDomainName(row), type: row.Type, value: String(value) };
-    showCheck.value = true;
-  } else message.error(res.msg);
+  try {
+    const value = Array.isArray(row.Value) ? row.Value[0] : row.Value;
+    const res = await api<any>('POST', `/domains/${did}/records/check`, { name: row.Name, type: row.Type, value });
+    if (res.code === 0) {
+      checkResult.value = { ...res.data, name: row.Name, domainName: rowDomainName(row), type: row.Type, value: String(value) };
+      showCheck.value = true;
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  }
 }
 
 async function toggleStatus(row: any) {
   const did = rowDid(row);
   if (!did) return;
   const target = row.Status === '1' ? '0' : '1';
-  const res = await api('POST', `/domains/${did}/records/${row.RecordId}/status`, { status: target });
-  if (res.code === 0) {
-    message.success(res.msg);
-    emit('refresh');
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/domains/${did}/records/${row.RecordId}/status`, { status: target });
+    if (res.code === 0) {
+      message.success(res.msg);
+      emit('refresh');
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('record.saveFailed'));
+  }
 }
 
 function delRecord(row: any) {
@@ -655,11 +665,15 @@ function delRecord(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('DELETE', `/domains/${did}/records/${row.RecordId}`);
-      if (res.code === 0) {
-        message.success(t('record.deleteSuccess'));
-        emit('refresh');
-      } else message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/domains/${did}/records/${row.RecordId}`);
+        if (res.code === 0) {
+          message.success(t('record.deleteSuccess'));
+          emit('refresh');
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('record.saveFailed'));
+      }
     },
   });
 }

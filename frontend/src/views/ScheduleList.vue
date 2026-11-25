@@ -246,11 +246,15 @@ function batch(act: string) {
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('POST', '/schedule/tasks/batch', { act, ids });
-      if (res.code === 0) message.success(res.msg);
-      else message.error(res.msg);
-      checkedRowKeys.value = [];
-      loadTasks();
+      try {
+        const res = await api('POST', '/schedule/tasks/batch', { act, ids });
+        if (res.code === 0) message.success(res.msg);
+        else message.error(res.msg);
+        checkedRowKeys.value = [];
+        loadTasks();
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }

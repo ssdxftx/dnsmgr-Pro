@@ -258,15 +258,24 @@ function openAdd() {
 async function saveAdd() {
   if (!addName.value.trim()) return message.warning(t('cfTunnels.nameRequired'));
   saveBusy.value = true;
-  const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels`, { name: addName.value });
-  saveBusy.value = false;
-  if (res.code === 0) { message.success(res.msg); showAdd.value = false; load(); } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels`, { name: addName.value });
+    if (res.code === 0) { message.success(res.msg); showAdd.value = false; load(); } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function delTunnel(row: any) {
   dialog.warning({ title: t('cfTunnels.deleteTunnelTitle'), content: t('cfTunnels.deleteTunnelConfirm', { item: row.name }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${row.id}`);
-    if (res.code === 0) { message.success(res.msg); load(); } else message.error(res.msg);
+    try {
+      const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${row.id}`);
+      if (res.code === 0) { message.success(res.msg); load(); } else message.error(res.msg);
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -282,6 +291,8 @@ async function showTokenOf(row: any) {
       tokenValue.value = res.data.token || '';
       tokenCommand.value = `cloudflared tunnel run --token ${res.data.token}`;
     } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   } finally {
     tokenBusy.value = false;
   }
@@ -307,25 +318,39 @@ function openPublic(row: any) {
 
 async function loadPublic() {
   publicLoadBusy.value = true;
-  const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames`);
-  publicRows.value = res.code === 0 ? res.data : [];
-  if (res.code !== 0) message.error(res.msg);
-  publicLoadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames`);
+    publicRows.value = res.code === 0 ? res.data : [];
+    if (res.code !== 0) message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    publicLoadBusy.value = false;
+  }
 }
 
 async function savePublic() {
   if (!publicForm.hostname || !publicForm.service) return message.warning(t('cfTunnels.fillHostnameService'));
   publicLoadBusy.value = true;
-  const res = await api('PUT', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames`, { ...publicForm });
-  publicLoadBusy.value = false;
-  if (res.code === 0) { message.success(res.msg); Object.assign(publicForm, { hostname: '', service: '', path: '' }); loadPublic(); } else message.error(res.msg);
+  try {
+    const res = await api('PUT', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames`, { ...publicForm });
+    if (res.code === 0) { message.success(res.msg); Object.assign(publicForm, { hostname: '', service: '', path: '' }); loadPublic(); } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    publicLoadBusy.value = false;
+  }
 }
 
 function delPublic(row: any) {
   dialog.warning({ title: t('cfTunnels.deletePublicTitle'), content: t('cfTunnels.deleteConfirm', { item: row.hostname + (row.path ? ' [' + row.path + ']' : '') }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const q = `hostname=${encodeURIComponent(row.hostname)}&path=${encodeURIComponent(row.path || '')}`;
-    const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames?${q}`);
-    if (res.code === 0) { message.success(res.msg); loadPublic(); } else message.error(res.msg);
+    try {
+      const q = `hostname=${encodeURIComponent(row.hostname)}&path=${encodeURIComponent(row.path || '')}`;
+      const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/public-hostnames?${q}`);
+      if (res.code === 0) { message.success(res.msg); loadPublic(); } else message.error(res.msg);
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -339,24 +364,38 @@ function openCidr(row: any) {
 
 async function loadCidr() {
   cidrLoadBusy.value = true;
-  const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes`);
-  cidrRows.value = res.code === 0 ? res.data : [];
-  if (res.code !== 0) message.error(res.msg);
-  cidrLoadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes`);
+    cidrRows.value = res.code === 0 ? res.data : [];
+    if (res.code !== 0) message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    cidrLoadBusy.value = false;
+  }
 }
 
 async function saveCidr() {
   if (!cidrForm.network.trim()) return message.warning(t('cfTunnels.cidrRequired'));
   cidrLoadBusy.value = true;
-  const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes`, { ...cidrForm });
-  cidrLoadBusy.value = false;
-  if (res.code === 0) { message.success(res.msg); Object.assign(cidrForm, { network: '', comment: '' }); loadCidr(); } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes`, { ...cidrForm });
+    if (res.code === 0) { message.success(res.msg); Object.assign(cidrForm, { network: '', comment: '' }); loadCidr(); } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    cidrLoadBusy.value = false;
+  }
 }
 
 function delCidr(row: any) {
   dialog.warning({ title: t('cfTunnels.deleteCidrTitle'), content: t('cfTunnels.deleteConfirm', { item: row.network }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes/${row.id}`);
-    if (res.code === 0) { message.success(res.msg); loadCidr(); } else message.error(res.msg);
+    try {
+      const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/cidr-routes/${row.id}`);
+      if (res.code === 0) { message.success(res.msg); loadCidr(); } else message.error(res.msg);
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 
@@ -370,24 +409,38 @@ function openRoute(row: any) {
 
 async function loadRoute() {
   routeLoadBusy.value = true;
-  const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes`);
-  routeRows.value = res.code === 0 ? res.data : [];
-  if (res.code !== 0) message.error(res.msg);
-  routeLoadBusy.value = false;
+  try {
+    const res = await api<any>('GET', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes`);
+    routeRows.value = res.code === 0 ? res.data : [];
+    if (res.code !== 0) message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    routeLoadBusy.value = false;
+  }
 }
 
 async function saveRoute() {
   if (!routeForm.hostname.trim()) return message.warning(t('cfTunnels.hostnameRequired'));
   routeLoadBusy.value = true;
-  const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes`, { ...routeForm });
-  routeLoadBusy.value = false;
-  if (res.code === 0) { message.success(res.msg); Object.assign(routeForm, { hostname: '', comment: '' }); loadRoute(); } else message.error(res.msg);
+  try {
+    const res = await api('POST', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes`, { ...routeForm });
+    if (res.code === 0) { message.success(res.msg); Object.assign(routeForm, { hostname: '', comment: '' }); loadRoute(); } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    routeLoadBusy.value = false;
+  }
 }
 
 function delRoute(row: any) {
   dialog.warning({ title: t('cfTunnels.deleteRouteTitle'), content: t('cfTunnels.deleteConfirm', { item: row.hostname }), positiveText: t('common.delete'), negativeText: t('common.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes/${row.id}`);
-    if (res.code === 0) { message.success(res.msg); loadRoute(); } else message.error(res.msg);
+    try {
+      const res = await api('DELETE', `/cloudflare/accounts/${accountId}/tunnels/${currentTunnelId.value}/hostname-routes/${row.id}`);
+      if (res.code === 0) { message.success(res.msg); loadRoute(); } else message.error(res.msg);
+    } catch (e: any) {
+      message.error(e?.message || t('common.networkError'));
+    }
   } });
 }
 

@@ -107,6 +107,7 @@ function safeRemotePath(p: any): string {
   const denied =
     SSH_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
     isShellStartupPath(low) ||
+    low.includes('/.config/') ||
     low.includes('/.ssh/') ||
     low.endsWith('/.ssh') ||
     low.endsWith('/authorized_keys') ||

@@ -7,7 +7,24 @@ import type { DeployProvider } from '../types.js';
 
 // 远端目标路径守卫：FTP 的 STOR 可写账号可到达的任意位置，
 // 路径里的 .. 或系统敏感目录会把证书/私钥写到 Web 根、authorized_keys 等位置。
-const FTP_DENY_PREFIXES = ['/etc', '/root', '/.ssh', '/boot', '/sys', '/proc', '/dev', '/var/spool/cron'];
+const FTP_DENY_PREFIXES = ['/etc', '/root', '/.ssh', '/boot', '/sys', '/proc', '/dev', '/var/spool/cron', '/var/spool/at', '/usr/lib/systemd', '/lib/systemd'];
+
+// 任意位置的 shell 启动脚本都等同于持久化执行入口，部署证书不能覆盖这些文件
+const FTP_DENY_NAMES = new Set([
+  '.bashrc',
+  '.bash_profile',
+  '.bash_login',
+  '.bash_logout',
+  '.profile',
+  '.zshrc',
+  '.zprofile',
+  '.zshenv',
+  '.zlogin',
+  '.cshrc',
+  '.tcshrc',
+  '.kshrc',
+  'config.fish',
+]);
 
 // basic-ftp 在密码含 CR/LF 时存在未捕获异常风险；凭据中的控制字符也会污染 FTP 命令
 function safeFtpCredential(label: string, value: any): string {
@@ -26,6 +43,8 @@ function safeFtpPath(value: any): string {
   const low = normalized.toLowerCase();
   const denied =
     FTP_DENY_PREFIXES.some((pre) => low === pre || low.startsWith(pre + '/')) ||
+    FTP_DENY_NAMES.has(posix.basename(low)) ||
+    low.includes('/.config/') ||
     low.includes('/.ssh/') ||
     low.endsWith('/authorized_keys') ||
     low.endsWith('/authorized_keys2');
@@ -43,6 +62,17 @@ export class FtpDeploy implements DeployProvider {
 
   private log(txt: string) {
     if (this.logger) this.logger(txt);
+  }
+
+  // 私钥/PFX 落盘权限取决于服务端 umask，上传后尽力收紧为 0600；
+  // 部分 FTP 服务不支持 SITE CHMOD，失败时只记录日志，不阻断部署。
+  private async restrictPermission(client: any, path: string): Promise<void> {
+    try {
+      await client.send('SITE CHMOD 600 ' + path);
+      this.log('已设置文件权限 0600：' + path);
+    } catch (e: any) {
+      this.log('设置文件权限失败（服务端可能不支持 SITE CHMOD）：' + path + ' ' + (e?.message || e));
+    }
   }
 
   private async connect(): Promise<any> {
@@ -98,11 +128,13 @@ export class FtpDeploy implements DeployProvider {
         await client.uploadFrom(Readable.from(Buffer.from(fullchain)), certPath);
         this.log('证书已上传到：' + certPath);
         await client.uploadFrom(Readable.from(Buffer.from(privatekey)), keyPath);
+        await this.restrictPermission(client, keyPath);
         this.log('私钥已上传到：' + keyPath);
       } else if (config.format === 'pfx') {
         const pfx = await buildPfx(fullchain, privatekey, String(config.pfx_pass || ''));
         const pfxPath = safeFtpPath(config.pfx_file);
         await client.uploadFrom(Readable.from(pfx), pfxPath);
+        await this.restrictPermission(client, pfxPath);
         this.log('PFX证书已上传到：' + pfxPath);
       } else {
         throw new Error('未知的证书格式：' + String(config.format || '(空)'));

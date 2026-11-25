@@ -196,20 +196,26 @@ export function createRateLimit(opts: RateLimitOptions = {}) {
       for (const [k, b] of buckets) if (b.reset <= now) buckets.delete(k);
       lastSweep = now;
     }
-    // 容量保护：超限时先清理过期项，仍超限则按插入顺序淘汰最旧项
+    // 容量保护：只清理过期桶；仍有未过期桶时不淘汰，新来源归入共享溢出桶
     if (buckets.size >= maxBuckets) {
       for (const [k, b] of buckets) if (b.reset <= now) buckets.delete(k);
-      while (buckets.size >= maxBuckets) {
-        const oldest = buckets.keys().next().value;
-        if (oldest === undefined) break;
-        buckets.delete(oldest);
+    }
+    let key = req.ip || 'unknown';
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      if (buckets.size >= maxBuckets) {
+        // 攻击者可用大量不同来源挤掉目标桶：容量满时降级到共享溢出桶，保留未过期桶
+        key = '\u0000overflow';
+        bucket = buckets.get(key);
+      }
+      if (!bucket) {
+        bucket = { count: 0, reset: now + windowMs };
+        buckets.set(key, bucket);
       }
     }
-    const key = req.ip || 'unknown';
-    let bucket = buckets.get(key);
-    if (!bucket || bucket.reset <= now) {
-      bucket = { count: 0, reset: now + windowMs };
-      buckets.set(key, bucket);
+    if (bucket.reset <= now) {
+      bucket.count = 0;
+      bucket.reset = now + windowMs;
     }
     bucket.count += 1;
     if (bucket.count > max) {

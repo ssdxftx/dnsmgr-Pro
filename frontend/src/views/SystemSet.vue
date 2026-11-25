@@ -660,12 +660,17 @@ async function saveStatCache() {
 const refreshCacheBusy = ref(false);
 async function refreshStatCache() {
   refreshCacheBusy.value = true;
-  const res = await api('POST', '/system/stat-cache-refresh', {});
-  refreshCacheBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    await loadSettings();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', '/system/stat-cache-refresh', {});
+    if (res.code === 0) {
+      message.success(res.msg);
+      await loadSettings();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    refreshCacheBusy.value = false;
+  }
 }
 const clearCacheBusy = ref(false);
 function clearStatCache() {
@@ -676,12 +681,17 @@ function clearStatCache() {
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
       clearCacheBusy.value = true;
-      const res = await api('POST', '/system/stat-cache-clear', {});
-      clearCacheBusy.value = false;
-      if (res.code === 0) {
-        message.success(res.msg);
-        await loadSettings();
-      } else message.error(res.msg);
+      try {
+        const res = await api('POST', '/system/stat-cache-clear', {});
+        if (res.code === 0) {
+          message.success(res.msg);
+          await loadSettings();
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      } finally {
+        clearCacheBusy.value = false;
+      }
     },
   });
 }
@@ -800,10 +810,15 @@ const announcementColumns = computed<any[]>(() => [
 
 async function loadAnnouncements() {
   announcementsLoadBusy.value = true;
-  const res = await api<any>('GET', '/system/announcements');
-  announcementsLoadBusy.value = false;
-  if (res.code === 0) announcements.value = Array.isArray(res.data) ? res.data : [];
-  else message.error(res.msg);
+  try {
+    const res = await api<any>('GET', '/system/announcements');
+    if (res.code === 0) announcements.value = Array.isArray(res.data) ? res.data : [];
+    else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    announcementsLoadBusy.value = false;
+  }
 }
 
 function openAnnouncementAdd() {
@@ -847,26 +862,35 @@ async function saveAnnouncement() {
     endtime: announcementForm.endtime || null,
   };
   announcementSaveBusy.value = true;
-  const res: any = announcementEditingId.value
-    ? await api('PUT', `/system/announcements/${announcementEditingId.value}`, body)
-    : await api('POST', '/system/announcements', body);
-  announcementSaveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showAnnouncement.value = false;
-    await loadAnnouncements();
-  } else {
-    message.error(res.msg);
+  try {
+    const res: any = announcementEditingId.value
+      ? await api('PUT', `/system/announcements/${announcementEditingId.value}`, body)
+      : await api('POST', '/system/announcements', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showAnnouncement.value = false;
+      await loadAnnouncements();
+    } else {
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    announcementSaveBusy.value = false;
   }
 }
 
 async function toggleAnnouncement(row: any, value: boolean) {
-  const res: any = await api('POST', `/system/announcements/${row.id}/status`, { active: value ? 1 : 0 });
-  if (res.code === 0) {
-    message.success(res.msg);
-    await loadAnnouncements();
-  } else {
-    message.error(res.msg);
+  try {
+    const res: any = await api('POST', `/system/announcements/${row.id}/status`, { active: value ? 1 : 0 });
+    if (res.code === 0) {
+      message.success(res.msg);
+      await loadAnnouncements();
+    } else {
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
   }
 }
 
@@ -877,12 +901,16 @@ function deleteAnnouncement(row: any) {
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res: any = await api('DELETE', `/system/announcements/${row.id}`);
-      if (res.code === 0) {
-        message.success(res.msg);
-        await loadAnnouncements();
-      } else {
-        message.error(res.msg);
+      try {
+        const res: any = await api('DELETE', `/system/announcements/${row.id}`);
+        if (res.code === 0) {
+          message.success(res.msg);
+          await loadAnnouncements();
+        } else {
+          message.error(res.msg);
+        }
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
       }
     },
   });
@@ -890,10 +918,15 @@ function deleteAnnouncement(row: any) {
 
 async function loadRegCodes() {
   regCodesLoadBusy.value = true;
-  const res = await api<any>('GET', '/register/codes', { limit: 500, offset: 0 });
-  regCodesLoadBusy.value = false;
-  if (res.code === 0) regCodes.value = res.data.list;
-  else message.error(res.msg);
+  try {
+    const res = await api<any>('GET', '/register/codes', { limit: 500, offset: 0 });
+    if (res.code === 0) regCodes.value = res.data.list;
+    else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    regCodesLoadBusy.value = false;
+  }
 }
 
 async function setRegisterEnable(v: boolean) {
@@ -908,15 +941,20 @@ async function saveRegister() {
 
 async function doGen() {
   genBusy.value = true;
-  const res = await api<any>('POST', '/register/codes', genForm);
-  genBusy.value = false;
-  if (res.code === 0) {
-    showGen.value = false;
-    resultText.value = (res.data.codes || []).join('\n');
-    showResult.value = true;
-    loadRegCodes();
-  } else {
-    message.error(res.msg);
+  try {
+    const res = await api<any>('POST', '/register/codes', { count: genForm.count, days: genForm.days, max_use: genForm.maxUse, remark: genForm.remark });
+    if (res.code === 0) {
+      showGen.value = false;
+      resultText.value = (res.data.codes || []).join('\n');
+      showResult.value = true;
+      loadRegCodes();
+    } else {
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    genBusy.value = false;
   }
 }
 

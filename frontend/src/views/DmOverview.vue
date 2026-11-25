@@ -25,7 +25,7 @@
       <n-text depth="3" class="log-meta">{{ t('dm.lastRunTime') }} · {{ info.run_time || t('common.none') }}</n-text>
       <n-alert v-if="info.run_error" type="error" class="mb-3">{{ t('dm.runError') }}{{ info.run_error }}</n-alert>
       <div class="clean-row">
-        <n-input-number v-model:value="days" :min="0" class="days-input" />
+        <n-input-number v-model:value="days" :min="1" :max="3650" class="days-input" />
         <n-button type="warning" class="clean-btn" @click="clean">{{ t('dm.cleanLog') }}</n-button>
       </div>
       <n-text depth="3" style="display: block; margin-top: 8px">{{ t('dm.cleanHint') }}</n-text>

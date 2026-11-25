@@ -85,14 +85,14 @@ export async function queryTencentCdnStatistics(
 
   for (const d of domains) {
     for (const area of toAreaList(d.serviceArea)) {
-      const add = (target: number[], values: number[]) => {
-        const aligned = alignSeries(values, len);
+      const add = (target: number[], values: number[], agg: 'sum' | 'max' | 'avg' = 'sum') => {
+        const aligned = alignSeries(values, len, agg);
         for (let i = 0; i < len; i++) target[i] += aligned[i] || 0;
       };
 
       if (type === 'Resource' || type === 'All') {
-        add(bw, await cdnData(d.name, 'bandwidth', area));
-        add(bsBw, await originData(d.name, 'bandwidth', area));
+        add(bw, await cdnData(d.name, 'bandwidth', area), 'max');
+        add(bsBw, await originData(d.name, 'bandwidth', area), 'max');
         add(flux, await cdnData(d.name, 'flux', area));
         add(bsFlux, await originData(d.name, 'flux', area));
       }

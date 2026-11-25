@@ -39,6 +39,33 @@ export class PowerDns implements DnsProvider {
     return this.error;
   }
 
+  private zoneApiId(): string {
+    const id = String(this.domainid || this.domain || '').trim();
+    return id.endsWith('.') ? id : id + '.';
+  }
+
+  private zoneName(): string {
+    return String(this.domainid || this.domain || '').trim().toLowerCase().replace(/\.$/, '');
+  }
+
+  private normalizeName(name: string): string {
+    return String(name || '').trim().toLowerCase().replace(/\.$/, '');
+  }
+
+  private fqdnOf(host: string): string {
+    const zone = this.zoneName();
+    const raw = String(host || '').trim().replace(/\.$/, '');
+    const h = this.normalizeName(raw);
+    if (!zone) return raw + '.';
+    if (!h || h === '@') return zone + '.';
+    if (h === zone || h.endsWith('.' + zone)) return raw + '.';
+    return `${raw}.${zone}.`;
+  }
+
+  private sameRecordName(a: string, b: string): boolean {
+    return this.fqdnOf(a).toLowerCase() === this.fqdnOf(b).toLowerCase();
+  }
+
   private async send(method: string, path: string, params?: any): Promise<any> {
     const headers: Record<string, string> = { 'X-API-Key': this.apikey };
     let url = this.baseUrl + path;
@@ -86,7 +113,7 @@ export class PowerDns implements DnsProvider {
     if (!data) return false;
     const list = (Array.isArray(data) ? data : []).map((row: any) => ({
       DomainId: row.id,
-      Domain: (row.name || '').replace(/\.$/, ''),
+      Domain: (row.name || '').trim().toLowerCase().replace(/\.$/, ''),
       RecordCount: 0,
     }));
     const total = list.length;
@@ -105,17 +132,23 @@ export class PowerDns implements DnsProvider {
     _Line: string | null = null,
     Status: string | null = null,
   ): Promise<RecordListResult | false> {
-    const data = await this.send('GET', `/servers/${this.serverId}/zones/${this.domainid}`);
+    const data = await this.send('GET', `/servers/${this.serverId}/zones/${this.zoneApiId()}`);
     if (!data) return false;
     const rrsets: PdnsRrset[] = [];
     const list: any[] = [];
+    const zoneName = this.zoneName();
     let rrsetId = 0;
     for (const row of data.rrsets || []) {
       rrsetId++;
-      const fullName = String(row.name || '').replace(/\.$/, '');
-      const name = fullName === this.domainid ? '@' : fullName.replace('.' + this.domainid, '');
+      const fullName = String(row.name || '').trim().replace(/\.$/, '');
+      const cmpName = this.normalizeName(fullName);
+      let name: string;
+      if (cmpName === zoneName) name = '@';
+      else if (zoneName && cmpName.endsWith('.' + zoneName)) name = fullName.slice(0, fullName.length - zoneName.length - 1);
+      else name = fullName;
+      const canonicalName = this.fqdnOf(name);
       const records: PdnsRecord[] = [];
-      const rrset: PdnsRrset = { id: rrsetId, host: name, name: row.name, type: row.type, ttl: row.ttl, records };
+      const rrset: PdnsRrset = { id: rrsetId, host: name, name: canonicalName, type: row.type, ttl: row.ttl, records };
       const remark = row.comments?.length ? row.comments[0].content : null;
       let recordId = 0;
       for (const record of row.records || []) {
@@ -131,8 +164,8 @@ export class PowerDns implements DnsProvider {
           }
         }
         list.push({
-          RecordId: this.recordIdOf(String(row.name), row.type, String(record.content)),
-          Domain: this.domain,
+          RecordId: this.recordIdOf(canonicalName, row.type, String(record.content)),
+          Domain: zoneName || this.domain,
           Name: name,
           Type: row.type,
           Value: value,
@@ -149,7 +182,7 @@ export class PowerDns implements DnsProvider {
     }
     this.rrsetsCache = rrsets;
     let filtered = list;
-    if (SubDomain) filtered = filtered.filter((v) => v.Name.toLowerCase() === SubDomain.toLowerCase());
+    if (SubDomain) filtered = filtered.filter((v) => this.sameRecordName(v.Name, SubDomain));
     else {
       if (KeyWord) filtered = filtered.filter((v) => v.Name.includes(KeyWord) || v.Value.includes(KeyWord));
       if (Value) filtered = filtered.filter((v) => v.Value === Value);
@@ -189,7 +222,7 @@ export class PowerDns implements DnsProvider {
     // 未预热时先拉取同域名记录，否则 existing 恒为 undefined，REPLACE 会删除已有同名记录
     if (!(await this.ensureRrsets())) return false;
     const rrsets = this.rrsetsCache || [];
-    const existing = rrsets.find((r) => r.host === Name && r.type === Type);
+    const existing = rrsets.find((r) => this.sameRecordName(r.host, Name) && r.type === Type);
     let records: PdnsRecord[] = [];
     if (existing) {
       if (existing.records.some((r) => r.content === value)) {
@@ -223,7 +256,7 @@ export class PowerDns implements DnsProvider {
         this.error = '已存在相同记录';
         return false;
       }
-      if (rrset.host === Name && rrset.type === Type) {
+      if (this.sameRecordName(rrset.host, Name) && rrset.type === Type) {
         rrset.records[idx].content = value;
       } else {
         rrset.records.splice(idx, 1);
@@ -291,7 +324,7 @@ export class PowerDns implements DnsProvider {
     const parsed = this.parseStableRecordId(recordId);
     if (!parsed) return null;
     for (const rrset of this.rrsetsCache || []) {
-      if (rrset.name !== parsed.h || rrset.type !== parsed.t) continue;
+      if (!this.sameRecordName(rrset.name, parsed.h) || rrset.type !== parsed.t) continue;
       const idx = rrset.records.findIndex((r) => String(r.content) === parsed.c);
       if (idx >= 0) return { rrset, idx };
     }
@@ -310,17 +343,15 @@ export class PowerDns implements DnsProvider {
   }
 
   private rrsetReplace(host: string, type: string, ttl: number, records: PdnsRecord[], remark: string | null = null) {
-    const h = String(host || '').replace(/\.$/, '');
-    const name = h === '@' ? this.domainid : h + '.' + this.domainid;
+    const name = this.fqdnOf(host);
     const rrset: any = { name, type, ttl: Number(ttl), changetype: 'REPLACE', records, comments: [] };
     if (remark) rrset.comments = [{ account: '', content: remark }];
-    return this.send('PATCH', `/servers/${this.serverId}/zones/${this.domainid}`, { rrsets: [rrset] });
+    return this.send('PATCH', `/servers/${this.serverId}/zones/${this.zoneApiId()}`, { rrsets: [rrset] });
   }
 
   private rrsetDelete(host: string, type: string) {
-    const h = String(host || '').replace(/\.$/, '');
-    const name = h === '@' ? this.domainid : h + '.' + this.domainid;
-    return this.send('PATCH', `/servers/${this.serverId}/zones/${this.domainid}`, {
+    const name = this.fqdnOf(host);
+    return this.send('PATCH', `/servers/${this.serverId}/zones/${this.zoneApiId()}`, {
       rrsets: [{ name, type, changetype: 'DELETE' }],
     });
   }

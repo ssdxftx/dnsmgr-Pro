@@ -157,7 +157,8 @@ export class TencentCDN implements CdnProvider {
           if (!rulePaths.length) return null;
         } else if (parsed.type === 'catalog') {
           ruleType = 'directory';
-          rulePaths = [catalogPath(parsed.value)];
+          const dir = catalogPath(parsed.value);
+          rulePaths = [dir === '/' ? '/' : dir + '/'];
         } else if (parsed.type === 'full_path') {
           ruleType = 'path';
           rulePaths = [normalizeValue(parsed.value)];

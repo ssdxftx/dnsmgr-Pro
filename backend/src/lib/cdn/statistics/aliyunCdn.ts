@@ -78,17 +78,17 @@ export async function queryAliyunCdnStatistics(
   const hitFlux = new Array(len).fill(0);
 
   for (const d of domains) {
-    const add = (target: number[], values: number[]) => {
-      const aligned = alignSeries(values, len);
+    const add = (target: number[], values: number[], agg: 'sum' | 'max' | 'avg' = 'sum') => {
+      const aligned = alignSeries(values, len, agg);
       for (let i = 0; i < len; i++) target[i] += aligned[i] || 0;
     };
 
     if (type === 'Resource' || type === 'All') {
       const domainFlux = await usage(d.name, 'traf');
       add(flux, domainFlux);
-      add(bw, await usage(d.name, 'bps'));
+      add(bw, await usage(d.name, 'bps'), 'max');
       if (type === 'All') {
-        const rates = alignSeries(await hitRate(d.name), len);
+        const rates = alignSeries(await hitRate(d.name), len, 'avg');
         const alignedFlux = alignSeries(domainFlux, len);
         for (let i = 0; i < len; i++) hitFlux[i] += Math.round(((alignedFlux[i] || 0) * (rates[i] || 0)) / 100);
       }

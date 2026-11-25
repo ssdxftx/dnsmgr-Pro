@@ -44,19 +44,46 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     }
 
     const perms = await getEffectivePermissions(req.user);
-    const names = [...new Set(perms.map((p: any) => domainKey(p.domain)).filter(Boolean))];
+    const names = new Set<string>();
+    const ids = new Set<number>();
+    const aidNames: { aid: number; name: string }[] = [];
+    for (const p of perms) {
+      const name = domainKey(p.domain);
+      if (!name) continue;
+      const hasAid = p.aid !== undefined && p.aid !== null;
+      const hasDomainId = p.domainId !== undefined && p.domainId !== null;
+      if (!hasAid && !hasDomainId) {
+        names.add(name);
+        continue;
+      }
+      const did = Number(p.domainId);
+      if (hasDomainId && Number.isInteger(did) && did > 0) ids.add(did);
+      else if (hasAid) aidNames.push({ aid: Number(p.aid), name });
+    }
+    const conds: string[] = [];
+    const params: any[] = [];
+    if (names.size) {
+      conds.push(`LOWER(TRIM(TRAILING '.' FROM D.name)) IN (${[...names].map(() => '?').join(',')})`);
+      params.push(...names);
+    }
+    if (ids.size) {
+      conds.push(`D.id IN (${[...ids].map(() => '?').join(',')})`);
+      params.push(...ids);
+    }
+    for (const x of aidNames) {
+      conds.push(`(D.aid = ? AND LOWER(TRIM(TRAILING '.' FROM D.name)) = ?)`);
+      params.push(x.aid, x.name);
+    }
     let domains = 0;
-    // 分批 IN，避免授权域名很多时拼出超长 SQL
-    for (let i = 0; i < names.length; i += 500) {
-      const chunk = names.slice(i, i + 500);
+    if (conds.length) {
       const row = await queryOne<{ c: number }>(
         `SELECT COUNT(*) AS c FROM ${table('domain')} D
           LEFT JOIN ${table('account')} A ON D.aid = A.id
-         WHERE LOWER(TRIM(TRAILING '.' FROM D.name)) IN (${chunk.map(() => '?').join(',')})
+         WHERE (${conds.join(' OR ')})
            AND (A.visibility IS NULL OR A.visibility <> 'private' OR A.owner_uid = ?)`,
-        [...chunk, Number(req.user.uid)],
+        [...params, Number(req.user.uid)],
       );
-      domains += Number(row?.c || 0);
+      domains = Number(row?.c || 0);
     }
     const [accounts, cdnDomains] = await Promise.all([
       queryOne<{ c: number }>(

@@ -146,10 +146,19 @@ async function loadProviders() {
 
 async function loadAccounts() {
   loadBusy.value = true;
-  const res = await api<any>('GET', '/cert/accounts', { deploy: 1, limit: 200 });
-  const rows = res.code === 0 ? res.data : [];
-  accounts.value = rows.map((r: any) => ({ ...r, typename: r.typename || providers.value[r.type]?.name || r.type }));
-  loadBusy.value = false;
+  try {
+    const res = await api<any>('GET', '/cert/accounts', { deploy: 1, limit: 200 });
+    if (res.code !== 0) {
+      message.error(res.msg);
+      return;
+    }
+    const rows = res.data;
+    accounts.value = rows.map((r: any) => ({ ...r, typename: r.typename || providers.value[r.type]?.name || r.type }));
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    loadBusy.value = false;
+  }
 }
 
 function onTypeChange() {
@@ -195,16 +204,21 @@ async function save() {
   if (!form.type || !form.name) return message.warning(t('deployAccount.fillWarning'));
   if (currentProvider.value && !currentProvider.value.implemented) return message.warning(t('deployAccount.unsupported'));
   saveBusy.value = true;
-  const body = { type: form.type, name: form.name, remark: form.remark, config: form.config, deploy: 1 };
-  const res = editingId.value
-    ? await api('PUT', `/cert/accounts/${editingId.value}`, body)
-    : await api('POST', '/cert/accounts', body);
-  saveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showEdit.value = false;
-    loadAccounts();
-  } else message.error(res.msg);
+  try {
+    const body = { type: form.type, name: form.name, remark: form.remark, config: form.config, deploy: 1 };
+    const res = editingId.value
+      ? await api('PUT', `/cert/accounts/${editingId.value}`, body)
+      : await api('POST', '/cert/accounts', body);
+    if (res.code === 0) {
+      message.success(res.msg);
+      showEdit.value = false;
+      loadAccounts();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    saveBusy.value = false;
+  }
 }
 
 function del(row: any) {
@@ -214,17 +228,21 @@ function del(row: any) {
     positiveText: t('common.delete'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('DELETE', `/cert/accounts/${row.id}?deploy=1`);
-      if (res.code === 0) {
-        message.success(t('deployAccount.deleteSuccess'));
-        loadAccounts();
-      } else message.error(res.msg);
+      try {
+        const res = await api('DELETE', `/cert/accounts/${row.id}?deploy=1`);
+        if (res.code === 0) {
+          message.success(t('deployAccount.deleteSuccess'));
+          loadAccounts();
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }
 
 onMounted(() => {
-  loadProviders().then(loadAccounts);
+  loadProviders().then(loadAccounts).catch((e: any) => message.error(e?.message || t('common.networkError')));
 });
 </script>
 

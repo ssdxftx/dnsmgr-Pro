@@ -11,6 +11,22 @@ export function sqliteIndexName(tableName: string, indexName: string): string {
   return `${cleanIdent(tableName)}_${cleanIdent(indexName)}`;
 }
 
+function needsNoCase(tableName: string, column: string): boolean {
+  const specs: Array<[string, string[]]> = [
+    ['user', ['username', 'email']],
+    ['reg_code', ['code']],
+    ['domain', ['name']],
+    ['cdn_domain', ['name']],
+    ['cert_domain', ['domain']],
+    ['cert_cname', ['domain']],
+    ['domain_alias', ['name']],
+  ];
+  const hit = specs
+    .filter(([name]) => tableName === name || tableName.endsWith('_' + name))
+    .sort((a, b) => b[0].length - a[0].length)[0];
+  return !!hit && hit[1].includes(column);
+}
+
 function formatDate(value: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return (
@@ -152,8 +168,9 @@ function translateCreateTable(statement: string): string {
     }
 
     let def = toSqliteColumnDef(line);
-    // 与 MySQL 默认排序规则保持一致：用户名/邮箱唯一约束与登录查询不区分大小写
-    if (tableName.endsWith('user') && /^`?(?:username|email)`?\s/i.test(def) && !/\bCOLLATE\b/i.test(def)) {
+    const columnMatch = /^`?([A-Za-z0-9_]+)`?\s/.exec(def);
+    // 与 MySQL 默认排序规则保持一致：唯一约束与去重查询不区分大小写
+    if (columnMatch && needsNoCase(tableName, columnMatch[1]) && !/\bCOLLATE\b/i.test(def)) {
       def += ' COLLATE NOCASE';
     }
     body.push(def);
@@ -179,7 +196,7 @@ function translateAlterTable(statement: string): string {
   if (columnMatch) {
     const [, tableName, column, definition] = columnMatch;
     let def = toSqliteColumnDef(definition);
-    if (tableName.endsWith('user') && /^(?:username|email)$/i.test(column) && !/\bCOLLATE\b/i.test(def)) {
+    if (needsNoCase(tableName, column) && !/\bCOLLATE\b/i.test(def)) {
       def += ' COLLATE NOCASE';
     }
     return `ALTER TABLE \`${tableName}\` ADD COLUMN \`${column}\` ${def};`;

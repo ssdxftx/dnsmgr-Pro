@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
-import { isGeneratedColumn } from '../../db/types.js';
+import { isGeneratedColumn, type TransactionFn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS_JSON, kdfParamsFromStored, unwrapDek, wrapDek } from '../vault/keys.js';
 import { decodeStoredValue, TABLES } from './manifest.js';
@@ -46,7 +46,7 @@ export interface ImportReport {
   warnings: string[];
 }
 
-type Q = <R = any>(sql: string, params?: any[]) => Promise<R[]>;
+type Q = TransactionFn;
 
 // config 中的 sys_key/backup_key/maintenance 不能由归档覆盖；其余表在 replace 模式下全部重建。
 const DELETE_SKIP = new Set(['config']);
@@ -65,7 +65,20 @@ const USER_IMPORT_TABLES = new Set<string>([
 
 // replace 模式除业务表外还必须清理的运行态数据；否则旧站点的日志、统计、
 // 验证码和 TOTP 防重放记录会残留到新站点。
-const REPLACE_EXTRA_TABLES = ['log', 'cdn_stat_data', 'reg_verify', 'totp_replay'];
+const REPLACE_EXTRA_TABLES = [
+  'log',
+  'cdn_stat_data',
+  'reg_verify',
+  'totp_replay',
+  'notification_log',
+  'event_delivery',
+  'async_job',
+  'idempotency_key',
+  'token_revocation',
+  'rate_limit',
+  'legacy_nonce',
+  // backup_job 不能在此清理：恢复前的安全快照记录必须保留，恢复结束后由 restore 单独清理旧任务
+];
 
 function sanitizePlainConfig(raw: any, allowed: Set<string>): any {
   if (raw && typeof raw === 'object') {
@@ -173,6 +186,26 @@ async function insertRows(q: Q, name: string, rows: Record<string, any>[], cols:
     }
   }
   return count;
+}
+
+async function insertOrReuse(
+  q: Q,
+  name: string,
+  row: Record<string, any>,
+  cols: Set<string>,
+  findExisting?: () => Promise<number>,
+): Promise<{ id: number; reused: boolean }> {
+  if (findExisting) {
+    const existing = await findExisting();
+    if (existing) return { id: existing, reused: true };
+  }
+  try {
+    return { id: await insertRow(q, name, row, cols), reused: false };
+  } catch (e) {
+    if (!isDuplicateError(e)) throw e;
+    const existing = findExisting ? await findExisting() : 0;
+    return { id: existing, reused: true };
+  }
 }
 
 async function uniqueName(q: Q, base: string): Promise<string> {
@@ -712,7 +745,7 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'dmtask':
             case 'sctask':
             case 'optimizeip': {
-              const did = didMap.get(Number(row.did));
+              const did = (name === 'cert_link_log' ? cdidMap : didMap).get(Number(row.did));
               if (!did) {
                 rep.skipped++;
                 continue;
@@ -739,15 +772,54 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               const orig = Number(row.id);
               delete row.id;
-              const id = await insertRow(q, name, row, columns);
-              if (name === 'dmtask') taskMap.set(orig, id);
-              rep.inserted++;
+              const findExisting = mode === 'merge' ? async (): Promise<number> => {
+                let hit: any[] = [];
+                if (name === 'domain_alias') {
+                  hit = await q(`SELECT id FROM ${table(name)} WHERE did = ? AND name = ? LIMIT 1`, [row.did, row.name]);
+                } else if (name === 'cert_cname') {
+                  hit = await q(`SELECT id FROM ${table(name)} WHERE domain = ? OR (did = ? AND rr = ?) LIMIT 1`, [
+                    row.domain,
+                    row.did,
+                    row.rr,
+                  ]);
+                } else if (name === 'cert_link_log') {
+                  hit = await q(
+                    `SELECT id FROM ${table(name)} WHERE did = ? AND oid = ? AND node = ? AND status = ? AND IFNULL(message, '') = ? LIMIT 1`,
+                    [row.did, row.oid, row.node, row.status, String(row.message || '')],
+                  );
+                } else if (name === 'dns_check_task') {
+                  hit = await q(
+                    `SELECT id FROM ${table(name)} WHERE did = ? AND uid = ? AND IFNULL(sub, '') = ? AND name = ? LIMIT 1`,
+                    [row.did, row.uid, String(row.sub || ''), String(row.name || '')],
+                  );
+                } else if (name === 'dmtask') {
+                  hit = await q(`SELECT id FROM ${table(name)} WHERE did = ? AND recordid = ? LIMIT 1`, [row.did, row.recordid]);
+                } else if (name === 'sctask') {
+                  hit = await q(
+                    `SELECT id FROM ${table(name)} WHERE did = ? AND recordid = ? AND switchtype = ? AND switchtime = ? LIMIT 1`,
+                    [row.did, row.recordid, row.switchtype, row.switchtime],
+                  );
+                } else if (name === 'optimizeip') {
+                  hit = await q(`SELECT id FROM ${table(name)} WHERE did = ? AND rr = ? LIMIT 1`, [row.did, row.rr]);
+                }
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (name === 'dmtask' && inserted.id) taskMap.set(orig, inserted.id);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             case 'cdn_domain': {
               const orig = Number(row.id);
+              const origAid = Number(row.aid);
+              const mappedAid = caidMap.get(origAid);
+              if (origAid && !mappedAid) {
+                rep.dropped++;
+                continue;
+              }
               delete row.id;
-              row.aid = caidMap.get(Number(row.aid)) ?? 0;
+              row.aid = mappedAid ?? 0;
               row.did = didMap.get(Number(row.did)) ?? 0;
               const hit = await q(`SELECT id FROM ${table('cdn_domain')} WHERE aid = ? AND name = ? LIMIT 1`, [row.aid, row.name]);
               if (hit.length) {
@@ -769,13 +841,27 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               row.did = did;
               delete row.id;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              const findExisting = mode === 'merge' ? async (): Promise<number> => {
+                const hit = await q(`SELECT id FROM ${table('cdn_cache_rule')} WHERE did = ? AND path = ? LIMIT 1`, [
+                  row.did,
+                  row.path,
+                ]);
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             case 'cert_order': {
               const orig = Number(row.id);
-              row.aid = xaidMap.get(Number(row.aid)) ?? 0;
+              const origAid = Number(row.aid);
+              const mappedAid = xaidMap.get(origAid);
+              if (origAid && !mappedAid) {
+                rep.dropped++;
+                continue;
+              }
+              row.aid = mappedAid ?? 0;
               // link 中的 cdnDomainId 是旧站点的 CDN 域名 ID，必须重映射；找不到时删除该字段，
               // 避免恢复后把证书联动到同 ID 的另一个站点。
               if (row.link) {
@@ -822,8 +908,16 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               if ('aid' in row) row.aid = xaidMap.get(Number(row.aid)) ?? 0;
               if (name === 'cert_deploy' && 'processid' in row) row.processid = safeProcessId(row.processid);
               delete row.id;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              const findExisting = mode === 'merge' && name === 'cert_domain' ? async (): Promise<number> => {
+                const hit = await q(`SELECT id FROM ${table('cert_domain')} WHERE oid = ? AND domain = ? LIMIT 1`, [
+                  oid,
+                  row.domain,
+                ]);
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             case 'cf_rule_credential': {
@@ -835,8 +929,13 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               }
               row.aid = aid;
               delete row.id;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              const findExisting = mode === 'merge' ? async (): Promise<number> => {
+                const hit = await q(`SELECT id FROM ${table('cf_rule_credential')} WHERE aid = ? LIMIT 1`, [aid]);
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             case 'dmlog': {
@@ -880,17 +979,41 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
             case 'backup_destination': {
               const orig = Number(row.id);
               delete row.id;
-              const id = await insertRow(q, name, row, columns);
-              destMap.set(orig, id);
-              rep.inserted++;
+              const findExisting = mode === 'merge' ? async (): Promise<number> => {
+                const hit = await q(`SELECT id FROM ${table('backup_destination')} WHERE name = ? AND type = ? LIMIT 1`, [
+                  row.name,
+                  row.type,
+                ]);
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.id) destMap.set(orig, inserted.id);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             case 'cdn_preheat_task':
             case 'cdn_cache_task': {
               delete row.id;
               if ('owner_uid' in row) row.owner_uid = uidMap.get(Number(row.owner_uid)) ?? 0;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              const findExisting = mode === 'merge' ? async (): Promise<number> => {
+                let hit: any[] = [];
+                if (name === 'cdn_preheat_task') {
+                  hit = await q(
+                    `SELECT id FROM ${table(name)} WHERE name = ? AND op = ? AND urls = ? LIMIT 1`,
+                    [row.name, row.op, row.urls],
+                  );
+                } else {
+                  hit = await q(
+                    `SELECT id FROM ${table(name)} WHERE url = ? AND type = ? AND provider = ? AND task_id = ? LIMIT 1`,
+                    [row.url, row.type, row.provider, row.task_id],
+                  );
+                }
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             case 'backup_schedule': {
@@ -898,14 +1021,31 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
               // 站点计划目前只支持整站导出；归一化 scope，避免旧归档带 user 值后被当作整站计划执行
               if ('scope' in row) row.scope = 'site';
               row.dest_id = destMap.get(Number(row.dest_id)) ?? 0;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              const findExisting = mode === 'merge' && row.name ? async (): Promise<number> => {
+                const hit = await q(`SELECT id FROM ${table('backup_schedule')} WHERE name = ? LIMIT 1`, [row.name]);
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
+              continue;
+            }
+            case 'reg_code': {
+              delete row.id;
+              const findExisting = mode === 'merge' && row.code ? async (): Promise<number> => {
+                const hit = await q(`SELECT id FROM ${table('reg_code')} WHERE code = ? LIMIT 1`, [row.code]);
+                return Number((hit as any[])[0]?.id || 0);
+              } : undefined;
+              const inserted = await insertOrReuse(q, name, row, columns, findExisting);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
               continue;
             }
             default: {
               delete row.id;
-              await insertRow(q, name, row, columns);
-              rep.inserted++;
+              const inserted = await insertOrReuse(q, name, row, columns);
+              if (inserted.reused) rep.reused++;
+              else rep.inserted++;
             }
           }
         }

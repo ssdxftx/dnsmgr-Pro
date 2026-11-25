@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table, isDuplicateError } from '../db.js';
 import { configGet } from '../config.js';
-import { checkLevel } from '../auth.js';
+import { checkLevel, sameDomain } from '../auth.js';
 import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
@@ -46,6 +46,7 @@ async function validateTaskRecord(did: number, recordid: string): Promise<string
     .then(() => provider.getDomainRecordInfo(String(recordid)))
     .catch(() => false);
   if (!info) return '所选解析记录不属于当前域名，请重新选择';
+  if (!info.Domain || !sameDomain(info.Domain, d.name)) return '所选解析记录不属于当前域名，请重新选择';
   if (!info.Type || info.Value === null || info.Value === undefined) return '请选择具体解析记录（主机汇总行不可用）';
   return null;
 }
@@ -192,7 +193,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
       return { code: -1, msg: 'TCP 端口需为 1-65535' };
     }
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
-    if (task.checktype > 0 && task.timeout > task.frequency) {
+    if (task.timeout > task.frequency) {
       return { code: -1, msg: '为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔' };
     }
     if (task.type === 2 && task.backup_value === task.main_value) {
@@ -257,7 +258,7 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
       return { code: -1, msg: 'TCP 端口需为 1-65535' };
     }
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
-    if (task.checktype > 0 && task.timeout > task.frequency) {
+    if (task.timeout > task.frequency) {
       return { code: -1, msg: '为保障容灾切换任务正常运行，最大超时时间不能大于检测间隔' };
     }
     if (task.type === 2 && task.backup_value === task.main_value) {
@@ -380,10 +381,14 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
 
   app.post('/api/dmonitor/clean', auth, async (req: any) => {
     const days = Number((req.body || {}).days);
-    if (!days || days < 0) return { code: -1, msg: '参数错误' };
-    const threshold = fmtDateTime(new Date(Date.now() - days * 24 * 3600 * 1000));
-    await query(`DELETE FROM ${table('dmlog')} WHERE date < ?`, [threshold]);
-    return { code: 0, msg: '清理成功' };
+    if (!Number.isInteger(days) || days < 1 || days > 3650) {
+      return { code: -1, msg: '保留天数需为 1-3650 之间的整数' };
+    }
+    const thresholdDate = new Date(Date.now() - days * 24 * 3600 * 1000);
+    if (!Number.isFinite(thresholdDate.getTime())) return { code: -1, msg: '保留天数不合法' };
+    const threshold = fmtDateTime(thresholdDate);
+    const res: any = await query(`DELETE FROM ${table('dmlog')} WHERE date < ?`, [threshold]);
+    return { code: 0, msg: '清理成功', data: { deleted: Number(res?.affectedRows || 0) } };
   });
 
   app.get('/api/dmonitor/status', auth, async () => {

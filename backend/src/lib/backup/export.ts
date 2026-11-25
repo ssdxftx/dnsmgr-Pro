@@ -16,7 +16,7 @@ import { ensureBackupKey, getBackupKey } from './key.js';
 import { encodeRow, EXCLUDE_COLUMNS, TABLES, type BackupTable } from './manifest.js';
 import { readSnapshot, type SnapshotRead } from './snapshot.js';
 import { withDistributedLockResult } from '../scheduler/distLock.js';
-import { isTempActive } from './tmpRegistry.js';
+import { isTempActive, markTempActive, markTempDone } from './tmpRegistry.js';
 
 export interface ExportOptions {
   scope: 'site' | 'user';
@@ -24,6 +24,7 @@ export interface ExportOptions {
   includeLogs?: boolean;
   kind?: 'manual' | 'schedule' | 'pre_restore';
   passphrase?: string;
+  forceFull?: boolean;
   /** 计划备份所属的 backup_schedule.id，用于按计划执行保留策略 */
   scheduleId?: number;
 }
@@ -207,9 +208,10 @@ function siteFilter(name: string, ex: SiteExclusions) {
     if (name === 'sctask') return !ex.users.has(Number(row.owner_uid)) && !ex.domains.has(Number(row.did));
     if (name === 'optimizeip') return !ex.users.has(Number(row.owner_uid)) && !ex.domains.has(Number(row.did));
     if (name === 'cdn_preheat_task' || name === 'cdn_cache_task') return !ex.users.has(Number(row.owner_uid));
-    if (name === 'domain_alias' || name === 'cert_cname' || name === 'cert_link_log') {
+    if (name === 'domain_alias' || name === 'cert_cname') {
       return !ex.domains.has(Number(row.did));
     }
+    if (name === 'cert_link_log') return !ex.cdnDomains.has(Number(row.did));
     if (name === 'dmlog') return !ex.tasks.has(Number(row.taskid));
     if (name === 'cdn_domain') return !ex.cdnDomains.has(Number(row.id));
     if (name === 'cdn_cache_rule') return !ex.cdnDomains.has(Number(row.did));
@@ -252,7 +254,7 @@ function userFilter(name: string, ctx: UserContext, includeLogs: boolean) {
       case 'cert_cname':
         return ctx.domainIds.has(Number(row.did));
       case 'cert_link_log':
-        return ctx.domainIds.has(Number(row.did));
+        return ctx.cdnDomainIds.has(Number(row.did));
       case 'cf_rule_credential':
         return ctx.accountIds.has(Number(row.aid));
       case 'dmtask':
@@ -338,19 +340,21 @@ interface SpooledExport {
  */
 async function spoolTables(tables: () => AsyncGenerator<ArchiveTableChunk>, dir: string): Promise<SpoolTable[]> {
   await mkdir(dir, { recursive: true, mode: 0o700 });
+  markTempActive(dir);
   const out: SpoolTable[] = [];
   try {
     let index = 0;
     for await (const chunk of tables()) {
       if (!chunk.columns.length) continue;
       const file = path.join(dir, `${String(index++).padStart(4, '0')}.ndjson`);
+      markTempActive(file);
+      out.push({ name: chunk.name, columns: chunk.columns, file });
       const source = Readable.from(
         (async function* () {
           for await (const row of chunk.rows) yield JSON.stringify(row) + '\n';
         })(),
       );
       await pipeline(source, createWriteStream(file, { mode: 0o600 }));
-      out.push({ name: chunk.name, columns: chunk.columns, file });
     }
     return out;
   } catch (e) {
@@ -382,8 +386,14 @@ function spooledDraft(spool: SpooledExport): { header: Record<string, any>; tabl
 }
 
 async function cleanupSpool(spool: SpooledExport): Promise<void> {
-  await Promise.all(spool.tables.map((t) => unlink(t.file).catch(() => undefined)));
+  await Promise.all(
+    spool.tables.map(async (t) => {
+      await unlink(t.file).catch(() => undefined);
+      markTempDone(t.file);
+    }),
+  );
   await rmdir(spool.dir).catch(() => undefined);
+  markTempDone(spool.dir);
 }
 
 /**
@@ -408,6 +418,7 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
   const scope = opts.scope;
   const ownerUid = Number(opts.ownerUid || 0);
   const includeLogs = opts.includeLogs !== false;
+  const forceFull = opts.forceFull === true || opts.kind === 'pre_restore';
   if (scope === 'user' && !ownerUid) throw new Error('个人备份缺少用户标识');
 
   const jobRows: any = await query(
@@ -468,7 +479,7 @@ async function exportBackupInner(opts: ExportOptions): Promise<ExportResult> {
 
     spool = await readSnapshot(async (read) => {
       const excludedUsers = new Set<number>();
-      if (scope === 'site') {
+      if (scope === 'site' && !forceFull) {
         const rows = await read(`SELECT uid FROM ${table('user_vault')} WHERE exclude_from_site_backup = 1`);
         for (const r of rows as any[]) excludedUsers.add(Number(r.uid));
       }

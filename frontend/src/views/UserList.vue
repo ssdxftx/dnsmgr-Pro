@@ -439,6 +439,8 @@ async function save() {
   }
   if (editingId.value) {
     body.repwd = form.repwd;
+    // 重置他人密码必须显式确认目标用户，交由后端校验超级管理员权限
+    if (form.repwd && editingId.value !== currentUid.value) body.confirm_reset_password = true;
   } else {
     body.password = form.password;
   }

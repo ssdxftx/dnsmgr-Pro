@@ -84,8 +84,13 @@ export class CloudflareDns implements DnsProvider {
     if (status === '0') name = name.slice(0, -6);
     if (name === '__root__') name = '@';
     let value = row.content || '';
-    if (row.type === 'SRV' && row.priority !== undefined && row.priority !== null) {
-      value = row.priority + ' ' + value;
+    if (row.type === 'SRV') {
+      const d = row.data || {};
+      if (d.priority !== undefined && d.priority !== null && d.port !== undefined) {
+        value = `${d.priority} ${d.weight ?? 0} ${d.port} ${d.target ?? ''}`.trim();
+      } else if (row.priority !== undefined && row.priority !== null && !/^\d+\s+\d+\s+\d+\s+\S+/.test(String(value).trim())) {
+        value = row.priority + ' ' + value;
+      }
     }
     const type = row.type === 'URI' ? 'REDIRECT_URL' : row.type;
     if (row.type === 'URI') value = String(row.data?.target ?? row.content ?? '');
@@ -112,26 +117,34 @@ export class CloudflareDns implements DnsProvider {
   }
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+    if (Type === 'SRV' && !this.srvNameParts(Name)) {
+      this.error = 'SRV 记录名需形如 _service._proto';
+      return false;
+    }
     const ascii = this.domainAscii();
     const name = Name === '@' ? ascii : Name + '.' + ascii;
     const body: Record<string, any> = { name, type: this.convertType(Type), content: Value, proxied: Line === '1', ttl: Number(TTL), comment: Remark ?? null };
     if (Type === 'MX') body.priority = Number(MX);
     if (Type === 'CAA' || Type === 'SRV' || this.isUrlType(Type)) {
       delete body.content;
-      body.data = this.convertValue(Value, Type);
+      body.data = this.convertValue(Value, Type, Name);
     }
     const data = await this.send('POST', '/zones/' + this.config.domainid + '/dns_records', undefined, body);
     return data && data.result?.id ? String(data.result.id) : false;
   }
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+    if (Type === 'SRV' && !this.srvNameParts(Name)) {
+      this.error = 'SRV 记录名需形如 _service._proto';
+      return false;
+    }
     const ascii = this.domainAscii();
     const name = Name === '@' ? ascii : Name + '.' + ascii;
     const body: Record<string, any> = { name, type: this.convertType(Type), content: Value, proxied: Line === '1', ttl: Number(TTL), comment: Remark ?? null };
     if (Type === 'MX') body.priority = Number(MX);
     if (Type === 'CAA' || Type === 'SRV' || this.isUrlType(Type)) {
       delete body.content;
-      body.data = this.convertValue(Value, Type);
+      body.data = this.convertValue(Value, Type, Name);
     }
     return (await this.send('PATCH', '/zones/' + this.config.domainid + '/dns_records/' + RecordId, undefined, body)) !== false;
   }
@@ -171,7 +184,14 @@ export class CloudflareDns implements DnsProvider {
     return type === 'REDIRECT_URL' || type === 'FORWARD_URL';
   }
 
-  private convertValue(value: string, type: string): Record<string, any> {
+  private srvNameParts(name: string): { service: string; proto: string; name: string } | null {
+    const labels = String(name || '').trim().replace(/\.+$/, '').split('.').filter(Boolean);
+    if (labels.length < 2 || !labels[0] || !labels[1]) return null;
+    const rest = labels.slice(2).join('.');
+    return { service: labels[0], proto: labels[1], name: rest || '@' };
+  }
+
+  private convertValue(value: string, type: string, name?: string): Record<string, any> {
     if (this.isUrlType(type)) {
       // Cloudflare URI 记录要求 data.target；允许用户填写「优先级 权重 目标」，
       // 仅填写目标时使用 Cloudflare 的默认优先级和权重。
@@ -182,10 +202,11 @@ export class CloudflareDns implements DnsProvider {
     }
     const arr = value.split(' ');
     if (type === 'SRV') {
-      if (arr.length > 3) {
-        return { priority: Number(arr[0]), weight: Number(arr[1]), port: Number(arr[2]), target: arr[3] };
-      }
-      return { weight: Number(arr[0]), port: Number(arr[1]), target: arr[2] };
+      const parts = this.srvNameParts(name || '') || { service: '', proto: '', name: '@' };
+      const srv = arr.length > 3
+        ? { priority: Number(arr[0]), weight: Number(arr[1]), port: Number(arr[2]), target: arr.slice(3).join(' ') }
+        : { weight: Number(arr[0]), port: Number(arr[1]), target: arr.slice(2).join(' ') };
+      return { ...srv, service: parts.service, proto: parts.proto, name: parts.name };
     }
     if (type === 'CAA') {
       return { flags: Number(arr[0]), tag: arr[1], value: (arr[2] || '').replace(/^"|"$/g, '') };

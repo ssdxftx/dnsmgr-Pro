@@ -1,9 +1,10 @@
 import { unlink } from 'node:fs/promises';
 import { table, withTransaction } from '../../db.js';
+import type { TransactionFn } from '../../db/types.js';
 import { resolveArchivePath } from '../backup/archive.js';
 import { deleteRemote } from '../backup/destinations.js';
 
-type Q = <R = any>(sql: string, params?: any[]) => Promise<R[]>;
+type Q = TransactionFn;
 
 function marks(ids: Array<string | number>): string {
   return ids.map(() => '?').join(',');
@@ -105,6 +106,10 @@ export async function purgePrivateAssets(
   await delByIds(q, 'cdn_stat_data', 'aid', cdnAccountIds);
   await delByIds(q, 'cf_rule_credential', 'aid', accountIds);
   await delByIds(q, 'cdn_domain', 'id', cdnDomainIds);
+  if (domainIds.length) {
+    // 其他账户可能引用待删除域名，先解除绑定，避免新域名复用 id 后挂上旧 CDN 记录
+    await q(`UPDATE ${table('cdn_domain')} SET did = 0 WHERE did IN (${marks(domainIds)})`, domainIds);
+  }
   await delByIds(q, 'cert_domain', 'oid', certOrderIds);
   await delByIds(q, 'cert_deploy', 'oid', certOrderIds);
   await delByIds(q, 'cert_order', 'id', certOrderIds);

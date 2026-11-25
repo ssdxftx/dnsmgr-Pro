@@ -64,8 +64,10 @@ function safeTargetPath(p: any): string {
     // 默认数据目录不能作为拒绝 Windows 部署的依据，否则该分支永远不可达。
     if (configuredDirs.length) throw new Error('目标文件路径不在允许目录内（可通过 DNSMGR_DEPLOY_LOCAL_DIRS 配置）：' + raw);
     // Windows 路径：按 win32 语义规范化后做系统位置拒绝
-    // \\?\ 前缀与 8.3 短名（PROGRA~1）能绕过前缀匹配，直接拒绝
-    if (/^\\\\\?\\/.test(raw) || /~[0-9]/.test(basename(raw))) {
+    // \\?\ 前缀能绕过前缀匹配；8.3 短名（如 PROGRA~1）可绕过受保护目录判断。
+    // 逐段检查每个路径段，避免短名出现在中间目录时被 basename 漏掉。
+    const winSegments = raw.split(/[\\/]+/).filter(Boolean);
+    if (/^\\\\\?\\/.test(raw) || winSegments.some((seg) => /~[0-9]/.test(seg))) {
       throw new Error('目标文件路径包含不允许的 Windows 特殊前缀或短名：' + raw);
     }
     const wn = win32.normalize(raw).toLowerCase();

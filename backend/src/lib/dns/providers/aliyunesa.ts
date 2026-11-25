@@ -132,12 +132,14 @@ export class AliyunEsaDns implements DnsProvider {
     return res && res.RecordId ? String(res.RecordId) : false;
   }
 
-  async updateDomainRecord(RecordId: string, _Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+  async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+    const rn = Name === '@' ? this.domain : Name + '.' + this.domain;
     const type = Type === 'A' || Type === 'AAAA' ? 'A/AAAA' : Type;
     const data = this.buildData(Type, Value, MX);
     const param: Record<string, any> = {
       Action: 'UpdateRecord',
       RecordId,
+      RecordName: rn,
       Type: type,
       Proxied: Line === '1' ? 'true' : 'false',
       Ttl: Number(TTL),

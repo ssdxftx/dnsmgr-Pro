@@ -59,19 +59,23 @@ export class CloudpanelDeploy implements DeployProvider {
 
     await this.login();
 
-    let success = 0;
-    let errmsg: string | null = null;
+    const failures: string[] = [];
+    let deployed = 0;
     for (const domain of targets) {
       try {
         await this.deploySite(domain, fullchain, privatekey);
         this.log(`网站 ${domain} 证书部署成功`);
-        success++;
+        deployed++;
       } catch (e: any) {
-        errmsg = e?.message || String(e);
-        this.log(`网站 ${domain} 证书部署失败：` + errmsg);
+        const msg = e?.message || String(e);
+        failures.push(`${domain}: ${msg}`);
+        this.log(`网站 ${domain} 证书部署失败：` + msg);
       }
     }
-    if (success === 0) throw new Error(errmsg || '要部署的网站不存在');
+    if (failures.length) {
+      throw new Error(`证书部署部分失败（${failures.length} 个站点）：${failures.join('；')}`);
+    }
+    if (!deployed) throw new Error('要部署的网站不存在');
   }
 
   private assertAccountConfig(): void {

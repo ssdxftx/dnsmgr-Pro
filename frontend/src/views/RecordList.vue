@@ -39,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRoute, useRouter } from 'vue-router';
 import { NButton, NSpace, useMessage } from 'naive-ui';
@@ -52,12 +52,12 @@ const route = useRoute();
 const router = useRouter();
 const { t } = useI18n();
 const message = useMessage();
-const domainId = Number(route.params.id);
+const domainId = computed(() => Number(route.params.id));
 const domainName = ref('');
 const accountType = ref('');
 const subFilter = computed(() => (route.query.sub as string) || '');
 const displayTitle = computed(() => {
-  if (!domainName.value) return t('record.domainFallback', { id: domainId });
+  if (!domainName.value) return t('record.domainFallback', { id: domainId.value });
   return subFilter.value ? `${subFilter.value}.${domainName.value}` : domainName.value;
 });
 const access = ref<{ admin: boolean; readonly: boolean; writable: boolean }>({ admin: false, readonly: true, writable: false });
@@ -87,7 +87,7 @@ async function loadRecords() {
   loadAbort = ac;
   loadBusy.value = true;
   try {
-    const res = await api<any>('GET', `/domains/${domainId}/records`, { page: page.value, pagesize: pageSize.value, subdomain: subFilter.value || undefined }, { signal: ac.signal });
+    const res = await api<any>('GET', `/domains/${domainId.value}/records`, { page: page.value, pagesize: pageSize.value, subdomain: subFilter.value || undefined }, { signal: ac.signal });
     if (loadAbort !== ac) return;
     if (res.code === 0) {
       records.value = res.data.list;
@@ -115,13 +115,22 @@ async function loadDomainInfo() {
       if (key && !index[key]) index[key] = { id: d.id, sub: d._sub || '' };
     }
     domainIndex.value = index;
-    const d = list.find((x: any) => x.id === domainId);
+    const d = list.find((x: any) => x.id === domainId.value);
     if (d) {
       domainName.value = d._base_name || d.name;
       accountType.value = d.account_type || '';
     }
   }
 }
+
+watch(
+  () => [route.params.id, route.query.sub],
+  () => {
+    page.value = 1;
+    loadRecords();
+    loadDomainInfo();
+  },
+);
 
 onMounted(() => {
   loadRecords();

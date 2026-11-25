@@ -389,22 +389,27 @@ async function loadAll() {
       while (cursor < targets.length) {
         const i = cursor++;
         const a = targets[i];
-        const res = await api<any>('GET', '/cdn/zones', { aid: a.id });
-        if (res.code === 0) {
-          results[i] = (res.data || []).map((z: any) => ({
-            ...z,
-            typename: z.typename || a.typename || a.type,
-            accountName: a.name,
-            key: `${z.aid ?? a.id}:${z.zone_id}`,
-          }));
-        } else {
-          // 失败账户保留上次已展示的站点，不能静默从列表里消失
+        try {
+          const res = await api<any>('GET', '/cdn/zones', { aid: a.id });
+          if (res.code === 0) {
+            results[i] = (res.data || []).map((z: any) => ({
+              ...z,
+              typename: z.typename || a.typename || a.type,
+              accountName: a.name,
+              key: `${z.aid ?? a.id}:${z.zone_id}`,
+            }));
+          } else {
+            // 失败账户保留上次已展示的站点，不能静默从列表里消失
+            failed.push(a.name);
+            results[i] = zoneList.value.filter((z: any) => String(z.key || '').startsWith(`${a.id}:`));
+          }
+        } catch {
           failed.push(a.name);
           results[i] = zoneList.value.filter((z: any) => String(z.key || '').startsWith(`${a.id}:`));
         }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(4, targets.length) }, worker));
+    await Promise.allSettled(Array.from({ length: Math.min(4, targets.length) }, worker));
     if (seq !== loadAllSeq) return;
     zoneList.value = results.flat();
     if (failed.length) message.warning(`${failed.join('、')}：${t('cdnZoneSetting.loadFailed')}`);

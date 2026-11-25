@@ -121,6 +121,7 @@ export async function fetchEdgeOneDetail(
   }
 
   const accessPoints = new Map<string, TimePoint[]>();
+  const peakAccess = new Map<string, (number | null)[]>();
   const originPoints = new Map<string, TimePoint[]>();
   const cachePoints = new Map<string, TimePoint[]>();
   const statusPoints = new Map<string, TimePoint[]>();
@@ -162,13 +163,10 @@ export async function fetchEdgeOneDetail(
         const pts = extractEoPoints(resp, name);
         if (!pts.length) continue;
         const bucketed = bucketMaxByTimestamp(pts, timeline);
-        // 5min 峰值覆盖原小时均值：用已分桶的序列重建（空桶用 NaN，对齐时保持 null）
-        accessPoints.set(
+        const prev = peakAccess.get(name);
+        peakAccess.set(
           name,
-          bucketed.map((v, i) => ({
-            ts: timeline.start.getTime() + i * timeline.stepMs,
-            value: v == null ? NaN : v,
-          })),
+          prev ? combineSeries([prev, bucketed], 'sum', timeline.labels.length) : bucketed,
         );
       }
     }
@@ -227,6 +225,18 @@ export async function fetchEdgeOneDetail(
           const pts = extractEoPoints(resp, 'l7Flow_outFlux');
           if (pts.length) cachePoints.set('l7Flow_outFlux:hit', pts);
         }
+        const totalResp = await call(
+          'DescribeTimingL7AnalysisData',
+          { ...base, MetricNames: ['l7Flow_outFlux'] },
+          '缓存降级总流量',
+          zoneId,
+        );
+        if (totalResp) {
+          const pts = extractEoPoints(totalResp, 'l7Flow_outFlux');
+          if (pts.length) {
+            cachePoints.set('l7Flow_outFlux:total', [...(cachePoints.get('l7Flow_outFlux:total') || []), ...pts]);
+          }
+        }
       }
     }
 
@@ -254,6 +264,16 @@ export async function fetchEdgeOneDetail(
         }
       }
     }
+  }
+
+  for (const [name, values] of peakAccess) {
+    accessPoints.set(
+      name,
+      values.map((v, i) => ({
+        ts: timeline.start.getTime() + i * timeline.stepMs,
+        value: v == null ? NaN : v,
+      })),
+    );
   }
 
   // 概览主图额外需要响应流量/带宽，它们不属于 basic 但属于首屏
@@ -308,17 +328,26 @@ export async function fetchEdgeOneDetail(
   const missFluxValues = cacheFlux.miss
     ? alignByTimestamp(cacheFlux.miss, timeline)
     : cacheFallback
-      ? alignByTimestamp(accessPoints.get('l7Flow_outFlux') || [], timeline).map((total, i) => {
-          const hit = hitFluxValues[i];
-          return total == null || hit == null ? null : Math.max(0, total - hit);
-        })
+      ? (() => {
+          const totalPoints = cachePoints.get('l7Flow_outFlux:total') || accessPoints.get('l7Flow_outFlux');
+          if (!totalPoints?.length) return empty();
+          return alignByTimestamp(totalPoints, timeline).map((total, i) => {
+            const hit = hitFluxValues[i];
+            return total == null || hit == null ? null : Math.max(0, total - hit);
+          });
+        })()
       : empty();
   const dynamicFluxValues = cacheFlux.dynamic
     ? alignByTimestamp(cacheFlux.dynamic, timeline)
     : empty();
   const hitReqValues = cacheReq.hit ? alignByTimestamp(cacheReq.hit, timeline) : empty();
   const missReqValues = cacheReq.miss ? alignByTimestamp(cacheReq.miss, timeline) : empty();
-  const totalFluxValues = combineSeries([hitFluxValues, missFluxValues, dynamicFluxValues], 'sum', timeline.labels.length);
+  const totalFluxValues = cacheFallback
+    ? hitFluxValues.map((hit, i) => {
+        const miss = missFluxValues[i];
+        return hit == null || miss == null ? null : hit + miss;
+      })
+    : combineSeries([hitFluxValues, missFluxValues, dynamicFluxValues], 'sum', timeline.labels.length);
   const totalReqValues = combineSeries([hitReqValues, missReqValues], 'sum', timeline.labels.length);
   const hitRateFlux = rateSeries(hitFluxValues, totalFluxValues);
   const hitRateReq = rateSeries(hitReqValues, totalReqValues);

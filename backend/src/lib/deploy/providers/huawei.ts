@@ -137,7 +137,7 @@ export class HuaweiDeploy implements DeployProvider {
     for (const domain of String(config.domain).split(',')) {
       if (!domain) continue;
       await this.obsSetBucketCustomdomain(config.obs_bucket, config.obs_endpoint, domain, config.cert_name, fullchain, privatekey);
-      this.log('OSS域名 ' + domain + ' 部署证书成功！');
+      this.log('OBS域名 ' + domain + ' 部署证书成功！');
     }
   }
 

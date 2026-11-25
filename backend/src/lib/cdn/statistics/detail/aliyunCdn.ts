@@ -8,7 +8,6 @@ import {
   combineSeries,
   isBasicWanted,
   makeSeries,
-  rateSeries,
   runPool,
   toBreakdown,
   type TimePoint,
@@ -64,7 +63,8 @@ export async function fetchAliyunCdnDetail(
   const req = new Array<number | null>(len).fill(null);
   const qps = new Array<number | null>(len).fill(null);
   const hitRate = new Array<number | null>(len).fill(null);
-  const hitRateParts: (number | null)[][] = [];
+  const hitRateParts: Array<{ domain: string; values: (number | null)[] }> = [];
+  const domainFlux = new Map<string, (number | null)[]>();
   const originFlux = new Array<number | null>(len).fill(null);
   const originBw = new Array<number | null>(len).fill(null);
   const codes: Record<string, (number | null)[]> = {
@@ -124,7 +124,9 @@ export async function fetchAliyunCdnDetail(
     if (need('flux') || need('hit_rate') || need('hit_flux') || need('req')) {
       tasks.push(async () => {
         const pts = await usage(d.name, 'traf', intervalSec);
-        addTo(flux, alignByTimestamp(pts, timeline));
+        const values = alignByTimestamp(pts, timeline);
+        domainFlux.set(d.name, values);
+        addTo(flux, values);
       });
     }
     if (need('bw')) {
@@ -145,7 +147,7 @@ export async function fetchAliyunCdnDetail(
             EndTime: formatIso(timeline.end),
           });
           const pts = toPoints(modulesOf(resp, 'HitRatePerInterval'), 'HitRate', timeline);
-          hitRateParts.push(alignByTimestamp(pts, timeline, 'avg'));
+          hitRateParts.push({ domain: d.name, values: alignByTimestamp(pts, timeline, 'avg') });
         } catch (e: any) {
           errors.push(`${d.name} 命中率: ${e?.message || e}`);
         }
@@ -271,16 +273,26 @@ export async function fetchAliyunCdnDetail(
   }
 
   // 命中率跨域名按流量加权
+  const hitFluxParts: (number | null)[][] = [];
   if (hitRateParts.length) {
+    for (const part of hitRateParts) {
+      const ownFlux = domainFlux.get(part.domain);
+      hitFluxParts.push(
+        part.values.map((rate, i) => {
+          const f = ownFlux?.[i];
+          return rate == null || f == null ? null : (f * rate) / 100;
+        }),
+      );
+    }
     for (let i = 0; i < len; i++) {
       let num = 0;
       let den = 0;
-      for (const arr of hitRateParts) {
-        const v = arr[i];
-        if (v == null) continue;
-        const w = flux[i] ?? 1;
-        num += v * w;
-        den += w;
+      for (const part of hitRateParts) {
+        const rate = part.values[i];
+        const f = domainFlux.get(part.domain)?.[i];
+        if (rate == null || f == null) continue;
+        num += rate * f;
+        den += f;
       }
       hitRate[i] = den > 0 ? num / den : null;
     }
@@ -295,8 +307,8 @@ export async function fetchAliyunCdnDetail(
     }
   }
 
-  const hitFlux = rateSeries(hitRate, new Array(len).fill(100)).map((rate, i) =>
-    rate == null || flux[i] == null ? null : Math.round((flux[i]! * rate) / 100),
+  const hitFlux = combineSeries(hitFluxParts, 'sum', len).map((v) =>
+    v == null ? null : Math.round(v),
   );
 
   const series: MetricSeries[] = [];

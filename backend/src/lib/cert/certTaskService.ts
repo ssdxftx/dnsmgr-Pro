@@ -35,6 +35,23 @@ export function parseHour(value: unknown, def: number): number {
   return n >= 0 && n <= 23 ? n : def;
 }
 
+export function parseRenewDays(value: unknown, def = 7): number {
+  const raw = String(value ?? '').trim();
+  if (raw === '') return def;
+  if (!/^\d+$/.test(raw)) return def;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 && n <= 60 ? n : def;
+}
+
+export function validateRenewDays(value: unknown): string | null {
+  const raw = String(value ?? '').trim();
+  if (raw === '') return null;
+  if (!/^\d+$/.test(raw)) return '自动续签天数必须为 0~60 的整数';
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 0 || n > 60) return '自动续签天数必须为 0~60 的整数';
+  return null;
+}
+
 // 支持跨天时段，例如 22 至 6；起止相同视为不限制
 export function inRunWindow(hour: number, start: number, end: number): boolean {
   if (start === end) return true;
@@ -61,6 +78,7 @@ export async function findRunningOrders(q: QueryFn = query): Promise<any[]> {
     `SELECT id FROM ${table('cert_order')}
        WHERE isauto = 1
          AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))
+         AND COALESCE(retry2, 0) < 3
          AND status IN (${placeholders})
          AND (retrytime IS NULL OR retrytime <= NOW())
        ORDER BY retrytime ASC LIMIT ?`,
@@ -257,7 +275,8 @@ async function renewExpiringOrders(days: number): Promise<number> {
       `UPDATE ${table('cert_order')}
         SET status = 0, retry = 0, retry2 = 0, retrytime = NOW(), processid = NULL,
             error = NULL, updatetime = NOW(), issend = 0, islock = 0
-        WHERE id = ? AND status = 3 AND islock = 0`,
+        WHERE id = ? AND status = 3
+          AND (islock = 0 OR islock IS NULL OR locktime IS NULL OR locktime < DATE_SUB(NOW(), INTERVAL 1 HOUR))`,
       [row.id],
     );
     if (!res?.affectedRows) continue;
@@ -310,7 +329,7 @@ export async function certTaskRun(): Promise<void> {
   const end = parseHour(await configGet('deploy_hour_end', '23'), 23);
   if (!inRunWindow(new Date().getHours(), start, end)) return;
 
-  const days = Number(await configGet('cert_renewdays', '7')) || 7;
+  const days = parseRenewDays(await configGet('cert_renewdays', '7'));
   const renewed = await renewExpiringOrders(days);
   // 订单签发可能被 ACME 的 DNS 验证等待数分钟；部署任务与之并行推进，
   // 否则同一轮里已签发证书的部署会被慢订单饿死。

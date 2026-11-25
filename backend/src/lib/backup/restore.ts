@@ -60,6 +60,21 @@ async function runLocked(opts: RunOptions): Promise<any> {
   return result;
 }
 
+async function removeLocalArchive(fileName: string, label: string): Promise<void> {
+  const name = String(fileName || '');
+  if (!name) return;
+  let archivePath: string;
+  try {
+    archivePath = resolveArchivePath(name);
+  } catch (e: any) {
+    console.warn(`[backup] ${label}文件名「${name}」不合法，已跳过清理：${e?.message || e}`);
+    return;
+  }
+  await unlink(archivePath).catch((e: any) => {
+    console.warn(`[backup] ${label}本地文件清理失败（${name}）：${e?.message || e}`);
+  });
+}
+
 async function runRestore(opts: RunOptions): Promise<any> {
   if (getRestoreStatus().running) throw new Error('已有恢复任务正在执行');
   const archivePath = opts.archivePath;
@@ -68,13 +83,14 @@ async function runRestore(opts: RunOptions): Promise<any> {
     throw new Error('仅支持恢复整站备份');
   }
   setRestoreStatus({ running: true, stage: 'snapshot', message: '正在创建恢复前快照', startedAt: Date.now(), finishedAt: 0, ok: false });
-  await setMaintenance(true);
 
   // 只有真正开始导入后才保留维护模式。快照/密钥校验等前置阶段失败时尚未改动任何数据，
   // 必须解除维护模式，否则一次失败的恢复尝试会让全站写请求一直 503。
   let importStarted = false;
   try {
-    const snapshot = await exportBackup({ scope: 'site', kind: 'pre_restore', includeLogs: true });
+    // 维护标志必须持久化成功后才继续：失败时其他副本仍可写库，恢复将产生混合数据
+    await setMaintenance(true);
+    const snapshot = await exportBackup({ scope: 'site', kind: 'pre_restore', includeLogs: true, forceFull: true });
     setRestoreStatus({ stage: 'import', message: `快照 ${snapshot.file} 已生成，正在导入` });
 
     // 使用归档头匹配当前/历史密钥，避免轮换后旧备份无法在线恢复并卡在维护模式
@@ -95,23 +111,27 @@ async function runRestore(opts: RunOptions): Promise<any> {
     });
     if (opts.mode === 'replace') {
       // 整站替换后，旧站点的所有备份都属于上一套数据；仅保留本次恢复前的快照，避免旧数据继续可下载。
-      const keepJobId = Number(snapshot.jobId || 0);
-      if (keepJobId > 0) {
-        const staleJobs = await query<any>(
-          `SELECT id, file_name, dest_id FROM ${table('backup_job')} WHERE id <> ?`,
-          [keepJobId],
-        );
-        await query(`DELETE FROM ${table('backup_job')} WHERE id <> ?`, [keepJobId]);
-        for (const job of staleJobs as any[]) {
-          if (job.dest_id) await deleteRemote(Number(job.dest_id), String(job.file_name || '')).catch(() => undefined);
-          if (job.file_name) await unlink(resolveArchivePath(String(job.file_name))).catch(() => undefined);
+      try {
+        const keepJobId = Number(snapshot.jobId || 0);
+        if (keepJobId > 0) {
+          const staleJobs = await query<any>(
+            `SELECT id, file_name, dest_id FROM ${table('backup_job')} WHERE id <> ?`,
+            [keepJobId],
+          );
+          await query(`DELETE FROM ${table('backup_job')} WHERE id <> ?`, [keepJobId]);
+          for (const job of staleJobs as any[]) {
+            if (job.dest_id) await deleteRemote(Number(job.dest_id), String(job.file_name || '')).catch(() => undefined);
+            await removeLocalArchive(String(job.file_name || ''), '旧备份');
+          }
+        } else {
+          const oldUserJobs = await query<any>(`SELECT file_name FROM ${table('backup_job')} WHERE scope = 'user'`);
+          await query(`DELETE FROM ${table('backup_job')} WHERE scope = 'user'`);
+          for (const job of oldUserJobs as any[]) {
+            await removeLocalArchive(String(job.file_name || ''), '旧个人备份');
+          }
         }
-      } else {
-        const oldUserJobs = await query<any>(`SELECT file_name FROM ${table('backup_job')} WHERE scope = 'user'`);
-        await query(`DELETE FROM ${table('backup_job')} WHERE scope = 'user'`);
-        for (const job of oldUserJobs as any[]) {
-          if (job.file_name) await unlink(resolveArchivePath(String(job.file_name))).catch(() => undefined);
-        }
+      } catch (e: any) {
+        console.warn(`[backup] 恢复后清理旧备份失败，已忽略：${e?.message || e}`);
       }
     }
     // 导入完成后再清理旧快照：本次恢复可能正在读取其中一个旧 pre_restore 文件
@@ -132,7 +152,10 @@ async function runRestore(opts: RunOptions): Promise<any> {
       ok: true,
       report: { snapshot: snapshot.file, import: report },
     });
-    await setMaintenance(false);
+    // 数据已恢复，关闭维护标志失败不应把成功结果改判为失败；宁可重启后仍停留在维护模式
+    await setMaintenance(false).catch((e: any) => {
+      console.warn('[backup] 恢复完成但维护标志持久化关闭失败，请手动检查：' + (e?.message || e));
+    });
     return { snapshot: snapshot.file, report };
   } catch (e: any) {
     setRestoreStatus({

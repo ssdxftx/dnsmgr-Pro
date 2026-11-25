@@ -78,18 +78,26 @@ const router = createRouter({
 let setupChecked = false;
 let setupInstalled = true;
 
+export function markSetupInstalled() {
+  setupChecked = true;
+  setupInstalled = true;
+}
+
 router.beforeEach(async (to, from, next) => {
   if (to.path === '/setup') return next();
-  if (!setupChecked) {
+  if (!setupChecked || (to.path === '/login' && !setupInstalled)) {
     try {
       // 首次安装状态探测必须有超时：后端无响应时不能让所有路由永久挂起
       const res = await fetch('/api/setup/status', { signal: AbortSignal.timeout(5000) });
       const json = await res.json();
       setupInstalled = json?.data?.installed ?? true;
+      setupChecked = true;
     } catch {
-      setupInstalled = true;
+      // 探测失败时保留未知状态：不得 fail-open 为「已安装」，
+      // 也不缓存结果，下一次导航会重新探测。未安装时引导到安装页重试。
+      setupChecked = false;
+      return next('/setup');
     }
-    setupChecked = true;
   }
   if (!setupInstalled) return next('/setup');
   if (to.meta.public) return next();

@@ -117,7 +117,7 @@ export class AliyunDeploy implements DeployProvider {
     let certId: string | null = null;
     if (data.TotalCount > 0 && data.CertificateOrderList && data.CertificateOrderList.length > 0) {
       for (const cert of data.CertificateOrderList) {
-        if (String(cert.SerialNo).toLowerCase() === serialNo || String(cert.SerialNo).toLowerCase().includes(serialNo)) {
+        if (String(cert.SerialNo).toLowerCase() === serialNo) {
           certId = cert.CertificateId;
           certName = cert.Name;
           break;
@@ -687,7 +687,7 @@ export class AliyunDeploy implements DeployProvider {
           RegionId: config.regionid,
           AliCloudCertificateId: certId,
           AliCloudCertificateName: certName,
-          AliCloudCertificateRegionId: 'cn-hangzhou',
+          AliCloudCertificateRegionId: this.certRegion(config),
         });
       } catch (e: any) {
         throw new Error('服务器证书添加失败：' + e.message);
@@ -709,8 +709,10 @@ export class AliyunDeploy implements DeployProvider {
       }
       const exts = data.DomainExtensions && data.DomainExtensions.DomainExtension ? data.DomainExtensions.DomainExtension : [];
       const extArr = Array.isArray(exts) ? exts : [exts];
+      let matched = 0;
       for (const item of extArr) {
         if (domains.includes(item.Domain)) {
+          matched++;
           if (serverCertificateId === item.ServerCertificateId) {
             this.log('负载均衡HTTPS扩展域名 ' + item.Domain + ' 证书已配置');
           } else {
@@ -723,6 +725,9 @@ export class AliyunDeploy implements DeployProvider {
             this.log('负载均衡HTTPS扩展域名 ' + item.Domain + ' 证书更新成功');
           }
         }
+      }
+      if (matched === 0) {
+        throw new Error('扩展域名未在负载均衡实例中找到：' + config.clb_domain);
       }
     } else {
       try {

@@ -26,6 +26,7 @@
     <!-- ESA：按官方控制台站点级菜单组织 -->
     <EsaZoneConsole
       v-else-if="isEsa"
+      :key="esaReloadKey"
       v-model:tab="esaTab"
       :subs="esaSub"
       :aid="aid"
@@ -1109,6 +1110,7 @@ const aid = Number(route.params.aid || 0);
 const zoneId = String(route.params.zoneId || '');
 const tab = ref('overview');
 const esaTab = ref('overview');
+const esaReloadKey = ref(0);
 const esaSub = reactive<Record<string, string>>({});
 for (const tabDef of ESA_ZONE_TABS) {
   if (tabDef.children?.length) esaSub[tabDef.key] = tabDef.defaultChild || tabDef.children[0].key;
@@ -3720,6 +3722,10 @@ async function reloadAll() {
     await Promise.all(preloads);
   } finally {
     loadBusy.value = false;
+  }
+  if (isEsa.value) {
+    esaReloadKey.value++;
+    return;
   }
   await loadByTab(tab.value, true);
 }

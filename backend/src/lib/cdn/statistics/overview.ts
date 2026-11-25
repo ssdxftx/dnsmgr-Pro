@@ -99,7 +99,6 @@ export async function buildProviderCard(
 
   const started = Date.now();
   const endFor = new Date(Math.min(end.getTime(), Date.now() - catalog.delayMinutes * 60_000));
-  const timeline = buildTimeline(start, endFor);
   const card: ProviderCard = {
     route: catalog.route,
     name: catalog.name,
@@ -112,6 +111,13 @@ export async function buildProviderCard(
     cached: false,
     tookMs: 0,
   };
+
+  if (endFor.getTime() <= start.getTime()) {
+    card.tookMs = Date.now() - started;
+    return card;
+  }
+
+  const timeline = buildTimeline(start, endFor);
 
   if (!input.accountCount || !card.domainCount) {
     card.tookMs = Date.now() - started;

@@ -59,7 +59,9 @@ export function isSqliteFileInsideDataDir(cfg: DbConfig): boolean {
 }
 
 export function dbIdentity(cfg: DbConfig): string {
-  return cfg.db_type === 'sqlite' ? 'sqlite:' + resolveSqliteFile(cfg) : String(cfg.db_name || '');
+  if (cfg.db_type === 'sqlite') return 'sqlite:' + resolveSqliteFile(cfg);
+  // 完整连接标识：同一库名在不同 host/port/user 下是不同数据库，不能共用安装令牌
+  return `mysql://${cfg.db_user}@${cfg.db_host}:${cfg.db_port}/${cfg.db_name}`;
 }
 
 // 读取数据库配置：持久化配置文件优先，其次环境变量，最后默认值。

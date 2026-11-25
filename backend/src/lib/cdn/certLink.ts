@@ -385,7 +385,15 @@ export async function ensureCertDeployForDomain(cdnDomainId: number, orderId: nu
     await linkLog(did, orderId, 'account', 'fail', 'CDN 账户不存在，无法创建部署任务');
     return false;
   }
-  const provider: any = getCdnProvider(acct.type, await loadAccountConfig(acct));
+  let config: Record<string, any>;
+  try {
+    config = await loadAccountConfig(acct);
+  } catch (e: any) {
+    const msg = String(e?.message || '');
+    await linkLog(did, orderId, 'account', 'fail', /锁定/.test(msg) ? '保险库已锁定，请先解锁后重试' : msg || '账户配置无法解密');
+    return false;
+  }
+  const provider: any = getCdnProvider(acct.type, config);
   if (!provider || typeof provider.getCertScope !== 'function') {
     await linkLog(did, orderId, 'account', 'fail', '该 CDN 类型不支持证书联动部署');
     return false;

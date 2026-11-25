@@ -358,6 +358,7 @@ export class TencentDeploy implements DeployProvider {
       ResourceTypesRegions: resourceTypesRegions,
     };
     retry = 0;
+    let updated = false;
     while (retry++ < 10) {
       try {
         data = await this.client.request('UploadUpdateCertificateInstance', param);
@@ -365,9 +366,13 @@ export class TencentDeploy implements DeployProvider {
         throw new Error('更新证书内容失败：' + e.message);
       }
       if (data.DeployStatus === 1) {
+        updated = true;
         break;
       }
       await sleep(1000);
+    }
+    if (!updated) {
+      throw new Error('更新证书内容未完成，DeployStatus=' + (data ? data.DeployStatus : '未知'));
     }
     this.log('更新证书内容成功，可能需要一些时间完成各资源的证书更新部署');
   }
@@ -376,6 +381,12 @@ export class TencentDeploy implements DeployProvider {
     if (!config.cert_id) throw new Error('证书ID不能为空');
 
     const oldCertId = config.cert_id;
+    let domain = config.domain || '';
+    if (!domain) {
+      try {
+        domain = parseCertPem(fullchain).subject;
+      } catch {}
+    }
 
     let data: any;
     try {
@@ -463,11 +474,15 @@ export class TencentDeploy implements DeployProvider {
           SwitchStatus: 1,
         });
       } catch (e: any) {
-        this.log('上传新证书失败：' + e.message);
+        throw new Error('上传新证书失败：' + e.message);
       }
 
       if (config.delete_old_cert) {
-        if (newCertId && newCertId === oldCertId) {
+        if (!resourceResult) {
+          this.log('关联资源查询未完成，跳过删除旧证书 域名=' + domain + ' CertificateId=' + oldCertId);
+        } else if (!newCertId) {
+          this.log('新证书未创建，跳过删除旧证书 域名=' + domain + ' CertificateId=' + oldCertId);
+        } else if (newCertId === oldCertId) {
           this.log('新证书ID与旧证书ID相同（证书内容未变），跳过删除');
         } else {
           try {
@@ -496,30 +511,67 @@ export class TencentDeploy implements DeployProvider {
     this.log('UpdateCertificateInstance 请求参数(已隐藏证书内容)：' + JSON.stringify({ ...param, CertificatePublicKey: '***', CertificatePrivateKey: '***' }));
 
     let newCertId: string | null = null;
+    let deployRecordId: string | null = null;
     retry = 0;
     while (retry++ < 10) {
-      try {
-        data = await this.client.request('UpdateCertificateInstance', param);
-      } catch (e: any) {
-        throw new Error('一键更新旧证书资源失败：' + e.message);
+      if (!deployRecordId) {
+        try {
+          data = await this.client.request('UpdateCertificateInstance', param);
+        } catch (e: any) {
+          throw new Error('一键更新旧证书资源失败：' + e.message);
+        }
+        if (data.DeployRecordId && data.DeployRecordId > 0) {
+          deployRecordId = String(data.DeployRecordId);
+          this.log('一键更新任务创建成功 DeployRecordId=' + deployRecordId);
+        }
       }
-      if (data.DeployRecordId && data.DeployRecordId > 0) {
-        this.log('一键更新任务创建成功 DeployRecordId=' + data.DeployRecordId);
+      if (deployRecordId) {
+        // 腾讯云证书列表存在延迟：拿到部署记录后仍需轮询新证书 ID，不能只查一次
         newCertId = await this.findNewCertId(fullchain);
-        break;
+        if (newCertId) break;
       }
       await sleep(2000);
     }
+    // 循环结束仍未拿到部署记录/新证书，说明更新任务没有真正落地，不能按成功返回
+    if (!deployRecordId || !newCertId) {
+      throw new Error('一键更新旧证书资源未完成，未能确认部署任务与新证书');
+    }
 
+    let resourceUpdated = false;
     if (newCertId) {
       if (!info.config) info.config = {};
       info.config.cert_id = newCertId;
       this.log('证书ID已更新为：' + newCertId);
+
+      retry = 0;
+      while (retry++ < 60) {
+        try {
+          const record = await this.client.request('DescribeHostUpdateRecordDetail', {
+            DeployRecordId: deployRecordId,
+            Limit: '200',
+          });
+          const total = Number(record.TotalCount || 0);
+          const success = Number(record.SuccessTotalCount || 0);
+          const failed = Number(record.FailedTotalCount || 0);
+          if (total > 0 && success + failed >= total) {
+            resourceUpdated = failed === 0;
+            break;
+          }
+        } catch (e: any) {
+          this.log('查询证书更新部署记录失败：' + e.message);
+          break;
+        }
+        await sleep(2000);
+      }
     }
 
     if (config.delete_old_cert) {
-      if (newCertId && newCertId === oldCertId) {
+      if (!newCertId) {
+        this.log('未能确认新证书ID，跳过删除旧证书 域名=' + domain + ' CertificateId=' + oldCertId);
+      } else if (newCertId === oldCertId) {
         this.log('新证书ID与旧证书ID相同（证书内容未变），跳过删除');
+      } else if (!resourceUpdated) {
+        this.log('关联资源尚未确认切换到新证书，跳过删除旧证书 域名=' + domain + ' CertificateId=' + oldCertId);
       } else {
         try {
           await this.client.request('DeleteCertificate', { CertificateId: oldCertId });

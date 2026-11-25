@@ -10,6 +10,7 @@ export function setToken(t: string) {
   cacheEpoch++;
   getCache.clear();
   inflight.clear();
+  abortInflightGets();
 }
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
@@ -18,6 +19,7 @@ export function clearToken() {
   cacheEpoch++;
   getCache.clear();
   inflight.clear();
+  abortInflightGets();
   meAbort?.abort();
 }
 export function getUser(): any {
@@ -35,6 +37,7 @@ export function setUser(u: any) {
     cacheEpoch++;
     getCache.clear();
     inflight.clear();
+    abortInflightGets();
   }
   // 通知 Pinia store 同步更新：否则 403/401 触发的用户刷新只改 localStorage，
   // 菜单与统计入口仍按旧身份渲染
@@ -59,7 +62,14 @@ const GET_DEFAULT_TTL = 15000;
 const GET_CACHE_MAX = 200;
 const getCache = new Map<string, { at: number; data: any }>();
 const inflight = new Map<string, Promise<any>>();
+const getControllers = new Set<AbortController>();
 let cacheEpoch = 0;
+
+// 写操作/登录态变更后中止所有仍在进行的 GET，避免旧响应在写完成后回写页面。
+function abortInflightGets(): void {
+  for (const controller of getControllers) controller.abort();
+  getControllers.clear();
+}
 
 // 缓存超限时淘汰最旧的一批，避免无上限增长
 function evictGetCache(): void {
@@ -76,6 +86,7 @@ export function invalidateApiCache(prefix?: string): void {
   // 写操作后必须同时丢弃 in-flight：否则写成功后新发起的 GET 仍可能加入
   // 写之前发出的旧请求并拿到写前数据（虽不写缓存，但会覆盖 UI）。
   inflight.clear();
+  abortInflightGets();
   if (!prefix) {
     getCache.clear();
     return;
@@ -123,7 +134,8 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
     // 避免后端僵死时 fetch 永不 settle，导致各页 loading 永久转圈。
     // 备份导出/恢复可能超过 2 分钟，调用方显式传 timeout: 0 关闭超时。
     const timeoutMs = opts.timeout === 0 ? 0 : (opts.timeout ?? 120000);
-    const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+    let timedOut = false;
+    const timer = timeoutMs > 0 ? setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs) : null;
     const onAbort = () => controller.abort();
     if (opts.signal) {
       if (opts.signal.aborted) {
@@ -132,17 +144,20 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
       }
       opts.signal.addEventListener('abort', onAbort);
     }
+    if (isGet) getControllers.add(controller);
     let res: Response;
     try {
       res = await fetch(fullUrl, { method: upper, headers, body: payload, signal: controller.signal });
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         if (opts.signal?.aborted) throw e; // 调用方主动取消，交由调用方处理
-        return { code: -1, msg: '请求超时，请稍后重试' } as T;
+        if (timedOut) return { code: -1, msg: '请求超时，请稍后重试' } as T;
+        throw e; // 写操作/登录态变更导致的中止：交给上层丢弃旧响应
       }
       throw e;
     } finally {
       if (timer) clearTimeout(timer);
+      if (isGet) getControllers.delete(controller);
       opts.signal?.removeEventListener('abort', onAbort);
     }
     if (res.status === 401) {
@@ -167,15 +182,42 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
     }
   };
 
-  const epochAtStart = cacheEpoch;
-  const task = doFetch().then((data) => {
-    // 若期间发生过写操作（cacheEpoch 变化），不把可能过期的 GET 结果写回缓存
-    if (isGet && ttl > 0 && cacheEpoch === epochAtStart && (data as any)?.code === 0) {
-      evictGetCache();
-      getCache.set(cacheKey, { at: Date.now(), data });
+  let epochAtStart = cacheEpoch;
+  let task!: Promise<T>;
+  task = (async (): Promise<T> => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const data = await doFetch();
+        // 若期间发生过写操作（cacheEpoch 变化），不把可能过期的 GET 结果交给调用方。
+        // 如果已有同 key 的新请求，则复用新请求结果；否则重新拉取一次，避免页面误报错误。
+        if (isGet && cacheEpoch !== epochAtStart) {
+          const replacement = inflight.get(cacheKey);
+          if (replacement && replacement !== task) return replacement;
+          if (attempt < 2) {
+            epochAtStart = cacheEpoch;
+            continue;
+          }
+          throw Object.assign(new Error('stale'), { name: 'AbortError' });
+        }
+        if (isGet && ttl > 0 && (data as any)?.code === 0) {
+          evictGetCache();
+          getCache.set(cacheKey, { at: Date.now(), data });
+        }
+        return data;
+      } catch (e: any) {
+        if (isGet && e?.name === 'AbortError') {
+          const replacement = inflight.get(cacheKey);
+          if (replacement && replacement !== task) return replacement;
+          // 写操作会主动中止所有在途 GET：在调用方未取消的前提下自动重试新数据
+          if (!opts.signal?.aborted && cacheEpoch !== epochAtStart && attempt < 2) {
+            epochAtStart = cacheEpoch;
+            continue;
+          }
+        }
+        throw e;
+      }
     }
-    return data;
-  });
+  })();
 
   if (isGet && !opts.signal && !opts.force) {
     inflight.set(cacheKey, task);

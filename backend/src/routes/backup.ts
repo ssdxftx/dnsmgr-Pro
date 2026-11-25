@@ -607,32 +607,37 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (isMaintenance()) return reply.code(409).send({ code: -1, msg: '系统维护中，暂不能执行备份' });
     const row: any = await queryOne(`SELECT * FROM ${table('backup_schedule')} WHERE id = ?`, [Number(req.params.id)]);
     if (!row) return { code: -1, msg: '计划不存在' };
-    try {
-      const r = await exportBackup({
-        scope: 'site',
-        kind: 'schedule',
-        includeLogs: Number(row.include_logs) === 1,
-        scheduleId: Number(row.id),
-      });
-      if (Number(row.dest_id) > 0) {
-        await uploadToDestination(Number(row.dest_id), resolveArchivePath(r.file), r.file);
-        await query(`UPDATE ${table('backup_job')} SET dest_id = ? WHERE id = ?`, [Number(row.dest_id), r.jobId]);
+    // 与定时备份调度器使用同一把锁，避免手动与定时（或两名管理员）同时生成多份整站备份
+    const outcome = await withDistributedLockResult('dnsmgr:backup', async () => {
+      try {
+        const r = await exportBackup({
+          scope: 'site',
+          kind: 'schedule',
+          includeLogs: Number(row.include_logs) === 1,
+          scheduleId: Number(row.id),
+        });
+        if (Number(row.dest_id) > 0) {
+          await uploadToDestination(Number(row.dest_id), resolveArchivePath(r.file), r.file);
+          await query(`UPDATE ${table('backup_job')} SET dest_id = ? WHERE id = ?`, [Number(row.dest_id), r.jobId]);
+        }
+        await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ?, next_run = ? WHERE id = ?`, [
+          '成功',
+          computeNextRun(row),
+          row.id,
+        ]);
+        await applyScheduleRetention(row);
+        void emitEvent('backup.completed', { job_id: r.jobId, scope: 'site', file: r.file, schedule_id: Number(row.id) });
+        return { code: 0, msg: '备份完成', data: r };
+      } catch (e: any) {
+        await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ? WHERE id = ?`, [
+          String(e?.message || e).slice(0, 300),
+          row.id,
+        ]);
+        return { code: -1, msg: publicError(e) };
       }
-      await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ?, next_run = ? WHERE id = ?`, [
-        '成功',
-        computeNextRun(row),
-        row.id,
-      ]);
-      await applyScheduleRetention(row);
-      void emitEvent('backup.completed', { job_id: r.jobId, scope: 'site', file: r.file, schedule_id: Number(row.id) });
-      return { code: 0, msg: '备份完成', data: r };
-    } catch (e: any) {
-      await query(`UPDATE ${table('backup_schedule')} SET last_run = NOW(), last_result = ? WHERE id = ?`, [
-        String(e?.message || e).slice(0, 300),
-        row.id,
-      ]);
-      return { code: -1, msg: publicError(e) };
-    }
+    });
+    if (!outcome.locked) return reply.code(409).send({ code: -1, msg: '已有备份任务正在执行，请稍后再试' });
+    return outcome.result;
   });
 
   // ===== 远端浏览 / 拉回 =====

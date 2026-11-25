@@ -194,18 +194,22 @@ export class QiniuDeploy implements DeployProvider {
   }
 
   private async getCertId(fullchain: string, privatekey: string, common_name: string, cert_name: string): Promise<any> {
+    const MAX_CERT_PAGES = 100;
+    const seenMarkers = new Set<string>();
     let cert_id: any = null;
     let marker = '';
-    do {
+    for (let page = 0; page < MAX_CERT_PAGES; page++) {
       const query: Record<string, any> = { marker, limit: 100 };
       const data = await this.request('GET', '/sslcert', query);
       if (!data?.certs) break;
-      marker = data.marker ?? '';
       for (const cert of data.certs) {
         if (cert_name === cert.name) {
           cert_id = cert.certid;
           this.log('证书' + cert_name + '已存在，证书ID:' + cert_id);
-        } else if (Number(cert.not_after) < Math.floor(Date.now() / 1000)) {
+          continue;
+        }
+        const boundCount = cert.domainCount ?? cert.domain_count ?? (Array.isArray(cert.domains) ? cert.domains.length : undefined);
+        if (Number(cert.not_after) < Math.floor(Date.now() / 1000) && boundCount !== undefined && Number(boundCount) === 0) {
           try {
             await this.request('DELETE', '/sslcert/' + cert.certid);
             this.log('证书' + cert.name + '已过期，删除证书成功');
@@ -215,7 +219,11 @@ export class QiniuDeploy implements DeployProvider {
           await new Promise((r) => setTimeout(r, 300));
         }
       }
-    } while (marker !== '');
+      const nextMarker = data.marker ?? '';
+      if (!nextMarker || nextMarker === marker || seenMarkers.has(nextMarker)) break;
+      seenMarkers.add(nextMarker);
+      marker = nextMarker;
+    }
 
     if (!cert_id) {
       const param = { name: cert_name, common_name, pri: privatekey, ca: fullchain };

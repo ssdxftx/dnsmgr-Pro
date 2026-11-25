@@ -19,14 +19,21 @@ export interface LockOutcome<T> {
   result?: T;
 }
 
+/** 只读查询：返回行数组 */
 export type QueryFn = <R = any>(sql: string, params?: any[]) => Promise<R[]>;
+
+/** 写操作：返回自增 ID 与实际受影响行数 */
+export type ExecFn = (sql: string, params?: any[]) => Promise<WriteResult>;
+
+/** 事务执行器同时支持读写：写操作按 ExecFn 返回 WriteResult */
+export type TransactionFn = QueryFn & ExecFn;
 
 export interface DbDriver {
   readonly type: DbType;
   readonly config: DbConfig;
   query<T = any>(sql: string, params?: any[]): Promise<T[]>;
   queryOne<T = any>(sql: string, params?: any[]): Promise<T | undefined>;
-  withTransaction<T>(fn: (q: QueryFn) => Promise<T>): Promise<T>;
+  withTransaction<T>(fn: (q: TransactionFn) => Promise<T>): Promise<T>;
   readSnapshot<T>(fn: (read: (sql: string, params?: any[]) => Promise<any[]>) => Promise<T>): Promise<T>;
   withLock<T>(name: string, fn: () => Promise<T>, waitSeconds?: number): Promise<LockOutcome<T>>;
   listColumns(tableName: string, q?: QueryFn): Promise<ColumnInfo[]>;

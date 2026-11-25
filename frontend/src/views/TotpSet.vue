@@ -45,13 +45,15 @@
 import { onMounted, ref } from 'vue';
 import { useMessage, useDialog } from 'naive-ui';
 import { useI18n } from 'vue-i18n';
-import { api, setToken, setUser, getUser } from '../api';
+import { api, setUser, getUser } from '../api';
+import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
 import QRCode from 'qrcode';
 
 const { t } = useI18n();
 const message = useMessage();
 const dialog = useDialog();
+const auth = useAuthStore();
 const loadBusy = ref(false);
 const step = ref('');
 const enabled = ref(false);
@@ -104,7 +106,7 @@ async function bind() {
       code.value = '';
       password.value = '';
       if (res.data?.token) {
-        setToken(res.data.token);
+        auth.applyToken(res.data.token);
         setUser({ ...(getUser() || {}), totp_open: 1 });
       }
     } else message.error(res.msg);
@@ -137,7 +139,7 @@ function close() {
           secret.value = '';
           bindToken.value = '';
           if (res.data?.token) {
-            setToken(res.data.token);
+            auth.applyToken(res.data.token);
             setUser({ ...(getUser() || {}), totp_open: 0 });
           }
         } else message.error(res.msg);

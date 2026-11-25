@@ -2,7 +2,7 @@ import { HuaweiCloud } from '../../clients/HuaweiCloud.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
-import { cachedDetail } from '../detailCache.js';
+import { cachedDetail, credentialCacheId } from '../detailCache.js';
 
 const serviceAreaMap: Record<string, string> = {
   mainland_china: 'mainland_china',
@@ -39,7 +39,7 @@ export class HuaweiCDN implements CdnProvider {
 
   constructor(config: Record<string, any>) {
     this.client = new HuaweiCloud(config.AccessKeyId, config.SecretAccessKey, 'cdn.myhuaweicloud.com');
-    this.cacheId = String(config.AccessKeyId || '');
+    this.cacheId = credentialCacheId(config.AccessKeyId, config.SecretAccessKey);
   }
 
   getError() {
@@ -130,7 +130,8 @@ export class HuaweiCDN implements CdnProvider {
       const pageItems = await mapPool(domains, 8, async (d: any) => {
         const name = d.domain_name || d.DomainName || '';
         if (!name) return null;
-        const detail = await cachedDetail(`huawei:${this.cacheId}:detail:${name}`, 30_000, () => this.getDomainDetail(name));
+        const detailKey = this.cacheId ? `huawei:${this.cacheId}:detail:${name}` : '';
+        const detail = await cachedDetail(detailKey, 30_000, () => this.getDomainDetail(name));
         const info = detail?.domain || {};
         const sources = info.sources || [];
         const origins: string[] = [];

@@ -15,6 +15,11 @@ function sqlStr(s: string): string {
   return String(s).replace(/'/g, "''");
 }
 
+function positiveMs(value: any, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+}
+
 export class FnosDeploy implements DeployProvider {
   private config: Record<string, any>;
   private logger: ((txt: string) => void) | null = null;
@@ -64,27 +69,46 @@ export class FnosDeploy implements DeployProvider {
         if (err) return reject(new Error(name + '执行命令失败'));
         let output = '';
         let errorOutput = '';
+        let settled = false;
+        const execTimeout = positiveMs(this.config.timeout, 120_000);
+        const finish = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          fn();
+        };
+        // 远端命令不退出时不能无限挂起部署锁：超时后关闭通道并让任务进入可重试状态
+        const timer = setTimeout(() => {
+          try {
+            stream.close();
+          } catch {
+            // ignore
+          }
+          finish(() => reject(new Error(name + '执行命令超时（' + Math.round(execTimeout / 1000) + ' 秒）')));
+        }, execTimeout);
         stream.on('data', (d: Buffer) => (output += d.toString()));
         stream.stderr.on('data', (d: Buffer) => (errorOutput += d.toString()));
+        // 未监听 error 时通道错误会升级为未捕获异常并中断整个部署进程
+        stream.on('error', (e: any) => finish(() => reject(new Error(name + '执行命令失败：' + (e?.message || e)))));
         stream.on('close', (code: number) => {
-          const err = errorOutput.trim();
-          if (err) {
-            if (err.includes('a password is required')) {
-              reject(new Error('权限不足，请先配置 sudo 免密'));
+          const errText = errorOutput.trim();
+          if (errText) {
+            if (errText.includes('a password is required')) {
+              finish(() => reject(new Error('权限不足，请先配置 sudo 免密')));
             } else {
-              reject(new Error(name + '失败：' + err));
+              finish(() => reject(new Error(name + '失败：' + errText)));
             }
             return;
           }
           if (code !== 0) {
-            reject(new Error(name + '失败：退出码 ' + code + (output.trim() ? ' ' + output.trim() : '')));
+            finish(() => reject(new Error(name + '失败：退出码 ' + code + (output.trim() ? ' ' + output.trim() : ''))));
             return;
           }
           if (output.length > 200) {
-            resolve(output);
+            finish(() => resolve(output));
           } else {
             this.log(name + '成功 ' + output.trim());
-            resolve(output);
+            finish(() => resolve(output));
           }
         });
       });

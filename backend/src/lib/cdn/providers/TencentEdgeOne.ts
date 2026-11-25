@@ -772,11 +772,12 @@ export class TencentEdgeOne implements CdnProvider {
     for (const r of rules) {
       const name = r?.Name;
       const condition = String(r?.Condition || '');
+      const whitelist = /^\s*not\s*\(/.test(condition);
       if (name === 'dnsmgr_ip_acl') {
-        out.ip_mode = condition.includes('not') ? 'whitelist' : 'blacklist';
+        out.ip_mode = whitelist ? 'whitelist' : 'blacklist';
         out.ip_list = this.parseConditionList(condition);
       } else if (name === 'dnsmgr_referer') {
-        out.referer_mode = condition.includes('not') ? 'whitelist' : 'blacklist';
+        out.referer_mode = whitelist ? 'whitelist' : 'blacklist';
         out.referer_list = this.parseConditionList(condition);
       } else if (name === 'dnsmgr_user_agent') {
         out.ua_list = this.parseConditionList(condition);
@@ -868,12 +869,43 @@ export class TencentEdgeOne implements CdnProvider {
   }
 
   private parseConditionList(condition: string): string[] {
-    const m = condition.match(/\[([^\]]*)\]/);
-    if (!m) return [];
-    return m[1]
-      .split(',')
-      .map((s) => s.trim().replace(/^'|'$/g, '').replace(/\\'/g, "'").replace(/\\\\/g, '\\'))
-      .filter(Boolean);
+    const start = condition.indexOf('[');
+    if (start < 0) return [];
+    const out: string[] = [];
+    let i = start + 1;
+    while (i < condition.length) {
+      while (i < condition.length && /[\s,]/.test(condition[i])) i++;
+      if (i >= condition.length || condition[i] === ']') break;
+      const quote = condition[i];
+      if (quote === "'" || quote === '"') {
+        i++;
+        let value = '';
+        while (i < condition.length) {
+          const c = condition[i];
+          if (c === '\\' && i + 1 < condition.length) {
+            value += condition[i + 1];
+            i += 2;
+            continue;
+          }
+          if (c === quote) {
+            i++;
+            break;
+          }
+          value += c;
+          i++;
+        }
+        out.push(value);
+      } else {
+        let value = '';
+        while (i < condition.length && condition[i] !== ',' && condition[i] !== ']') {
+          value += condition[i];
+          i++;
+        }
+        const trimmed = value.trim();
+        if (trimmed) out.push(trimmed);
+      }
+    }
+    return out;
   }
 
   // ===== Phase 1：站点（Zone）生命周期 =====

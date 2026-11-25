@@ -2,7 +2,7 @@ import { BaiduCloud } from '../../clients/BaiduCloud.js';
 import type { CdnProvider, CdnDomainItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule } from '../pathRule.js';
 import { mapPool } from '../../util.js';
-import { cachedDetail } from '../detailCache.js';
+import { cachedDetail, credentialCacheId } from '../detailCache.js';
 
 function parsePeer(peer: string): { host: string; port: number } | null {
   const m = String(peer).match(/^https?:\/\/(\[[^\]]+\]|[^/:]+)(?::(\d+))?/);
@@ -21,7 +21,7 @@ export class BaiduCDN implements CdnProvider {
 
   constructor(config: Record<string, any>) {
     this.client = new BaiduCloud(config.AccessKeyId, config.SecretAccessKey, 'cdn.baidubce.com');
-    this.cacheId = String(config.AccessKeyId || '');
+    this.cacheId = credentialCacheId(config.AccessKeyId, config.SecretAccessKey);
   }
 
   getError() {
@@ -84,7 +84,8 @@ export class BaiduCDN implements CdnProvider {
     const items = await mapPool(domains, 8, async (d: any) => {
       const name = d.domain || d.Domain || '';
       if (!name) return null;
-      const detail = await cachedDetail(`baidu:${this.cacheId}:detail:${name}`, 30_000, () => this.getDomainDetail(name));
+      const detailKey = this.cacheId ? `baidu:${this.cacheId}:detail:${name}` : '';
+      const detail = await cachedDetail(detailKey, 30_000, () => this.getDomainDetail(name));
       if (!detail) return null;
       const origins: string[] = [];
       let httpPort = 80;

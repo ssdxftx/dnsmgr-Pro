@@ -869,20 +869,29 @@ async function applyLinkMgr() {
   }
 }
 
-async function applyNoneMgr() {
+function applyNoneMgr() {
   if (!certMgrTarget.value) return;
-  certMgrBusy.value = true;
-  try {
-    const res = await api('POST', `/cdn/domains/${certMgrTarget.value.id}/cert_mode`, { mode: '' });
-    if (res.code === 0) {
-      certMgrTarget.value.cert_mode = '';
-      message.success(res.msg);
-    } else message.error(res.msg);
-  } catch (e: any) {
-    message.error(e?.message || t('common.networkError'));
-  } finally {
-    certMgrBusy.value = false;
-  }
+  const target = certMgrTarget.value;
+  dialog.warning({
+    title: t('cdnDomain.confirmDisableCert'),
+    content: t('cdnDomain.confirmDisableCertContent'),
+    positiveText: t('common.confirm'),
+    negativeText: t('common.cancel'),
+    onPositiveClick: async () => {
+      certMgrBusy.value = true;
+      try {
+        const res = await api('POST', `/cdn/domains/${target.id}/cert_mode`, { mode: '' });
+        if (res.code === 0) {
+          target.cert_mode = '';
+          message.success(res.msg);
+        } else message.error(res.msg);
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      } finally {
+        certMgrBusy.value = false;
+      }
+    },
+  });
 }
 
 function closeCertMgr() {
@@ -922,11 +931,16 @@ async function fetchLinkLog() {
 async function retryLink() {
   if (!linkLogDomainId.value) return;
   linkLogRetryBusy.value = true;
-  const res = await api<any>('POST', `/cdn/domains/${linkLogDomainId.value}/certlink/run`, {});
-  linkLogRetryBusy.value = false;
-  message[res.code === 0 ? 'success' : 'error'](res.msg);
-  await fetchLinkLog();
-  if (!linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
+  try {
+    const res = await api<any>('POST', `/cdn/domains/${linkLogDomainId.value}/certlink/run`, {});
+    message[res.code === 0 ? 'success' : 'error'](res.msg);
+    await fetchLinkLog();
+    if (!linkLog.value?.done && !linkLog.value?.failed) startLinkLogTimer();
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    linkLogRetryBusy.value = false;
+  }
 }
 
 function startLinkLogTimer() {
@@ -1482,13 +1496,18 @@ function confirmLink() {
 async function doSync() {
   if (!syncAid.value) return message.warning(t('cdnDomain.pleaseSelectAccount'));
   syncBusy.value = true;
-  const res = await api('POST', '/cdn/sync', { aid: syncAid.value, did: syncDid.value });
-  syncBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    showSync.value = false;
-    loadDomains();
-  } else message.error(res.msg);
+  try {
+    const res = await api('POST', '/cdn/sync', { aid: syncAid.value, did: syncDid.value });
+    if (res.code === 0) {
+      message.success(res.msg);
+      showSync.value = false;
+      loadDomains();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    syncBusy.value = false;
+  }
 }
 
 async function openCert(ids: number[], mode: 'free' | 'link') {

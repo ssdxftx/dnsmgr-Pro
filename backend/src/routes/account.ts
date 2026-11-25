@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { query, queryOne, table, withTransaction } from '../db.js';
+import { query, queryOne, table, withTransaction, isDuplicateError } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getDnsProvider, dnsProviders, ADMIN_ONLY_DNS_TYPES } from '../lib/dns/factory.js';
 import { getCdnProvider, cdnConfig, getCdnConfigList, pickCdnConfig } from '../lib/cdn/factory.js';
@@ -80,17 +80,24 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: '该厂商暂未支持' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证账户失败，' + provider.getError() };
-    const id = await insertAndGetId(
-      `INSERT INTO ${table('account')} (type, name, config, remark, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        type,
-        name,
-        encryptAccountConfig(config, isPrivate, dek),
-        remark || '',
-        isPrivate ? req.user.uid : 0,
-        isPrivate ? 'private' : 'shared',
-      ],
-    );
+    let id: number;
+    try {
+      id = await insertAndGetId(
+        `INSERT INTO ${table('account')} (type, name, config, remark, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          type,
+          name,
+          encryptAccountConfig(config, isPrivate, dek),
+          remark || '',
+          isPrivate ? req.user.uid : 0,
+          isPrivate ? 'private' : 'shared',
+        ],
+      );
+    } catch (e: any) {
+      // 先查后插存在并发窗口；唯一索引生效时在这里统一返回友好提示。
+      if (isDuplicateError(e)) return { code: -1, msg: '账户已存在' };
+      throw e;
+    }
     audit(req, {
       targetType: 'account',
       targetId: id,
@@ -155,9 +162,18 @@ export default async function accountRoutes(app: FastifyInstance) {
     const { id } = req.params as any;
     const row: any = await getVisibleAccount('account', Number(id), req.user);
     if (!row) return reply.code(404).send({ code: -1, msg: '账户不存在' });
-    const dcount = await queryOne(`SELECT COUNT(*) c FROM ${table('domain')} WHERE aid = ?`, [id]);
-    if (dcount && dcount.c > 0) return { code: -1, msg: '该账户下存在域名，无法删除' };
-    await query(`DELETE FROM ${table('account')} WHERE id = ?`, [id]);
+    // 统计与删除放在同一事务，并用条件删除兜底：避免检查后又有域名挂到该账户，
+    // 留下 aid 指向不存在账户的孤儿域名。
+    const deleted = await withTransaction(async (q) => {
+      const rows = (await q(`SELECT COUNT(*) AS c FROM ${table('domain')} WHERE aid = ?`, [id])) as any[];
+      if (Number(rows?.[0]?.c || 0) > 0) return false;
+      const res: any = await q(
+        `DELETE FROM ${table('account')} WHERE id = ? AND NOT EXISTS (SELECT 1 FROM ${table('domain')} WHERE aid = ?)`,
+        [id, id],
+      );
+      return Number(res?.affectedRows || 0) > 0;
+    });
+    if (!deleted) return { code: -1, msg: '该账户下存在域名，无法删除' };
     const isPrivate = row.visibility === 'private';
     audit(req, {
       targetType: 'account',
@@ -214,17 +230,24 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (!provider) return { code: -1, msg: 'CDN模块不存在' };
     const ok = await provider.check();
     if (!ok) return { code: -1, msg: '验证CDN账户失败，' + provider.getError() };
-    const id = await insertAndGetId(
-      `INSERT INTO ${table('cdn_account')} (type, name, config, remark, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        type,
-        name,
-        encryptAccountConfig(safeConfig, isPrivate, dek),
-        remark || '',
-        isPrivate ? req.user.uid : 0,
-        isPrivate ? 'private' : 'shared',
-      ],
-    );
+    let id: number;
+    try {
+      id = await insertAndGetId(
+        `INSERT INTO ${table('cdn_account')} (type, name, config, remark, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          type,
+          name,
+          encryptAccountConfig(safeConfig, isPrivate, dek),
+          remark || '',
+          isPrivate ? req.user.uid : 0,
+          isPrivate ? 'private' : 'shared',
+        ],
+      );
+    } catch (e: any) {
+      // 先查后插存在并发窗口；唯一索引生效时在这里统一返回友好提示。
+      if (isDuplicateError(e)) return { code: -1, msg: 'CDN账户已存在' };
+      throw e;
+    }
     bumpCdnAccountEpoch();
     audit(req, {
       targetType: 'account',

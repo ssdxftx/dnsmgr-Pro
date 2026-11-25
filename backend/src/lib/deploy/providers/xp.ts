@@ -55,8 +55,8 @@ export class XpDeploy implements DeployProvider {
     }
     if (result.code === 1000) {
       const sites = String(config.sites || '').split('\n').map((s) => s.trim());
-      let success = 0;
-      let errmsg: string | null = null;
+      const failures: string[] = [];
+      let deployed = 0;
 
       for (const item of result.data || []) {
         if (!sites.includes(item.name)) {
@@ -65,14 +65,18 @@ export class XpDeploy implements DeployProvider {
         try {
           await this.deploySite(item.id, fullchain, privatekey);
           this.log('网站 ' + item.name + ' 证书部署成功');
-          success++;
+          deployed++;
         } catch (e: any) {
-          errmsg = e.message;
-          this.log('网站 ' + item.name + ' 证书部署失败：' + errmsg);
+          const msg = e.message || String(e);
+          failures.push(`${item.name}: ${msg}`);
+          this.log('网站 ' + item.name + ' 证书部署失败：' + msg);
         }
       }
-      if (success === 0) {
-        throw new Error(errmsg || '要部署的网站不存在');
+      if (failures.length) {
+        throw new Error(`证书部署部分失败（${failures.length} 个站点）：${failures.join('；')}`);
+      }
+      if (!deployed) {
+        throw new Error('要部署的网站不存在');
       }
     } else if (result.message) {
       throw new Error(result.message);

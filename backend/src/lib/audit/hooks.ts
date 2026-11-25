@@ -46,7 +46,12 @@ export function registerAuditHooks(app: FastifyInstance): void {
     try {
       collect(req, reply);
     } catch {
-      /* 审计自身异常绝不外抛 */
+      try {
+        const row = fallbackRow(req, reply);
+        if (row) enqueueAudit(row);
+      } catch {
+        /* 审计自身异常绝不外抛 */
+      }
     }
     done();
   });
@@ -104,6 +109,40 @@ function collect(req: any, reply: any): void {
     addtime: nowStr(),
   };
   enqueueAudit(row);
+}
+
+function fallbackRow(req: any, reply: any): AuditRow | null {
+  const route = String(req.routeOptions?.url || req.routerPath || '');
+  if (shouldSkip(req, route)) return null;
+  const ctx = req.audit || {};
+  const status = Number(reply.raw?.statusCode || reply.statusCode || 200);
+  let uid = Number(ctx.uid ?? req.user?.uid ?? 0);
+  if (!Number.isFinite(uid) || uid < 0) uid = 0;
+  return {
+    uid,
+    username: clean(ctx.username || req.user?.username || req.body?.username || '', 64),
+    auth_type: String(req.user?.auth_type || 'session').slice(0, 16),
+    api_key_id: Number(req.user?.api_key_id || 0),
+    api_key_name: clean(req.user?.api_key_name || '', 64),
+    module: clean(ctx.module || 'audit', 32),
+    action: clean(ctx.action || 'fallback', 48),
+    method: req.method,
+    path: clean(String(req.raw?.url || '').split('?')[0], 255),
+    route: route.slice(0, 255),
+    target_type: clean(ctx.targetType || '', 32),
+    target_id: ctx.targetId != null ? clean(ctx.targetId, 64) : '',
+    target_name: clean(ctx.targetName || '', 255),
+    summary: clean(ctx.summary || '审计采集降级记录', 500),
+    detail: null,
+    changes: null,
+    result: status < 400 ? 1 : 0,
+    errmsg: '',
+    status,
+    ip: String(req.ip || '').slice(0, 64),
+    ua: String(req.headers?.['user-agent'] || '').slice(0, 255),
+    cost_ms: Math.round(Number(reply.getResponseTime?.() || 0)),
+    addtime: nowStr(),
+  };
 }
 
 function buildDetail(req: any, extra?: Record<string, any>, scrubBody = false): string | null {

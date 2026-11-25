@@ -150,12 +150,18 @@ export class HuoshanDeploy implements DeployProvider {
     const client = new Volcengine(this.AccessKeyId, this.SecretAccessKey, 'cdn.volcengineapi.com', 'cdn', '2021-03-01', 'cn-north-1');
     const data = await client.request('POST', 'BatchDeployCert', { CertId: certId, Domain: config.domain });
     if (!data || !data.DeployResult) throw new Error('部署证书失败：DeployResult为空');
+    const failures: string[] = [];
     for (const row of data.DeployResult) {
       if (row.Status == 'success') {
         this.log('CDN域名 ' + row.Domain + ' 部署证书成功！');
       } else {
-        this.log('CDN域名 ' + row.Domain + ' 部署证书失败：' + (row.ErrorMsg ? row.ErrorMsg : ''));
+        const msg = row.ErrorMsg ? row.ErrorMsg : '未知错误';
+        failures.push((row.Domain || '未知域名') + ': ' + msg);
+        this.log('CDN域名 ' + row.Domain + ' 部署证书失败：' + msg);
       }
+    }
+    if (failures.length) {
+      throw new Error('CDN证书部署失败（' + failures.length + ' 个域名）：' + failures.join('；'));
     }
   }
 
@@ -210,6 +216,7 @@ export class HuoshanDeploy implements DeployProvider {
   private async deployImagex(certId: string, config: Record<string, any>): Promise<void> {
     if (!config.domain) throw new Error('绑定的域名不能为空');
     const endpoint = 'imagex.volcengineapi.com';
+    const failures: string[] = [];
     for (const domain of String(config.domain).split(',')) {
       if (!domain) continue;
       const body = JSON.stringify([{ domain, cert_id: certId }]);
@@ -238,10 +245,15 @@ export class HuoshanDeploy implements DeployProvider {
         this.log('veImageX域名 ' + domain + ' 部署证书成功！');
       } else if (result && result.FailedDomains && result.FailedDomains.length > 0) {
         const errmsg = result.FailedDomains[0].ErrMsg;
+        failures.push(domain + ': ' + (errmsg || '未知错误'));
         this.log('veImageX域名 ' + domain + ' 部署证书失败：' + errmsg);
       } else {
+        failures.push(domain + ': 未知错误');
         this.log('veImageX域名 ' + domain + ' 部署证书失败');
       }
+    }
+    if (failures.length) {
+      throw new Error('veImageX证书部署失败（' + failures.length + ' 个域名）：' + failures.join('；'));
     }
   }
 

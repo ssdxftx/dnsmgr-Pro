@@ -8,6 +8,12 @@
         </n-button>
       </template>
     </PageHeader>
+    <n-alert v-if="infoError" type="error" :show-icon="false">
+      <div class="info-error">
+        <span>{{ t('common.loadFailedHint') }}</span>
+        <n-button size="small" :loading="infoBusy" @click="loadInfo">{{ t('common.retry') }}</n-button>
+      </div>
+    </n-alert>
     <n-grid v-if="task" class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
       <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="task.fail_count || 0" :label="t('dm.infoFailCount24')" tone="error" :icon="AlertCircleOutline" :caption="t('common.last24h')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="task.switch_count || 0" :label="t('dm.infoSwitchCount24')" tone="warning" :icon="SwapHorizontalOutline" :caption="t('common.last24h')" /></n-grid-item>
@@ -67,6 +73,8 @@ const { t } = useI18n();
 const task = ref<any>(null);
 const logs = ref<any[]>([]);
 const loadBusy = ref(false);
+const infoBusy = ref(false);
+const infoError = ref(false);
 const page = ref(1);
 const pageSize = ref(10);
 const actionFilter = ref(0);
@@ -143,9 +151,22 @@ const pagination = reactive({
 
 async function loadInfo() {
   const id = Number(route.params.id);
-  const res = await api<any>('GET', `/dmonitor/tasks/${id}`);
-  if (res.code === 0) task.value = { ...res.data, domain: res.data.domain };
-  else message.error(res.msg);
+  infoBusy.value = true;
+  try {
+    const res = await api<any>('GET', `/dmonitor/tasks/${id}`);
+    if (res.code === 0) {
+      task.value = { ...res.data, domain: res.data.domain };
+      infoError.value = false;
+    } else {
+      infoError.value = true;
+      message.error(res.msg);
+    }
+  } catch (e: any) {
+    infoError.value = true;
+    message.error(e?.message || t('common.networkError'));
+  } finally {
+    infoBusy.value = false;
+  }
 }
 
 let loadAbort: AbortController | null = null;
@@ -171,6 +192,7 @@ async function loadLogs() {
     }
   } catch (e: any) {
     if (e?.name === 'AbortError') return;
+    if (loadAbort === ac) message.error(e?.message || t('common.networkError'));
   } finally {
     if (loadAbort === ac) loadBusy.value = false;
   }
@@ -181,3 +203,10 @@ onMounted(() => {
   loadLogs();
 });
 </script>
+<style scoped>
+.info-error {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+</style>

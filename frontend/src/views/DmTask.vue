@@ -279,20 +279,28 @@ function onBatch(key: string) {
     positiveText: t('common.confirm'),
     negativeText: t('common.cancel'),
     onPositiveClick: async () => {
-      const res = await api('POST', '/dmonitor/tasks/batch', { act: key, ids });
-      if (res.code === 0) message.success(res.msg);
-      else message.error(res.msg);
-      checkedRowKeys.value = [];
-      loadTasks();
+      try {
+        const res = await api('POST', '/dmonitor/tasks/batch', { act: key, ids });
+        if (res.code === 0) message.success(res.msg);
+        else message.error(res.msg);
+        checkedRowKeys.value = [];
+        loadTasks();
+      } catch (e: any) {
+        message.error(e?.message || t('common.networkError'));
+      }
     },
   });
 }
 
 async function retry(row: any) {
-  const res = await api('POST', '/dmonitor/tasks/batch', { act: 'retry', ids: [row.id] });
-  if (res.code === 0) message.success(t('dm.retrySet'));
-  else message.error(res.msg);
-  loadTasks();
+  try {
+    const res = await api('POST', '/dmonitor/tasks/batch', { act: 'retry', ids: [row.id] });
+    if (res.code === 0) message.success(t('dm.retrySet'));
+    else message.error(res.msg);
+    loadTasks();
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+  }
 }
 
 async function toggleActive(row: any) {

@@ -61,14 +61,14 @@ export default async function expireRoutes(app: FastifyInstance) {
   app.post('/api/domains/:id/update-date', auth, async (req: any) => {
     if (!(await hitRateLimitDistributed(`expire:update:${req.user.uid}`, 10, 60_000))) return { code: -1, msg: '更新过于频繁，请稍后再试' };
     const id = Number(req.params.id);
-    const row: any = await queryOne(`SELECT id, name FROM ${table('domain')} WHERE id = ?`, [id]);
+    const row: any = await queryOne(`SELECT id, aid, name FROM ${table('domain')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '域名不存在' };
     // 私有账户域名仅所有者可操作（管理员也不能借域名 ID 触发他人域名的外部查询）
     if (!(await canAccessDomainAccount(id, req.user))) return { code: -1, msg: '域名不存在或无权限' };
     // 普通用户仅能更新其有权限访问、且可写的域名到期时间（只读/受限子域名均拒绝）
     if (!checkLevel(req.user, 2)) {
       const perms = await getEffectivePermissions(req.user);
-      const m = matchPermission(perms, row.name, '@');
+      const m = matchPermission(perms, row.name, '@', row);
       if (m < 0) return { code: -1, msg: '无权限' };
       if (m === 1) return { code: -1, msg: '该域名仅查看，禁止修改' };
     }

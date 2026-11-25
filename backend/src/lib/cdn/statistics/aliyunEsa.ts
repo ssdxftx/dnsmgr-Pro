@@ -73,12 +73,15 @@ export async function queryAliyunEsaStatistics(
     }
 
     if (type === 'Resource' || type === 'All') {
-      const fluxSeries = alignSeries(pickSeries(data, 'Traffic'), len);
-      // 带宽由流量按时间粒度换算（ESA 不单独提供带宽指标）
+      const traffic = pickSeries(data, 'Traffic');
+      const fluxSeries = alignSeries(traffic, len, 'sum');
+      // 带宽由流量按时间粒度换算（ESA 不单独提供带宽指标）：
+      // 桶内先取峰值流量再换算 bps，避免把多个点求和后当成同一时刻的带宽
+      const peakSeries = alignSeries(traffic, len, 'max');
       const sec = Number(intervalSec) || 3600;
       for (let i = 0; i < len; i++) {
         flux[i] += fluxSeries[i] || 0;
-        bw[i] += Math.round((fluxSeries[i] || 0) / sec);
+        bw[i] += Math.round(((peakSeries[i] || 0) * 8) / sec);
       }
     }
     if (type === 'Visits' || type === 'All') {
