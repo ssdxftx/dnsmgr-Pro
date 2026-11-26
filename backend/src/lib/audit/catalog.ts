@@ -15,6 +15,8 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'POST /api/auth/lang': { module: 'auth', action: 'auth.lang', targetType: 'user' },
   'POST /api/auth/totp-config': { module: 'auth', action: 'auth.totpConfig', targetType: 'user' },
   'POST /api/auth/reauth': { module: 'auth', action: 'auth.reauth', targetType: 'user' },
+  'POST /api/auth/logout': { module: 'auth', action: 'auth.logout', targetType: 'user' },
+  'POST /api/auth/logout-all': { module: 'auth', action: 'auth.logoutAll', targetType: 'user' },
   'POST /api/api-keys': { module: 'apikeys', action: 'apikey.create', targetType: 'api_key' },
   'PATCH /api/api-keys/:id': { module: 'apikeys', action: 'apikey.update', targetType: 'api_key' },
   'POST /api/api-keys/:id/rotate': { module: 'apikeys', action: 'apikey.rotate', targetType: 'api_key' },
@@ -80,6 +82,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
   'PUT /api/backup/schedules/:id': { module: 'backup', action: 'backup.schedule.update' },
   'DELETE /api/backup/schedules/:id': { module: 'backup', action: 'backup.schedule.delete' },
   'POST /api/backup/schedules/:id/run': { module: 'backup', action: 'backup.schedule.run' },
+  'POST /api/backup/maintenance/exit': { module: 'backup', action: 'backup.maintenance.exit' },
   'POST /api/backup/remote/:destId/pull': { module: 'backup', action: 'backup.remote.pull' },
   'DELETE /api/backup/remote/:destId': { module: 'backup', action: 'backup.remote.delete' },
 
@@ -98,6 +101,7 @@ export const AUDIT_ROUTES: Record<string, RouteMeta> = {
 
   // 系统
   'POST /api/system/settings': { module: 'system', action: 'system.settings.update' },
+  'POST /api/qqbot/webhook': { module: 'system', action: 'system.qqbotWebhook', targetType: 'qqbot' },
   'POST /api/cert/order': { module: 'cert', action: 'cert.order.legacyInfo', targetType: 'cert_order' },
   'POST /api/system/stat-cache-clear': { module: 'system', action: 'system.cache.clear' },
   'POST /api/system/stat-cache-refresh': { module: 'system', action: 'system.cache.refresh' },

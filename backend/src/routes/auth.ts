@@ -436,6 +436,16 @@ export default async function authRoutes(app: FastifyInstance) {
       return { code: -1, msg: '密码确认过于频繁，请稍后再试' };
     }
     if (!(await verifyPassword(user.password, password))) return { code: -1, msg: '登录密码错误' };
+    // 已开启 TOTP 时，二次确认令牌必须同时证明当前动态口令，否则被盗会话 + 密码
+    // 仍可兑换出可执行敏感操作的令牌，第二因素形同虚设。
+    if (Number(user.totp_open) === 1) {
+      const code = String(req.body?.current_code ?? req.body?.totp_code ?? '').trim();
+      if (!code) return { code: -1, msg: '请输入当前动态口令' };
+      const secret = String(decryptText(user.totp_secret) || '');
+      if (!secret) return { code: -1, msg: '二次验证配置异常，请联系管理员重置' };
+      if (!verifyTOTP(secret, code)) return { code: -1, msg: '当前动态口令错误' };
+      if (!(await markTotpUsed(uid, code))) return { code: -1, msg: '当前动态口令已被使用，请稍后再试' };
+    }
     // sid 绑定签发会话、op 绑定具体操作：令牌不能再被拿去执行别的敏感操作，
     // 也不会在登出/换设备后继续有效（校验时比对当前请求的 jti）。
     const reauthOp = String(req.body?.op || '').trim().slice(0, 64);

@@ -2232,32 +2232,37 @@ async function saveRule(payload: any) {
     if (missing.length) return message.warning(t('cdnRules.requiredMissing', { fields: missing.join('、') }));
   }
   ruleSaveBusy.value = true;
-  let res: any;
-  if (isEsa.value) {
-    res = await api('POST', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, params: payload });
-  } else if (ruleEditingId.value) {
-    res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(ruleEditingId.value)}`, {
-      zoneId,
-      ruleName: payload.RuleName,
-      status: payload.Status,
-      branches: payload.Branches,
-      description: payload.Description,
-    });
-  } else {
-    res = await api('POST', `/cdn/accounts/${aid}/rules`, {
-      zoneId,
-      ruleName: payload.RuleName,
-      status: payload.Status,
-      branches: payload.Branches,
-      description: payload.Description,
-    });
+  try {
+    let res: any;
+    if (isEsa.value) {
+      res = await api('POST', `/cdn/accounts/${aid}/rule-configs`, { zoneId, kind: ruleKind.value, params: payload });
+    } else if (ruleEditingId.value) {
+      res = await api('PUT', `/cdn/accounts/${aid}/rules/${encodeURIComponent(ruleEditingId.value)}`, {
+        zoneId,
+        ruleName: payload.RuleName,
+        status: payload.Status,
+        branches: payload.Branches,
+        description: payload.Description,
+      });
+    } else {
+      res = await api('POST', `/cdn/accounts/${aid}/rules`, {
+        zoneId,
+        ruleName: payload.RuleName,
+        status: payload.Status,
+        branches: payload.Branches,
+        description: payload.Description,
+      });
+    }
+    if (res.code === 0) {
+      message.success(res.msg || t('cdnRules.savedOk'));
+      showRuleEditor.value = false;
+      loadRules();
+    } else message.error(res.msg);
+  } catch (e: any) {
+    message.error(e?.message || t('cdnRules.saveFailed'));
+  } finally {
+    ruleSaveBusy.value = false;
   }
-  ruleSaveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg || t('cdnRules.savedOk'));
-    showRuleEditor.value = false;
-    loadRules();
-  } else message.error(res.msg);
 }
 
 async function toggleRuleEnabled(row: any) {

@@ -183,9 +183,10 @@ export default async function userRoutes(app: FastifyInstance) {
     if (isApi === 1 && !apikey) return { code: -1, msg: 'API密钥不能为空' };
     if (apikey.length > 256) return { code: -1, msg: 'API密钥长度不能超过 256 位' };
     if (isApi === 1 && await queryOne(`SELECT id FROM ${table('user')} WHERE apikey = ? LIMIT 1`, [apikey])) return { code: -1, msg: 'API密钥已被使用' };
-    // 创建管理员、启用旧版全权 Key 都属于账号接管级操作，必须重输当前登录密码。
+    // 创建账号会直接生成可登录凭据；即使只是带子域名权限的普通用户，也可能被用于
+    // 在管理员改密/吊销会话后继续访问 DNS。所有创建请求都必须重输当前登录密码。
     // 新用户密码字段是 password，管理员自己的确认密码用 confirm_password，避免两者冲突。
-    if (level >= 2 || isApi === 1) {
+    {
       const pwErr = await requireLoginPassword(
         Number(req.user.uid),
         b.confirm_password ?? b.login_password,

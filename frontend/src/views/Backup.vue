@@ -269,6 +269,7 @@ const showDest = ref(false);
 const remoteDestId = ref(0);
 const remoteFiles = ref<any[]>([]);
 const remoteLoading = ref(false);
+const remotePassword = ref('');
 const showSched = ref(false);
 const restoreTarget = ref<any>(null);
 const restoreForm = reactive({ mode: 'replace', confirm: '' });
@@ -382,10 +383,29 @@ async function loadAll() {
   }
 }
 
+function passwordHeader(password: string): Record<string, string> {
+  const bytes = new TextEncoder().encode(password);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return { 'X-Confirm-Password-B64': btoa(bin) };
+}
+
+async function askConfirmPassword(title: string): Promise<string | null> {
+  const password = await askPassword(title, t('vault.loginPass'));
+  if (password === null) return null;
+  if (!password) {
+    message.warning(t('vault.loginPass'));
+    return null;
+  }
+  return password;
+}
+
 async function startExport() {
+  const password = await askConfirmPassword(t('backup.exportNow'));
+  if (password === null) return;
   busy.value = true;
   try {
-    const res = await api<any>('POST', '/backup/export', { scope: 'site', include_logs: includeLogs.value, dest_id: destId.value }, { timeout: 0 });
+    const res = await api<any>('POST', '/backup/export', { scope: 'site', include_logs: includeLogs.value, dest_id: destId.value }, { timeout: 0, headers: passwordHeader(password) });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
     await loadAll();
@@ -441,19 +461,16 @@ async function rotateKey() {
 
 async function download(row: any) {
   // 用统一的 getToken() 读取令牌，避免 localStorage 键名变更后下载 401 且无提示
-  let passwordHeader = '';
+  let passwordB64 = '';
   if (String(row.scope) === 'user') {
     const pwd = await askPassword(t('backup.downloadTitle'), t('vault.loginPass'));
     if (pwd === null) return;
     if (!pwd) return message.warning(t('vault.loginPass'));
-    const bytes = new TextEncoder().encode(pwd);
-    let bin = '';
-    for (const b of bytes) bin += String.fromCharCode(b);
-    passwordHeader = btoa(bin);
+    passwordB64 = passwordHeader(pwd)['X-Confirm-Password-B64'];
   }
   try {
     const headers: Record<string, string> = { Authorization: 'Bearer ' + getToken() };
-    if (passwordHeader) headers['X-Confirm-Password-B64'] = passwordHeader;
+    if (passwordB64) headers['X-Confirm-Password-B64'] = passwordB64;
     const res = await fetch(`/api/backup/jobs/${row.id}/download`, { headers });
     if (!res.ok) return message.error(t('backup.loadFailed'));
     const blob = await res.blob();
@@ -474,6 +491,9 @@ let remoteSeq = 0;
 let remoteAbort: AbortController | null = null;
 
 async function openRemote(d: any) {
+  const password = await askConfirmPassword(t('backup.remoteTitle'));
+  if (password === null) return;
+  remotePassword.value = password;
   remoteDestId.value = Number(d.id);
   remoteFiles.value = [];
   showRemote.value = true;
@@ -489,7 +509,7 @@ async function loadRemote() {
   remoteAbort = ctrl;
   remoteLoading.value = true;
   try {
-    const res = await api<any>('GET', `/backup/remote/${destId}`, undefined, { signal: ctrl.signal });
+    const res = await api<any>('GET', `/backup/remote/${destId}`, undefined, { signal: ctrl.signal, headers: passwordHeader(remotePassword.value) });
     if (seq !== remoteSeq || destId !== remoteDestId.value) return;
     if (res.code !== 0) return message.error(res.msg);
     remoteFiles.value = res.data || [];
@@ -602,12 +622,14 @@ function openDest(d?: any) {
 }
 
 async function saveDest() {
+  const password = await askConfirmPassword(t('backup.save'));
+  if (password === null) return;
   saving.value = true;
   try {
     const body = { name: destForm.name, type: destForm.type, config: destForm.config, enabled: destForm.enabled };
     const res = destForm.id
-      ? await api<any>('PUT', `/backup/destinations/${destForm.id}`, body)
-      : await api<any>('POST', '/backup/destinations', body);
+      ? await api<any>('PUT', `/backup/destinations/${destForm.id}`, body, { headers: passwordHeader(password) })
+      : await api<any>('POST', '/backup/destinations', body, { headers: passwordHeader(password) });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.saved'));
     showDest.value = false;
@@ -620,8 +642,10 @@ async function saveDest() {
 }
 
 async function testDest(d: any) {
+  const password = await askConfirmPassword(t('backup.destTest'));
+  if (password === null) return;
   try {
-    const res = await api<any>('POST', `/backup/destinations/${d.id}/test`, {});
+    const res = await api<any>('POST', `/backup/destinations/${d.id}/test`, {}, { headers: passwordHeader(password) });
     res.code === 0 ? message.success(res.msg) : message.error(res.msg);
   } catch (e: any) {
     message.error(e?.message || t('backup.loadFailed'));
@@ -635,8 +659,10 @@ function removeDest(d: any) {
     positiveText: t('backup.delete'),
     negativeText: t('backup.cancel'),
     onPositiveClick: async () => {
+      const password = await askConfirmPassword(t('backup.delete'));
+      if (password === null) return false;
       try {
-        const res = await api<any>('DELETE', `/backup/destinations/${d.id}`);
+        const res = await api<any>('DELETE', `/backup/destinations/${d.id}`, undefined, { headers: passwordHeader(password) });
         if (res.code !== 0) return message.error(res.msg);
         await loadAll();
       } catch (e: any) {
@@ -664,12 +690,14 @@ function openSched(s?: any) {
 }
 
 async function saveSched() {
+  const password = await askConfirmPassword(t('backup.save'));
+  if (password === null) return;
   saving.value = true;
   try {
     const body = { ...schedForm, include_logs: schedForm.include_logs ? 1 : 0, enabled: schedForm.enabled };
     const res = schedForm.id
-      ? await api<any>('PUT', `/backup/schedules/${schedForm.id}`, body)
-      : await api<any>('POST', '/backup/schedules', body);
+      ? await api<any>('PUT', `/backup/schedules/${schedForm.id}`, body, { headers: passwordHeader(password) })
+      : await api<any>('POST', '/backup/schedules', body, { headers: passwordHeader(password) });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.saved'));
     showSched.value = false;
@@ -682,8 +710,10 @@ async function saveSched() {
 }
 
 async function runSched(s: any) {
+  const password = await askConfirmPassword(t('backup.runNow'));
+  if (password === null) return;
   try {
-    const res = await api<any>('POST', `/backup/schedules/${s.id}/run`, {});
+    const res = await api<any>('POST', `/backup/schedules/${s.id}/run`, {}, { headers: passwordHeader(password) });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
     await loadAll();
@@ -699,8 +729,10 @@ function removeSched(s: any) {
     positiveText: t('backup.delete'),
     negativeText: t('backup.cancel'),
     onPositiveClick: async () => {
+      const password = await askConfirmPassword(t('backup.delete'));
+      if (password === null) return false;
       try {
-        const res = await api<any>('DELETE', `/backup/schedules/${s.id}`);
+        const res = await api<any>('DELETE', `/backup/schedules/${s.id}`, undefined, { headers: passwordHeader(password) });
         if (res.code !== 0) return message.error(res.msg);
         await loadAll();
       } catch (e: any) {

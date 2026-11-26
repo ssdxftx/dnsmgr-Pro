@@ -427,11 +427,11 @@ export async function sendExpireNotice(day: number, list: { name: string; expire
   if (await on('expire_notice_qqbot')) {
     await attempt('qqbot', sendQqbot(title, content));
   }
-  if ((await configGet('expire_notice_webhook')) === '1') {
+  if (await on('expire_notice_webhook')) {
     const c = content.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
     await attempt('webhook', sendWebhook(title, c));
   }
-  if ((await configGet('expire_notice_custom_webhook')) === '1') {
+  if (await on('expire_notice_custom_webhook')) {
     await attempt('custom_webhook', sendCustomWebhook(title, content));
   }
   if (failed.length) console.warn('[notice] 到期提醒部分渠道发送失败：' + failed.join('；'));
@@ -471,7 +471,7 @@ async function certSend(title: string, content: string, result: boolean): Promis
   if (await on('cert_notice_qqbot')) {
     await attempt('qqbot', sendQqbot(title, content));
   }
-  if ((await configGet('cert_notice_webhook')) === '1') {
+  if (await on('cert_notice_webhook')) {
     const c = content.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
     await attempt('webhook', sendWebhook(title, c));
   }

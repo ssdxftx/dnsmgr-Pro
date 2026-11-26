@@ -83,7 +83,7 @@
     <n-modal v-model:show="showImport" preset="card" :title="t('domain.importDomains')" class="modal-md" :mask-closable="false">
       <n-form label-placement="left" label-width="110">
         <n-form-item :label="t('nav.dnsAccounts')">
-          <n-select v-model:value="importAid" :options="accountOptions" :placeholder="t('domain.selectAccount')" @update:value="loadPullDomains" />
+          <n-select v-model:value="importAid" :options="accountOptions" :placeholder="t('domain.selectAccount')" :disabled="importBusy" @update:value="loadPullDomains" />
         </n-form-item>
         <n-form-item :label="t('domain.cloudDomains')">
           <n-checkbox-group v-model:value="checkedDomains">
@@ -408,6 +408,7 @@ async function doImport() {
   importBusy.value = true;
   try {
     const queue = [...checkedDomains.value];
+    const aid = Number(importAid.value);
     const failed: string[] = [];
     let ok = 0;
     const worker = async () => {
@@ -415,7 +416,7 @@ async function doImport() {
         const d: any = queue.shift();
         if (!d) break;
         try {
-          const r: any = await api('POST', '/domains', { aid: importAid.value, domain: d.Domain, thirdid: d.DomainId, recordcount: d.RecordCount || 0 });
+          const r: any = await api('POST', '/domains', { aid, domain: d.Domain, thirdid: d.DomainId, recordcount: d.RecordCount || 0 });
           if (r.code === 0) ok++;
           else failed.push(String(d.Domain));
         } catch {

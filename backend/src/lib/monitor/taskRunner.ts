@@ -91,7 +91,22 @@ async function handle(row: any): Promise<void> {
     } else if (row.checktype === 1) {
       result = await checkTcp(row.main_value, row.checkurl, row.tcpport, row.timeout);
     } else {
-      result = await checkPing(row.main_value, row.checkurl, row.timeout);
+      // checkPing 接收毫秒；任务表 timeout 的单位是秒。
+      result = await checkPing(row.main_value, row.checkurl, Number(row.timeout || 1) * 1000);
+    }
+
+    // 仅监控任务不能写切换状态/通知：status 是切换状态，不是健康状态。
+    if (Number(row.type) === 0) {
+      if (result.status) {
+        await query(
+          `UPDATE ${table('dmtask')} SET errcount = 0 WHERE id = ? AND errcount <> 0`,
+          [row.id],
+        );
+      } else {
+        await query(`UPDATE ${table('dmtask')} SET errcount = CASE WHEN errcount < 100 THEN errcount + 1 ELSE errcount END WHERE id = ?`, [row.id]);
+        await insertLog(row.id, 0, result.errmsg || '探测失败').catch(() => undefined);
+      }
+      return;
     }
 
     action = 0;

@@ -15,8 +15,8 @@ for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.ts'))) {
 }
 
 const uniq = [...new Set(found)].sort();
-const unmapped = uniq.filter((k) => !AUDIT_ROUTES[k]);
 const skipped = uniq.filter((k) => /\/api\/setup\//.test(k));
+const unmapped = uniq.filter((k) => !AUDIT_ROUTES[k] && !/\/api\/setup\//.test(k));
 
 console.log(`写路由总数：${uniq.length}`);
 console.log(`精确映射：${uniq.length - unmapped.length - skipped.length}`);
@@ -26,4 +26,8 @@ for (const k of unmapped) {
   const [method, route] = k.split(' ');
   const meta = resolveRoute(method, route);
   console.log(`  ${k}  →  ${meta.module} / ${meta.action}`);
+}
+if (unmapped.length) {
+  console.error(`[audit] ${unmapped.length} 条写路由未精确映射，请在 backend/src/lib/audit/catalog.ts 中补充。`);
+  process.exitCode = 1;
 }

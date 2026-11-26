@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { TencentCloud } from '../../clients/TencentCloud.js';
 import type { CdnProvider, CdnDomainItem, CertScope, CertDeployPlan, FreeCertResult, DomainCertInfo, ZoneSummary, PagedResult, OriginGroupItem, LoadBalancerItem, RuleItem, SecurityIpGroupItem, L4ProxyItem } from '../types.js';
 import { catalogPath, fileExtensions, normalizeValue, parsePathRule, splitRuleValues, wildcardToRegex } from '../pathRule.js';
@@ -216,6 +217,12 @@ export class TencentEdgeOne implements CdnProvider {
       let zoneForceRedirect = false;
       const zs = await this.send('DescribeL7AccSetting', { ZoneId: zoneId });
       if (zs) zoneForceRedirect = zs.ZoneSetting?.ZoneConfig?.ForceRedirectHTTPS?.Switch === 'on';
+      const l7Rules = await this.listAllL7Rules(zoneId);
+      const enabledRules = new Set<string>(
+        (l7Rules === false ? [] : l7Rules)
+          .filter((r: any) => String(r?.Status || '').toLowerCase() === 'enable')
+          .map((r: any) => String(r?.RuleName || '')),
+      );
       const dr = await this.listAllAccelerationDomains(zoneId);
       if (dr === false) {
         this.zoneErrors.push(z.ZoneName + ': ' + this.error);
@@ -241,7 +248,7 @@ export class TencentEdgeOne implements CdnProvider {
           http_port: d.HttpOriginPort || 80,
           https_port: d.HttpsOriginPort || 443,
           https_enabled: httpsEnabled,
-          force_redirect: zoneForceRedirect,
+          force_redirect: zoneForceRedirect || enabledRules.has(this.httpsForceRuleName(d.DomainName)),
         });
       }
       return out;
@@ -466,6 +473,22 @@ export class TencentEdgeOne implements CdnProvider {
     return 'dnsmgr_cache_' + this.normalize(domain).replace(/[^A-Za-z0-9_-]/g, '_');
   }
 
+  private domainRuleToken(domain: string): string {
+    return createHash('sha1').update(this.normalize(domain)).digest('hex').slice(0, 12);
+  }
+
+  private httpsForceRuleName(domain: string): string {
+    return `dnsmgr_httpsforce_${this.domainRuleToken(domain)}`;
+  }
+
+  private accessRulePrefix(domain: string): string {
+    return `dnsmgr_acl_${this.domainRuleToken(domain)}_`;
+  }
+
+  private hostCondition(domain: string): string {
+    return "${http.request.host} in ['" + this.escapeConditionValue(domain) + "']";
+  }
+
   private async findEdgeOneL7Rule(zoneId: string, ruleName: string): Promise<any | null> {
     let offset = 0;
     const limit = 200;
@@ -566,9 +589,41 @@ export class TencentEdgeOne implements CdnProvider {
     };
   }
 
-  // 移植自 multi-cloud-cdn TencentEdgeOneDomainServiceImpl.httpsConfiguration / forcedToJump：
-  // 关闭 HTTPS 时禁用域名证书（ModifyHostsCertificate Mode=disable，开启需要证书内容，请在控制台配置）；
-  // 强制跳转为站点级 ZoneConfig.ForceRedirectHTTPS
+  // HTTPS 开关按域名禁用证书；强制跳转改为域名级 L7 规则，避免改写站点级
+  // ZoneConfig.ForceRedirectHTTPS 影响同一 Zone 下的其它加速域名。
+  private async applyHttpsForceRule(zoneId: string, domain: string, enabled: boolean): Promise<boolean> {
+    const ruleName = this.httpsForceRuleName(domain);
+    const existing = await this.findEdgeOneL7Rule(zoneId, ruleName);
+    if (!enabled) {
+      if (existing?.RuleId) {
+        await this.client.request('DeleteL7AccRules', { ZoneId: zoneId, RuleIds: [existing.RuleId] });
+      }
+      return true;
+    }
+    const item = {
+      Status: 'enable',
+      RuleName: ruleName,
+      Description: ['dnsmgr force https for ' + domain],
+      Branches: [
+        {
+          Condition: this.hostCondition(domain),
+          Actions: [
+            {
+              Name: 'ForceRedirectHTTPS',
+              ForceRedirectHTTPSParameters: { Switch: 'on', RedirectStatusCode: '302' },
+            },
+          ],
+        },
+      ],
+    };
+    if (existing?.RuleId) {
+      await this.client.request('ModifyL7AccRule', { ZoneId: zoneId, Rule: { ...item, RuleId: existing.RuleId } });
+    } else {
+      await this.client.request('CreateL7AccRules', { ZoneId: zoneId, Rules: [item] });
+    }
+    return true;
+  }
+
   async setHttps(domain: string, enabled: boolean, forceRedirect: boolean) {
     const zoneId = await this.findZone(domain);
     if (!zoneId) {
@@ -579,10 +634,7 @@ export class TencentEdgeOne implements CdnProvider {
       if (!enabled) {
         await this.client.request('ModifyHostsCertificate', { ZoneId: zoneId, Hosts: [domain], Mode: 'disable' });
       }
-      await this.client.request('ModifyL7AccSetting', {
-        ZoneId: zoneId,
-        ZoneConfig: { ForceRedirectHTTPS: { Switch: forceRedirect ? 'on' : 'off', RedirectStatusCode: 302 } },
-      });
+      await this.applyHttpsForceRule(zoneId, domain, enabled && forceRedirect);
       return true;
     } catch (e: any) {
       this.error = '修改腾讯云 EdgeOne HTTPS 配置失败：' + (e.message || String(e));
@@ -769,17 +821,19 @@ export class TencentEdgeOne implements CdnProvider {
     const rules = await this.describeSecurityPolicy(domain);
     if (rules === false) return false;
     const out: Record<string, any> = { referer_mode: 'off', referer_list: [], ip_mode: 'off', ip_list: [], ua_list: [] };
+    const prefix = this.accessRulePrefix(domain);
     for (const r of rules) {
-      const name = r?.Name;
+      const name = String(r?.Name || '');
+      if (!name.startsWith(prefix)) continue;
       const condition = String(r?.Condition || '');
       const whitelist = /^\s*not\s*\(/.test(condition);
-      if (name === 'dnsmgr_ip_acl') {
+      if (name === prefix + 'ip_acl') {
         out.ip_mode = whitelist ? 'whitelist' : 'blacklist';
         out.ip_list = this.parseConditionList(condition);
-      } else if (name === 'dnsmgr_referer') {
+      } else if (name === prefix + 'referer') {
         out.referer_mode = whitelist ? 'whitelist' : 'blacklist';
         out.referer_list = this.parseConditionList(condition);
-      } else if (name === 'dnsmgr_user_agent') {
+      } else if (name === prefix + 'user_agent') {
         out.ua_list = this.parseConditionList(condition);
       }
     }
@@ -795,10 +849,12 @@ export class TencentEdgeOne implements CdnProvider {
     const data = await this.send('DescribeSecurityPolicy', { ZoneId: zoneId, Entity: 'ZoneDefaultPolicy' });
     if (data === false) return false;
     const existing = data?.SecurityPolicy?.CustomRules?.Rules || [];
+    const prefix = this.accessRulePrefix(domain);
+    // 只替换当前域名的规则：其它域名的 dnsmgr_* 规则和用户自定义规则必须原样保留。
     const keep = existing
-      .filter((r: any) => !String(r?.Name || '').startsWith('dnsmgr_'))
+      .filter((r: any) => !String(r?.Name || '').startsWith(prefix))
       .map((r: any) => this.copyCustomRule(r));
-    const additions = this.buildAccessRules(config);
+    const additions = this.buildAccessRules(domain, config);
     // 注意：SecurityConfig 是 ModifySecurityPolicy 的必填参数（官方文档「必选=是」），
     // 即使只用 SecurityPolicy 下发（SecurityConfig 内的 Acl/IpTable 会被忽略）也必须传空对象，
     // 否则接口直接返回参数缺失错误。历史实现漏传导致 EO 访问控制保存必失败。
@@ -825,14 +881,16 @@ export class TencentEdgeOne implements CdnProvider {
     };
   }
 
-  private buildAccessRules(config: Record<string, any>): any[] {
+  private buildAccessRules(domain: string, config: Record<string, any>): any[] {
     const rules: any[] = [];
+    const prefix = this.accessRulePrefix(domain);
+    const host = this.hostCondition(domain);
     const refererMode = config.referer_mode || 'off';
     if (refererMode === 'whitelist' || refererMode === 'blacklist') {
       const cond = `\${http.request.headers['referer']} like ${this.conditionList(config.referer_list || [])}`;
       rules.push({
-        Name: 'dnsmgr_referer',
-        Condition: refererMode === 'whitelist' ? `not (${cond})` : cond,
+        Name: prefix + 'referer',
+        Condition: refererMode === 'whitelist' ? `not (${cond}) and ${host}` : `${cond} and ${host}`,
         Enabled: 'on',
         RuleType: 'PreciseMatchRule',
         Priority: 10,
@@ -843,8 +901,8 @@ export class TencentEdgeOne implements CdnProvider {
     if (ipMode === 'whitelist' || ipMode === 'blacklist') {
       const cond = `\${http.request.ip} in ${this.conditionList(config.ip_list || [])}`;
       rules.push({
-        Name: 'dnsmgr_ip_acl',
-        Condition: ipMode === 'whitelist' ? `not (${cond})` : cond,
+        Name: prefix + 'ip_acl',
+        Condition: ipMode === 'whitelist' ? `not (${cond}) and ${host}` : `${cond} and ${host}`,
         Enabled: 'on',
         RuleType: 'BasicAccessRule',
         Action: { Name: 'Deny' },
@@ -852,8 +910,8 @@ export class TencentEdgeOne implements CdnProvider {
     }
     if ((config.ua_list || []).length) {
       rules.push({
-        Name: 'dnsmgr_user_agent',
-        Condition: `\${http.request.headers['user-agent']} like ${this.conditionList(config.ua_list || [])}`,
+        Name: prefix + 'user_agent',
+        Condition: `\${http.request.headers['user-agent']} like ${this.conditionList(config.ua_list || [])} and ${host}`,
         Enabled: 'on',
         RuleType: 'PreciseMatchRule',
         Priority: 12,

@@ -62,6 +62,7 @@ const routes = [
       { path: 'schedule-tasks/:id/edit', component: () => import('./views/ScheduleForm.vue'), meta: { titleKey: 'route.scheduleEdit' } },
       { path: 'system-settings', component: () => import('./views/SystemSet.vue'), meta: { titleKey: 'route.systemSettings' } },
       { path: 'users', component: () => import('./views/UserList.vue'), meta: { titleKey: 'route.users' } },
+      { path: 'mcp', component: () => import('./views/McpAccess.vue'), meta: { titleKey: 'route.mcp' } },
       { path: 'logs', component: () => import('./views/UserLog.vue'), meta: { titleKey: 'route.logs' } },
       { path: 'about', component: () => import('./views/About.vue'), meta: { titleKey: 'route.about' } },
       // 兜底：未匹配的路径不再渲染成整页空白，统一进 404 页

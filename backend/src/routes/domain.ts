@@ -88,6 +88,27 @@ async function runPool<T, R>(items: T[], limit: number, fn: (item: T, index: num
   return results;
 }
 
+/**
+ * rrset 型厂商（PowerDNS/AWS 等）的写操作是「读取整个 rrset -> 修改 -> 整体替换」。
+ * 同一 name+type 的多条记录并发执行会互相覆盖，必须按 rrset 分组、组内串行。
+ */
+async function runRecordGroups<T, R>(records: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const groups = new Map<string, Array<{ item: T; index: number }>>();
+  for (let i = 0; i < records.length; i++) {
+    const row: any = records[i];
+    const name = String(row?.Name ?? '').trim().toLowerCase();
+    const type = String(row?.Type ?? '').trim().toUpperCase();
+    const key = name ? `${name}|${type}` : `record:${String(row?.RecordId ?? i)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push({ item: records[i], index: i });
+  }
+  const results = new Array<R>(records.length);
+  await runPool([...groups.values()], limit, async (group) => {
+    for (const { item, index } of group) results[index] = await fn(item, index);
+  });
+  return results;
+}
+
 /** 缓存超限时淘汰最旧的一批（约 10%），避免整表 clear 造成命中率归零 */
 function evictOldest<K, V extends { at: number }>(map: Map<K, V>, max: number): void {
   if (map.size < max) return;
@@ -1328,7 +1349,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     let fail = 0;
     if (action === 'open' || action === 'pause') {
       const st = action === 'open' ? '1' : '0';
-      const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().setDomainRecordStatus(r.RecordId, st)));
+      const results = await runRecordGroups(records, 8, async (r: any) => !!(await makeProvider().setDomainRecordStatus(r.RecordId, st)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       if (success) invalidateDomainRecordCaches(Number(id));
@@ -1338,7 +1359,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       };
     }
     if (action === 'delete') {
-      const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().deleteDomainRecord(r.RecordId)));
+      const results = await runRecordGroups(records, 8, async (r: any) => !!(await makeProvider().deleteDomainRecord(r.RecordId)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       if (success) await bumpRecordCount(id, -success);
@@ -1348,7 +1369,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       const remark = b.remark ? asText(b.remark, 255) : null;
       const fn = provider.updateDomainRecordRemark;
       if (typeof fn !== 'function') return { code: -1, msg: '该DNS类型不支持备注' };
-      const results = await runPool(records, 8, async (r: any) => !!(await makeProvider().updateDomainRecordRemark(r.RecordId, remark)));
+      const results = await runRecordGroups(records, 8, async (r: any) => !!(await makeProvider().updateDomainRecordRemark(r.RecordId, remark)));
       success = results.filter(Boolean).length;
       fail = results.length - success;
       if (success) invalidateDomainRecordCaches(Number(id));
@@ -1363,7 +1384,7 @@ export default async function domainRoutes(app: FastifyInstance) {
           return { code: -1, msg: '批量修改记录值要求所选记录类型一致' };
         }
       }
-      const results = await runPool(records, 8, async (r: any) => {
+      const results = await runRecordGroups(records, 8, async (r: any) => {
         const type = action === 'value' ? String(r.Type || b.type) : r.Type;
         const value = action === 'value' ? String(b.value ?? '') : (Array.isArray(r.Value) ? r.Value.join(',') : r.Value);
         const line = action === 'line' ? String(b.line ?? '') : r.Line;
@@ -2069,16 +2090,19 @@ export default async function domainRoutes(app: FastifyInstance) {
       }
     }
     const provider = ctx.provider;
+    const providerConfig = await accountConfigOf(ctx.info.account);
+    const makeLegacyProvider = (): any =>
+      getDnsProvider(ctx.info.account.type, providerConfig, ctx.info.domain.name, ctx.info.domain.thirdid);
     audit(req, { targetType: 'record', targetName: ctx.info.domain.name, summary: `旧版API批量${action} ${records.length} 条记录`, detail: { action, count: records.length } });
     if (action === 'open' || action === 'pause') {
       const st = action === 'open' ? '1' : '0';
-      const results = await runPool(records, 8, async (r: any) => !!(await provider.setDomainRecordStatus(String(r.RecordId), st)));
+      const results = await runRecordGroups(records, 8, async (r: any) => !!(await makeLegacyProvider().setDomainRecordStatus(String(r.RecordId), st)));
       const success = results.filter(Boolean).length;
       if (success) invalidateDomainRecordCaches(id);
       return { code: 0, msg: `成功${action === 'open' ? '启用' : '暂停'}${success}条解析记录` };
     }
     if (action === 'delete') {
-      const results = await runPool(records, 8, async (r: any) => !!(await provider.deleteDomainRecord(String(r.RecordId))));
+      const results = await runRecordGroups(records, 8, async (r: any) => !!(await makeLegacyProvider().deleteDomainRecord(String(r.RecordId))));
       const success = results.filter(Boolean).length;
       if (success) await bumpRecordCount(id, -success);
       return { code: 0, msg: `成功删除${success}条解析记录` };
@@ -2086,7 +2110,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (action === 'remark') {
       if (typeof provider.updateDomainRecordRemark !== 'function') return { code: -1, msg: '该DNS类型不支持备注' };
       const remark = asText(b.remark) || null;
-      const results = await runPool(records, 8, async (r: any) => !!(await provider.updateDomainRecordRemark(String(r.RecordId), remark)));
+      const results = await runRecordGroups(records, 8, async (r: any) => !!(await makeLegacyProvider().updateDomainRecordRemark(String(r.RecordId), remark)));
       const success = results.filter(Boolean).length;
       if (success) invalidateDomainRecordCaches(id);
       return { code: 0, msg: `批量修改备注，成功${success}条，失败${results.length - success}条` };
@@ -2094,7 +2118,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     if (action === 'group') {
       if (typeof provider.changeRecordGroup !== 'function') return { code: -1, msg: '该DNS类型不支持分组' };
       const ids = records.map((r: any) => String(r.RecordId));
-      const ok = await provider.changeRecordGroup(ids, asText(b.groupid));
+      const ok = await makeLegacyProvider().changeRecordGroup(ids, asText(b.groupid));
       if (ok) invalidateDomainRecordCaches(id);
       return ok ? { code: 0, msg: `成功修改${ids.length}条记录的分组` } : { code: -1, msg: '修改分组失败，' + provider.getError() };
     }

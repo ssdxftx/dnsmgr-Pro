@@ -122,7 +122,7 @@
 import { computed, h, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { NAvatar, NButton, NDrawer, NDrawerContent, NDropdown, NIcon, NMenu, NTooltip, type MenuOption } from 'naive-ui';
-import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, ArchiveOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
+import { GlobeOutline, MenuOutline, ServerOutline, CloudOutline, SpeedometerOutline, LinkOutline, ShieldCheckmarkOutline, RocketOutline, PulseOutline, SwapHorizontalOutline, FlashOutline, TimeOutline, SettingsOutline, PeopleOutline, TerminalOutline, DocumentTextOutline, BarChartOutline, RefreshOutline, FolderOutline, InformationCircleOutline, ArchiveOutline, MoonOutline, SunnyOutline, ChevronBackOutline, ChevronForwardOutline, ChevronDownOutline } from '@vicons/ionicons5';
 import { useAuthStore } from '../stores/auth';
 import { isAdminUser, requiresAdmin } from '../lib/admin';
 import { useResponsive } from '../composables/useResponsive';
@@ -262,6 +262,7 @@ const menuOptions = computed<MenuOption[]>(() => [
     children: [
       { label: t('nav.systemSettings'), key: 'system-settings', icon: renderIcon(SettingsOutline) },
       { label: t('nav.users'), key: 'users', icon: renderIcon(PeopleOutline) },
+      { label: t('nav.mcp'), key: 'mcp', icon: renderIcon(TerminalOutline) },
       { label: t('nav.backup'), key: 'backup', icon: renderIcon(ArchiveOutline) },
       { label: t('nav.logs'), key: 'logs', icon: renderIcon(DocumentTextOutline) },
       { label: t('nav.about'), key: 'about', icon: renderIcon(InformationCircleOutline) },
@@ -305,7 +306,7 @@ const activeKey = computed(() => {
     'cert-accounts', 'cert-orders', 'deploy-accounts', 'deploy-tasks', 'cert-settings',
     'cert-cname',
     'backup',
-    'system-settings', 'users', 'logs', 'about',
+    'system-settings', 'users', 'mcp', 'logs', 'about',
   ].find((k) => route.path.startsWith('/' + k));
   return matched || '';
 });
@@ -321,7 +322,7 @@ const activeGroupMap: Record<string, string> = {
   'dm-overview': 'group-dm', 'dm-tasks': 'group-dm', 'schedule-tasks': 'group-dm',
   'optimize-settings': 'group-optimize', 'optimize-tasks': 'group-optimize',
   'cert-accounts': 'group-cert', 'cert-orders': 'group-cert', 'deploy-accounts': 'group-cert', 'deploy-tasks': 'group-cert', 'cert-settings': 'group-cert', 'cert-cname': 'group-cert',
-  'system-settings': 'group-system', users: 'group-system', logs: 'group-system', backup: 'group-system', about: 'group-system',
+  'system-settings': 'group-system', users: 'group-system', mcp: 'group-system', logs: 'group-system', backup: 'group-system', about: 'group-system',
   preferences: 'group-system', totp: 'group-system',
 };
 

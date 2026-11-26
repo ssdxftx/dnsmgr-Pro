@@ -31,7 +31,6 @@ function scopePath(module: string): string {
 }
 
 export function checkActionScope(ctx: McpContext, action: ActionDef): void {
-  if (ctx.mode !== 'api_key') return;
   if (!action.scope) throw new McpToolError('该操作未配置作用域');
   if (!ctx.scopes.length) throw new McpToolError('API Key 未配置可用的权限范围');
   const method = action.scope.write ? 'POST' : 'GET';

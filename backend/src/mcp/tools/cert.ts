@@ -1,7 +1,5 @@
 import { query, queryOne, table } from '../../db.js';
 import { decryptText } from '../../lib/secret.js';
-import { buildPfx } from '../../lib/certService.js';
-import { canAccessCertOrder } from '../../lib/accounts/visibility.js';
 import { getMainDomain } from '../../lib/cert/utils.js';
 import { audit } from '../../lib/audit/context.js';
 import { callRoute } from '../invoker.js';
@@ -49,42 +47,19 @@ function readStoredPrivateKey(raw: any): string | null {
 
 async function orderGet(ctx: McpContext, args: ToolArgs): Promise<any> {
   const id = Number(args.id);
-  if (ctx.mode !== 'legacy') {
-    const res = await callRoute(ctx, {
-      method: 'GET',
-      path: `/api/cert/orders/${id}/info`,
-      headers: boolValue(args.include_pfx) ? { 'x-pfx-pass': '123456' } : undefined,
-    });
-    if (res?.code === 0 && res.data && boolValue(args.include_pfx)) {
-      delete res.data.pfx_pass;
-    } else if (res?.code === 0 && res.data) {
-      delete res.data.pfx;
-      delete res.data.pfx_pass;
-    }
-    return res;
+  // 私钥/PFX 读取必须与 UI 一致走登录密码确认：MCP 不再保留绕过确认的旧版直查分支。
+  const res = await callRoute(ctx, {
+    method: 'GET',
+    path: `/api/cert/orders/${id}/info`,
+    headers: boolValue(args.include_pfx) ? { 'x-pfx-pass': '123456' } : undefined,
+  });
+  if (res?.code === 0 && res.data && boolValue(args.include_pfx)) {
+    delete res.data.pfx_pass;
+  } else if (res?.code === 0 && res.data) {
+    delete res.data.pfx;
+    delete res.data.pfx_pass;
   }
-  if (!(await canAccessCertOrder(id, ctx.user))) return { code: -1, msg: '证书订单不存在' };
-  const row: any = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
-  if (!row) return { code: -1, msg: '证书订单不存在' };
-  const domains: any[] = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
-  const privateKey = readStoredPrivateKey(row.privatekey);
-  if (privateKey === null) return { code: -1, msg: '私钥解密失败，请重新保存证书' };
-  const data: any = {
-    id: row.id,
-    crt: row.fullchain,
-    key: privateKey,
-    issuetime: row.issuetime,
-    expiretime: row.expiretime,
-    domains: domains.map((d) => d.domain),
-  };
-  if (boolValue(args.include_pfx) && row.fullchain && privateKey) {
-    try {
-      data.pfx = (await buildPfx(row.fullchain, privateKey, '123456')).toString('base64');
-    } catch {
-      data.pfx = null;
-    }
-  }
-  return { code: 0, data };
+  return res;
 }
 
 async function orderLog(ctx: McpContext, args: ToolArgs): Promise<any> {

@@ -30,6 +30,7 @@ export default {
     modeSyncFailed: 'JSON 解析失败，已保留原始内容',
     requiredMissing: '以下必填项未填写：{fields}',
     savedOk: '规则已保存',
+    saveFailed: '保存规则失败，请稍后重试',
     colKind: '类型',
     colSeq: '顺序',
     colEnable: '开关',

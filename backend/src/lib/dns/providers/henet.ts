@@ -324,7 +324,7 @@ export class HenetDns implements DnsProvider {
   }
 
   async getDomainRecordInfo(RecordId: string): Promise<RecordInfo | false> {
-    const records = await this.getDomainRecords(1, 1000);
+    const records = await this.getDomainRecords(1, 1_000_000);
     if (records === false) return false;
     for (const row of records.list) {
       if (row.RecordId === RecordId) return row;

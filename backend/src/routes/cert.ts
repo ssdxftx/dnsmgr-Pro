@@ -1123,7 +1123,12 @@ export default async function certRoutes(app: FastifyInstance) {
     } catch (e: any) {
       return { code: -1, msg: '部署配置校验失败，' + e.message };
     }
-    await query(`UPDATE ${table('cert_deploy')} SET aid = ?, oid = ?, config = ?, remark = ? WHERE id = ?`, [aid, oid, encryptConfig(merged), remark || '', id]);
+    // 与部署 worker 共用 islock：正在上传/绑定证书时禁止修改目标，避免旧配置继续部署后覆盖新配置。
+    const upd: any = await query(
+      `UPDATE ${table('cert_deploy')} SET aid = ?, oid = ?, config = ?, remark = ? WHERE id = ? AND (islock = 0 OR islock IS NULL)`,
+      [aid, oid, encryptConfig(merged), remark || '', id],
+    );
+    if (!upd || !upd.affectedRows) return { code: -1, msg: '任务正在部署中，请稍后再修改' };
     audit(req, {
       targetType: 'deploy_task',
       targetId: id,

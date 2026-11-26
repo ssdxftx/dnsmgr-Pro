@@ -482,10 +482,12 @@ export class CertOrderService {
   }
 
   async revoke() {
-    await this.ensureLoaded();
-    this.client.setLogger((txt) => this.saveLog(txt));
-    await this.client.revoke(this.info, this.order.fullchain);
-    await this.saveResult(4);
+    // 吊销与签发/续签共用订单租约：否则 CA 吊销期间调度器仍可能写回 fullchain/privatekey。
+    await this.withMutationLock(async () => {
+      this.client.setLogger((txt) => this.saveLog(txt));
+      await this.client.revoke(this.info, this.order.fullchain);
+      await this.saveResult(4);
+    });
   }
 
   async cancel() {

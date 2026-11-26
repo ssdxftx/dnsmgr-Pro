@@ -32,8 +32,8 @@ Entries discovered by the Agent during task execution should follow this format:
 ## Entries
 
 [User Instruction Summary]
-- Date: 2026-11-14
-- Context: 用户要求删除 monkeycode-ai 署名相关内容，并固定使用 ssdxftx 身份推送（此前 2026-09-30、2026-10-29 已提出同一要求）
+- Date: 2026-11-18
+- Context: 用户要求删除 monkeycode-ai 署名相关内容，并固定使用 ssdxftx 身份推送（此前 2026-09-30、2026-10-29、2026-11-14 已提出同一要求）
 - Instructions:
   - Git 提交与推送统一使用 `user.name=ssdxftx`、`user.email=1763610087@qq.com`（同时写入本仓库本地配置与全局配置）
   - 禁止在提交信息中添加 `Co-authored-by` 尾注：删除 `.git/config` 中的 `coauthor.*` 配置项，并移除 `.git/hooks/prepare-commit-msg` 钩子
@@ -135,3 +135,16 @@ Entries discovered by the Agent during task execution should follow this format:
   - 本环境无预装 MySQL；可用 `DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server` 后 `service mariadb start`，root 走 unix socket `/run/mysqld/mysqld.sock`，TCP 连接需另建用户
   - 备份/安装类改动至少执行 `cd backend && npm run check:backup && npm run check:sqlite`；前端改动执行 `cd frontend && npx vue-tsc --noEmit && npm run check:format && npm run check:i18n`
   - 临时验证脚本放在 `/tmp/opencode`，并在该目录放 `{"type":"module"}` 的 `package.json`，用 `npx tsx` 执行，避免被当作 CJS 编译
+
+[Project Knowledge Summary]
+- Date: 2026-11-19
+- Context: Discovered by Agent while 新建 Cloudflare Workers 测试版 `workers/`
+- Category: Build Methods / Troubleshooting & Debugging
+- Instructions:
+  - Workers 测试版入口为 `workers/src/worker.ts`，使用原生 Fetch 路由；`cd workers && npm run dev`（wrangler 本地 D1），`npm run check` 执行 `tsc --noEmit` + `wrangler deploy --dry-run`
+  - Fastify 当前无法直接运行：`find-my-way` 注册路由时用 `new Function`，Workers 报 `EvalError: Code generation from strings disallowed`；保留 Fastify 需替换/补丁化其动态路由代码
+  - Workers 使用 `httpServerHandler` 时入口模块禁止 top-level await；初始化必须惰性放到请求内
+  - D1 单条 SQL 最多 100 个绑定参数（含固定条件），实测 `run_id + 99` 个 IN 参数可用、100 个报 `too many SQL variables`；`db.batch` 100 条插入语句可正常执行，5000 行批量插入约 0.5s
+  - `ALTER TABLE ADD COLUMN` 不接受 `DEFAULT CURRENT_TIMESTAMP`，迁移需用常量默认值再回填
+  - `npm run check` 现包含 `scripts/contract-check.mjs`，用于断言关键路由、响应字段、权限片段与前端关键页面契约；新增关键路由或前端页面契约时同步更新该脚本
+  - 备份恢复的维护模式与恢复状态存 `runtime_meta`，因为整站恢复会替换 `app_setting`；恢复期间 `/cron` 与写请求会被拦截，`/api/backup` 与登录接口放行

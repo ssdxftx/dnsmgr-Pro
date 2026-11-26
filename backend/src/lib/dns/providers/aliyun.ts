@@ -163,7 +163,7 @@ export class AliyunDns implements DnsProvider {
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX: number | null = null, Weight: number | null = null, Remark: string | null = null) {
     const param: Record<string, any> = { Action: 'AddDomainRecord', DomainName: this.domain, RR: Name, Type, Value, Line: convertLineCode(Line), TTL: Number(TTL) };
-    if (MX) param.Priority = Number(MX);
+    if (MX !== null && MX !== undefined) param.Priority = Number(MX);
     if (Weight !== null && Weight !== undefined) param.Weight = Number(Weight);
     const data = await this.request(param);
     return data && data.RecordId ? String(data.RecordId) : false;
@@ -171,7 +171,7 @@ export class AliyunDns implements DnsProvider {
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX: number | null = null, Weight: number | null = null, Remark: string | null = null) {
     const param: Record<string, any> = { Action: 'UpdateDomainRecord', RecordId, RR: Name, Type, Value, Line: convertLineCode(Line), TTL: Number(TTL) };
-    if (MX) param.Priority = Number(MX);
+    if (MX !== null && MX !== undefined) param.Priority = Number(MX);
     if (Weight !== null && Weight !== undefined) param.Weight = Number(Weight);
     return (await this.request(param)) !== false;
   }

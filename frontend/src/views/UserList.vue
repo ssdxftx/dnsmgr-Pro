@@ -107,7 +107,7 @@
       <template #footer>
         <n-space justify="end">
           <n-button @click="showEdit = false">{{ t('common.close') }}</n-button>
-          <n-button type="primary" :loading="saveBusy" @click="save">{{ t('common.save') }}</n-button>
+          <n-button type="primary" :loading="saveBusy" :disabled="editBusy" @click="save">{{ t('common.save') }}</n-button>
         </n-space>
       </template>
     </n-modal>
@@ -170,7 +170,8 @@ const legacyKeyChanged = computed(
 );
 // 改密与旧版 API Key 变更都属于账号接管级操作，编辑时必须重输当前管理员密码。
 const levelChanged = computed(() => !!editingId.value && Number(form.level) !== Number(origLevel.value));
-const sensitiveCreate = computed(() => !editingId.value && (Number(form.level) >= 2 || Number(form.is_api) === 1));
+// 创建账号会直接产生可登录凭据，统一要求管理员重新确认登录密码。
+const sensitiveCreate = computed(() => !editingId.value);
 const reauthNeeded = computed(
   () => sensitiveCreate.value || (!!editingId.value && (legacyKeyChanged.value || !!form.repwd || levelChanged.value)),
 );
@@ -416,6 +417,10 @@ async function openEdit(row: any) {
       showEdit.value = false;
       message.error(res.msg);
     }
+  } catch (e: any) {
+    // 请求失败时关闭弹窗，避免保留上一个用户的表单被误保存到当前 editingId。
+    showEdit.value = false;
+    message.error(e?.message || t('common.loadFailed'));
   } finally {
     editBusy.value = false;
   }

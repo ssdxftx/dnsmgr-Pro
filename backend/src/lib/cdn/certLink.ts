@@ -150,7 +150,7 @@ export async function findOrderByDomains(aid: number, domains: string[], q: Quer
     `SELECT O.id, O.aid, O.status, O.error, O.link,
             GROUP_CONCAT(D.domain ORDER BY D.domain SEPARATOR ',') AS doms
        FROM ${table('cert_order')} O JOIN ${table('cert_domain')} D ON D.oid = O.id
-      WHERE O.aid = ? AND O.status IN (0, 1, 2, 3)
+      WHERE O.aid = ? AND (O.status IN (0, 1, 2) OR (O.status = 3 AND O.expiretime IS NOT NULL AND O.expiretime > NOW()))
       GROUP BY O.id`,
     [aid],
   );
@@ -297,14 +297,32 @@ export async function ensureExactOrder(aid: number, domain: string, link: string
 // 复用 CDN 账户密钥：按（类型 + 配置）查找或创建自动部署账户
 export async function ensureDeployAccount(plan: CertDeployPlan, q: QueryFn = query): Promise<number> {
   const cfg = JSON.stringify(plan.accountConfig || {});
-  return withNamedLock('dnsmgr:cert-deploy-account:', plan.accountType + '|' + cfg, async () => {
-  // 加密存储使用随机 IV，无法按密文比较，改为按类型取出后解密比对
-  const rows: any = await q(`SELECT id, config FROM ${table('cert_account')} WHERE type = ? AND deploy = 1`, [plan.accountType]);
-  const hit = (rows as any[]).find((r: any) => decodeConfigCached(r.config).json === cfg);
+  const ownerUid = Math.max(0, Number(plan.ownerUid || 0));
+  const visibility = plan.visibility === 'private' ? 'private' : 'shared';
+  return withNamedLock('dnsmgr:cert-deploy-account:', plan.accountType + '|' + ownerUid + '|' + visibility + '|' + cfg, async () => {
+  // 加密存储使用随机 IV，无法按密文比较，改为按类型取出后解密比对。
+  // 私有 CDN 账户的云密钥必须继续保持私有，不能因配置相同就复用共享部署账户。
+  const rows: any = await q(
+    `SELECT id, config, owner_uid, visibility FROM ${table('cert_account')} WHERE type = ? AND deploy = 1`,
+    [plan.accountType],
+  );
+  const hit = (rows as any[]).find(
+    (r: any) =>
+      decodeConfigCached(r.config).json === cfg &&
+      Number(r.owner_uid || 0) === ownerUid &&
+      String(r.visibility || 'shared') === visibility,
+  );
   if (hit?.id) return Number(hit.id);
   const res: any = await q(
-    `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, addtime) VALUES (?, ?, ?, ?, 1, NOW())`,
-    [plan.accountType, plan.accountName || 'CDN 证书联动（' + plan.accountType + '）', encryptConfig(plan.accountConfig || {}), '由 CDN 证书联动自动创建'],
+    `INSERT INTO ${table('cert_account')} (type, name, config, remark, deploy, owner_uid, visibility, addtime) VALUES (?, ?, ?, ?, 1, ?, ?, NOW())`,
+    [
+      plan.accountType,
+      plan.accountName || 'CDN 证书联动（' + plan.accountType + '）',
+      encryptConfig(plan.accountConfig || {}),
+      '由 CDN 证书联动自动创建',
+      ownerUid,
+      visibility,
+    ],
   );
   return Number(res?.insertId || 0);
   });
@@ -361,7 +379,17 @@ export async function ensureCertDeploy(
   }
   // 关键：产品类型必须写入任务配置，否则部署时无法识别要上传/绑定到哪个云产品
   const taskConfig = { ...plan.config, product: plan.product };
-  const deployAid = await ensureDeployAccount(plan, q);
+  const cdnAcct: any = Number(row?.aid) > 0
+    ? await queryOne(`SELECT owner_uid, visibility FROM ${table('cdn_account')} WHERE id = ?`, [Number(row.aid)])
+    : null;
+  const deployAid = await ensureDeployAccount(
+    {
+      ...plan,
+      ownerUid: Number(cdnAcct?.owner_uid || 0),
+      visibility: cdnAcct?.visibility === 'private' ? 'private' : 'shared',
+    },
+    q,
+  );
   if (!deployAid) {
     await linkLog(did, orderId, 'account', 'fail', '创建自动部署账户失败（密钥或配置不完整）', q);
     return false;

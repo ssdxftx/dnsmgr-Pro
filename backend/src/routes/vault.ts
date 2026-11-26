@@ -149,8 +149,14 @@ export default async function vaultRoutes(app: FastifyInstance) {
     if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     // 升级会清空 wrapped_dek_sys 并把 DEK 重新包进「攻击者已知的口令」，
     // 一旦被窃会话调用，原主人既没有口令也没有恢复码，私有凭据就永久不可读（只能 destroy）。
-    // 因此这里必须先做二次确认，且把令牌限定到该操作。
-    const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.upgrade');
+    // 因此这里必须先做二次确认，且把令牌限定到该操作；开启 TOTP 后还必须校验动态口令。
+    const passwordErr = await requireVaultConfirm(
+      Number(req.user.uid),
+      req.body?.password,
+      req,
+      'vault.upgrade',
+      req.body?.current_code ?? req.body?.totp_code,
+    );
     if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
     try {
       const r = await upgradeVault(
@@ -215,7 +221,13 @@ export default async function vaultRoutes(app: FastifyInstance) {
     const apiBlocked = apiKeyBlocked(req);
     if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     try {
-      const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.recovery');
+      const passwordErr = await requireVaultConfirm(
+        Number(req.user.uid),
+        req.body?.password,
+        req,
+        'vault.recovery',
+        req.body?.current_code ?? req.body?.totp_code,
+      );
       if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
       const r = await setRecovery(Number(req.user.uid), jtiOf(req), String(req.body?.recovery || 'random'));
       audit(req, { module: 'vault', action: 'vault.recovery', summary: '设置保险库恢复码', scrubBody: true });
@@ -240,7 +252,13 @@ export default async function vaultRoutes(app: FastifyInstance) {
     const apiBlocked = apiKeyBlocked(req);
     if (apiBlocked) return reply.code(403).send({ code: -1, msg: apiBlocked });
     try {
-      const passwordErr = await requireLoginPassword(Number(req.user.uid), req.body?.password, req, 'vault.destroy');
+      const passwordErr = await requireVaultConfirm(
+        Number(req.user.uid),
+        req.body?.password,
+        req,
+        'vault.destroy',
+        req.body?.current_code ?? req.body?.totp_code,
+      );
       if (passwordErr) return reply.code(400).send({ code: -1, msg: passwordErr });
       await destroyVault(
         Number(req.user.uid),

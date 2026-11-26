@@ -19,6 +19,14 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = next;
       if (next.lang) applyUserLocale(next.lang);
     });
+    // 另一个标签页登录/登出后同步本标签页的 token 与用户状态；api.ts 已负责清缓存。
+    window.addEventListener('dnsmgr:auth-storage', (ev: Event) => {
+      const next = (ev as CustomEvent).detail || {};
+      token.value = String(next.token || '');
+      user.value = next.user || null;
+      if (next.user?.lang) applyUserLocale(next.user.lang);
+      if (!token.value && !location.pathname.startsWith('/login')) location.href = '/login';
+    });
   }
 
   function setAuth(t: string, u: any) {

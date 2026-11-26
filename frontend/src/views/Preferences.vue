@@ -61,30 +61,6 @@
       <n-empty v-else :description="t('preferences.noKeys')" />
     </n-card>
 
-    <n-card :bordered="false" :title="t('preferences.mcpTitle')" size="small" style="max-width:920px">
-      <p class="pref-hint">{{ t('preferences.mcpHint') }}</p>
-      <n-form label-placement="top">
-        <n-form-item :label="t('preferences.mcpEndpoint')">
-          <n-input :value="mcpUrl" readonly />
-        </n-form-item>
-      </n-form>
-      <div class="mcp-block">
-        <div class="mcp-block-head">
-          <span>{{ t('preferences.mcpApiKeyMode') }}</span>
-          <n-button size="tiny" quaternary type="primary" @click="copyMcp(mcpApiConfig)">{{ t('preferences.copy') }}</n-button>
-        </div>
-        <pre class="mcp-config">{{ mcpApiConfig }}</pre>
-      </div>
-      <div class="mcp-block">
-        <div class="mcp-block-head">
-          <span>{{ t('preferences.mcpLegacyMode') }}</span>
-          <n-button size="tiny" quaternary type="primary" @click="copyMcp(mcpLegacyConfig)">{{ t('preferences.copy') }}</n-button>
-        </div>
-        <pre class="mcp-config">{{ mcpLegacyConfig }}</pre>
-        <p class="pref-hint">{{ t('preferences.mcpLegacyHint', { uid: auth.user?.id || '<UID>' }) }}</p>
-      </div>
-    </n-card>
-
     <n-modal v-model:show="createShow" preset="card" :title="t('preferences.createKey')" style="max-width:640px">
       <n-form label-placement="top">
         <n-form-item :label="t('preferences.keyName')">
@@ -103,6 +79,9 @@
         </n-form-item>
         <n-form-item :label="t('preferences.password')">
           <n-input v-model:value="createForm.password" type="password" show-password-on="click" :placeholder="t('preferences.passwordHint')" />
+        </n-form-item>
+        <n-form-item v-if="totpRequired" :label="t('login.totp')">
+          <n-input v-model:value="createForm.code" maxlength="6" :placeholder="t('login.totpPlaceholder')" />
         </n-form-item>
       </n-form>
       <template #footer>
@@ -127,6 +106,7 @@
     <n-modal v-model:show="reauthShow" preset="card" :title="t('preferences.reauthTitle')" style="max-width:520px">
       <p class="pref-hint">{{ reauthHint }}</p>
       <n-input v-model:value="reauthPassword" type="password" show-password-on="click" :placeholder="t('preferences.passwordHint')" @keyup.enter="submitReauth" />
+      <n-input v-if="totpRequired" v-model:value="reauthCode" maxlength="6" class="mt-2" :placeholder="t('login.totpPlaceholder')" />
       <template #footer>
         <n-space justify="end">
           <n-button @click="reauthShow = false">{{ t('preferences.cancel') }}</n-button>
@@ -165,13 +145,11 @@ interface ApiKeyRow {
 
 const { t } = useI18n();
 const { locale, setLocale } = useLocale();
-const auth = useAuthStore();
 const message = useMessage();
+const auth = useAuthStore();
+const totpRequired = computed(() => Number(auth.user?.totp_open) === 1);
 
 const keys = ref<ApiKeyRow[]>([]);
-const mcpUrl = computed(() => `${window.location.origin}/mcp`);
-const mcpApiConfig = computed(() => JSON.stringify({ mcpServers: { dnsmgr: { url: mcpUrl.value, headers: { 'X-API-Key': '<YOUR_API_KEY>' } } } }, null, 2));
-const mcpLegacyConfig = computed(() => JSON.stringify({ mcpServers: { dnsmgr: { url: mcpUrl.value, headers: { Authorization: `Bearer ${auth.user?.id || '<UID>'}:<LEGACY_API_KEY>` } } } }, null, 2));
 const legacy = reactive({ enabled: false, prefix: '' });
 const modules = ref<string[]>([]);
 const createShow = ref(false);
@@ -180,16 +158,18 @@ const reauthShow = ref(false);
 const submitting = ref(false);
 const createdKey = ref('');
 const reauthPassword = ref('');
+const reauthCode = ref('');
 const pending = reactive<{ action: 'rotate' | 'revoke' | 'legacy' | 'revokeAll'; id: number }>({ action: 'revoke', id: 0 });
 watch(secretShow, (v) => { if (!v) createdKey.value = ''; });
-watch(createShow, (v) => { if (!v) createForm.password = ''; });
-watch(reauthShow, (v) => { if (!v) reauthPassword.value = ''; });
+watch(createShow, (v) => { if (!v) { createForm.password = ''; createForm.code = ''; } });
+watch(reauthShow, (v) => { if (!v) { reauthPassword.value = ''; reauthCode.value = ''; } });
 const createForm = reactive({
   name: '',
   scopes: ['*'] as string[],
   expiresAt: null as number | null,
   ipAllowlist: '',
   password: '',
+  code: '',
 });
 
 const scopeOptions = computed(() => {
@@ -241,8 +221,8 @@ function fmtDate(ts: number | null): string | null {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
-async function getReauthToken(password: string): Promise<string> {
-  const res = await api<any>('POST', '/auth/reauth', { password, op: 'api-key.write' });
+async function getReauthToken(password: string, code = ''): Promise<string> {
+  const res = await api<any>('POST', '/auth/reauth', { password, op: 'api-key.write', current_code: code });
   if (res?.code !== 0 || !res.data?.token) throw new Error(res?.msg || t('preferences.reauthFailed'));
   return String(res.data.token);
 }
@@ -252,9 +232,13 @@ async function submitCreate() {
     message.warning(t('preferences.passwordHint'));
     return;
   }
+  if (totpRequired.value && !createForm.code) {
+    message.warning(t('login.totpRequired'));
+    return;
+  }
   submitting.value = true;
   try {
-    const token = await getReauthToken(createForm.password);
+    const token = await getReauthToken(createForm.password, createForm.code);
     const res = await api<any>('POST', '/api-keys', {
       name: createForm.name || 'API Key',
       scopes: createForm.scopes,
@@ -278,6 +262,7 @@ function askReauth(action: 'rotate' | 'revoke' | 'legacy' | 'revokeAll', id = 0)
   pending.action = action;
   pending.id = id;
   reauthPassword.value = '';
+  reauthCode.value = '';
   reauthShow.value = true;
 }
 
@@ -286,9 +271,13 @@ async function submitReauth() {
     message.warning(t('preferences.passwordHint'));
     return;
   }
+  if (totpRequired.value && !reauthCode.value) {
+    message.warning(t('login.totpRequired'));
+    return;
+  }
   submitting.value = true;
   try {
-    const token = await getReauthToken(reauthPassword.value);
+    const token = await getReauthToken(reauthPassword.value, reauthCode.value);
     if (pending.action === 'rotate') {
       const res = await api<any>('POST', `/api-keys/${pending.id}/rotate`, undefined, { headers: { 'X-Reauth-Token': token } });
       if (res?.code !== 0) throw new Error(res?.msg || t('preferences.submitFailed'));
@@ -314,15 +303,6 @@ async function submitReauth() {
     message.error(e?.message || t('preferences.submitFailed'));
   } finally {
     submitting.value = false;
-  }
-}
-
-async function copyMcp(text: string) {
-  try {
-    await navigator.clipboard.writeText(text);
-    message.success(t('preferences.copied'));
-  } catch {
-    message.warning(t('preferences.copyManual'));
   }
 }
 
@@ -359,27 +339,5 @@ onMounted(load);
 }
 .secret-box {
   margin-top: 12px;
-}
-.mcp-block {
-  margin-top: 14px;
-}
-.mcp-block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 6px;
-  font-size: 13px;
-  font-weight: 600;
-}
-.mcp-config {
-  margin: 0;
-  padding: 12px;
-  overflow-x: auto;
-  border-radius: 8px;
-  background: var(--app-fill-2);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre;
 }
 </style>

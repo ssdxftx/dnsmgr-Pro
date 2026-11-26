@@ -8,6 +8,8 @@ const WRITE_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 const SKIP_PREFIXES = ['/api/setup', '/api/health'];
 // QQ 机器人 webhook 是匿名入口，但绑定变更必须留痕（含来源 IP），不能整体跳过审计
 const ANON_WRITE_ROUTES = ['/api/auth/login', '/api/auth/totp', '/api/register', '/api/qqbot/webhook'];
+// 这些路由的请求体包含可继续用于登录/二次确认的短时令牌，审计只记录字段名。
+const SCRUB_BODY_ROUTES = new Set(['/api/auth/totp-config']);
 
 function shouldSkip(req: any, route: string): boolean {
   if (!WRITE_METHODS.has(req.method)) return true;
@@ -83,6 +85,7 @@ function collect(req: any, reply: any): void {
   const username = clean(ctx.username || req.user?.username || req.body?.username || '', 64);
   const errmsg = ok ? '' : clean(msg, 500);
 
+  const scrubBody = ctx.scrubBody === true || SCRUB_BODY_ROUTES.has(route);
   const row: AuditRow = {
     uid,
     username,
@@ -98,7 +101,7 @@ function collect(req: any, reply: any): void {
     target_id: ctx.targetId != null ? clean(ctx.targetId, 64) : '',
     target_name: clean(ctx.targetName || '', 255),
     summary: clean(ctx.summary || defaultSummary(ctx.module || meta.module, ctx.action || meta.action), 500),
-    detail: buildDetail(req, ctx.detail, ctx.scrubBody === true),
+    detail: buildDetail(req, ctx.detail, scrubBody),
     changes: ctx.changes?.length ? JSON.stringify(ctx.changes) : null,
     result: ok ? 1 : 0,
     errmsg,

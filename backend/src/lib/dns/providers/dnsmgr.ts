@@ -137,7 +137,7 @@ export class DnsmgrDns implements DnsProvider {
 
   async addDomainRecord(Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null) {
     const param: Record<string, any> = { name: Name, type: Type, value: Value, line: Line, ttl: Number(TTL) };
-    if (Type === 'MX' && MX) param.mx = Number(MX);
+    if (Type === 'MX' && MX !== null && MX !== undefined) param.mx = Number(MX);
     if (Weight) param.weight = Number(Weight);
     if (Remark) param.remark = Remark;
     const data = await this.sendRequest('/api/record/add/' + this.domainid, param);
@@ -147,7 +147,7 @@ export class DnsmgrDns implements DnsProvider {
 
   async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = 'default', TTL = 600, MX = 1, Weight: number | null = null, Remark: string | null = null) {
     const param: Record<string, any> = { recordid: RecordId, name: Name, type: Type, value: Value, line: Line, ttl: Number(TTL) };
-    if (Type === 'MX' && MX) param.mx = Number(MX);
+    if (Type === 'MX' && MX !== null && MX !== undefined) param.mx = Number(MX);
     if (Weight) param.weight = Number(Weight);
     if (Remark) param.remark = Remark;
     return (await this.sendRequest('/api/record/update/' + this.domainid, param)) !== false;

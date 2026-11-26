@@ -254,3 +254,18 @@ function refreshMe(): void {
       meRefreshing = false;
     });
 }
+// 其它标签页登录/登出/切换账号：storage 事件只在非当前标签页触发，
+// 清空本标签页的 GET 缓存并通知 Pinia 同步 token/user，避免旧账号数据继续渲染。
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (ev: StorageEvent) => {
+    if (ev.key !== TOKEN_KEY && ev.key !== USER_KEY && ev.key !== null) return;
+    cacheEpoch++;
+    getCache.clear();
+    inflight.clear();
+    abortInflightGets();
+    meAbort?.abort();
+    window.dispatchEvent(
+      new CustomEvent('dnsmgr:auth-storage', { detail: { token: getToken(), user: getUser() } }),
+    );
+  });
+}

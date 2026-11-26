@@ -44,3 +44,8 @@ dump.rdb
 docs-site/node_modules/
 docs-site/dist/
 docs-site/.valaxy/
+
+# 本地导出、Workers POC 与工具生成的根锁文件不参与发布
+/export/
+/workers/
+/package-lock.json

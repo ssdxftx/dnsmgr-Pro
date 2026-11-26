@@ -27,6 +27,15 @@ function fail(msg) {
   process.exit(1);
 }
 
+function runCheck(label, command, args, cwd) {
+  console.log(`[release] ${label} ...`);
+  try {
+    execFileSync(command, args, { cwd: join(root, cwd), stdio: 'inherit' });
+  } catch {
+    fail(`${label} 未通过`);
+  }
+}
+
 const [version, ...msgParts] = process.argv.slice(2);
 if (!/^\d+\.\d+\.\d+$/.test(version || '')) {
   fail('请提供符合 x.y.z 的版本号，例如：node scripts/release.mjs 1.0.1');
@@ -39,9 +48,35 @@ if (git(['tag', '-l', tag])) fail(`标签 ${tag} 已存在`);
 const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
 if (branch !== 'main') fail(`当前分支为 ${branch}，请在 main 分支发布`);
 
+const status = git(['status', '--porcelain']).split('\n').filter(Boolean);
+const unstaged = status.filter((line) => line.startsWith('??') || line[1] !== ' ');
+if (unstaged.length) {
+  fail('存在未暂存或未跟踪改动，请先提交/暂存或清理后再发布：\n' + unstaged.map((f) => '  - ' + f).join('\n'));
+}
+
 const staged = git(['diff', '--cached', '--name-only']);
 if (!staged) fail('暂存区为空，请先 git add 本次要发布的改动');
-console.log(`[release] 待发布改动：\n${staged.split('\n').map((f) => '  - ' + f).join('\n')}`);
+const stagedFiles = staged.split('\n').filter(Boolean);
+const forbidden = stagedFiles.filter((f) =>
+  /^(workers\/|export\/|frontend\/dist\/|node_modules\/)/.test(f) ||
+  f === 'package-lock.json' ||
+  /(^|\/)\.env(\.|$)/.test(f) ||
+  /\.(pem|key|p12|pfx|dnsmgrbk)$/i.test(f)
+);
+if (forbidden.length) {
+  fail('暂存区包含禁止发布的文件：\n' + forbidden.map((f) => '  - ' + f).join('\n'));
+}
+console.log(`[release] 待发布改动：\n${stagedFiles.map((f) => '  - ' + f).join('\n')}`);
+
+// 发布前必须通过构建与自检；任何一步失败都在改版本号/打标签前中止。
+git(['diff', '--cached', '--check']);
+runCheck('后端类型检查', 'npx', ['tsc', '--noEmit'], 'backend');
+runCheck('MCP 自检', 'npm', ['run', 'check:mcp', '--silent'], 'backend');
+runCheck('审计覆盖检查', 'npm', ['run', 'check:audit', '--silent'], 'backend');
+runCheck('备份自检', 'npm', ['run', 'check:backup', '--silent'], 'backend');
+runCheck('前端 i18n 检查', 'npm', ['run', 'check:i18n', '--silent'], 'frontend');
+runCheck('前端格式检查', 'npm', ['run', 'check:format', '--silent'], 'frontend');
+runCheck('前端构建', 'npm', ['run', 'build', '--silent'], 'frontend');
 
 for (const rel of VERSION_FILES) {
   const file = join(root, rel);

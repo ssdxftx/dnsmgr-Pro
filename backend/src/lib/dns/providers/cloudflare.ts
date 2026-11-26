@@ -133,13 +133,23 @@ export class CloudflareDns implements DnsProvider {
     return data && data.result?.id ? String(data.result.id) : false;
   }
 
-  async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null) {
+  private wireRecordName(Name: string, paused: boolean): string {
+    let base = String(Name || '').trim();
+    if (base.endsWith('_pause')) base = base.slice(0, -6);
+    if (base === '__root__') base = '@';
+    if (paused) base = (base === '@' ? '__root__' : base) + '_pause';
+    return base === '@' ? this.domainAscii() : base + '.' + this.domainAscii();
+  }
+
+  async updateDomainRecord(RecordId: string, Name: string, Type: string, Value: string, Line = '0', TTL = 600, MX = 1, _Weight: number | null = null, Remark: string | null = null, pausedState?: boolean) {
     if (Type === 'SRV' && !this.srvNameParts(Name)) {
       this.error = 'SRV 记录名需形如 _service._proto';
       return false;
     }
-    const ascii = this.domainAscii();
-    const name = Name === '@' ? ascii : Name + '.' + ascii;
+    // 暂停状态由名称后缀表达；编辑时沿用当前状态，避免提交剥离后的名称把记录静默启用。
+    const current = await this.getDomainRecordInfo(RecordId);
+    const paused = pausedState === undefined ? (current ? current.Status === '0' : false) : pausedState;
+    const name = this.wireRecordName(Name, paused);
     const body: Record<string, any> = { name, type: this.convertType(Type), content: Value, proxied: Line === '1', ttl: Number(TTL), comment: Remark ?? null };
     if (Type === 'MX') body.priority = Number(MX);
     if (Type === 'CAA' || Type === 'SRV' || this.isUrlType(Type)) {
@@ -163,7 +173,7 @@ export class CloudflareDns implements DnsProvider {
     let name = Status === '1' ? info.Name.replace(/_pause/g, '') : info.Name + '_pause';
     if (name === '__root__') name = '@';
     else if (name === '@_pause') name = '__root___pause';
-    return (await this.updateDomainRecord(RecordId, name, info.Type, info.Value, info.Line, info.TTL, info.MX ?? 1, info.Weight, info.Remark)) !== false;
+    return (await this.updateDomainRecord(RecordId, name, info.Type, info.Value, info.Line, info.TTL, info.MX ?? 1, info.Weight, info.Remark, Status !== '1')) !== false;
   }
 
   async getRecordLine() {

@@ -30,6 +30,7 @@ export default {
     modeSyncFailed: 'Invalid JSON, original content kept',
     requiredMissing: 'Required fields missing: {fields}',
     savedOk: 'Rule saved',
+    saveFailed: 'Failed to save rule, please try again',
     colKind: 'Type',
     colSeq: 'Order',
     colEnable: 'Switch',

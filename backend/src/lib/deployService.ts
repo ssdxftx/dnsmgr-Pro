@@ -72,7 +72,19 @@ export class CertDeployService {
       sets.push('retry = ?');
       params.push(this.task.retry);
     }
-    await query(`UPDATE ${table('cert_deploy')} SET ${sets.join(', ')} WHERE id = ?`, [...params, this.tid]);
+    const token = safeProcessId(this.task?.processid);
+    if (token) {
+      const res: any = await query(
+        `UPDATE ${table('cert_deploy')} SET ${sets.join(', ')} WHERE id = ? AND processid = ?`,
+        [...params, this.tid, token],
+      );
+      if (!res || !res.affectedRows) {
+        if (err) this.saveLog('[Error] ' + err);
+        throw new Error('部署任务锁已失效，结果未写入');
+      }
+    } else {
+      await query(`UPDATE ${table('cert_deploy')} SET ${sets.join(', ')} WHERE id = ?`, [...params, this.tid]);
+    }
     if (err) this.saveLog('[Error] ' + err);
   }
 
@@ -95,57 +107,55 @@ export class CertDeployService {
     );
   }
 
-  private async lockTask() {
-    await this.takeTaskLock();
-  }
-
-  private async unlockTask() {
-    const token = safeProcessId(this.task.processid);
-    if (token) await this.releaseTaskLock(token);
-  }
-
   async process(isManual = false): Promise<void> {
+    // 先加租约锁，再重新加载任务：加载后使用的 aid/oid/config 必须与当前锁对应的最新行一致，
+    // 否则编辑接口在加载与加锁之间保存的新目标会被旧配置覆盖。
+    const token = await this.takeTaskLock();
     try {
-      await this.load();
-    } catch (e: any) {
-      // 账户被删除/密钥轮换/厂商不支持等前置失败也必须落到负状态并带 retrytime，
-      // 否则 status 恒为 0，调度器每 5 分钟重复选中且永远不会发失败通知。
-      if (this.task) await this.saveResult(-1, e?.message || '部署任务初始化失败').catch(() => undefined);
-      throw e;
-    }
-    if (this.task.status >= 1) return;
-    if (this.task.retry >= 6 && !isManual) {
-      const msg = '已超出最大重试次数(' + (this.task.error || '未知错误') + ')';
-      await this.saveResult(-1, msg).catch(() => undefined);
-      throw new Error(msg);
-    }
+      try {
+        await this.load();
+      } catch (e: any) {
+        // 账户被删除/密钥轮换等加载失败也必须落负状态并带 retrytime。
+        if (this.task) await this.saveResult(-1, e?.message || '部署任务初始化失败').catch(() => undefined);
+        throw e;
+      }
+      if (this.task.status >= 1) return;
+      if (this.task.retry >= 6 && !isManual) {
+        const msg = '已超出最大重试次数(' + (this.task.error || '未知错误') + ')';
+        await this.saveResult(-1, msg);
+        throw new Error(msg);
+      }
 
-    const fail = async (msg: string): Promise<never> => {
-      await this.saveResult(-1, msg);
-      throw new Error(msg);
-    };
+      const fail = async (msg: string): Promise<never> => {
+        await this.saveResult(-1, msg);
+        throw new Error(msg);
+      };
 
-    const order = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [this.task.oid]);
-    if (!order) return fail('SSL证书订单不存在');
-    if (order.status === 4) return fail('SSL证书订单已吊销');
-    if (order.status !== 3) return fail('SSL证书订单未完成签发');
-    if (!order.fullchain || !order.privatekey) return fail('SSL证书或私钥内容不存在');
-    // 私钥为加密存储，部署前解密（兼容历史明文）；密文解密失败时禁止把密文当私钥部署
-    const decryptedKey = decryptText(order.privatekey);
-    if (decryptedKey === null && String(order.privatekey).startsWith('enc:')) {
-      return fail('证书私钥无法解密（系统密钥可能已变更），请重新签发或导入证书');
-    }
-    const privateKey = decryptedKey ?? order.privatekey;
+      const order = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [this.task.oid]);
+      if (!order) return fail('SSL证书订单不存在');
+      if (order.status === 4) return fail('SSL证书订单已吊销');
+      if (order.status !== 3) return fail('SSL证书订单未完成签发');
+      if (!order.fullchain || !order.privatekey) return fail('SSL证书或私钥内容不存在');
+      const expRaw = order.expiretime;
+      const exp = expRaw instanceof Date ? expRaw.getTime() : new Date(String(expRaw || '').replace(' ', 'T')).getTime();
+      if (!Number.isFinite(exp) || exp <= Date.now()) return fail('SSL证书已过期，请先续签后再部署');
+      // 私钥为加密存储，部署前解密（兼容历史明文）；密文解密失败时禁止把密文当私钥部署
+      const decryptedKey = decryptText(order.privatekey);
+      if (decryptedKey === null && String(order.privatekey).startsWith('enc:')) {
+        return fail('证书私钥无法解密（系统密钥可能已变更），请重新签发或导入证书');
+      }
+      const privateKey = decryptedKey ?? order.privatekey;
 
-    await this.lockTask();
-    try {
-      // 加锁前读到的是旧状态：并发的手动/自动触发可能已在等锁期间完成部署，
-      // 拿到锁后必须复检，避免同一任务被重复上传证书。
-      const current: any = await queryOne(`SELECT status FROM ${table('cert_deploy')} WHERE id = ?`, [this.tid]);
-      if (!current || Number(current.status) >= 1) return;
+      // 加锁后重新确认状态，避免等待锁期间其他执行者已经完成部署。
+      const current: any = await queryOne(
+        `SELECT status FROM ${table('cert_deploy')} WHERE id = ? AND processid = ?`,
+        [this.tid, token],
+      );
+      if (!current) throw new Error('部署任务锁已失效，请稍后重试');
+      if (Number(current.status) >= 1) return;
       await this.deploy(order.fullchain, privateKey);
     } finally {
-      await this.unlockTask();
+      await this.releaseTaskLock(token).catch(() => undefined);
     }
   }
 

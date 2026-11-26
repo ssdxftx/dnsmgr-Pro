@@ -6,7 +6,7 @@ import type { FastifyInstance } from 'fastify';
 import { query, queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { audit } from '../lib/audit/context.js';
-import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig } from '../lib/secret.js';
+import { decryptConfig, encryptConfig, maskConfig, mergeMaskedConfig, SECRET_MASK } from '../lib/secret.js';
 import {
   backupsDir,
   ensureDataDirs,
@@ -38,6 +38,33 @@ import { emitEvent } from '../lib/events.js';
 
 function isAdmin(user: any): boolean {
   return checkLevel(user, 2);
+}
+
+/** 显式提交的凭据：掩码/空值代表“沿用旧值”，不能用于新主机认证。 */
+function explicitSecret(config: any, key: string): string {
+  const value = config && typeof config === 'object' ? config[key] : undefined;
+  if (value === undefined || value === null) return '';
+  const text = String(value);
+  return text && text !== SECRET_MASK ? text : '';
+}
+
+/** 目的地身份：WebDAV 按协议+主机+端口，S3 按 endpoint。主机变化时禁止复用旧凭据。 */
+function destinationEndpoint(type: string, config: any): string {
+  if (!config || typeof config !== 'object') return '';
+  if (type === 'webdav') {
+    try {
+      const u = new URL(String(config.url || ''));
+      return `${u.protocol}//${u.host}`.toLowerCase();
+    } catch {
+      return String(config.url || '').trim().toLowerCase();
+    }
+  }
+  return String(config.endpoint || '').trim().replace(/\/+$/, '').toLowerCase();
+}
+
+function hasCredentialChange(before: any, after: any, type: string): boolean {
+  if (type === 'webdav') return destinationEndpoint(type, before) !== destinationEndpoint(type, after);
+  return destinationEndpoint(type, before) !== destinationEndpoint(type, after);
 }
 
 function archiveMeta(name: string) {
@@ -89,9 +116,9 @@ export default async function backupRoutes(app: FastifyInstance) {
     const b = req.body || {};
     const scope = b.scope === 'user' ? 'user' : 'site';
     if (scope === 'site' && !isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
-    // 个人备份包含全部私有凭据，且口令模式会用备份口令试解保险库；
-    // 必须二次确认，避免仅凭被盗会话无限次低速爆破口令（绕过保险库失败计数）。
-    if (scope === 'user') {
+    // 个人备份包含全部私有凭据，整站备份可被上传到攻击者目的地；
+    // 两者都必须二次确认，避免仅凭被盗会话导出或外传备份。
+    {
       const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.export');
       if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     }
@@ -482,6 +509,8 @@ export default async function backupRoutes(app: FastifyInstance) {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     const b = req.body || {};
     if (!b.name || (b.type !== 'webdav' && b.type !== 's3')) return { code: -1, msg: '请填写名称并选择类型' };
+    const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.destination.create');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const r: any = await query(
       `INSERT INTO ${table('backup_destination')} (name, type, config, enabled, addtime) VALUES (?, ?, ?, ?, NOW())`,
       [String(b.name), b.type, encryptConfig(b.config || {}), b.enabled === false ? 0 : 1],
@@ -494,9 +523,21 @@ export default async function backupRoutes(app: FastifyInstance) {
     const row: any = await queryOne(`SELECT * FROM ${table('backup_destination')} WHERE id = ?`, [Number(req.params.id)]);
     if (!row) return { code: -1, msg: '目的地不存在' };
     const b = req.body || {};
+    const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.destination.update');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const old = decryptConfig(row.config) || {};
+    const incoming = b.config || {};
     // 前端回显的是掩码，敏感字段沿用原值
-    const merged = mergeMaskedConfig(b.config || {}, old);
+    const merged = mergeMaskedConfig(incoming, old);
+    const type = b.type === 'webdav' || b.type === 's3' ? b.type : String(row.type);
+    if (hasCredentialChange(old, merged, type)) {
+      const keys = type === 'webdav' ? ['username', 'password'] : ['accessKeyId', 'secretAccessKey'];
+      const missing = keys.filter((key) => !explicitSecret(incoming, key));
+      if (missing.length) {
+        return reply.code(400).send({ code: -1, msg: `更改备份服务器地址时必须重新填写凭据：${missing.join('、')}` });
+      }
+      for (const key of keys) merged[key] = explicitSecret(incoming, key);
+    }
     // 编辑时未显式传入 enabled 必须保持原状态：否则因凭据泄露而禁用的目的地
     // 会在「编辑名称」后被静默重新启用，继续把备份写到不可信端点。
     const enabled =
@@ -516,12 +557,16 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.delete('/api/backup/destinations/:id', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.destination.delete');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     await query(`DELETE FROM ${table('backup_destination')} WHERE id = ?`, [Number(req.params.id)]);
     return { code: 0, msg: '已删除' };
   });
 
   app.post('/api/backup/destinations/:id/test', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.destination.test');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const row = await getDestination(Number(req.params.id));
     if (!row) return { code: -1, msg: '目的地不存在' };
     const r = await testDestination(row);
@@ -542,6 +587,8 @@ export default async function backupRoutes(app: FastifyInstance) {
   app.post('/api/backup/schedules', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
     const b = req.body || {};
+    const pwErr = await requireLoginPassword(Number(req.user.uid), b.password, req, 'backup.schedule.create');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const time = scheduleTime(b);
     const next = computeNextRun(b);
     const r: any = await query(
@@ -568,6 +615,8 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.put('/api/backup/schedules/:id', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.schedule.update');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const id = Number(req.params.id);
     const row: any = await queryOne(`SELECT * FROM ${table('backup_schedule')} WHERE id = ?`, [id]);
     if (!row) return { code: -1, msg: '计划不存在' };
@@ -598,12 +647,16 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.delete('/api/backup/schedules/:id', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.schedule.delete');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     await query(`DELETE FROM ${table('backup_schedule')} WHERE id = ?`, [Number(req.params.id)]);
     return { code: 0, msg: '已删除' };
   });
 
   app.post('/api/backup/schedules/:id/run', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.schedule.run');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     if (isMaintenance()) return reply.code(409).send({ code: -1, msg: '系统维护中，暂不能执行备份' });
     const row: any = await queryOne(`SELECT * FROM ${table('backup_schedule')} WHERE id = ?`, [Number(req.params.id)]);
     if (!row) return { code: -1, msg: '计划不存在' };
@@ -643,6 +696,8 @@ export default async function backupRoutes(app: FastifyInstance) {
   // ===== 远端浏览 / 拉回 =====
   app.get('/api/backup/remote/:destId', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), undefined, req, 'backup.remote.list');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     try {
       const items = await listRemote(Number(req.params.destId));
       return { code: 0, data: items.map((it) => ({ ...it, ...archiveMeta(it.name) })) };
@@ -653,6 +708,8 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.delete('/api/backup/remote/:destId', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.remote.delete');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const rawName = String(req.query?.name || req.body?.name || '');
     const name = path.basename(rawName);
     if (name !== rawName || !name.endsWith('.dnsmgrbk')) return { code: -1, msg: '文件名不合法' };
@@ -673,6 +730,8 @@ export default async function backupRoutes(app: FastifyInstance) {
 
   app.post('/api/backup/remote/:destId/pull', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
+    const pwErr = await requireLoginPassword(Number(req.user.uid), (req.body || {}).password, req, 'backup.remote.pull');
+    if (pwErr) return reply.code(400).send({ code: -1, msg: pwErr });
     const rawName = String(req.body?.name || '');
     const name = path.basename(rawName);
     // 远端对象只允许纯文件名，避免把 ../ 等路径片段传给 WebDAV/S3 客户端

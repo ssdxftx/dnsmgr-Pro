@@ -41,6 +41,8 @@ export interface CertDeployPlan {
   accountName?: string;
   product: string;
   config: Record<string, any>;
+  ownerUid?: number;
+  visibility?: 'shared' | 'private';
 }
 
 // 云端加速域名当前证书项（用于证书管理弹窗展示）
