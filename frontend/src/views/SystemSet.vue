@@ -260,12 +260,18 @@
                   @update:value="setLegacyApiV1"
                 />
               </n-form-item>
+              <n-form-item :label="t('systemSet.mcpLegacyEnable')">
+                <n-switch :value="(cfg.mcp_legacy_enable || '0') === '1'" :disabled="saveBusy" @update:value="setMcpLegacy" />
+              </n-form-item>
               <n-form-item :label="t('systemSet.legacyApiEndpoints')">
                 <n-input value="/api/domain, /api/domain/:id, /api/record/*, /api/cert/order, /quicklogin, /cron, /dmtask/status, /optimizeip/status" readonly type="textarea" :rows="2" />
               </n-form-item>
             </n-form>
             <n-alert v-if="(cfg.legacy_api_v1_enable || '0') === '1'" type="error" :show-icon="false" style="margin-top:8px">
               {{ t('systemSet.legacyApiV1Hint') }}
+            </n-alert>
+            <n-alert v-if="(cfg.mcp_legacy_enable || '0') === '1'" type="error" :show-icon="false" style="margin-top:8px">
+              {{ t('systemSet.mcpLegacyHint') }}
             </n-alert>
             <n-alert type="info" :show-icon="false" style="margin-top:16px">
               {{ t('systemSet.legacyApiHint') }}
@@ -537,7 +543,7 @@ async function loadSettings() {
   if (res.code === 0) Object.assign(cfg, res.data);
 }
 
-const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|legacy_|audit_retain_days$)/;
+const SENSITIVE_SETTING_RE = /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|legacy_|mcp_legacy_|audit_retain_days$)/;
 
 function askPassword(): Promise<string | null> {
   return new Promise((resolve) => {
@@ -641,6 +647,11 @@ async function setLegacyApiV1(v: boolean) {
   const prev = cfg.legacy_api_v1_enable;
   cfg.legacy_api_v1_enable = v ? '1' : '0';
   if (!(await saveFields(['legacy_api_v1_enable']))) cfg.legacy_api_v1_enable = prev;
+}
+async function setMcpLegacy(v: boolean) {
+  const prev = cfg.mcp_legacy_enable;
+  cfg.mcp_legacy_enable = v ? '1' : '0';
+  if (!(await saveFields(['mcp_legacy_enable']))) cfg.mcp_legacy_enable = prev;
 }
 
 const statCacheInterval = computed<number>({

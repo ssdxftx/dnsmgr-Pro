@@ -1,6 +1,8 @@
 import { query, queryOne, table } from '../../db.js';
 import { decryptText } from '../../lib/secret.js';
+import { buildPfx } from '../../lib/certService.js';
 import { getMainDomain } from '../../lib/cert/utils.js';
+import { canAccessCertOrder } from '../../lib/accounts/visibility.js';
 import { audit } from '../../lib/audit/context.js';
 import { callRoute } from '../invoker.js';
 import {
@@ -47,7 +49,30 @@ function readStoredPrivateKey(raw: any): string | null {
 
 async function orderGet(ctx: McpContext, args: ToolArgs): Promise<any> {
   const id = Number(args.id);
-  // 私钥/PFX 读取必须与 UI 一致走登录密码确认：MCP 不再保留绕过确认的旧版直查分支。
+  if (ctx.mode === 'legacy') {
+    if (!(await canAccessCertOrder(id, ctx.user))) return { code: -1, msg: '证书订单不存在' };
+    const row: any = await queryOne(`SELECT * FROM ${table('cert_order')} WHERE id = ?`, [id]);
+    if (!row) return { code: -1, msg: '证书订单不存在' };
+    const domains: any[] = await query(`SELECT domain FROM ${table('cert_domain')} WHERE oid = ? ORDER BY sort ASC`, [id]);
+    const privateKey = readStoredPrivateKey(row.privatekey);
+    if (privateKey === null) return { code: -1, msg: '私钥解密失败，请重新保存证书' };
+    const data: any = {
+      id: row.id,
+      crt: row.fullchain,
+      key: privateKey,
+      issuetime: row.issuetime,
+      expiretime: row.expiretime,
+      domains: domains.map((d) => d.domain),
+    };
+    if (boolValue(args.include_pfx) && row.fullchain && privateKey) {
+      try {
+        data.pfx = (await buildPfx(row.fullchain, privateKey, '123456')).toString('base64');
+      } catch {
+        data.pfx = null;
+      }
+    }
+    return { code: 0, data };
+  }
   const res = await callRoute(ctx, {
     method: 'GET',
     path: `/api/cert/orders/${id}/info`,

@@ -117,6 +117,8 @@ export default {
     legacyApiV1Hint: '旧版签名（sign）不绑定请求路径与参数，被截获后可在 5 分钟内重放到任意旧版接口，因此默认停用。仅在旧客户端尚未支持 sign2 + nonce 时临时开启，并尽快升级客户端。',
     legacyApiEndpoints: '兼容路径',
     legacyApiHint: '兼容范围：域名列表/详情、快捷登录链接、解析记录增删改查与批量操作、证书订单读取、/cron?key= 定时触发、容灾与优选状态探测。目标用户需开启 API 权限并保留旧版 apikey；新版 /api/v1 不受影响。',
+    mcpLegacyEnable: '启用 MCP 旧版兼容',
+    mcpLegacyHint: '开启后 /mcp 接受 Authorization: Bearer <uid>:<apikey>，彩虹聚合 DNS 旧版 MCP 客户端可零改动接入。该开关与旧版 HTTP API 兼容层相互独立。旧版 apikey 不受作用域、有效期和 IP 白名单约束，请仅在迁移期间开启。',
     statCacheCardTitle: 'CDN 数据统计缓存',
     statCacheAlert: '开启后系统会按服务商数据粒度定时拉取统计并保存到服务器（近 30 天按天、近 48 小时按小时），打开数据统计页即可快速加载。该功能会在后台持续消耗服务器资源，请按需开启；并可在「用户管理」中为其他用户单独开启查看权限。',
     statCacheEnable: '开启统计缓存',

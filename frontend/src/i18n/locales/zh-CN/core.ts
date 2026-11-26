@@ -218,9 +218,11 @@ export default {
   mcp: {
     title: 'MCP 接口',
     subtitle: '让 AI Agent 通过 MCP 管理域名解析、证书、CDN 与自动化任务',
-    hint: '使用 X-API-Key 认证。API 密钥在偏好设置中创建和管理。',
+    hint: '推荐使用 X-API-Key 认证。API 密钥在偏好设置中创建和管理；旧版彩虹 DNS 客户端可在系统设置中开启 MCP 旧版兼容。',
     endpoint: 'MCP 地址',
     apiKeyMode: '推荐：X-API-Key',
+    legacyMode: '彩虹聚合 DNS 旧版兼容',
+    legacyHint: '服务端已开启 MCP 旧版兼容。该配置会把 user.apikey 作为 Bearer 凭据发送，建议仅在迁移旧客户端期间使用。',
     manageKeys: '管理 API 密钥',
     copy: '复制',
     copied: '已复制到剪贴板',

@@ -25,7 +25,7 @@ function safeEqual(a: string, b: string): boolean {
 // 需要重输登录密码才能修改的敏感项：除凭据/通道配置外，注册开关、定时任务密钥、
 // 审计保留期都可能被会话被盗者用来对抗取证或扩大攻击面，必须纳入二次确认。
 const SENSITIVE_SETTING_RE =
-  /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|legacy_|audit_retain_days$)/;
+  /^(proxy_|mail_|webhook_|custom_webhook_|tgbot_|wechat_|qqbot_|cron_|register_|backup_|legacy_|mcp_legacy_|audit_retain_days$)/;
 
 const authenticate = (app: FastifyInstance) => ({
   preHandler: async (req: any, reply: any) => {
@@ -45,7 +45,7 @@ const SETTINGS_KEYS = new Set([
   'custom_webhook_url', 'custom_webhook_method', 'custom_webhook_content_type', 'custom_webhook_headers', 'custom_webhook_body', 'custom_webhook_content_format',
   'vcode', 'register_enable', 'register_mode',
   'proxy_server', 'proxy_port', 'proxy_user', 'proxy_pwd', 'proxy_type',
-  'cron_type', 'cron_key', 'legacy_api_enable', 'legacy_api_v1_enable',
+  'cron_type', 'cron_key', 'legacy_api_enable', 'legacy_api_v1_enable', 'mcp_legacy_enable',
   'cdn_stats_cache', 'cdn_stats_cache_interval', 'audit_retain_days',
 ]);
 

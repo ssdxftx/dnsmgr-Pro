@@ -269,7 +269,7 @@ Pro 的 API Key 已经支持作用域和有效期，适合把 MCP 纳入现有�
 | 维度 | 上游 v2.22 | 彩虹 DNS Pro 1.35.10 |
 | --- | --- | --- |
 | 运行环境 | PHP 8 / ThinkPHP | Node.js / TypeScript / Fastify |
-| 认证 | `Authorization: Bearer <uid>:<apikey>` | `Authorization: Bearer <JWT>` 或 `X-API-Key` |
+| 认证 | `Authorization: Bearer <uid>:<apikey>` | `Authorization: Bearer <JWT>` 或 `X-API-Key`；旧版 Bearer 由独立开关开启 |
 | API Key 存储 | `user.apikey` 明文 | `api_key.key_hash` 哈希 |
 | 作用域 | 无 | 模块 + read/write 作用域 |
 | 有效期 | 无 | 支持 |
@@ -457,10 +457,10 @@ README.md
 
 - 新增 `/mcp` JSON-RPC 2.0 端点，支持 `initialize`、`ping`、`tools/list`、`tools/call`、批量请求、通知 202、Origin 校验、405/401/429 和解析错误处理。
 - 工具契约与上游 v2.22 对齐：28 个工具、124 个动作；普通用户 6 个工具、27 个动作，`domain_manage` 仅保留 `update_date`、`alias_add`、`alias_delete`。后续 Pro 第一批扩展新增 17 个只读工具，第二批新增 13 个受控写工具，第三批新增 11 个 CDN 高级工具，当前为管理员 69 个工具、452 个动作，普通用户 27 个工具、149 个动作，详见 `MCP_MODULE_COVERAGE_REPORT.md`。
-- 认证同时支持 `X-API-Key`、`Authorization: Bearer <API Key>` 和兼容旧版的 `Authorization: Bearer <uid>:<apikey>`；API Key 继续执行作用域、有效期与 IP 白名单校验。
+- 认证支持 `X-API-Key` 与 `Authorization: Bearer <API Key>`；旧版 `Authorization: Bearer <uid>:<apikey>` 由系统设置中的「启用 MCP 旧版兼容」独立开关控制，默认关闭。API Key 继续执行作用域、有效期与 IP 白名单校验。
 - 工具执行通过 Fastify `app.inject()` 调用现有 `/api/*`，保留路由级权限、审计、幂等和限流；MCP 层额外记录工具、动作、Key、用户、IP 与参数摘要。
-- 证书私钥、PFX、长任务等行为按 Pro 安全模型调整：API Key 读取私钥仍要求登录密码确认；旧版 `uid:apikey` 保持上游行为。
-- 前端“偏好设置 → MCP 接口”展示端点和两种客户端配置模板；README 补充接口说明。
+- 证书私钥、PFX、长任务等行为按 Pro 安全模型调整：API Key 读取私钥仍要求登录密码确认；开启 MCP 旧版兼容后，旧版 `uid:apikey` 保持上游直读私钥行为。
+- 前端“偏好设置 → MCP 接口”展示端点和客户端配置模板；开启旧版兼容时额外展示 `Authorization: Bearer <uid>:<apikey>` 模板。README 补充接口说明。
 - 新增 `backend/scripts/check-mcp.ts` 与 `npm run check:mcp`，并接入 CI，断言工具数量、动作数量、权限视图和 JSON-RPC 边界。
 
 验证结果：后端 `tsc --noEmit`、`check:mcp`、`check:sqlite`、`check:backup` 通过；前端 `vue-tsc --noEmit`、`check:i18n`、`check:format`、`vite build` 通过。
@@ -489,7 +489,7 @@ README.md
 
 仍保留的已知差异（均为 Pro 安全/产品模型，不改变上游工具契约）：
 
-- API Key 模式读取证书私钥仍要求 `X-Confirm-Password`；旧版 `uid:apikey` 模式与上游一致。
+- API Key 模式读取证书私钥仍要求 `X-Confirm-Password`；开启 MCP 旧版兼容后，`uid:apikey` 模式的私钥读取与上游一致。
 - 账户列表返回掩码后的 `config`，上游返回明文；部署/证书任务长操作沿用 Pro 的同步路由与后台任务机制。
 - 删除域名/批量删除域名时，Pro 会阻止仍被证书订单引用的域名；上游直接删除。
 - `domain_manage.batch_add` 逐个调用 Pro 接入接口，以便继续执行云账户校验和权限清理；上游使用 `insertAll`，部分失败时的汇总消息不同。

@@ -1,6 +1,8 @@
+import { timingSafeEqual } from 'node:crypto';
 import { findUserById } from '../auth.js';
 import { query, queryOne, table } from '../db.js';
 import { hashApiKey, ipAllowed, parseScopes } from '../lib/apiKeys.js';
+import { mcpLegacyEnabled } from '../lib/legacyApi.js';
 import type { McpContext } from './types.js';
 
 export class McpAuthError extends Error {
@@ -20,6 +22,46 @@ function bearerToken(req: any): string {
   if (!auth) return '';
   if (auth.slice(0, 7).toLowerCase() !== 'bearer ') return '';
   return auth.slice(7).trim();
+}
+
+function equalText(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  return left.length === right.length && timingSafeEqual(left, right);
+}
+
+async function legacyContext(req: any, token: string, ip: string): Promise<McpContext> {
+  if (!(await mcpLegacyEnabled())) {
+    throw new McpAuthError('MCP 旧版兼容未开启，请在系统设置中启用，或使用 X-API-Key');
+  }
+  const parts = token.split(':');
+  const uidText = parts[0] || '';
+  const apikey = parts.slice(1).join(':');
+  if (parts.length < 2 || !/^\d+$/.test(uidText) || !apikey) {
+    throw new McpAuthError('认证信息格式错误，应为 <uid>:<apikey>');
+  }
+  const uid = Number(uidText);
+  if (!Number.isSafeInteger(uid) || uid <= 0) throw new McpAuthError('认证信息格式错误，应为 <uid>:<apikey>');
+  const user: any = await findUserById(uid);
+  if (!user || !user.apikey || !equalText(String(user.apikey), apikey)) {
+    throw new McpAuthError('用户不存在或API密钥错误');
+  }
+  if (Number(user.status) === 0) throw new McpAuthError('该用户已被封禁');
+  if (Number(user.is_api) === 0) throw new McpAuthError('该用户未开启API权限');
+  return {
+    app: req.server,
+    req,
+    user,
+    uid,
+    level: Number(user.level || 0),
+    mode: 'legacy',
+    scopes: ['*'],
+    apiKeyId: 0,
+    apiKeyName: 'legacy',
+    ip,
+    jsonrpcId: null,
+    requestHeaders: req.headers || {},
+  };
 }
 
 async function apiKeyContext(req: any, apiKey: string, ip: string): Promise<McpContext> {
@@ -78,10 +120,6 @@ export async function authenticateMcp(req: any): Promise<McpContext> {
   if (!token) {
     throw new McpAuthError('缺少认证信息，请使用 X-API-Key');
   }
-  // 旧版明文 user.apikey 不受作用域、有效期和 IP 白名单约束；常规 API 已停用该凭据，
-  // MCP 也不再把 <uid>:<apikey> 解释为认证信息，避免绕过 X-API-Key 的全部限制。
-  if (/^\d+:/.test(token)) {
-    throw new McpAuthError('旧版 uid:apikey 认证已停用，请使用 X-API-Key');
-  }
+  if (/^\d+:/.test(token)) return legacyContext(req, token, ip);
   return apiKeyContext(req, token, ip);
 }

@@ -20,23 +20,39 @@
         </div>
         <pre class="mcp-config">{{ mcpApiConfig }}</pre>
       </div>
+      <div v-if="legacyEnabled" class="mcp-block">
+        <div class="mcp-block-head">
+          <span>{{ t('mcp.legacyMode') }}</span>
+          <n-button size="tiny" quaternary type="primary" @click="copy(mcpLegacyConfig)">{{ t('mcp.copy') }}</n-button>
+        </div>
+        <n-alert type="warning" :show-icon="false" style="margin-bottom:8px">{{ t('mcp.legacyHint') }}</n-alert>
+        <pre class="mcp-config">{{ mcpLegacyConfig }}</pre>
+      </div>
     </n-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useRouter } from 'vue-router';
-import { NButton, NCard, NForm, NFormItem, NInput, useMessage } from 'naive-ui';
+import { NAlert, NButton, NCard, NForm, NFormItem, NInput, useMessage } from 'naive-ui';
+import { api } from '../api';
 import PageHeader from '../components/PageHeader.vue';
 
 const { t } = useI18n();
 const router = useRouter();
 const message = useMessage();
 
+const legacyEnabled = ref(false);
 const mcpUrl = computed(() => `${window.location.origin}/mcp`);
 const mcpApiConfig = computed(() => JSON.stringify({ mcpServers: { dnsmgr: { url: mcpUrl.value, headers: { 'X-API-Key': '<YOUR_API_KEY>' } } } }, null, 2));
+const mcpLegacyConfig = computed(() => JSON.stringify({ mcpServers: { dnsmgr: { url: mcpUrl.value, headers: { Authorization: 'Bearer <UID>:<APIKEY>' } } } }, null, 2));
+
+onMounted(async () => {
+  const res = await api<any>('GET', '/about');
+  if (res.code === 0) legacyEnabled.value = res.data?.mcpLegacy === true;
+});
 
 async function copy(text: string) {
   try {

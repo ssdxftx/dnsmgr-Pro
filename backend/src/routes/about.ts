@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { APP_DESCRIPTION, APP_NAME, APP_VERSION, LICENSE, REPO_URL, UPDATE_REPO } from '../lib/version.js';
 import { checkUpdate } from '../lib/update/updateCheck.js';
+import { mcpLegacyEnabled } from '../lib/legacyApi.js';
 import { checkLevel } from '../auth.js';
 
 export default async function aboutRoutes(app: FastifyInstance) {
@@ -16,6 +17,7 @@ export default async function aboutRoutes(app: FastifyInstance) {
       repo: REPO_URL,
       license: LICENSE,
       updateRepo: UPDATE_REPO,
+      mcpLegacy: await mcpLegacyEnabled(),
     };
     // Node 版本/平台/启动时间属于部署侦察信息，仅管理员可见
     if (checkLevel(req.user, 2)) {

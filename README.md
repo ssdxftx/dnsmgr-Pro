@@ -100,7 +100,7 @@ npm run dev
 
 - **多用户体系**：超级管理员、管理员、普通用户；支持自助注册（邮箱验证码或注册码，可配置开关与方式）、TOTP 两步验证、密码重置、账号启停、域名与子域名授权、只读权限、统计查看权限。
 - **通知通道**：邮件（SMTP、SendCloud、阿里云邮件推送）、WxPusher、Telegram、QQ 机器人、钉钉、企业微信、飞书/Lark、自定义 Webhook。
-- **MCP 接口**：`/mcp` 提供 JSON-RPC 2.0 MCP 服务，在彩虹 DNS 2.22 契约基础上扩展为 69 个工具、452 个动作，覆盖域名、解析记录、SSL 证书、证书部署、Cloudflare、CDN 与高级规则/安全/边缘/流量/计费、DNS 检测、审计、异步任务、备份、系统设置、用户、事件回调、CF 规则与保险库状态；支持 `X-API-Key` 与兼容旧版的 `Authorization: Bearer <uid>:<apikey>`。
+- **MCP 接口**：`/mcp` 提供 JSON-RPC 2.0 MCP 服务，在彩虹 DNS 2.22 契约基础上扩展为 69 个工具、452 个动作，覆盖域名、解析记录、SSL 证书、证书部署、Cloudflare、CDN 与高级规则/安全/边缘/流量/计费、DNS 检测、审计、异步任务、备份、系统设置、用户、事件回调、CF 规则与保险库状态；推荐使用 `X-API-Key`，并可在「系统设置 → 旧版接口兼容」中开启 MCP 旧版兼容，继续接受 `Authorization: Bearer <uid>:<apikey>`。
 - **接口与集成**：`/api/v1` 提供 RESTful JSON API（`/api` 为兼容别名），使用 Bearer 会话令牌或可限定作用域、有效期、IP 白名单的 `X-API-Key`；支持 `Idempotency-Key` 幂等写请求、`X-Reauth-Token` 敏感操作二次确认、统一异步任务、事件回调、`/api/openapi.json` 与 `/api/docs`；支持 CORS 来源白名单与 cron 触发地址。
 - **系统设置**：站点配置、注册策略、通知配置、全局 HTTP/HTTPS/SOCKS 代理、统计缓存、审计保留天数、cron 密钥与测试发送。
 - **体验**：简体中文与 English 双语、浅色/深色主题、桌面/平板/移动端响应式布局、列表页缓存、图表统计与快捷操作仪表盘。

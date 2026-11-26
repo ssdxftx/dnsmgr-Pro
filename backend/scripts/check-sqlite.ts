@@ -73,6 +73,29 @@ const { legacyApiAuth, legacyBody } = await import('../src/lib/legacyApi.js');
 const form = legacyBody({ query: {}, body: 'uid=1000&domains%5B%5D=a.example.com&domains%5B%5D=b.example.com' });
 assert(Array.isArray(form.domains) && form.domains.length === 2, '旧版表单数组字段解析正确');
 await db.query('UPDATE dnsmgr_user SET is_api = 1, apikey = ? WHERE id = 1000', ['legacy-check-key']);
+
+const { authenticateMcp } = await import('../src/mcp/auth.js');
+const mcpLegacyReq = () => ({ headers: { authorization: 'Bearer 1000:legacy-check-key' }, ip: '127.0.0.1', server: {} });
+await config.configSet('mcp_legacy_enable', '0');
+let mcpLegacyOff = false;
+try {
+  await authenticateMcp(mcpLegacyReq());
+} catch (e: any) {
+  mcpLegacyOff = /MCP 旧版兼容未开启/.test(e?.message || '');
+}
+assert(mcpLegacyOff, 'MCP 旧版兼容默认关闭');
+await config.configSet('mcp_legacy_enable', '1');
+const mcpLegacyCtx = await authenticateMcp(mcpLegacyReq());
+assert(mcpLegacyCtx.mode === 'legacy' && mcpLegacyCtx.uid === 1000 && mcpLegacyCtx.scopes.includes('*'), 'MCP 旧版 Bearer 认证通过');
+let mcpLegacyBad = false;
+try {
+  await authenticateMcp({ headers: { authorization: 'Bearer 1000:wrong-key' }, ip: '127.0.0.1', server: {} });
+} catch (e: any) {
+  mcpLegacyBad = /用户不存在或API密钥错误/.test(e?.message || '');
+}
+assert(mcpLegacyBad, 'MCP 旧版密钥错误被拒绝');
+await config.configSet('mcp_legacy_enable', '0');
+
 await config.configSet('legacy_api_enable', '0');
 const offAuth = await legacyApiAuth({ query: {}, body: { uid: 1000, timestamp: '1', sign: 'x' }, headers: {} });
 assert(!offAuth.ok && offAuth.status === 404, '旧版 API 兼容层默认关闭');

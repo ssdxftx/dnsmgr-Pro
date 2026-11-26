@@ -14,6 +14,11 @@ export async function legacyApiEnabled(): Promise<boolean> {
   return (await configGet('legacy_api_enable', '0')) === '1';
 }
 
+/** MCP 旧版客户端使用 Bearer <uid>:<apikey>，风险高于旧版 HTTP API，单独开关控制 */
+export async function mcpLegacyEnabled(): Promise<boolean> {
+  return (await configGet('mcp_legacy_enable', '0')) === '1';
+}
+
 /** 旧版 md5 签名不绑定请求，可在 300 秒内被重放到任意旧版接口；默认关闭，需显式开启 */
 async function legacyV1Enabled(): Promise<boolean> {
   return (await configGet('legacy_api_v1_enable', '0')) === '1';

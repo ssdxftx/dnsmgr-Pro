@@ -218,9 +218,11 @@ export default {
   mcp: {
     title: 'MCP Endpoint',
     subtitle: 'Connect AI agents to DNS, certificates, CDN and automation tasks over MCP',
-    hint: 'Authenticate with X-API-Key. API keys are created and managed in Preferences.',
+    hint: 'X-API-Key is recommended. API keys are created and managed in Preferences; legacy Rainbow DNS clients can enable MCP legacy compatibility in system settings.',
     endpoint: 'MCP URL',
     apiKeyMode: 'Recommended: X-API-Key',
+    legacyMode: 'Rainbow DNS Legacy Compatibility',
+    legacyHint: 'MCP legacy compatibility is enabled on the server. This configuration sends user.apikey as a Bearer credential; use it only while migrating legacy clients.',
     manageKeys: 'Manage API keys',
     copy: 'Copy',
     copied: 'Copied to clipboard',

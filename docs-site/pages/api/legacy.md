@@ -19,6 +19,16 @@ top: 90
 - 已开启 API 权限（`is_api = 1`）。
 - 保留旧版 `user.apikey`。新版 API Key 存储在独立表中，不能用于旧版签名。
 
+## MCP 旧版兼容
+
+“旧版接口兼容”页面另有一个独立的“启用 MCP 旧版兼容”开关。开启后，`/mcp` 接受彩虹聚合 DNS v2.22 客户端的：
+
+```http
+Authorization: Bearer <uid>:<apikey>
+```
+
+此时 MCP 工具、动作和 `cert_order_query.get` 的私钥/PFX 读取行为与上游 v2.22 一致。该开关默认关闭，与旧版 HTTP API 兼容层互不影响。旧版 `apikey` 不受作用域、有效期和 IP 白名单约束，请仅在迁移期间开启。
+
 ## 认证方式
 
 旧版客户端通过 `application/x-www-form-urlencoded` 提交以下字段：

@@ -100,6 +100,8 @@ assert.ok(dnscheckTool);
 const apiCtx: any = { ...admin, mode: 'api_key', scopes: ['dnscheck:read'] };
 assert.doesNotThrow(() => checkActionScope(apiCtx, dnscheckTool!.actions.tasks));
 assert.throws(() => checkActionScope(apiCtx, { desc: 'no scope' } as any), /作用域/);
+assert.doesNotThrow(() => checkActionScope({ ...admin, mode: 'legacy', scopes: ['*'] }, dnscheckTool!.actions.tasks));
+assert.throws(() => checkActionScope({ ...admin, mode: 'legacy', scopes: [] }, dnscheckTool!.actions.tasks), /权限范围/);
 const cfQuery = cloudflareTools.find((t) => t.name === 'cf_hostname_query');
 assert.ok(cfQuery);
 assert.equal(cfQuery!.actions.txt_targets.scope?.write, true);

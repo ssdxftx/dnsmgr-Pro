@@ -84,6 +84,8 @@ top: 60
 
 兼容层使用用户表中的旧版 `apikey` 和 MD5 签名，安全性低于新版 `X-API-Key`。目标用户需要开启 API 权限并保留旧版密钥。迁移完成后建议关闭并轮换密钥。
 
+同一页面提供独立的「启用 MCP 旧版兼容」开关。开启后 `/mcp` 接受 `Authorization: Bearer <uid>:<apikey>`，彩虹聚合 DNS 旧版 MCP 客户端可以零改动接入；关闭后仅接受 `X-API-Key`。该开关与旧版 HTTP API 兼容层相互独立，默认关闭。
+
 详细端点与认证方式见 [旧版彩虹 DNS API 兼容](/api/legacy)。
 
 ## 统计缓存

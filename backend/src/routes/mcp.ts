@@ -81,7 +81,7 @@ function writeAuditCall(req: any, ctx: McpContext, call: ToolCall, errmsg: strin
   enqueueAudit({
     uid: ctx.uid,
     username: String(ctx.user?.username || ''),
-    auth_type: 'mcp_api_key',
+    auth_type: ctx.mode === 'legacy' ? 'mcp_legacy' : 'mcp_api_key',
     api_key_id: ctx.apiKeyId,
     api_key_name: ctx.apiKeyName,
     module: 'mcp',
