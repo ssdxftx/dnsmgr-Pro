@@ -231,6 +231,11 @@ const snapshot = await db.readSnapshot(async (read) => {
   return { domains: Number(domains[0].c), accounts: Number(accounts[0].c) };
 });
 assert(snapshot.domains === 2 && snapshot.accounts === 1, '一致性快照读取');
+const snapshotBlob: any = await db.readSnapshot(async (read) => {
+  const rows = await read('SELECT salt FROM dnsmgr_user_vault WHERE uid = ?', [1000]);
+  return rows[0];
+});
+assert(Buffer.isBuffer(snapshotBlob?.salt) && snapshotBlob.salt.toString() === 'blob-check', '快照 worker BLOB 返回 Buffer');
 
 const lock1 = db.withDistributedLockResult('check-lock', async () => {
   await new Promise((resolve) => setTimeout(resolve, 150));

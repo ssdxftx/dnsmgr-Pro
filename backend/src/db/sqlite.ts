@@ -473,7 +473,7 @@ export function createSqliteDriver(cfg: DbConfig): DbDriver {
       if (!wait) return;
       pending.delete(Number(msg.id));
       if (msg.error) wait.reject(new Error(String(msg.error)));
-      else wait.resolve(Array.isArray(msg.rows) ? msg.rows : []);
+      else wait.resolve(Array.isArray(msg.rows) ? msg.rows.map(normalizeRow) : []);
     });
     worker.on('error', failAll);
     worker.on('exit', (code) => {
