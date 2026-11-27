@@ -35,6 +35,8 @@ export interface DbDriver {
   queryOne<T = any>(sql: string, params?: any[]): Promise<T | undefined>;
   withTransaction<T>(fn: (q: TransactionFn) => Promise<T>): Promise<T>;
   readSnapshot<T>(fn: (read: (sql: string, params?: any[]) => Promise<any[]>) => Promise<T>): Promise<T>;
+  /** SQLite 可选：把批量写放到独立 worker，主线程只等待结果；其他驱动可不实现 */
+  runWriteBatch?(statements: Array<{ sql: string; params?: any[] }>): Promise<WriteResult[]>;
   withLock<T>(name: string, fn: () => Promise<T>, waitSeconds?: number): Promise<LockOutcome<T>>;
   listColumns(tableName: string, q?: QueryFn): Promise<ColumnInfo[]>;
   tableExists(tableName: string): Promise<boolean>;

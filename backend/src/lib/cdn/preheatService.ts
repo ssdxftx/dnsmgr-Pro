@@ -1,6 +1,6 @@
 import { query, queryOne, table } from '../../db.js';
 import { getCdnProvider } from './factory.js';
-import { calcDailyNextRun, fmtDateTime } from '../util.js';
+import { calcDailyNextRun, fmtDateTime, mapPool } from '../util.js';
 
 import { loadAccountConfig } from '../accounts/taskConfig.js';
 
@@ -164,20 +164,23 @@ export function calcNextRun(cycle: string, intervalMin: number, runTime: string 
   return calcDailyNextRun(runTime, now);
 }
 
+const PREHEAT_BATCH = Math.max(1, Math.min(500, Number(process.env.DNSMGR_PREHEAT_BATCH || 50) || 50));
+const PREHEAT_CONCURRENCY = Math.max(1, Math.min(20, Number(process.env.DNSMGR_PREHEAT_CONCURRENCY || 3) || 3));
+
 /** 调度器入口：执行所有到期的自动预热任务 */
 export async function executePreheatTasks(): Promise<number> {
   const rows: any[] = await query(
-    `SELECT * FROM ${table('cdn_preheat_task')} WHERE active = 1 AND (next_run IS NULL OR next_run <= NOW())`,
+    `SELECT * FROM ${table('cdn_preheat_task')} WHERE active = 1 AND (next_run IS NULL OR next_run <= NOW()) ORDER BY next_run ASC, id ASC LIMIT ${PREHEAT_BATCH}`,
   );
   let run = 0;
-  for (const t of rows) {
+  await mapPool(rows, PREHEAT_CONCURRENCY, async (t) => {
     const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
     // 原子领取：仅当任务仍处于到期状态时才更新成功，避免并发调度重复执行
     const claim: any = await query(
       `UPDATE ${table('cdn_preheat_task')} SET last_run = NOW(), next_run = ? WHERE id = ? AND active = 1 AND (next_run IS NULL OR next_run <= NOW())`,
       [fmtDateTime(next), t.id],
     );
-    if (!claim || !claim.affectedRows) continue;
+    if (!claim || !claim.affectedRows) return;
     const urls = loadUrls(t.urls);
     if (urls.length) {
       try {
@@ -188,6 +191,6 @@ export async function executePreheatTasks(): Promise<number> {
       }
     }
     run++;
-  }
+  });
   return run;
 }

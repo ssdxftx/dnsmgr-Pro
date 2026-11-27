@@ -1,4 +1,5 @@
 import type { FastifyInstance } from 'fastify';
+import { domainNameNorm } from '../lib/domainNorm.js';
 import { queryOne, table } from '../db.js';
 import { checkLevel } from '../auth.js';
 import { getEffectivePermissions } from '../lib/accounts/visibility.js';
@@ -63,7 +64,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
     const conds: string[] = [];
     const params: any[] = [];
     if (names.size) {
-      conds.push(`LOWER(TRIM(TRAILING '.' FROM D.name)) IN (${[...names].map(() => '?').join(',')})`);
+      conds.push(`${domainNameNorm('D')} IN (${[...names].map(() => '?').join(',')})`);
       params.push(...names);
     }
     if (ids.size) {
@@ -71,7 +72,7 @@ export default async function dashboardRoutes(app: FastifyInstance) {
       params.push(...ids);
     }
     for (const x of aidNames) {
-      conds.push(`(D.aid = ? AND LOWER(TRIM(TRAILING '.' FROM D.name)) = ?)`);
+      conds.push(`(D.aid = ? AND ${domainNameNorm('D')} = ?)`);
       params.push(x.aid, x.name);
     }
     let domains = 0;

@@ -6,6 +6,37 @@ const buckets = new Map<string, number[]>();
 const MAX_BUCKETS = 20_000;
 let lastSweep = 0;
 
+// 分布式限流的进程内镜像：按数据库相同的固定窗口计数，避免滑窗语义让客户端在窗口切换后继续被拦。
+const distBuckets = new Map<string, { window: number; count: number }>();
+let lastDistSweep = 0;
+
+function allowDistributedLocal(key: string, max: number, windowStart: number): boolean {
+  const now = Date.now();
+  if (now - lastDistSweep > 60_000) {
+    const stale = windowStart - 600_000;
+    for (const [k, v] of distBuckets) {
+      if (v.window < stale) distBuckets.delete(k);
+    }
+    lastDistSweep = now;
+  }
+  let rec = distBuckets.get(key);
+  if (!rec || rec.window !== windowStart) {
+    if (!rec && distBuckets.size >= MAX_BUCKETS) {
+      const stale = windowStart - 600_000;
+      for (const [k, v] of distBuckets) {
+        if (v.window < stale) distBuckets.delete(k);
+      }
+      // 容量仍满时跳过本地镜像，数据库计数仍是准绳
+      if (distBuckets.size >= MAX_BUCKETS) return true;
+    }
+    rec = { window: windowStart, count: 0 };
+    distBuckets.set(key, rec);
+  }
+  if (rec.count >= max) return false;
+  rec.count++;
+  return true;
+}
+
 export function hitRateLimit(key: string, max: number, windowMs: number): boolean {
   const now = Date.now();
   if (now - lastSweep > 60_000) {
@@ -46,6 +77,9 @@ export function hitRateLimit(key: string, max: number, windowMs: number): boolea
 export async function hitRateLimitDistributed(key: string, max: number, windowMs: number): Promise<boolean> {
   const now = Date.now();
   const windowStart = Math.floor(now / windowMs) * windowMs;
+  // 进程内预检：同一固定窗口内本地计数达到上限时，全局计数必然也已达到，直接拒绝省掉一次写库。
+  // 预检同时记录本次命中，数据库不可用时天然回退到进程内限流。
+  if (!allowDistributedLocal(key, max, windowStart)) return false;
   try {
     // 单条原子 upsert：窗口切换与计数在同一行完成，避免「删除当前窗口计数」的竞态。
     await query(
@@ -61,6 +95,7 @@ export async function hitRateLimitDistributed(key: string, max: number, windowMs
     }
     return Number(rows?.[0]?.hits || 0) <= max;
   } catch {
-    return hitRateLimit(key, max, windowMs);
+    // 预检已经计数：数据库异常时由进程内固定窗口继续限流，不再重复计数。
+    return true;
   }
 }

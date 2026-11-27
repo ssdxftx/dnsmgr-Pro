@@ -16,7 +16,7 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="domains.length" :label="t('common.total')" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="domainsTotal" :label="t('common.total')" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="queryFailed" :label="t('common.queryFailed')" tone="warning" :icon="AlertCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="noticeOn" :label="t('common.noticeOn')" tone="success" :icon="NotificationsOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
@@ -72,6 +72,7 @@
           :empty-text="t('domain.empty')"
           :empty-description="t('domain.emptyHint')"
           :error="loadError"
+          :pagination="domainsPagination"
           :virtual-scroll="domains.length > 200"
           :max-height="620"
           @retry="loadDomains()"
@@ -174,21 +175,55 @@ const loadBusy = ref(false);
 const loadError = ref(false);
 const saveBusy = ref(false);
 const domains = ref<any[]>([]);
+// 管理员域名列表走服务端分页；普通用户仍按授权展开后一次返回
+const domainsPage = ref(1);
+const domainsPageSize = ref(200);
+const domainsTotal = ref(0);
+const domainsSummary = ref<Record<string, number> | null>(null);
 // 正在手动刷新到期时间的域名 id：只让被点击的那一格转圈，不阻塞整表
 const refreshingIds = ref<Set<number>>(new Set());
 // 列重建信号：n-data-table 会缓存列渲染结果，手动刷新开始/结束时显式触发重绘
 const refreshTick = ref(0);
-const queryFailed = computed(() => domains.value.filter((d: any) => d.checkstatus === 2).length);
-const noticeOn = computed(() => domains.value.filter((d: any) => d.is_notice === 1).length);
-const recordTotal = computed(() => domains.value.reduce((sum: number, d: any) => sum + (d._count_error ? 0 : Number(d.recordcount) || 0), 0));
-const categoryCount = computed(() => new Set(domains.value.map((d: any) => d.category_name).filter(Boolean)).size);
-const expiredCount = computed(() => {
+const localStats = computed(() => {
   const now = Date.now();
-  return domains.value.filter((d: any) => {
-    const ts = d.expiretime ? new Date(d.expiretime).getTime() : NaN;
-    return Number.isFinite(ts) && ts < now;
-  }).length;
+  let queryFailed = 0;
+  let noticeOn = 0;
+  let recordTotal = 0;
+  let expired = 0;
+  const categories = new Set<string>();
+  for (const d of domains.value) {
+    if (d.checkstatus === 2) queryFailed++;
+    if (d.is_notice === 1) noticeOn++;
+    if (!d._count_error) recordTotal += Number(d.recordcount) || 0;
+    if (d.category_name) categories.add(d.category_name);
+    const ts = d.expiretime ? expireTs(String(d.expiretime)) : NaN;
+    if (Number.isFinite(ts) && ts < now) expired++;
+  }
+  return { total: domains.value.length, queryFailed, noticeOn, recordTotal, categoryCount: categories.size, expired };
 });
+const queryFailed = computed(() => domainsSummary.value?.queryFailed ?? localStats.value.queryFailed);
+const noticeOn = computed(() => domainsSummary.value?.noticeOn ?? localStats.value.noticeOn);
+const recordTotal = computed(() => domainsSummary.value?.recordTotal ?? localStats.value.recordTotal);
+const categoryCount = computed(() => domainsSummary.value?.categoryCount ?? localStats.value.categoryCount);
+const expiredCount = computed(() => domainsSummary.value?.expired ?? localStats.value.expired);
+const domainsPagination = computed(() =>
+  isAdmin.value
+    ? {
+        page: domainsPage.value,
+        pageSize: domainsPageSize.value,
+        itemCount: domainsTotal.value,
+        showSizePicker: true,
+        pageSizes: [100, 200, 500, 1000],
+        onChange: (page: number) => {
+          if (page !== domainsPage.value) void loadDomains({ page, keepSelection: true });
+        },
+        onUpdatePageSize: (size: number) => {
+          domainsPageSize.value = size;
+          void loadDomains({ page: 1, keepSelection: true });
+        },
+      }
+    : undefined,
+);
 const recordResults = ref<any[]>([]);
 const showRecords = ref(false);
 const checked = ref<string[]>([]);
@@ -333,8 +368,10 @@ let lastLoadedAt = 0;
 let loadAbort: AbortController | null = null;
 // 静默刷新不置 loadBusy，单独标记避免轮询与标签页可见事件同时触发两个请求
 let silentLoading = false;
-async function loadDomains(opts: { silent?: boolean } = {}) {
+async function loadDomains(opts: { silent?: boolean; page?: number; keepSelection?: boolean } = {}) {
   const silent = opts.silent === true;
+  const keepSelection = opts.keepSelection === true || silent;
+  const targetPage = isAdmin.value ? Math.max(1, opts.page ?? domainsPage.value) : 1;
   // 静默刷新不得抢占用户主动触发的搜索/刷新，也不得在弹窗编辑期间替换行对象
   if (silent && (silentLoading || loadBusy.value || showEdit.value || showImport.value || showCategory.value)) return;
   loadAbort?.abort();
@@ -343,13 +380,29 @@ async function loadDomains(opts: { silent?: boolean } = {}) {
   if (silent) silentLoading = true;
   else loadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/domains', kw.value ? { kw: kw.value } : undefined, { signal: ac.signal });
+    const params: Record<string, any> = {};
+    if (kw.value) params.kw = kw.value;
+    if (isAdmin.value) {
+      params.limit = domainsPageSize.value;
+      params.offset = (targetPage - 1) * domainsPageSize.value;
+    }
+    const res = await api<any>('GET', '/domains', Object.keys(params).length ? params : undefined, { signal: ac.signal });
     // 静默刷新失败时保留当前列表，避免一次限流/超时把整页清空
     if (silent && res.code !== 0) return;
     loadError.value = res.code !== 0;
     const list: any[] = res.code === 0 ? res.data : [];
-    // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片
-    if (kw.value && list.length === 0) {
+    const total = Number(res.total ?? list.length);
+    domainsTotal.value = total;
+    domainsSummary.value = res.summary ?? null;
+    domainsPage.value = targetPage;
+    // 删除末页最后一条后回退一页，避免停留在空页
+    if (isAdmin.value && total > 0 && !list.length && targetPage > 1) {
+      await loadDomains({ page: targetPage - 1, keepSelection });
+      return;
+    }
+    // 本地无命中时按解析记录（子域名）检索，原地展示记录卡片；
+    // 单字符关键词命中面过大，跳过云端全量扫描。
+    if (kw.value.length >= 2 && list.length === 0) {
       const rres = await api<any>('GET', '/records/search', { kw: kw.value }, { signal: ac.signal });
       recordResults.value = rres.code === 0 ? rres.data : [];
       showRecords.value = recordResults.value.length > 0;
@@ -358,10 +411,12 @@ async function loadDomains(opts: { silent?: boolean } = {}) {
       showRecords.value = false;
     }
     domains.value = list;
-    // 搜索/刷新后必须清理已不可见的选中项：否则批量删除/通知会作用到
-    // 当前列表根本看不到的域名（旧 checked 残留）。
-    const visibleIds = new Set(list.map((d: any) => Number(d.id)));
-    checked.value = checked.value.filter((id) => visibleIds.has(Number(id)));
+    // 搜索/刷新时清理已不可见的选中项；翻页和静默刷新保留跨页勾选，
+    // 批量删除/通知才能作用于所有已选域名。
+    if (!keepSelection) {
+      const visibleIds = new Set(list.map((d: any) => Number(d.id)));
+      checked.value = checked.value.filter((id) => visibleIds.has(Number(id)));
+    }
     lastLoadedAt = Date.now();
   } catch (e: any) {
     // 静默刷新失败不打断用户：保留旧数据，等下一次轮询/激活再试
@@ -373,12 +428,12 @@ async function loadDomains(opts: { silent?: boolean } = {}) {
 }
 
 function search() {
-  loadDomains();
+  void loadDomains({ page: 1 });
 }
 
 function clearSearch() {
   kw.value = '';
-  loadDomains();
+  void loadDomains({ page: 1 });
 }
 
 async function loadAccounts() {
@@ -622,6 +677,7 @@ function batchDelete() {
         if (res.code === 0) {
           message.success(res.msg);
           checked.value = [];
+          await loadDomains({ page: domainsPage.value });
         } else {
           domains.value = snapshot; // 失败回滚：整体还原，保持原有顺序
           message.error(res.msg);
@@ -650,6 +706,7 @@ function delDomain(row: any) {
           // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
           checked.value = checked.value.filter((k) => Number(k) !== Number(row.id));
           message.success(t('domain.deleteSuccess'));
+          await loadDomains({ page: domainsPage.value, keepSelection: true });
         } else {
           if (removed) domains.value.splice(idx, 0, removed); // 失败回滚
           message.error(res.msg);

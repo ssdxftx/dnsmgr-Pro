@@ -3,7 +3,7 @@ import { configSet } from '../../config.js';
 import { fmtDateTime } from '../util.js';
 import { runMonitorTask } from './taskRunner.js';
 import { withDistributedLock } from '../scheduler/distLock.js';
-import { isMaintenance } from '../backup/maintenance.js';
+import { isMaintenance, refreshMaintenance } from '../backup/maintenance.js';
 
 let running = false;
 let day = '';
@@ -39,6 +39,8 @@ function formatDay(d: Date): string {
 }
 
 async function tick(): Promise<void> {
+  await refreshMaintenance();
+  if (isMaintenance()) return;
   const today = formatDay(new Date());
   if (day !== today) {
     count = 0;

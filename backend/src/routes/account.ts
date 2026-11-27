@@ -7,6 +7,7 @@ import { encryptAccountConfig, isSecretKey, maskConfig, mergeMaskedConfig, readA
 import { getVisibleAccount, listVisibleAccounts } from '../lib/accounts/visibility.js';
 import { getDekForWrite } from '../lib/vault/service.js';
 import { bumpCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
+import { getCachedZones, setCachedZones } from '../lib/cdn/zonesCache.js';
 import { cdnLinkIds } from '../lib/cdn/certLink.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
@@ -36,7 +37,7 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/dns/accounts', auth, async (req: any) => {
-    const rows = await listVisibleAccounts('account', req.user);
+    const rows = await listVisibleAccounts('account', req.user, ['id', 'type', 'name', 'config', 'remark', 'addtime', 'owner_uid', 'visibility']);
     const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
     return {
       code: 0,
@@ -190,7 +191,7 @@ export default async function accountRoutes(app: FastifyInstance) {
   });
 
   app.get('/api/cdn/accounts', auth, async (req: any) => {
-    const rows = await listVisibleAccounts('cdn_account', req.user);
+    const rows = await listVisibleAccounts('cdn_account', req.user, ['id', 'type', 'name', 'config', 'remark', 'addtime', 'owner_uid', 'visibility']);
     const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const data = rows.map((r: any) => {
@@ -348,7 +349,11 @@ export default async function accountRoutes(app: FastifyInstance) {
     if (state === 'locked') return reply.code(423).send({ code: -1, msg: '保险库已锁定，请先解锁' });
     const provider = getCdnProvider(acct.type, config);
     if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该账户不支持站点查询' };
-    const zones = await provider.getZones();
+    let zones: any = getCachedZones(Number(id));
+    if (zones === null) {
+      zones = await provider.getZones();
+      if (zones !== false) setCachedZones(Number(id), zones);
+    }
     return { code: 0, data: zones };
   });
 }

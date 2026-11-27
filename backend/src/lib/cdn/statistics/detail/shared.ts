@@ -35,16 +35,37 @@ function floorTo(d: Date, stepMs: number): Date {
 }
 
 /**
+ * 依据查询跨度选择统计粒度：
+ * ≤6h → 5min；6h–7d → hour；>7d → day。
+ */
+export function statIntervalFor(start: Date, end: Date): TimeInterval {
+  const span = Math.max(0, end.getTime() - start.getTime());
+  if (span <= 6 * 3_600_000) return '5min';
+  if (span <= 7 * 86_400_000) return 'hour';
+  return 'day';
+}
+
+/**
+ * 把查询区间对齐到统计粒度边界。云端统计按桶返回，结束时间精确到秒会让
+ * 每次请求生成不同的缓存键；对齐后同一时间窗口共享缓存，且不会包含未完成的桶。
+ */
+export function alignStatQueryRange(start: Date, end: Date): { start: Date; end: Date; interval: TimeInterval } {
+  const interval = statIntervalFor(start, end);
+  const stepMs = STEP_MS[interval];
+  const alignedStart = interval === 'day' ? startOfDay(start) : floorTo(start, stepMs);
+  let alignedEnd = interval === 'day' ? startOfDay(end) : floorTo(end, stepMs);
+  if (alignedEnd.getTime() <= alignedStart.getTime()) {
+    alignedEnd = new Date(alignedStart.getTime() + stepMs);
+  }
+  return { start: alignedStart, end: alignedEnd, interval };
+}
+
+/**
  * 依据查询跨度生成标签（设计 §3.5）：
  * ≤6h → 5min；6h–7d → hour；>7d → day。
  */
 export function buildTimeline(start: Date, end: Date, forced?: TimeInterval): Timeline {
-  const span = Math.max(0, end.getTime() - start.getTime());
-  let interval: TimeInterval;
-  if (forced) interval = forced;
-  else if (span <= 6 * 3_600_000) interval = '5min';
-  else if (span <= 7 * 86_400_000) interval = 'hour';
-  else interval = 'day';
+  const interval = forced || statIntervalFor(start, end);
 
   const stepMs = STEP_MS[interval];
   const alignedStart = interval === 'day' ? startOfDay(start) : floorTo(start, stepMs);

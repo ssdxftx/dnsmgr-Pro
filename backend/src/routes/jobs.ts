@@ -48,8 +48,11 @@ export default async function jobRoutes(app: FastifyInstance): Promise<void> {
     }
     const whereSql = where.length ? ' WHERE ' + where.join(' AND ') : '';
     const total = Number((await queryOne(`SELECT COUNT(*) AS c FROM ${table('async_job')}${whereSql}`, params))?.c || 0);
+    // 列表不返回 result mediumtext：详情接口才需要完整结果，避免大列撑大分页响应。
     const rows = await query(
-      `SELECT * FROM ${table('async_job')}${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      `SELECT id, uid, type, status, total, done, failed, detail, error, worker_id,
+              heartbeat_at, created_at, started_at, finished_at
+       FROM ${table('async_job')}${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
     return { code: 0, data: { total, list: rows.map(shape) } };

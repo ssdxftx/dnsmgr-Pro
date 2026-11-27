@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { query, queryOne, table, withTransaction } from '../../db.js';
+import { invalidateUserPermissions } from '../../auth.js';
 import { getSysKey } from '../../config.js';
 import {
   deriveKek,
@@ -331,6 +332,7 @@ export async function destroyVault(uid: number, confirm: string, passphrase?: st
     if (!dek) return await failAttempt(uid);
   }
   const backupFiles = await withTransaction(async (q) => await purgePrivateAssets(q, uid));
+  invalidateUserPermissions(uid);
   await removeBackupFiles(backupFiles);
   clearVaultSession(uid);
 }

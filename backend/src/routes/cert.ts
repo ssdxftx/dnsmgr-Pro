@@ -232,7 +232,11 @@ export default async function certRoutes(app: FastifyInstance) {
     const accountSort: Record<string, string> = { id: 'id', typename: 'type', name: 'name', remark: 'remark', addtime: 'addtime' };
     const sortKey = accountSort[String(sortName)] || 'id';
     const sortDir = String(sortOrder).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
-    const rows = await query(`SELECT * FROM ${table('cert_account')} WHERE ${where} ORDER BY ${sortKey} ${sortDir} LIMIT ? OFFSET ?`, [...params, clampLimit(limit, 20), clampOffset(offset)]);
+    const rows = await query(
+      `SELECT id, type, name, config, remark, addtime, owner_uid, visibility
+       FROM ${table('cert_account')} WHERE ${where} ORDER BY ${sortKey} ${sortDir} LIMIT ? OFFSET ?`,
+      [...params, clampLimit(limit, 20), clampOffset(offset)],
+    );
     const dek = await getDekForWrite(Number(req.user.uid), String(req.user.jti || ''));
     const list = rows.map((r: any) => {
       const { config, state } = readAccountConfig(r.config, dek);
@@ -406,7 +410,7 @@ export default async function certRoutes(app: FastifyInstance) {
     let where = '1=1';
     const params: any[] = [];
     // 与账户列表同口径：管理员看共享 + 自己的私有，普通用户只看自己的私有
-    const visibleCertAccounts = await listVisibleAccounts('cert_account', req.user);
+    const visibleCertAccounts = await listVisibleAccounts('cert_account', req.user, ['id']);
     const allowedCertAids = visibleCertAccounts.map((a: any) => Number(a.id));
     const certAidCond = allowedCertAids.length ? `A.aid IN (${allowedCertAids.map(() => '?').join(',')})` : '1=0';
     where += checkLevel(req.user, 2) ? ` AND (A.aid = 0 OR ${certAidCond})` : ` AND ${certAidCond}`;
@@ -1004,7 +1008,7 @@ export default async function certRoutes(app: FastifyInstance) {
       where += ' AND A.remark = ?';
       params.push(remark);
     }
-    const visibleCertAids = (await listVisibleAccounts('cert_account', req.user)).map((a: any) => Number(a.id));
+    const visibleCertAids = (await listVisibleAccounts('cert_account', req.user, ['id'])).map((a: any) => Number(a.id));
     if (!visibleCertAids.length) return { code: 0, total: 0, data: [] };
     const certAidPlaceholders = visibleCertAids.map(() => '?').join(',');
     where += ` AND A.aid IN (${certAidPlaceholders}) AND A.oid IN (SELECT id FROM ${table('cert_order')} WHERE aid = 0 OR aid IN (${certAidPlaceholders}))`;

@@ -126,7 +126,7 @@ async function load() {
 }
 
 async function loadDomains() {
-  const res = await api<any>('GET', '/domains', undefined, { cache: true });
+  const res = await api<any>('GET', '/domains', { limit: 0 }, { cache: true });
   if (res.code === 0) domainOptions.value = (res.data || []).map((d: any) => ({ label: d._base_name || d.name, value: d.id }));
 }
 

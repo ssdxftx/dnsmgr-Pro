@@ -2,7 +2,7 @@
   <div class="app-stack">
     <PageHeader :title="t('cache.title')" :subtitle="t('cache.subtitle')" />
     <n-grid class="telemetry-row" cols="2 s:2 m:3" responsive="screen" :x-gap="16" :y-gap="16">
-      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasks.length" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="reveal d1"><TelemetryCard :value="tasksTotal" :label="t('common.total')" tone="primary" :icon="ListOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d2"><TelemetryCard :value="typeCount" :label="t('common.type')" tone="info" :icon="LayersOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="reveal d3"><TelemetryCard :value="statusCount" :label="t('common.status')" tone="success" :icon="PulseOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
@@ -37,7 +37,7 @@
         :columns="columns"
         :data="tasks"
         :loading="tasksLoadBusy"
-        :pagination="{ pageSize: 20 }"
+        :pagination="tasksPagination"
       />
     </n-card>
   </div>
@@ -59,8 +59,24 @@ const urlText = ref('');
 const submitBusy = ref(false);
 const tasksLoadBusy = ref(false);
 const tasks = ref<any[]>([]);
-const typeCount = computed(() => new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size);
-const statusCount = computed(() => new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size);
+const tasksPage = ref(1);
+const tasksPageSize = 20;
+const tasksTotal = ref(0);
+const tasksSummary = ref<{ types: number; statuses: number } | null>(null);
+const typeCount = computed(
+  () => tasksSummary.value?.types ?? new Set(tasks.value.filter((r: any) => r.type != null).map((r: any) => r.type)).size,
+);
+const statusCount = computed(
+  () => tasksSummary.value?.statuses ?? new Set(tasks.value.filter((r: any) => r.status != null).map((r: any) => r.status)).size,
+);
+const tasksPagination = computed(() => ({
+  page: tasksPage.value,
+  pageSize: tasksPageSize,
+  itemCount: tasksTotal.value,
+  onChange: (page: number) => {
+    if (page !== tasksPage.value) void loadTasks(page);
+  },
+}));
 const result = ref<{ ok: boolean; msg: string; failed: { url: string; msg: string }[] }>({ ok: true, msg: '', failed: [] });
 
 const placeholderText = computed(() => {
@@ -126,30 +142,28 @@ async function submit() {
       result.value = { ok: true, msg: t('cache.submittedCount', { action, success }), failed: [] };
       urlText.value = '';
     }
-    loadTasks();
+    void loadTasks(1);
   } finally {
     submitBusy.value = false;
   }
 }
 
-async function loadTasks() {
+async function loadTasks(targetPage = tasksPage.value) {
   tasksLoadBusy.value = true;
   try {
-    const all: any[] = [];
-    let failed = false;
-    for (let page = 1; page <= 50; page++) {
-      const res = await api<any>('GET', '/cdn/cache-tasks', { page, size: 200 });
-      if (res.code !== 0) {
-        failed = true;
-        break;
-      }
-      const list = res.data || [];
-      all.push(...list);
-      const total = Number(res.total || 0);
-      if (!list.length || list.length < 200 || (total > 0 && all.length >= total)) break;
+    const page = Math.max(1, Number(targetPage) || 1);
+    const res = await api<any>('GET', '/cdn/cache-tasks', { page, size: tasksPageSize });
+    if (res.code !== 0) return;
+    const list = res.data || [];
+    const total = Number(res.total || 0);
+    if (!list.length && total > 0 && page > 1) {
+      await loadTasks(page - 1);
+      return;
     }
-    // 分页中途失败时保留旧列表，避免只显示部分历史
-    if (!failed) tasks.value = all;
+    tasksPage.value = page;
+    tasksTotal.value = total;
+    tasksSummary.value = res.summary || null;
+    tasks.value = list;
   } finally {
     tasksLoadBusy.value = false;
   }

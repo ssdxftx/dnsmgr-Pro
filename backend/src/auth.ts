@@ -80,11 +80,41 @@ export function permissionMatchesDomain(p: SubPermission, domain: string, scope?
   return true;
 }
 
+const PERM_CACHE_TTL_MS = 5000;
+const permsCache = new Map<number, { at: number; rows: SubPermission[] }>();
+
+function prunePermsCache(): void {
+  if (permsCache.size <= 5000) return;
+  const now = Date.now();
+  for (const [uid, item] of permsCache) if (now - item.at > PERM_CACHE_TTL_MS) permsCache.delete(uid);
+  while (permsCache.size > 5000) {
+    const oldest = permsCache.keys().next().value;
+    if (oldest === undefined) break;
+    permsCache.delete(oldest);
+  }
+}
+
+export function invalidateUserPermissions(uid: number): void {
+  permsCache.delete(Number(uid));
+}
+
+export function invalidateAllUserPermissions(): void {
+  permsCache.clear();
+}
+
 export async function getUserPermissions(uid: number): Promise<SubPermission[]> {
-  return query<SubPermission>(
+  const id = Number(uid);
+  if (!Number.isFinite(id) || id <= 0) return [];
+  const hit = permsCache.get(id);
+  // 返回副本：getEffectivePermissions 会向结果追加私有账户域名，不能污染缓存数组。
+  if (hit && Date.now() - hit.at < PERM_CACHE_TTL_MS) return hit.rows.slice();
+  const rows = await query<SubPermission>(
     `SELECT domain, sub, readonly, expiretime FROM ${table('permission')} WHERE uid = ? AND (expiretime IS NULL OR expiretime > NOW())`,
-    [uid],
+    [id],
   );
+  permsCache.set(id, { at: Date.now(), rows });
+  prunePermsCache();
+  return rows.slice();
 }
 
 /** DNS 名称大小写不敏感：统一比较小写并去掉末尾点 */

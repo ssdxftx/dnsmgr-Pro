@@ -48,7 +48,6 @@ import { useI18n } from 'vue-i18n';
 import { api, setUser, getUser } from '../api';
 import { useAuthStore } from '../stores/auth';
 import PageHeader from '../components/PageHeader.vue';
-import QRCode from 'qrcode';
 
 const { t } = useI18n();
 const message = useMessage();
@@ -67,6 +66,8 @@ const closeCode = ref('');
 const qrDataUrl = ref('');
 
 async function refreshQr() {
+  // 二维码只在绑定流程用到：按需加载，避免 TOTP 页面首屏带上 qrcode 依赖
+  const { default: QRCode } = await import('qrcode');
   qrDataUrl.value = await QRCode.toDataURL(qrcode.value, { width: 200, margin: 1 });
 }
 

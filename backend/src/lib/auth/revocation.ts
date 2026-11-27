@@ -3,16 +3,21 @@ import { query, queryOne, table } from '../../db.js';
 /**
  * 单会话令牌吊销表。
  * - 登出时写入当前 jti，未过期的令牌立即失效；
- * - 记录 1 秒负缓存，避免每个请求都查库，同时把跨实例登出窗口压到最小；
+ * - 未吊销结果短缓存 1 秒，已吊销结果缓存 60 秒；登出后跨实例最迟 1 秒生效；
  * - 过期记录在写入新吊销项时顺带清理。
  */
-const CACHE_TTL_MS = 1000;
+const NEGATIVE_TTL_MS = 1000;
+const POSITIVE_TTL_MS = 60_000;
 const cache = new Map<string, { revoked: boolean; at: number }>();
+
+function ttlFor(revoked: boolean): number {
+  return revoked ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS;
+}
 
 function prune(): void {
   if (cache.size <= 5000) return;
   const now = Date.now();
-  for (const [k, v] of cache) if (now - v.at > CACHE_TTL_MS) cache.delete(k);
+  for (const [k, v] of cache) if (now - v.at > ttlFor(v.revoked)) cache.delete(k);
   while (cache.size > 5000) {
     const oldest = cache.keys().next().value;
     if (oldest === undefined) break;
@@ -44,7 +49,7 @@ export async function isTokenRevoked(jti: string): Promise<boolean> {
   // 缺少 jti 的旧令牌无法被精确吊销，按已吊销处理（fail-closed）。
   if (!id) return true;
   const hit = cache.get(id);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.revoked;
+  if (hit && Date.now() - hit.at < ttlFor(hit.revoked)) return hit.revoked;
   let row: any;
   try {
     row = await queryOne(`SELECT jti FROM ${table('token_revocation')} WHERE jti = ? LIMIT 1`, [id]);

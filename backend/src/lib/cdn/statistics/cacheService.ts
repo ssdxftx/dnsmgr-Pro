@@ -1,8 +1,10 @@
 import { configGet, configSet } from '../../../config.js';
-import { query, table } from '../../../db.js';
+import { getDbType, getDriver, query, table } from '../../../db.js';
 import { decryptConfig } from '../../secret.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from './index.js';
 import { buildTimeline } from './detail/shared.js';
+import { yieldToEventLoop } from '../../util.js';
+import { withAccountLimit } from '../../hostLimit.js';
 
 interface BucketData {
   flux: number;
@@ -52,6 +54,15 @@ function safeConfig(s: any): Record<string, any> {
   return decryptConfig(s) || {};
 }
 
+async function runWrites(statements: Array<{ sql: string; params?: any[] }>): Promise<void> {
+  const driver = getDriver();
+  if (driver.runWriteBatch) {
+    await driver.runWriteBatch(statements);
+    return;
+  }
+  for (const item of statements) await query(item.sql, item.params || []);
+}
+
 // 腾讯云 EO 统计接口数据约 10 分钟延迟
 export const EO_DATA_DELAY_MS = 10 * 60 * 1000;
 
@@ -59,7 +70,7 @@ export const STAT_RETENTION_DAYS = 30;
 export const STAT_COVER_MS = 30 * 86400000;
 
 export function isStatCacheEnabled(): Promise<boolean> {
-  return configGet('cdn_stats_cache', '0').then((v) => v === '1');
+  return configGet('cdn_stats_cache', '1').then((v) => v !== '0');
 }
 
 export async function getStatCacheIntervalMs(): Promise<number> {
@@ -108,11 +119,13 @@ async function storeResult(
     values.push(route, aid, granularity, ts, JSON.stringify(data));
   }
   if (placeholders.length) {
-    await query(
-      `INSERT INTO ${table('cdn_stat_data')} (route, aid, granularity, ts, data, addtime) VALUES ${placeholders.join(',')}
+    await runWrites([
+      {
+        sql: `INSERT INTO ${table('cdn_stat_data')} (route, aid, granularity, ts, data, addtime) VALUES ${placeholders.join(',')}
        ON DUPLICATE KEY UPDATE data = VALUES(data)`,
-      values,
-    );
+        params: values,
+      },
+    ]);
   }
 }
 
@@ -153,20 +166,31 @@ export async function refreshAllStatCache(): Promise<{ accounts: number; errors:
       const list = byAid.get(Number(acct.id)) || [];
       const config = safeConfig(acct.config);
       try {
-        await storeResult(route, Number(acct.id), 'day', config, list, dayStart, dayEnd, 'All');
+        await withAccountLimit('cdn:' + acct.id, () =>
+          storeResult(route, Number(acct.id), 'day', config, list, dayStart, dayEnd, 'All'),
+        );
       } catch (e: any) {
         errors.push(`${route}#${acct.id}(天): ${e?.message || e}`);
       }
       try {
-        await storeResult(route, Number(acct.id), 'hour', config, list, hourStart, hourEnd, 'All');
+        await withAccountLimit('cdn:' + acct.id, () =>
+          storeResult(route, Number(acct.id), 'hour', config, list, hourStart, hourEnd, 'All'),
+        );
       } catch (e: any) {
         errors.push(`${route}#${acct.id}(小时): ${e?.message || e}`);
       }
+      // SQLite 写入是同步的：账户之间让出事件循环，避免整轮统计刷新持续阻塞 HTTP。
+      await yieldToEventLoop();
     }
   };
   await Promise.all(Array.from({ length: Math.min(4, jobs.length) }, worker));
 
-  await query(`DELETE FROM ${table('cdn_stat_data')} WHERE ts < ?`, [fmt(new Date(now.getTime() - (STAT_RETENTION_DAYS + 1) * 86400000))]);
+  await runWrites([
+    {
+      sql: `DELETE FROM ${table('cdn_stat_data')} WHERE ts < ?`,
+      params: [fmt(new Date(now.getTime() - (STAT_RETENTION_DAYS + 1) * 86400000))],
+    },
+  ]);
   await configSet('cdn_stats_cache_last', fmt(now));
   await configSet('cdn_stats_cache_error', errors.slice(0, 5).join('；'));
   return { accounts: count, errors };
@@ -174,9 +198,33 @@ export async function refreshAllStatCache(): Promise<{ accounts: number; errors:
 
 // 清空全部统计缓存数据（切换指标口径或数据异常时使用）
 export async function clearStatCache(): Promise<number> {
-  const res: any = await query(`DELETE FROM ${table('cdn_stat_data')}`);
+  const sql = getDbType() === 'sqlite'
+    ? `DELETE FROM ${table('cdn_stat_data')} WHERE id IN (SELECT id FROM ${table('cdn_stat_data')} LIMIT 5000)`
+    : `DELETE FROM ${table('cdn_stat_data')} LIMIT 5000`;
+  const driver = getDriver();
+  let deleted = 0;
+  if (driver.runWriteBatch) {
+    // SQLite：每轮 worker 批量执行 50 条删除（25 万行），避免单事务过大触发 60s 超时。
+    const perRound = 50;
+    const rounds = 40;
+    for (let round = 0; round < rounds; round++) {
+      const results = await driver.runWriteBatch(Array.from({ length: perRound }, () => ({ sql })));
+      const affected = results.reduce((sum, r) => sum + Number(r.affectedRows || 0), 0);
+      deleted += affected;
+      if (affected < perRound * 5000) break;
+      await yieldToEventLoop();
+    }
+  } else {
+    for (let i = 0; i < 2000; i++) {
+      const res: any = await query(sql);
+      const affected = Number(res?.affectedRows || 0);
+      deleted += affected;
+      if (affected < 5000) break;
+      await yieldToEventLoop();
+    }
+  }
   await configSet('cdn_stats_cache_last', '');
-  return Number(res?.affectedRows || 0);
+  return deleted;
 }
 
 // 从缓存读取并按查询区间聚合；无可用数据返回 null

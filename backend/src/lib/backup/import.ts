@@ -1,5 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { table, withTransaction, listColumns, isDuplicateError } from '../../db.js';
+import { invalidateAllUserPermissions } from '../../auth.js';
+import { invalidateEventSubscriptions } from '../events.js';
+import { bumpCdnAccountEpoch } from '../cdn/cacheEpoch.js';
 import { isGeneratedColumn, type TransactionFn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS_JSON, kdfParamsFromStored, unwrapDek, wrapDek } from '../vault/keys.js';
@@ -72,6 +75,7 @@ const REPLACE_EXTRA_TABLES = [
   'totp_replay',
   'notification_log',
   'event_delivery',
+  'domain_subcount',
   'async_job',
   'idempotency_key',
   'token_revocation',
@@ -1065,6 +1069,10 @@ export async function importArchive(file: string, opts: ImportOptions): Promise<
       }
     });
 
+    // 恢复可能替换权限与事件订阅：提交后立即丢弃进程内缓存。
+    invalidateAllUserPermissions();
+    invalidateEventSubscriptions();
+    bumpCdnAccountEpoch();
     return report;
   } finally {
     await archive.dispose();

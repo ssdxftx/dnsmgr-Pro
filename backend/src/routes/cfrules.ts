@@ -130,7 +130,7 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
        FROM ${table('domain')} A JOIN ${table('account')} B ON A.aid = B.id
        WHERE B.type = 'cloudflare' ORDER BY A.id DESC`,
     );
-    const visible = await listVisibleAccounts('account', req.user);
+    const visible = await listVisibleAccounts('account', req.user, ['id']);
     const visibleIds = new Set(visible.map((a: any) => Number(a.id)));
     const data = rows
       .filter((r) => visibleIds.has(Number(r.aid)) && String(r.zone_id || '').trim())
@@ -157,7 +157,7 @@ export default async function cfRulesRoutes(app: FastifyInstance) {
         GROUP BY B.id, B.name, B.visibility, B.owner_uid
         ORDER BY B.id DESC`,
     );
-    const visible = await listVisibleAccounts('account', req.user);
+    const visible = await listVisibleAccounts('account', req.user, ['id']);
     const visibleIds = new Set(visible.map((a: any) => Number(a.id)));
     const data: any[] = [];
     for (const r of rows) {

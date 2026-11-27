@@ -52,6 +52,8 @@
           :row-key="(row: any) => row.id"
           :empty-text="t('dm.empty')"
           :empty-description="t('dm.emptyHint')"
+          :virtual-scroll="tasks.length > 50"
+          :max-height="620"
         />
       </div>
     </n-card>

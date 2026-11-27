@@ -260,48 +260,13 @@
 
         <!-- ============ 源站与负载均衡 ============ -->
         <template v-else-if="tab === 'origin'">
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnOrigin.originGroups') }}</h3>
-              <div class="app-panel__extra">
-                <n-tag size="tiny" :bordered="false" class="tnum">{{ originGroups.length }}</n-tag>
-              </div>
-            </div>
-            <div class="zone-form-strip">
-              <n-input v-model:value="ogForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
-              <n-input v-model:value="ogForm.hostHeader" :placeholder="t('cdnOrigin.hostHeader')" style="width: 180px" size="small" />
-              <n-button size="small" type="primary" :loading="ogSaveBusy" @click="createOriginGroup">{{ t('cdnZoneSetting.create') }}</n-button>
-              <n-input v-model:value="ogForm.records" type="textarea" :rows="3" :placeholder="t('cdnOrigin.recordsHint')" class="zone-form-strip__wide mono-input" />
-              <n-input v-if="isEsa" v-model:value="ogForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
-            </div>
-            <ResponsiveDataTable :columns="ogColumns" :data="originGroups" size="small" :loading="loadBusy" :empty-text="t('cdnAdvanced.ogEmpty')" :empty-description="t('cdnAdvanced.ogEmptyHint')" />
-          </div>
-
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnOrigin.loadBalancers') }}</h3>
-              <div class="app-panel__extra">
-                <n-tag size="tiny" :bordered="false" class="tnum">{{ loadBalancers.length }}</n-tag>
-              </div>
-            </div>
-            <div class="zone-form-strip">
-              <n-input v-model:value="lbForm.name" :placeholder="t('cdnOrigin.name')" style="width: 180px" size="small" />
-              <EsaCardSelect v-model="lbForm.type" :options="lbTypeOptions" dense style="width: 160px; flex: 0 0 160px" />
-              <n-button size="small" type="primary" :loading="lbSaveBusy" @click="createLoadBalancer">{{ t('cdnZoneSetting.create') }}</n-button>
-              <EsaCardSelect
-                v-model="lbForm.originGroups"
-                :options="ogOptions"
-                :placeholder="t('cdnOrigin.originGroupsPick')"
-                multiple
-                searchable
-                clearable
-                dense
-                class="zone-form-strip__wide"
-              />
-              <n-input v-if="isEsa" v-model:value="lbForm.params" type="textarea" :rows="2" :placeholder="t('cdnOrigin.extraParamsHint')" class="zone-form-strip__wide mono-input" />
-            </div>
-            <ResponsiveDataTable :columns="lbColumns" :data="loadBalancers" size="small" :loading="loadBusy" :empty-text="t('cdnAdvanced.lbEmpty')" :empty-description="t('cdnAdvanced.lbEmptyHint')" />
-          </div>
+          <CdnZoneOriginTab
+            :aid="aid"
+            :zone-id="zoneId"
+            :is-esa="isEsa"
+            :load-balancer-health="caps.loadBalancerHealth"
+            :reload-key="originReloadKey"
+          />
         </template>
 
         <!-- ============ 规则引擎 ============ -->
@@ -380,6 +345,7 @@
               size="small"
               :loading="ruleLoadBusy"
               :empty-text="t('cdnRules.empty')"
+              :pagination="rulePagination"
             />
           </div>
 
@@ -420,44 +386,9 @@
 
         <!-- ============ 版本管理 ============ -->
         <template v-else-if="tab === 'versions'">
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnZoneSetting.environments') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" :loading="versionEnvLoading" :disabled="versionEnvLoading" @click="loadVersionEnvironments">{{ t('cdnAdvanced.load') }}</n-button>
-              </div>
-            </div>
-            <pre v-if="versionEnvText" class="code-view">{{ versionEnvText }}</pre>
-            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-          </div>
-
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnZoneSetting.configVersions') }}</h3>
-              <div class="app-panel__extra">
-                <n-input v-model:value="versionGroupId" :placeholder="t('cdnZoneSetting.groupIdHint')" size="small" style="width: 220px" />
-                <n-button size="small" :loading="versionLoading" :disabled="versionLoading || !versionGroupId.trim()" @click="loadVersions">{{ t('cdnAdvanced.load') }}</n-button>
-                <n-button size="small" type="primary" @click="openVersionModal('create')">{{ t('cdnZoneSetting.createVersion') }}</n-button>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="versionColumns" :data="versionList" size="small" :loading="versionLoading" :empty-text="t('cdnZoneSetting.versionEmpty')" />
-          </div>
-
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnZoneSetting.versionDeploy') }}</h3>
-              <div class="app-panel__extra">
-                <n-input v-model:value="versionEnvId" :placeholder="t('cdnZoneSetting.envIdHint')" size="small" style="width: 220px" />
-                <n-button size="small" type="primary" @click="openVersionModal('deploy')">{{ t('cdnZoneSetting.deployVersion') }}</n-button>
-                <n-button size="small" :loading="versionHistoryLoading" :disabled="versionHistoryLoading || !versionEnvId.trim()" @click="loadVersionHistory">{{ t('cdnZoneSetting.versionHistory') }}</n-button>
-              </div>
-            </div>
-            <pre v-if="versionActionText" class="code-view">{{ versionActionText }}</pre>
-            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-          </div>
+          <CdnZoneVersionsTab :aid="aid" :zone-id="zoneId" :reload-key="versionsReloadKey" />
         </template>
 
-        <!-- ============ 多通道安全网关 ============ -->
         <template v-else-if="caps.multiPath && tab === 'multipath'">
           <CdnZonePlatform :aid="aid" :zone-id="zoneId" section="multipath" />
         </template>
@@ -479,42 +410,7 @@
 
         <!-- ============ 边缘函数与 KV ============ -->
         <template v-else-if="tab === 'edge'">
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnZoneSetting.functions') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" type="primary" @click="openFunction()">{{ t('cdnZoneSetting.create') }}</n-button>
-                <n-button size="small" :loading="edgeLoading" :disabled="edgeLoading" @click="loadFunctions">{{ t('cdnAdvanced.refresh') }}</n-button>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="functionColumns" :data="functions" size="small" :loading="edgeLoading" :empty-text="t('cdnZoneSetting.functionEmpty')" />
-          </div>
-
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnZoneSetting.functionRules') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" type="primary" @click="openFunctionRule()">{{ t('cdnZoneSetting.create') }}</n-button>
-                <n-button size="small" :loading="edgeLoading" :disabled="edgeLoading" @click="loadFunctionRules">{{ t('cdnAdvanced.refresh') }}</n-button>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="functionRuleColumns" :data="functionRules" size="small" :loading="edgeLoading" :empty-text="t('cdnZoneSetting.functionRuleEmpty')" />
-          </div>
-
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnZoneSetting.kvNamespaces') }}</h3>
-              <div class="app-panel__extra">
-                <n-tag size="tiny" :bordered="false" class="tnum">{{ kvNamespaces.length }}</n-tag>
-              </div>
-            </div>
-            <div class="zone-form-strip">
-              <n-input v-model:value="kvForm.namespace" :placeholder="t('cdnZoneSetting.kvNamespace')" style="width: 180px" size="small" />
-              <n-input v-model:value="kvForm.remark" :placeholder="t('cdnZoneSetting.kvRemark')" style="width: 220px" size="small" />
-              <n-button size="small" type="primary" :loading="kvSaving" @click="createKvNamespace">{{ t('cdnZoneSetting.create') }}</n-button>
-            </div>
-            <ResponsiveDataTable :columns="kvNamespaceColumns" :data="kvNamespaces" size="small" :loading="edgeLoading" :empty-text="t('cdnZoneSetting.kvEmpty')" />
-          </div>
+          <CdnZoneEdgeTab :aid="aid" :zone-id="zoneId" :caps="caps" :reload-key="edgeReloadKey" />
         </template>
 
         <!-- ============ 安全 ============ -->
@@ -635,111 +531,7 @@
 
         <!-- ============ 任务与统计 ============ -->
         <template v-else-if="caps.tasks && tab === 'tasks'">
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.purge') }}</h3>
-              <div class="app-panel__extra">
-                <n-tag size="tiny" :bordered="false" class="tnum">{{ purgeTasks.length }}</n-tag>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="taskColumns" :data="purgeTasks" size="small" :loading="loadBusy" />
-          </div>
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.prefetch') }}</h3>
-              <div class="app-panel__extra">
-                <n-tag size="tiny" :bordered="false" class="tnum">{{ prefetchTasks.length }}</n-tag>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="taskColumns" :data="prefetchTasks" size="small" :loading="loadBusy" />
-          </div>
-          <div class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.quota') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" :loading="!!busy['quota']" :disabled="!!busy['quota']" @click="run('quota', loadQuota)">{{ t('cdnAdvanced.load') }}</n-button>
-              </div>
-            </div>
-            <pre v-if="quotaText" class="code-view">{{ quotaText }}</pre>
-            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-          </div>
-          <div v-if="caps.realtimeLogs" class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.realtimeLogs') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" type="primary" @click="openLogTask()">{{ t('cdnZoneSetting.create') }}</n-button>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="logTaskColumns" :data="logTasks" size="small" :loading="logTaskBusy" :empty-text="t('cdnAdvanced.logTaskEmpty')" />
-          </div>
-
-          <div v-if="caps.offlineLogs" class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.offlineLogs') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" :loading="!!busy['offlineL7']" :disabled="!!busy['offlineL7']" @click="run('offlineL7', () => loadOfflineLogs('l7'))">{{ t('cdnAdvanced.offlineL7') }}</n-button>
-                <n-button size="small" :loading="!!busy['offlineL4']" :disabled="!!busy['offlineL4']" @click="run('offlineL4', () => loadOfflineLogs('l4'))">{{ t('cdnAdvanced.offlineL4') }}</n-button>
-              </div>
-            </div>
-            <pre v-if="offlineLogText" class="code-view">{{ offlineLogText }}</pre>
-            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-          </div>
-
-          <div v-if="caps.contentIdentifier" class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.contentIdentifiers') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" type="primary" @click="openContentId()">{{ t('cdnZoneSetting.create') }}</n-button>
-              </div>
-            </div>
-            <ResponsiveDataTable :columns="contentIdColumns" :data="contentIds" size="small" :loading="contentIdBusy" :empty-text="t('cdnAdvanced.contentIdEmpty')" />
-          </div>
-
-          <div v-if="!isEsa" class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.prefetchOriginLimit') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" :loading="prefetchLimitLoading" :disabled="prefetchLimitLoading" @click="loadPrefetchOriginLimit">{{ t('cdnAdvanced.load') }}</n-button>
-                <n-button size="small" type="primary" :loading="prefetchLimitSaving" :disabled="prefetchLimitSaving" @click="savePrefetchOriginLimit">{{ t('cdnZoneSetting.save') }}</n-button>
-              </div>
-            </div>
-            <n-input
-              v-model:value="prefetchLimitText"
-              type="textarea"
-              :rows="7"
-              :placeholder="t('cdnAdvanced.prefetchOriginLimitHint')"
-              class="mono-input"
-              spellcheck="false"
-            />
-          </div>
-
-          <div v-if="!isEsa" class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.diagnostics') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" :loading="!!busy['ddosEvents']" :disabled="!!busy['ddosEvents']" @click="run('ddosEvents', loadDdosEvents)">{{ t('cdnAdvanced.ddosEvents') }}</n-button>
-                <n-button size="small" :loading="!!busy['ddosTop']" :disabled="!!busy['ddosTop']" @click="run('ddosTop', loadDdosTop)">{{ t('cdnAdvanced.ddosTop') }}</n-button>
-                <n-button size="small" :loading="!!busy['l4Timing']" :disabled="!!busy['l4Timing']" @click="run('l4Timing', loadL4Timing)">{{ t('cdnAdvanced.l4Timing') }}</n-button>
-              </div>
-            </div>
-            <div class="zone-form-strip">
-              <n-input v-model:value="ipRegionInput" :placeholder="t('cdnAdvanced.ipRegionHint')" style="width: 320px" size="small" />
-              <n-button size="small" :loading="!!busy['ipRegion']" :disabled="!!busy['ipRegion']" @click="run('ipRegion', loadIpRegion)">{{ t('cdnAdvanced.ipRegion') }}</n-button>
-            </div>
-            <pre v-if="diagnosticText" class="code-view">{{ diagnosticText }}</pre>
-            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-          </div>
-
-          <div v-if="caps.analysis" class="app-panel">
-            <div class="app-panel__head">
-              <h3 class="app-panel__title">{{ t('cdnAdvanced.analysis') }}</h3>
-              <div class="app-panel__extra">
-                <n-button size="small" :loading="!!busy['analysis']" :disabled="!!busy['analysis']" @click="run('analysis', loadTopAnalysis)">{{ t('cdnAdvanced.load') }}</n-button>
-              </div>
-            </div>
-            <pre v-if="analysisText" class="code-view">{{ analysisText }}</pre>
-            <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-          </div>
+          <CdnZoneTasksTab :aid="aid" :zone-id="zoneId" :caps="caps" :is-esa="isEsa" :reload-key="tasksReloadKey" />
         </template>
 
         <!-- ============ 全局配置 ============ -->
@@ -779,168 +571,12 @@
         />
       </n-modal>
 
-      <n-modal v-model:show="showFunction" preset="card" :title="functionEditingId ? t('cdnZoneSetting.editFunction') : t('cdnZoneSetting.createFunction')" class="modal-lg" :mask-closable="false">
-        <n-input v-model:value="functionJson" type="textarea" :rows="16" class="mono-input" spellcheck="false" :placeholder="t('cdnZoneSetting.functionJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showFunction = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="functionSaving" :disabled="functionSaving" @click="saveFunction">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
-      <n-modal v-model:show="showFunctionRule" preset="card" :title="functionRuleEditingId ? t('cdnZoneSetting.editFunctionRule') : t('cdnZoneSetting.createFunctionRule')" class="modal-lg" :mask-closable="false">
-        <n-input v-model:value="functionRuleJson" type="textarea" :rows="16" class="mono-input" spellcheck="false" :placeholder="t('cdnZoneSetting.functionRuleJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showFunctionRule = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="functionRuleSaving" :disabled="functionRuleSaving" @click="saveFunctionRule">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
-      <n-drawer v-model:show="showKvKeys" placement="right" width="min(900px, 94vw)">
-        <n-drawer-content closable :native-scrollbar="false" :title="kvKeyTitle">
-          <div class="app-stack">
-            <div class="app-panel">
-              <div class="app-panel__head">
-                <h3 class="app-panel__title">{{ t('cdnZoneSetting.kvKeys') }}</h3>
-                <div class="app-panel__extra">
-                  <n-input v-model:value="kvPrefix" :placeholder="t('cdnZoneSetting.kvPrefix')" size="small" style="width: 180px" />
-                  <n-button size="small" :loading="kvKeyLoading" :disabled="kvKeyLoading" @click="loadKvKeys">{{ t('cdnAdvanced.load') }}</n-button>
-                </div>
-              </div>
-              <pre v-if="kvKeysText" class="code-view">{{ kvKeysText }}</pre>
-              <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-            </div>
-            <div class="app-panel">
-              <div class="app-panel__head">
-                <h3 class="app-panel__title">{{ t('cdnZoneSetting.kvData') }}</h3>
-              </div>
-              <div class="zone-form-strip">
-                <n-input v-model:value="kvKeyForm.key" :placeholder="t('cdnZoneSetting.kvKey')" style="width: 180px" size="small" />
-                <n-button size="small" :loading="!!busy['kvGet']" :disabled="!!busy['kvGet'] || !kvKeyForm.key" @click="run('kvGet', kvGetKey)">{{ t('cdnZoneSetting.kvGet') }}</n-button>
-                <n-button size="small" type="error" :loading="!!busy['kvDel']" :disabled="!!busy['kvDel'] || !kvKeyForm.key" @click="run('kvDel', kvDeleteKey)">{{ t('cdnZoneSetting.delete') }}</n-button>
-              </div>
-              <n-input v-model:value="kvKeyForm.value" type="textarea" :rows="6" :placeholder="t('cdnZoneSetting.kvValue')" class="mono-input" style="margin-top: 8px" />
-              <div class="zone-form-strip" style="margin-top: 8px">
-                <n-input v-model:value="kvKeyForm.ttl" :placeholder="t('cdnZoneSetting.kvTtl')" style="width: 160px" size="small" />
-                <n-button size="small" type="primary" :loading="!!busy['kvPut']" :disabled="!!busy['kvPut'] || !kvKeyForm.key" @click="run('kvPut', kvPutKey)">{{ t('cdnZoneSetting.kvPut') }}</n-button>
-              </div>
-              <pre v-if="kvDataText" class="code-view">{{ kvDataText }}</pre>
-            </div>
-          </div>
-        </n-drawer-content>
-      </n-drawer>
-
-      <n-drawer v-model:show="showReplicas" placement="right" width="min(900px, 94vw)">
-        <n-drawer-content closable :native-scrollbar="false" :title="replicaTitle">
-          <div class="app-stack">
-            <div class="app-panel">
-              <div class="app-panel__head">
-                <h3 class="app-panel__title">{{ t('cdnZoneSetting.replicas') }}</h3>
-                <div class="app-panel__extra">
-                  <n-button size="small" type="primary" @click="openReplicaModal()">{{ t('cdnZoneSetting.create') }}</n-button>
-                  <n-button size="small" :loading="replicaLoading" :disabled="replicaLoading" @click="loadReplicas">{{ t('cdnAdvanced.refresh') }}</n-button>
-                </div>
-              </div>
-              <ResponsiveDataTable :columns="replicaColumns" :data="replicas" size="small" :loading="replicaLoading" :empty-text="t('cdnZoneSetting.replicaEmpty')" />
-            </div>
-          </div>
-        </n-drawer-content>
-      </n-drawer>
-
-      <n-drawer v-model:show="showBindings" placement="right" width="min(900px, 94vw)">
-        <n-drawer-content closable :native-scrollbar="false" :title="bindingTitle">
-          <div class="app-stack">
-            <div class="app-panel">
-              <div class="app-panel__head">
-                <h3 class="app-panel__title">{{ t('cdnZoneSetting.bindings') }}</h3>
-                <div class="app-panel__extra">
-                  <n-button size="small" type="primary" @click="openBindingModal">{{ t('cdnZoneSetting.edit') }}</n-button>
-                  <n-button size="small" :loading="bindingLoading" :disabled="bindingLoading" @click="loadBindings">{{ t('cdnAdvanced.refresh') }}</n-button>
-                </div>
-              </div>
-              <pre v-if="bindingText" class="code-view">{{ bindingText }}</pre>
-              <span v-else class="hint-text">{{ t('cdnZoneSetting.empty') }}</span>
-            </div>
-          </div>
-        </n-drawer-content>
-      </n-drawer>
-
-      <n-drawer v-model:show="showRuntime" placement="right" width="min(900px, 94vw)">
-        <n-drawer-content closable :native-scrollbar="false" :title="runtimeTitle">
-          <div class="app-stack">
-            <div class="app-panel">
-              <div class="app-panel__head">
-                <h3 class="app-panel__title">{{ t('cdnZoneSetting.runtime') }}</h3>
-                <div class="app-panel__extra">
-                  <n-button size="small" :loading="runtimeLoading" :disabled="runtimeLoading" @click="loadRuntime">{{ t('cdnAdvanced.load') }}</n-button>
-                  <n-button size="small" type="primary" :loading="runtimeSaving" :disabled="runtimeSaving" @click="saveRuntime">{{ t('cdnZoneSetting.save') }}</n-button>
-                </div>
-              </div>
-              <n-input v-model:value="runtimeJson" type="textarea" :rows="14" class="mono-input" spellcheck="false" :placeholder="t('cdnZoneSetting.runtimeJsonHint')" />
-            </div>
-          </div>
-        </n-drawer-content>
-      </n-drawer>
-
-      <n-modal v-model:show="showReplicaModal" preset="card" :title="replicaEditingName ? t('cdnZoneSetting.editReplica') : t('cdnZoneSetting.createReplica')" class="modal-lg" :mask-closable="false">
-        <n-input v-model:value="replicaJson" type="textarea" :rows="14" class="mono-input" spellcheck="false" :placeholder="t('cdnZoneSetting.replicaJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showReplicaModal = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="replicaSaving" :disabled="replicaSaving" @click="saveReplica">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
-      <n-modal v-model:show="showBindingModal" preset="card" :title="t('cdnZoneSetting.bindings')" class="modal-lg" :mask-closable="false">
-        <n-input v-model:value="bindingJson" type="textarea" :rows="12" class="mono-input" spellcheck="false" :placeholder="t('cdnZoneSetting.bindingJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showBindingModal = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="bindingSaving" :disabled="bindingSaving" @click="saveBindings">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
-      <n-modal v-model:show="showVersionModal" preset="card" :title="versionModalMode === 'create' ? t('cdnZoneSetting.createVersion') : t('cdnZoneSetting.deployVersion')" class="modal-lg" :mask-closable="false">
-        <n-input v-model:value="versionJson" type="textarea" :rows="16" class="mono-input" spellcheck="false" :placeholder="t('cdnZoneSetting.versionJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showVersionModal = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="versionSaving" :disabled="versionSaving" @click="saveVersionModal">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
       <n-modal v-model:show="showSecurityRule" preset="card" :title="securityRuleTitle" class="modal-lg" :mask-closable="false">
         <n-input v-model:value="securityRuleJson" type="textarea" :rows="14" class="mono-input" spellcheck="false" :placeholder="t('cdnSecurity.ruleJsonHint')" />
         <template #footer>
           <n-space justify="end">
             <n-button @click="showSecurityRule = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
             <n-button type="primary" :loading="securityRuleSaving" :disabled="securityRuleSaving" @click="saveSecurityRule">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
-      <n-modal v-model:show="showLogTask" preset="card" :title="logTaskEditingId ? t('cdnAdvanced.editLogTask') : t('cdnAdvanced.createLogTask')" class="modal-lg" :mask-closable="false">
-        <n-input v-model:value="logTaskJson" type="textarea" :rows="16" class="mono-input" spellcheck="false" :placeholder="t('cdnAdvanced.logTaskJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showLogTask = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="logTaskSaving" :disabled="logTaskSaving" @click="saveLogTask">{{ t('cdnZoneSetting.save') }}</n-button>
-          </n-space>
-        </template>
-      </n-modal>
-
-      <n-modal v-model:show="showContentId" preset="card" :title="contentIdEditingId ? t('cdnAdvanced.editContentId') : t('cdnAdvanced.createContentId')" class="modal-md" :mask-closable="false">
-        <n-input v-model:value="contentIdJson" type="textarea" :rows="8" class="mono-input" spellcheck="false" :placeholder="t('cdnAdvanced.contentIdJsonHint')" />
-        <template #footer>
-          <n-space justify="end">
-            <n-button @click="showContentId = false">{{ t('cdnZoneSetting.cancel') }}</n-button>
-            <n-button type="primary" :loading="contentIdSaving" :disabled="contentIdSaving" @click="saveContentId">{{ t('cdnZoneSetting.save') }}</n-button>
           </n-space>
         </template>
       </n-modal>
@@ -1088,7 +724,11 @@ import RuleCreatePicker, { type RuleCreateSource } from '../components/cdn/RuleC
 import EsaRuleKindPicker from '../components/cdn/EsaRuleKindPicker.vue';
 import ZoneModuleMenu, { type ZoneModuleMenuItem } from '../components/cdn/ZoneModuleMenu.vue';
 const EsaZoneConsole = defineAsyncComponent(() => import('../components/cdn/EsaZoneConsole.vue'));
-import CdnZoneGlobalSetting from '../components/cdn/CdnZoneGlobalSetting.vue';
+const CdnZoneGlobalSetting = defineAsyncComponent(() => import('../components/cdn/CdnZoneGlobalSetting.vue'));
+const CdnZoneVersionsTab = defineAsyncComponent(() => import('../components/cdn/CdnZoneVersionsTab.vue'));
+const CdnZoneOriginTab = defineAsyncComponent(() => import('../components/cdn/CdnZoneOriginTab.vue'));
+const CdnZoneEdgeTab = defineAsyncComponent(() => import('../components/cdn/CdnZoneEdgeTab.vue'));
+const CdnZoneTasksTab = defineAsyncComponent(() => import('../components/cdn/CdnZoneTasksTab.vue'));
 const CdnZonePlatform = defineAsyncComponent(() => import('../components/cdn/CdnZonePlatform.vue'));
 import EsaCardSelect from '../components/cdn/EsaCardSelect.vue';
 import { useAction } from '../composables/useAction';
@@ -1098,6 +738,7 @@ import { EO_RULE_TEMPLATES } from '../lib/eoRuleTemplates';
 import { EO_PRESET_RULES } from '../lib/eoPresetRules';
 import { ESA_RULE_CATEGORIES, esaKindsOfCategory, esaKindMeta, type EsaRuleCategory, type EsaRuleKindMeta } from '../lib/esaRuleMeta';
 import { EO_ZONE_TABS, ESA_ZONE_TABS } from '../lib/zoneTabs';
+import { parseExtraParams } from '../lib/cdn/zoneForms';
 
 const { t, locale } = useI18n();
 const message = useMessage();
@@ -1111,6 +752,10 @@ const zoneId = String(route.params.zoneId || '');
 const tab = ref('overview');
 const esaTab = ref('overview');
 const esaReloadKey = ref(0);
+const versionsReloadKey = ref(0);
+const originReloadKey = ref(0);
+const edgeReloadKey = ref(0);
+const tasksReloadKey = ref(0);
 const esaSub = reactive<Record<string, string>>({});
 for (const tabDef of ESA_ZONE_TABS) {
   if (tabDef.children?.length) esaSub[tabDef.key] = tabDef.defaultChild || tabDef.children[0].key;
@@ -1290,23 +935,8 @@ async function loadZoneInfo() {
   zoneInfo.value = hit || { zone_id: zoneId, name: '', zone_name: '' };
 }
 async function loadDomains() {
-  // 由后端按账户 + 站点过滤，替代拉全量后在本地筛选
-  // 接口已分页；按页取全量，避免站点域名超过默认 200 条时列表被截断
-  const rows: any[] = [];
-  let failed = false;
-  for (let page = 1; page <= 50; page++) {
-    const res = await api<any>('GET', '/cdn/domains', { aid, zone_id: zoneId, page, size: 500 });
-    if (res.code !== 0) {
-      failed = true;
-      break;
-    }
-    const list = res.data || [];
-    rows.push(...list);
-    const total = Number(res.total || 0);
-    if (!list.length || list.length < 500 || (total > 0 && rows.length >= total)) break;
-  }
-  // 失败时保留原列表，避免分页中途失败把已显示域名清空
-  if (!failed) domains.value = rows;
+  const res = await api<any>('GET', '/cdn/domains/options', { aid, zone_id: zoneId, limit: 10000 });
+  if (res.code === 0) domains.value = res.data || [];
 }
 async function loadNs() {
   if (!zoneId) return;
@@ -1716,160 +1346,6 @@ function delAlias(r: any) {
   });
 }
 
-// ===================== 源站与负载均衡 =====================
-const originGroups = ref<any[]>([]);
-const loadBalancers = ref<any[]>([]);
-const ogSaveBusy = ref(false);
-const lbSaveBusy = ref(false);
-const ogForm = reactive<any>({ name: '', hostHeader: '', records: '', params: '' });
-const lbForm = reactive<any>({ name: '', type: 'HTTP', originGroups: [], params: '' });
-const lbTypeOptions = [
-  { label: 'HTTP', value: 'HTTP' },
-  { label: 'HTTP_V2', value: 'HTTP_V2' },
-  { label: 'GENERAL', value: 'GENERAL' },
-];
-const ogOptions = computed(() => originGroups.value.map((g: any) => ({ label: g.name || String(g.groupId), value: String(g.groupId) })));
-const ogColumns = computed(() => [
-  { title: t('cdnOrigin.colName'), key: 'name', minWidth: 140 },
-  { title: t('cdnOrigin.colType'), key: 'type', width: 100 },
-  {
-    title: t('cdnOrigin.colRecords'),
-    key: 'records',
-    minWidth: 200,
-    render: (r: any) => (Array.isArray(r.records) ? r.records.map((x: any) => (typeof x === 'string' ? x : x.Record || x.record || x.Address || '')).join(', ') : ''),
-  },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 90, render: (r: any) => h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delOriginGroup(r) }, { default: () => t('cdnZoneSetting.delete') }) },
-]);
-const lbColumns = computed(() => [
-  { title: t('cdnOrigin.colName'), key: 'name', minWidth: 140 },
-  { title: t('cdnOrigin.colType'), key: 'type', width: 120 },
-  {
-    title: t('cdnOrigin.colActions'),
-    key: 'actions',
-    width: 160,
-    render: (r: any) =>
-      h('div', { class: 'row-actions' }, [
-        ...(caps.value.loadBalancerHealth
-          ? [h(NButton, { size: 'tiny', quaternary: true, onClick: () => showLbHealth(r) }, { default: () => t('cdnOrigin.health') })]
-          : []),
-        h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delLoadBalancer(r) }, { default: () => t('cdnZoneSetting.delete') }),
-      ]),
-  },
-]);
-
-function parseRecords(text: string) {
-  return String(text || '')
-    .split('\n')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((line) => {
-      const [rec, w] = line.split(',').map((x) => x.trim());
-      const o: any = { Record: rec };
-      if (w) o.Weight = Number(w);
-      return o;
-    });
-}
-function parseExtraParams(text: string) {
-  const s = String(text || '').trim();
-  if (!s) return undefined;
-  try {
-    const o = JSON.parse(s);
-    return o && typeof o === 'object' && !Array.isArray(o) ? o : undefined;
-  } catch {
-    return undefined;
-  }
-}
-async function loadOriginData(): Promise<boolean> {
-  const [og, lb] = await Promise.all([
-    api<any>('GET', `/cdn/accounts/${aid}/origin-groups`, { zoneId, page: 1, size: 100 }),
-    api<any>('GET', `/cdn/accounts/${aid}/load-balancers`, { zoneId, page: 1, size: 100 }),
-  ]);
-  originGroups.value = og.code === 0 ? og.data?.list || [] : [];
-  loadBalancers.value = lb.code === 0 ? lb.data?.list || [] : [];
-  return og.code === 0 && lb.code === 0;
-}
-async function createOriginGroup() {
-  if (!ogForm.name) return message.warning(t('cdnOrigin.needName'));
-  const records = parseRecords(ogForm.records);
-  if (!records.length) return message.warning(t('cdnOrigin.needRecords'));
-  ogSaveBusy.value = true;
-  const res = await api<any>('POST', `/cdn/accounts/${aid}/origin-groups`, {
-    zoneId,
-    name: ogForm.name,
-    records,
-    hostHeader: ogForm.hostHeader || undefined,
-    params: parseExtraParams(ogForm.params),
-  });
-  ogSaveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    ogForm.name = '';
-    ogForm.records = '';
-    ogForm.hostHeader = '';
-    ogForm.params = '';
-    loadOriginData();
-  } else message.error(res.msg);
-}
-function delOriginGroup(r: any) {
-  dialog.warning({
-    title: t('cdnOrigin.delete'),
-    content: t('cdnOrigin.confirmDelete', { name: r.name || r.groupId }),
-    positiveText: t('cdnZoneSetting.delete'),
-    negativeText: t('cdnZoneSetting.cancel'),
-    onPositiveClick: async () => {
-      const res = await api('DELETE', `/cdn/accounts/${aid}/origin-groups/${encodeURIComponent(r.groupId)}`, { zoneId });
-      if (res.code === 0) {
-        message.success(res.msg);
-        loadOriginData();
-      } else message.error(res.msg);
-    },
-  });
-}
-async function createLoadBalancer() {
-  if (!lbForm.name) return message.warning(t('cdnOrigin.needName'));
-  lbSaveBusy.value = true;
-  const originGroupsPayload = (lbForm.originGroups || []).map((gid: string, i: number) => ({ Priority: String(i + 1), OriginGroupId: String(gid) }));
-  const res = await api<any>('POST', `/cdn/accounts/${aid}/load-balancers`, {
-    zoneId,
-    name: lbForm.name,
-    type: lbForm.type,
-    originGroups: originGroupsPayload,
-    params: parseExtraParams(lbForm.params),
-  });
-  lbSaveBusy.value = false;
-  if (res.code === 0) {
-    message.success(res.msg);
-    lbForm.name = '';
-    lbForm.originGroups = [];
-    lbForm.params = '';
-    loadOriginData();
-  } else message.error(res.msg);
-}
-async function showLbHealth(r: any) {
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/load-balancers/${encodeURIComponent(String(r.instanceId))}/health`, { zoneId });
-  if (res.code !== 0) return message.error(res.msg);
-  dialog.info({
-    title: t('cdnOrigin.healthTitle', { name: r.name || r.instanceId }),
-    content: () => h('pre', { class: 'code-view', style: 'max-height:480px' }, JSON.stringify(res.data || [], null, 2)),
-  });
-}
-
-function delLoadBalancer(r: any) {
-  dialog.warning({
-    title: t('cdnOrigin.delete'),
-    content: t('cdnOrigin.confirmDelete', { name: r.name || r.instanceId }),
-    positiveText: t('cdnZoneSetting.delete'),
-    negativeText: t('cdnZoneSetting.cancel'),
-    onPositiveClick: async () => {
-      const res = await api('DELETE', `/cdn/accounts/${aid}/load-balancers/${encodeURIComponent(r.instanceId)}`, { zoneId });
-      if (res.code === 0) {
-        message.success(res.msg);
-        loadOriginData();
-      } else message.error(res.msg);
-    },
-  });
-}
-
 // ===================== 规则引擎（可视化） =====================
 const ruleList = ref<any[]>([]);
 const ruleLoadBusy = ref(false);
@@ -2009,11 +1485,22 @@ async function loadRules(): Promise<boolean> {
         ruleTotal.value = Number(res.data?.total || 0);
       }
     } else {
-      const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, { zoneId });
+      const res = await api<any>('GET', `/cdn/accounts/${aid}/rules`, {
+        zoneId,
+        page: rulePage.value,
+        size: rulePageSize.value,
+      });
       if (seq !== rulesLoadSeq) return false;
       ok = res.code === 0;
-      if (ok) ruleList.value = res.data || [];
-      else {
+      if (ok) {
+        if (Array.isArray(res.data)) {
+          ruleList.value = res.data;
+          ruleTotal.value = res.data.length;
+        } else {
+          ruleList.value = res.data?.list || [];
+          ruleTotal.value = Number(res.data?.total || 0);
+        }
+      } else {
         ruleLoadError.value = res.msg || '规则加载失败';
         message.error(ruleLoadError.value);
       }
@@ -2300,7 +1787,7 @@ function delRule(r: any) {
         : await api('DELETE', `/cdn/accounts/${aid}/rules`, { zoneId, ruleIds: [String(r.ruleId)] });
       if (res.code === 0) {
         message.success(res.msg);
-        if (isEsa.value && ruleList.value.length === 1 && rulePage.value > 1) rulePage.value--;
+        if (ruleList.value.length === 1 && rulePage.value > 1) rulePage.value--;
         loadRules();
       } else message.error(res.msg);
     },
@@ -2898,786 +2385,6 @@ function delL4Proxy(r: any) {
   });
 }
 
-// ===================== 任务与统计 =====================
-const purgeTasks = ref<any[]>([]);
-const prefetchTasks = ref<any[]>([]);
-const quotaText = ref('');
-const analysisText = ref('');
-const taskColumns = computed(() => [
-  { title: 'ID', key: 'taskId', minWidth: 120 },
-  { title: t('cdnRules.colStatus'), key: 'status', width: 120 },
-  { title: t('cdnAccount.addTime'), key: 'createTime', minWidth: 160, render: (row: any) => formatDateTime(row.createTime) },
-]);
-async function loadTasks(): Promise<boolean> {
-  if (!caps.value.tasks) return true;
-  const [p, pf] = await Promise.all([
-    api<any>('GET', `/cdn/accounts/${aid}/tasks/purge`, { zoneId, page: 1, size: 50 }),
-    api<any>('GET', `/cdn/accounts/${aid}/tasks/prefetch`, { zoneId, page: 1, size: 50 }),
-  ]);
-  purgeTasks.value = p.code === 0 ? p.data?.list || [] : [];
-  prefetchTasks.value = pf.code === 0 ? pf.data?.list || [] : [];
-  return p.code === 0 && pf.code === 0;
-}
-async function loadQuota() {
-  const res = await api<any>('GET', isEsa.value ? `/cdn/accounts/${aid}/quota/purge` : `/cdn/accounts/${aid}/quota/content`, { zoneId, type: 'file' });
-  if (res.code === 0) quotaText.value = JSON.stringify(res.data, null, 2);
-  else message.error(res.msg);
-}
-const logTasks = ref<any[]>([]);
-const logTaskBusy = ref(false);
-const showLogTask = ref(false);
-const logTaskEditingId = ref('');
-const logTaskJson = ref('');
-const logTaskSaving = ref(false);
-const offlineLogText = ref('');
-const contentIds = ref<any[]>([]);
-const contentIdBusy = ref(false);
-const showContentId = ref(false);
-const contentIdEditingId = ref('');
-const contentIdJson = ref('');
-const contentIdSaving = ref(false);
-const logTaskColumns = computed(() => [
-  { title: 'TaskName', key: 'TaskName', minWidth: 180 },
-  { title: 'LogType', key: 'LogType', width: 140 },
-  { title: 'TaskType', key: 'TaskType', width: 140 },
-  { title: t('cdnRules.colStatus'), key: 'DeliveryStatus', width: 110 },
-  {
-    title: t('cdnOrigin.colActions'),
-    key: 'actions',
-    width: 150,
-    render: (r: any) => h('div', { class: 'row-actions' }, [
-      h(NButton, { size: 'tiny', quaternary: true, onClick: () => openLogTask(r) }, { default: () => t('cdnZoneSetting.edit') }),
-      h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delLogTask(r) }, { default: () => t('cdnZoneSetting.delete') }),
-    ]),
-  },
-]);
-const contentIdColumns = computed(() => [
-  { title: 'ContentId', key: 'ContentId', minWidth: 180 },
-  { title: t('cdnAdvanced.contentIdDesc'), key: 'Description', minWidth: 180 },
-  { title: 'PlanId', key: 'PlanId', minWidth: 160 },
-  { title: t('cdnRules.colStatus'), key: 'Status', width: 100 },
-  {
-    title: t('cdnOrigin.colActions'),
-    key: 'actions',
-    width: 150,
-    render: (r: any) => h('div', { class: 'row-actions' }, [
-      h(NButton, { size: 'tiny', quaternary: true, onClick: () => openContentId(r) }, { default: () => t('cdnZoneSetting.edit') }),
-      h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delContentId(r) }, { default: () => t('cdnZoneSetting.delete') }),
-    ]),
-  },
-]);
-
-async function loadRealtimeLogs(): Promise<boolean> {
-  if (!caps.value.realtimeLogs) return true;
-  logTaskBusy.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/logs/realtime`, { zoneId, page: 1, size: 100 });
-    logTasks.value = res.code === 0 ? res.data?.list || [] : [];
-    return res.code === 0;
-  } finally {
-    logTaskBusy.value = false;
-  }
-}
-
-function openLogTask(row?: any) {
-  logTaskEditingId.value = row ? String(row.TaskId || '') : '';
-  logTaskJson.value = JSON.stringify(
-    row || {
-      Area: 'overseas',
-      LogType: 'l7-access-logs',
-      TaskName: '',
-      TaskType: 'custom_endpoint',
-      EntityList: [],
-      Fields: [],
-      CustomEndpoint: { URL: '', Method: 'POST' },
-    },
-    null,
-    2,
-  );
-  showLogTask.value = true;
-}
-
-async function saveLogTask() {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(logTaskJson.value);
-  } catch {
-    return message.error(t('cdnSecurity.invalidJson'));
-  }
-  logTaskSaving.value = true;
-  try {
-    const res: any = logTaskEditingId.value
-      ? await api('PUT', `/cdn/accounts/${aid}/logs/realtime/${encodeURIComponent(logTaskEditingId.value)}`, { zoneId, params: parsed })
-      : await api('POST', `/cdn/accounts/${aid}/logs/realtime`, { zoneId, params: parsed });
-    if (res.code === 0) {
-      message.success(res.msg);
-      showLogTask.value = false;
-      await loadRealtimeLogs();
-    } else message.error(res.msg);
-  } finally {
-    logTaskSaving.value = false;
-  }
-}
-
-function delLogTask(r: any) {
-  dialog.warning({
-    title: t('cdnZoneSetting.delete'),
-    content: t('cdnAdvanced.confirmDelete', { name: r.TaskName || r.TaskId }),
-    positiveText: t('cdnZoneSetting.delete'),
-    negativeText: t('cdnZoneSetting.cancel'),
-    onPositiveClick: async () => {
-      const res = await api('DELETE', `/cdn/accounts/${aid}/logs/realtime/${encodeURIComponent(String(r.TaskId))}`, { zoneId });
-      if (res.code === 0) {
-        message.success(res.msg);
-        await loadRealtimeLogs();
-      } else message.error(res.msg);
-    },
-  });
-}
-
-async function loadOfflineLogs(kind: 'l7' | 'l4') {
-  const { startTime, endTime } = timeRange24h();
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/logs/offline/${kind}`, { zoneIds: zoneId, startTime, endTime, limit: 100 });
-  if (res.code === 0) offlineLogText.value = JSON.stringify(res.data?.list || [], null, 2);
-  else message.error(res.msg);
-}
-
-async function loadContentIdentifiers(): Promise<boolean> {
-  if (!caps.value.contentIdentifier) return true;
-  contentIdBusy.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/content-identifiers`, { page: 1, size: 100 });
-    contentIds.value = res.code === 0 ? res.data?.list || [] : [];
-    return res.code === 0;
-  } finally {
-    contentIdBusy.value = false;
-  }
-}
-
-function openContentId(row?: any) {
-  contentIdEditingId.value = row ? String(row.ContentId || '') : '';
-  contentIdJson.value = JSON.stringify(row ? { ContentId: row.ContentId, Description: row.Description } : { PlanId: '', Description: '', Tags: [] }, null, 2);
-  showContentId.value = true;
-}
-
-async function saveContentId() {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(contentIdJson.value);
-  } catch {
-    return message.error(t('cdnSecurity.invalidJson'));
-  }
-  contentIdSaving.value = true;
-  try {
-    const res: any = contentIdEditingId.value
-      ? await api('PUT', `/cdn/accounts/${aid}/content-identifiers/${encodeURIComponent(contentIdEditingId.value)}`, { description: parsed.Description || '' })
-      : await api('POST', `/cdn/accounts/${aid}/content-identifiers`, { params: parsed });
-    if (res.code === 0) {
-      message.success(res.msg);
-      showContentId.value = false;
-      await loadContentIdentifiers();
-    } else message.error(res.msg);
-  } finally {
-    contentIdSaving.value = false;
-  }
-}
-
-function delContentId(r: any) {
-  dialog.warning({
-    title: t('cdnZoneSetting.delete'),
-    content: t('cdnAdvanced.confirmDelete', { name: r.Description || r.ContentId }),
-    positiveText: t('cdnZoneSetting.delete'),
-    negativeText: t('cdnZoneSetting.cancel'),
-    onPositiveClick: async () => {
-      const res = await api('DELETE', `/cdn/accounts/${aid}/content-identifiers/${encodeURIComponent(String(r.ContentId))}`);
-      if (res.code === 0) {
-        message.success(res.msg);
-        await loadContentIdentifiers();
-      } else message.error(res.msg);
-    },
-  });
-}
-
-const functions = ref<any[]>([]);
-const functionRules = ref<any[]>([]);
-const kvNamespaces = ref<any[]>([]);
-const edgeLoading = ref(false);
-const showFunction = ref(false);
-const functionEditingId = ref('');
-const functionJson = ref('');
-const functionSaving = ref(false);
-const showFunctionRule = ref(false);
-const functionRuleEditingId = ref('');
-const functionRuleJson = ref('');
-const functionRuleSaving = ref(false);
-const kvForm = reactive<any>({ namespace: '', remark: '' });
-const kvSaving = ref(false);
-const showKvKeys = ref(false);
-const kvKeyNamespace = ref('');
-const kvPrefix = ref('');
-const kvKeysText = ref('');
-const kvKeyLoading = ref(false);
-const kvKeyForm = reactive<any>({ key: '', value: '', ttl: '' });
-const kvDataText = ref('');
-const functionColumns = computed(() => [
-  { title: 'FunctionId', key: 'FunctionId', minWidth: 160 },
-  { title: t('cdnSecurity.ruleName'), key: 'Name', minWidth: 160 },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 320, render: (r: any) => h('div', { class: 'row-actions' }, [
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openFunction(r) }, { default: () => t('cdnZoneSetting.edit') }),
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openReplicas(r) }, { default: () => t('cdnZoneSetting.replicas') }),
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openBindings(r) }, { default: () => t('cdnZoneSetting.bindings') }),
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openRuntime(r) }, { default: () => t('cdnZoneSetting.runtime') }),
-    h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delFunction(r) }, { default: () => t('cdnZoneSetting.delete') }),
-  ]) },
-]);
-const functionRuleColumns = computed(() => [
-  { title: 'RuleId', key: 'RuleId', minWidth: 160 },
-  { title: 'TriggerType', key: 'TriggerType', width: 130 },
-  { title: 'Priority', key: 'Priority', width: 90 },
-  { title: 'Remark', key: 'Remark', minWidth: 180 },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 150, render: (r: any) => h('div', { class: 'row-actions' }, [
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openFunctionRule(r) }, { default: () => t('cdnZoneSetting.edit') }),
-    h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delFunctionRule(r) }, { default: () => t('cdnZoneSetting.delete') }),
-  ]) },
-]);
-const kvNamespaceColumns = computed(() => [
-  { title: t('cdnZoneSetting.kvNamespace'), key: 'Namespace', minWidth: 180 },
-  { title: t('cdnZoneSetting.kvRemark'), key: 'Remark', minWidth: 200 },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 180, render: (r: any) => h('div', { class: 'row-actions' }, [
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openKvKeys(r) }, { default: () => t('cdnZoneSetting.kvData') }),
-    h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delKvNamespace(r) }, { default: () => t('cdnZoneSetting.delete') }),
-  ]) },
-]);
-const kvKeyTitle = computed(() => `${t('cdnZoneSetting.kvData')} · ${kvKeyNamespace.value}`);
-
-async function loadFunctions(): Promise<boolean> {
-  if (!caps.value.functions) return true;
-  edgeLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/functions`, { zoneId });
-    functions.value = res.code === 0 ? res.data || [] : [];
-    return res.code === 0;
-  } finally {
-    edgeLoading.value = false;
-  }
-}
-
-function openFunction(row?: any) {
-  functionEditingId.value = row ? String(row.FunctionId || '') : '';
-  functionJson.value = JSON.stringify(row ? { Content: row.Content || '', Remark: row.Remark || '' } : { Name: '', Content: '', Remark: '' }, null, 2);
-  showFunction.value = true;
-}
-
-async function saveFunction() {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(functionJson.value);
-  } catch {
-    return message.error(t('cdnSecurity.invalidJson'));
-  }
-  functionSaving.value = true;
-  try {
-    const res: any = functionEditingId.value
-      ? await api('PUT', `/cdn/accounts/${aid}/functions/${encodeURIComponent(functionEditingId.value)}`, { zoneId, params: parsed })
-      : await api('POST', `/cdn/accounts/${aid}/functions`, { zoneId, params: parsed });
-    if (res.code === 0) {
-      message.success(res.msg);
-      showFunction.value = false;
-      await loadFunctions();
-    } else message.error(res.msg);
-  } finally {
-    functionSaving.value = false;
-  }
-}
-
-function delFunction(r: any) {
-  dialog.warning({ title: t('cdnZoneSetting.delete'), content: t('cdnAdvanced.confirmDelete', { name: r.Name || r.FunctionId }), positiveText: t('cdnZoneSetting.delete'), negativeText: t('cdnZoneSetting.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cdn/accounts/${aid}/functions/${encodeURIComponent(String(r.FunctionId))}`, { zoneId });
-    if (res.code === 0) { message.success(res.msg); await loadFunctions(); } else message.error(res.msg);
-  } });
-}
-
-async function loadFunctionRules(): Promise<boolean> {
-  if (!caps.value.functions) return true;
-  edgeLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/function-rules`, { zoneId });
-    functionRules.value = res.code === 0 ? res.data || [] : [];
-    return res.code === 0;
-  } finally {
-    edgeLoading.value = false;
-  }
-}
-
-function openFunctionRule(row?: any) {
-  functionRuleEditingId.value = row ? String(row.RuleId || '') : '';
-  functionRuleJson.value = JSON.stringify(row || { FunctionRuleConditions: [{ RuleConditions: [] }], TriggerType: 'direct', FunctionId: '', Remark: '' }, null, 2);
-  showFunctionRule.value = true;
-}
-
-async function saveFunctionRule() {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(functionRuleJson.value);
-  } catch {
-    return message.error(t('cdnSecurity.invalidJson'));
-  }
-  functionRuleSaving.value = true;
-  try {
-    const res: any = functionRuleEditingId.value
-      ? await api('PUT', `/cdn/accounts/${aid}/function-rules/${encodeURIComponent(functionRuleEditingId.value)}`, { zoneId, params: parsed })
-      : await api('POST', `/cdn/accounts/${aid}/function-rules`, { zoneId, params: parsed });
-    if (res.code === 0) {
-      message.success(res.msg);
-      showFunctionRule.value = false;
-      await loadFunctionRules();
-    } else message.error(res.msg);
-  } finally {
-    functionRuleSaving.value = false;
-  }
-}
-
-function delFunctionRule(r: any) {
-  dialog.warning({ title: t('cdnZoneSetting.delete'), content: t('cdnAdvanced.confirmDelete', { name: r.Remark || r.RuleId }), positiveText: t('cdnZoneSetting.delete'), negativeText: t('cdnZoneSetting.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cdn/accounts/${aid}/function-rules`, { zoneId, ruleIds: [String(r.RuleId)] });
-    if (res.code === 0) { message.success(res.msg); await loadFunctionRules(); } else message.error(res.msg);
-  } });
-}
-
-async function loadKvNamespaces(): Promise<boolean> {
-  if (!caps.value.kv) return true;
-  edgeLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/kv/namespaces`, { zoneId, page: 1, size: 100 });
-    kvNamespaces.value = res.code === 0 ? res.data?.list || [] : [];
-    return res.code === 0;
-  } finally {
-    edgeLoading.value = false;
-  }
-}
-
-async function createKvNamespace() {
-  if (!kvForm.namespace.trim()) return message.warning(t('cdnZoneSetting.kvNamespace'));
-  kvSaving.value = true;
-  try {
-    const res = await api('POST', `/cdn/accounts/${aid}/kv/namespaces`, { zoneId, namespace: kvForm.namespace.trim(), remark: kvForm.remark.trim() || undefined });
-    if (res.code === 0) { message.success(res.msg); kvForm.namespace = ''; kvForm.remark = ''; await loadKvNamespaces(); } else message.error(res.msg);
-  } finally {
-    kvSaving.value = false;
-  }
-}
-
-function delKvNamespace(r: any) {
-  dialog.warning({ title: t('cdnZoneSetting.delete'), content: t('cdnAdvanced.confirmDelete', { name: r.Namespace }), positiveText: t('cdnZoneSetting.delete'), negativeText: t('cdnZoneSetting.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cdn/accounts/${aid}/kv/namespaces/${encodeURIComponent(String(r.Namespace))}`, { zoneId });
-    if (res.code === 0) { message.success(res.msg); await loadKvNamespaces(); } else message.error(res.msg);
-  } });
-}
-
-function openKvKeys(r: any) {
-  kvKeyNamespace.value = String(r.Namespace || '');
-  kvPrefix.value = '';
-  kvKeysText.value = '';
-  kvDataText.value = '';
-  kvKeyForm.key = '';
-  kvKeyForm.value = '';
-  kvKeyForm.ttl = '';
-  showKvKeys.value = true;
-  loadKvKeys();
-}
-
-async function loadKvKeys() {
-  if (!kvKeyNamespace.value) return;
-  kvKeyLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/kv/namespaces/${encodeURIComponent(kvKeyNamespace.value)}/keys`, { zoneId, prefix: kvPrefix.value.trim(), limit: 100 });
-    if (res.code === 0) kvKeysText.value = JSON.stringify(res.data || {}, null, 2);
-    else message.error(res.msg);
-  } finally {
-    kvKeyLoading.value = false;
-  }
-}
-
-async function kvGetKey() {
-  if (!kvKeyForm.key.trim()) return message.warning(t('cdnZoneSetting.kvKey'));
-  const res = await api<any>('POST', `/cdn/accounts/${aid}/kv/namespaces/${encodeURIComponent(kvKeyNamespace.value)}/get`, { zoneId, keys: [kvKeyForm.key.trim()] });
-  if (res.code === 0) kvDataText.value = JSON.stringify(res.data || [], null, 2);
-  else message.error(res.msg);
-}
-
-async function kvPutKey() {
-  if (!kvKeyForm.key.trim()) return message.warning(t('cdnZoneSetting.kvKey'));
-  const res = await api<any>('POST', `/cdn/accounts/${aid}/kv/namespaces/${encodeURIComponent(kvKeyNamespace.value)}/put`, { zoneId, key: kvKeyForm.key.trim(), value: kvKeyForm.value, ttl: kvKeyForm.ttl ? Number(kvKeyForm.ttl) : undefined });
-  if (res.code === 0) { message.success(res.msg); await loadKvKeys(); await kvGetKey(); } else message.error(res.msg);
-}
-
-async function kvDeleteKey() {
-  if (!kvKeyForm.key.trim()) return message.warning(t('cdnZoneSetting.kvKey'));
-  const res = await api<any>('POST', `/cdn/accounts/${aid}/kv/namespaces/${encodeURIComponent(kvKeyNamespace.value)}/delete`, { zoneId, keys: [kvKeyForm.key.trim()] });
-  if (res.code === 0) { message.success(res.msg); kvDataText.value = ''; await loadKvKeys(); } else message.error(res.msg);
-}
-
-const showReplicas = ref(false);
-const replicaFunctionId = ref('');
-const replicas = ref<any[]>([]);
-const replicaLoading = ref(false);
-const showReplicaModal = ref(false);
-const replicaEditingName = ref('');
-const replicaJson = ref('');
-const replicaSaving = ref(false);
-const replicaTitle = computed(() => `${t('cdnZoneSetting.replicas')} · ${replicaFunctionId.value}`);
-const replicaColumns = computed(() => [
-  { title: 'ReplicaName', key: 'ReplicaName', minWidth: 180 },
-  { title: 'Remark', key: 'Remark', minWidth: 180 },
-  { title: t('cdnOrigin.colActions'), key: 'actions', width: 150, render: (r: any) => h('div', { class: 'row-actions' }, [
-    h(NButton, { size: 'tiny', quaternary: true, onClick: () => openReplicaModal(r) }, { default: () => t('cdnZoneSetting.edit') }),
-    h(NButton, { size: 'tiny', quaternary: true, type: 'error', onClick: () => delReplica(r) }, { default: () => t('cdnZoneSetting.delete') }),
-  ]) },
-]);
-const showBindings = ref(false);
-const bindingFunctionId = ref('');
-const bindingText = ref('');
-const bindingLoading = ref(false);
-const showBindingModal = ref(false);
-const bindingJson = ref('');
-const bindingSaving = ref(false);
-const bindingTitle = computed(() => `${t('cdnZoneSetting.bindings')} · ${bindingFunctionId.value}`);
-const showRuntime = ref(false);
-const runtimeFunctionId = ref('');
-const runtimeJson = ref('');
-const runtimeLoading = ref(false);
-const runtimeSaving = ref(false);
-const runtimeTitle = computed(() => `${t('cdnZoneSetting.runtime')} · ${runtimeFunctionId.value}`);
-
-function openReplicas(r: any) {
-  replicaFunctionId.value = String(r.FunctionId || '');
-  showReplicas.value = true;
-  loadReplicas();
-}
-
-async function loadReplicas() {
-  if (!replicaFunctionId.value) return;
-  replicaLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/functions/${encodeURIComponent(replicaFunctionId.value)}/replicas`, { zoneId, page: 1, size: 100 });
-    replicas.value = res.code === 0 ? res.data?.list || [] : [];
-    if (res.code !== 0) message.error(res.msg);
-  } finally {
-    replicaLoading.value = false;
-  }
-}
-
-function openReplicaModal(row?: any) {
-  replicaEditingName.value = row ? String(row.ReplicaName || '') : '';
-  replicaJson.value = JSON.stringify(row ? { ReplicaName: row.ReplicaName, Content: row.Content || '', Remark: row.Remark || '' } : { ReplicaName: '', Content: '', Remark: '' }, null, 2);
-  showReplicaModal.value = true;
-}
-
-async function saveReplica() {
-  let parsed: any;
-  try { parsed = JSON.parse(replicaJson.value); } catch { return message.error(t('cdnSecurity.invalidJson')); }
-  replicaSaving.value = true;
-  try {
-    const res: any = replicaEditingName.value
-      ? await api('PUT', `/cdn/accounts/${aid}/functions/${encodeURIComponent(replicaFunctionId.value)}/replicas/${encodeURIComponent(replicaEditingName.value)}`, { zoneId, params: parsed })
-      : await api('POST', `/cdn/accounts/${aid}/functions/${encodeURIComponent(replicaFunctionId.value)}/replicas`, { zoneId, params: parsed });
-    if (res.code === 0) { message.success(res.msg); showReplicaModal.value = false; await loadReplicas(); } else message.error(res.msg);
-  } finally {
-    replicaSaving.value = false;
-  }
-}
-
-function delReplica(r: any) {
-  dialog.warning({ title: t('cdnZoneSetting.delete'), content: t('cdnAdvanced.confirmDelete', { name: r.ReplicaName }), positiveText: t('cdnZoneSetting.delete'), negativeText: t('cdnZoneSetting.cancel'), onPositiveClick: async () => {
-    const res = await api('DELETE', `/cdn/accounts/${aid}/functions/${encodeURIComponent(replicaFunctionId.value)}/replicas`, { zoneId, replicaNames: [String(r.ReplicaName)] });
-    if (res.code === 0) { message.success(res.msg); await loadReplicas(); } else message.error(res.msg);
-  } });
-}
-
-function openBindings(r: any) {
-  bindingFunctionId.value = String(r.FunctionId || '');
-  bindingText.value = '';
-  showBindings.value = true;
-  loadBindings();
-}
-
-async function loadBindings() {
-  if (!bindingFunctionId.value) return;
-  bindingLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/functions/${encodeURIComponent(bindingFunctionId.value)}/bindings`, { zoneId });
-    if (res.code === 0) bindingText.value = JSON.stringify(res.data || [], null, 2);
-    else message.error(res.msg);
-  } finally {
-    bindingLoading.value = false;
-  }
-}
-
-function openBindingModal() {
-  bindingJson.value = JSON.stringify({ Operation: 'bind', FunctionComponentBindings: [] }, null, 2);
-  showBindingModal.value = true;
-}
-
-async function saveBindings() {
-  let parsed: any;
-  try { parsed = JSON.parse(bindingJson.value); } catch { return message.error(t('cdnSecurity.invalidJson')); }
-  bindingSaving.value = true;
-  try {
-    const res = await api<any>('POST', `/cdn/accounts/${aid}/functions/${encodeURIComponent(bindingFunctionId.value)}/bindings`, { zoneId, params: parsed });
-    if (res.code === 0) { message.success(res.msg); showBindingModal.value = false; await loadBindings(); } else message.error(res.msg);
-  } finally {
-    bindingSaving.value = false;
-  }
-}
-
-function openRuntime(r: any) {
-  runtimeFunctionId.value = String(r.FunctionId || '');
-  runtimeJson.value = '';
-  showRuntime.value = true;
-  loadRuntime();
-}
-
-async function loadRuntime() {
-  if (!runtimeFunctionId.value) return;
-  runtimeLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/functions/${encodeURIComponent(runtimeFunctionId.value)}/runtime`, { zoneId });
-    if (res.code === 0) runtimeJson.value = JSON.stringify(res.data || {}, null, 2);
-    else message.error(res.msg);
-  } finally {
-    runtimeLoading.value = false;
-  }
-}
-
-async function saveRuntime() {
-  let parsed: any;
-  try { parsed = JSON.parse(runtimeJson.value); } catch { return message.error(t('cdnSecurity.invalidJson')); }
-  runtimeSaving.value = true;
-  try {
-    const res = await api<any>('POST', `/cdn/accounts/${aid}/functions/${encodeURIComponent(runtimeFunctionId.value)}/runtime`, { zoneId, params: parsed });
-    if (res.code === 0) { message.success(res.msg); await loadRuntime(); } else message.error(res.msg);
-  } finally {
-    runtimeSaving.value = false;
-  }
-}
-
-const versionEnvText = ref('');
-const versionEnvLoading = ref(false);
-const versionGroupId = ref('');
-const versionEnvId = ref('');
-const versionList = ref<any[]>([]);
-const versionLoading = ref(false);
-const versionHistoryLoading = ref(false);
-const versionActionText = ref('');
-const showVersionModal = ref(false);
-const versionModalMode = ref<'create' | 'deploy'>('create');
-const versionJson = ref('');
-const versionSaving = ref(false);
-const versionColumns = computed(() => [
-  { title: 'VersionId', key: 'VersionId', minWidth: 170 },
-  { title: 'VersionNumber', key: 'VersionNumber', width: 120 },
-  { title: 'GroupType', key: 'GroupType', width: 140 },
-  { title: t('cdnRules.colStatus'), key: 'Status', width: 110 },
-  { title: 'Description', key: 'Description', minWidth: 180 },
-  {
-    title: t('cdnOrigin.colActions'),
-    key: 'actions',
-    width: 100,
-    render: (r: any) => h(NButton, { size: 'tiny', quaternary: true, onClick: () => showVersionDetail(r) }, { default: () => t('cdnSecurity.detail') }),
-  },
-]);
-
-async function loadVersionEnvironments() {
-  versionEnvLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/environments`);
-    if (res.code === 0) versionEnvText.value = JSON.stringify(res.data || [], null, 2);
-    else message.error(res.msg);
-  } finally {
-    versionEnvLoading.value = false;
-  }
-}
-
-async function loadVersions() {
-  if (!versionGroupId.value.trim()) return message.warning(t('cdnZoneSetting.groupIdHint'));
-  versionLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/versions`, { groupId: versionGroupId.value.trim(), page: 1, size: 100 });
-    versionList.value = res.code === 0 ? res.data?.list || [] : [];
-    if (res.code !== 0) message.error(res.msg);
-  } finally {
-    versionLoading.value = false;
-  }
-}
-
-function openVersionModal(mode: 'create' | 'deploy') {
-  versionModalMode.value = mode;
-  versionJson.value = JSON.stringify(
-    mode === 'create'
-      ? { GroupId: versionGroupId.value.trim(), Content: '', Description: '' }
-      : { EnvId: versionEnvId.value.trim(), ConfigGroupVersionInfos: [{ VersionId: '' }], Description: '' },
-    null,
-    2,
-  );
-  showVersionModal.value = true;
-}
-
-async function saveVersionModal() {
-  let parsed: any;
-  try {
-    parsed = JSON.parse(versionJson.value);
-  } catch {
-    return message.error(t('cdnSecurity.invalidJson'));
-  }
-  versionSaving.value = true;
-  try {
-    const suffix = versionModalMode.value === 'create' ? '' : '/deploy';
-    const res = await api<any>('POST', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/versions${suffix}`, { params: parsed });
-    if (res.code === 0) {
-      message.success(res.msg);
-      showVersionModal.value = false;
-      if (versionModalMode.value === 'create') await loadVersions();
-      else versionActionText.value = JSON.stringify(res.data || {}, null, 2);
-    } else message.error(res.msg);
-  } finally {
-    versionSaving.value = false;
-  }
-}
-
-async function showVersionDetail(row: any) {
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/versions/${encodeURIComponent(String(row.VersionId))}`);
-  if (res.code !== 0) return message.error(res.msg);
-  dialog.info({ title: `Version · ${row.VersionId}`, content: () => h('pre', { class: 'code-view', style: 'max-height:480px' }, JSON.stringify(res.data || {}, null, 2)) });
-}
-
-async function loadVersionHistory() {
-  if (!versionEnvId.value.trim()) return message.warning(t('cdnZoneSetting.envIdHint'));
-  versionHistoryLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/sites/${encodeURIComponent(zoneId)}/versions/history`, { envId: versionEnvId.value.trim() });
-    if (res.code === 0) versionActionText.value = JSON.stringify(res.data?.list || [], null, 2);
-    else message.error(res.msg);
-  } finally {
-    versionHistoryLoading.value = false;
-  }
-}
-
-const prefetchLimitText = ref('');
-const prefetchLimitLoading = ref(false);
-const prefetchLimitSaving = ref(false);
-const ipRegionInput = ref('');
-const diagnosticText = ref('');
-
-async function loadPrefetchOriginLimit() {
-  prefetchLimitLoading.value = true;
-  try {
-    const res = await api<any>('GET', `/cdn/accounts/${aid}/cache/prefetch-origin-limit`, { zoneId, page: 1, size: 100 });
-    if (res.code === 0) prefetchLimitText.value = JSON.stringify(res.data?.list || [], null, 2);
-    else message.error(res.msg);
-  } finally {
-    prefetchLimitLoading.value = false;
-  }
-}
-
-async function savePrefetchOriginLimit() {
-  let parsed: any;
-  try {
-    parsed = prefetchLimitText.value.trim() ? JSON.parse(prefetchLimitText.value) : [];
-  } catch {
-    return message.error(t('cdnSecurity.invalidJson'));
-  }
-  const items = Array.isArray(parsed) ? parsed : [parsed];
-  if (!items.length) return message.warning(t('cdnAdvanced.prefetchOriginLimitHint'));
-  prefetchLimitSaving.value = true;
-  try {
-    for (const item of items) {
-      const res = await api<any>('POST', `/cdn/accounts/${aid}/cache/prefetch-origin-limit`, {
-        zoneId,
-        domainName: item.DomainName || item.domainName || '',
-        area: item.Area || item.area || 'Overseas',
-        bandwidth: Number(item.Bandwidth ?? item.bandwidth ?? 0),
-        enabled: item.Enabled ?? item.enabled ?? 'on',
-      });
-      if (res.code !== 0) return message.error(res.msg);
-    }
-    message.success(t('cdnZoneSetting.saved'));
-    await loadPrefetchOriginLimit();
-  } finally {
-    prefetchLimitSaving.value = false;
-  }
-}
-
-function timeRange24h() {
-  const now = new Date();
-  const start = new Date(now.getTime() - 24 * 3600 * 1000);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const fmt = (d: Date) => {
-    const offsetMin = -d.getTimezoneOffset();
-    const sign = offsetMin >= 0 ? '+' : '-';
-    const abs = Math.abs(offsetMin);
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
-  };
-  return { startTime: fmt(start), endTime: fmt(now) };
-}
-
-async function loadDdosEvents() {
-  const { startTime, endTime } = timeRange24h();
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/analysis/ddos/events`, { zoneIds: zoneId, startTime, endTime, limit: 20 });
-  if (res.code === 0) diagnosticText.value = JSON.stringify(res.data || [], null, 2);
-  else message.error(res.msg);
-}
-
-async function loadDdosTop() {
-  const { startTime, endTime } = timeRange24h();
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/analysis/ddos/top`, {
-    zoneIds: zoneId,
-    startTime,
-    endTime,
-    metricName: 'ddos_attackFlux_protocol',
-    limit: 10,
-  });
-  if (res.code === 0) diagnosticText.value = JSON.stringify(res.data || [], null, 2);
-  else message.error(res.msg);
-}
-
-async function loadL4Timing() {
-  const { startTime, endTime } = timeRange24h();
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/analysis/l4-timing`, {
-    zoneIds: zoneId,
-    startTime,
-    endTime,
-    metricNames: 'l4Flow_flux,l4Flow_outFlux,l4Flow_inBandwidth,l4Flow_connections',
-    interval: 'hour',
-  });
-  if (res.code === 0) diagnosticText.value = JSON.stringify(res.data || [], null, 2);
-  else message.error(res.msg);
-}
-
-async function loadIpRegion() {
-  const ips = String(ipRegionInput.value || '').split(',').map((x) => x.trim()).filter(Boolean);
-  if (!ips.length) return message.warning(t('cdnAdvanced.ipRegionHint'));
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/diagnostics/ip-region`, { zoneId, ips: ips.join(',') });
-  if (res.code === 0) diagnosticText.value = JSON.stringify(res.data || [], null, 2);
-  else message.error(res.msg);
-}
-
-async function loadTopAnalysis() {
-  const now = new Date();
-  const start = new Date(now.getTime() - 24 * 3600 * 1000);
-  // 与项目其余时间语义保持一致：使用本地时间而非 UTC
-  const pad = (n: number) => String(n).padStart(2, '0');
-  const fmt = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-  const res = await api<any>('GET', `/cdn/accounts/${aid}/analysis/top`, {
-    zoneIds: zoneId,
-    startTime: fmt(start),
-    endTime: fmt(now),
-    metricName: 'l7Flow_outFlux',
-    limit: 10,
-  });
-  if (res.code === 0) analysisText.value = JSON.stringify(res.data, null, 2);
-  else message.error(res.msg);
-}
-
 // ===================== 汇总 =====================
 // 记录已加载的 tab：来回切换时跳过重复请求（reloadAll 或主动刷新时强制重载）。
 // 仅在加载成功时记录，避免首次失败后反复切 tab 永不重试。
@@ -3688,8 +2395,7 @@ async function loadByTab(name: string, force = false) {
   if (name === 'domains') {
     await loadDomains();
     ok = await loadDomainExtras();
-  } else if (name === 'origin') ok = await loadOriginData();
-  else if (name === 'rules') {
+  } else if (name === 'rules') {
     ok = await loadRules();
     if (!isEsa.value) {
       const varsOk = await loadCustomVariables();
@@ -3698,28 +2404,15 @@ async function loadByTab(name: string, force = false) {
     }
   }
   else if (name === 'security') ok = await loadSecurity();
-  else if (name === 'edge') {
-    const fOk = await loadFunctions();
-    const rOk = await loadFunctionRules();
-    const kvOk = await loadKvNamespaces();
-    ok = fOk && rOk && kvOk;
-  } else if (name === 'versions') {
-    if (!versionEnvText.value) await loadVersionEnvironments();
-    if (versionGroupId.value.trim()) ok = await (loadVersions().then(() => true).catch(() => false));
-  }
   else if (name === 'l4') ok = await loadL4Proxies();
-  else if (name === 'tasks') {
-    ok = await loadTasks();
-    if (!isEsa.value) {
-      const logsOk = await loadRealtimeLogs();
-      const cidOk = await loadContentIdentifiers();
-      ok = ok && logsOk && cidOk;
-    }
-  }
   if (ok) loadedTabs.add(name);
 }
 async function reloadAll() {
   loadedTabs.clear();
+  versionsReloadKey.value++;
+  originReloadKey.value++;
+  edgeReloadKey.value++;
+  tasksReloadKey.value++;
   loadBusy.value = true;
   try {
     const preloads: Promise<unknown>[] = [loadZoneInfo(), loadNs(), loadSiteProperties(), loadZonePlans()];

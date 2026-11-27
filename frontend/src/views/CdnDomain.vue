@@ -22,7 +22,7 @@
       </template>
     </PageHeader>
     <n-grid class="telemetry-row" cols="2 s:3 m:3" responsive="screen" :x-gap="14" :y-gap="14" item-responsive>
-      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domains.length" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
+      <n-grid-item v-reveal class="d1"><TelemetryCard :label="t('dashboard.statCdnDomains')" :value="domainsTotal" tone="primary" :icon="GlobeOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d2"><TelemetryCard :label="t('nav.cdnAccounts')" :value="accountOptions.length" tone="success" :icon="CloudOutline" :caption="t('common.cumulative')" /></n-grid-item>
       <n-grid-item v-reveal class="d3"><TelemetryCard :label="t('common.selected')" :value="checkedIds.length" tone="info" :icon="CheckmarkCircleOutline" :caption="t('common.cumulative')" /></n-grid-item>
     </n-grid>
@@ -51,7 +51,8 @@
           v-model:checked-row-keys="checkedIds"
           :empty-text="t('cdnDomain.empty')"
           :empty-description="t('cdnDomain.emptyHint')"
-          :virtual-scroll="domains.length > 200"
+          :pagination="domainsPagination"
+          :virtual-scroll="domains.length > 100"
           :max-height="620"
         />
       </div>
@@ -556,6 +557,10 @@ const message = useMessage();
 const dialog = useDialog();
 const loadBusy = ref(false);
 const domains = ref<any[]>([]);
+const domainsPage = ref(1);
+const domainsPageSize = ref(200);
+const domainsTotal = ref(0);
+const domainsSummary = ref<{ enabled: number; stopped: number; certPending: number } | null>(null);
 const accountOptions = ref<any[]>([]);
 const accountTypes = ref<Record<number, string>>({});
 const providerCaps = ref<Record<string, any>>({});
@@ -958,11 +963,30 @@ function stopLinkLogTimer() {
 }
 const certMgrHasPendingFree = computed(() => certMgrFree.value.some((r) => r.status === 'pending'));
 
-const enabledCount = computed(() => domains.value.filter((d: any) => d.status !== 'offline').length);
-const stoppedCount = computed(() => domains.value.filter((d: any) => d.status === 'offline').length);
-const certPendingCount = computed(() => domains.value.filter((d: any) => d.cert_mode === 'none' && !Number(d.https_enabled)).length);
-const canFreeCert = computed(() => domains.value.some((d) => d.can_freecert));
-const canCertApply = computed(() => domains.value.some((d) => d.can_certapply));
+const localDomainCounts = computed(() => {
+  let enabled = 0;
+  let stopped = 0;
+  let certPending = 0;
+  for (const d of domains.value) {
+    if (d.status === 'offline') stopped++;
+    else enabled++;
+    if (d.cert_mode === 'none' && !Number(d.https_enabled)) certPending++;
+  }
+  return { enabled, stopped, certPending };
+});
+const enabledCount = computed(() => domainsSummary.value?.enabled ?? localDomainCounts.value.enabled);
+const stoppedCount = computed(() => domainsSummary.value?.stopped ?? localDomainCounts.value.stopped);
+const certPendingCount = computed(() => domainsSummary.value?.certPending ?? localDomainCounts.value.certPending);
+const canFreeCert = computed(
+  () =>
+    domains.value.some((d) => d.can_freecert) ||
+    accountOptions.value.some((a: any) => providerCaps.value[accountTypes.value[a.value]]?.freecert),
+);
+const canCertApply = computed(
+  () =>
+    domains.value.some((d) => d.can_certapply) ||
+    accountOptions.value.some((a: any) => providerCaps.value[accountTypes.value[a.value]]?.certapply),
+);
 const hasPending = computed(() => certResults.value.some((r) => r.status === 'pending'));
 const summaryType = computed(() => (certResults.value.some((r) => r.status === 'failed') ? 'warning' : 'success'));
 
@@ -1069,39 +1093,47 @@ const columns = computed<any[]>(() => [
 
 let domainsRequestSeq = 0;
 let lastDomainsLoadAt = 0;
-async function loadDomains() {
+async function loadDomains(targetPage = domainsPage.value) {
   const seq = ++domainsRequestSeq;
   loadBusy.value = true;
   try {
-    // 接口已分页，前端按页取全量以保持批量选择/统计语义；单次请求仍有上限，
-    // 不会再次出现「一次拉全部域名导致响应和内存暴涨」。
-    const all: any[] = [];
-    const pageSize = 500;
-    for (let page = 1; page <= 50; page++) {
-      const res = await api<any>('GET', '/cdn/domains', { page, size: pageSize });
-      if (seq !== domainsRequestSeq) return;
-      if (res.code !== 0) {
-        // 失败时保留旧数据，避免一次瞬时 500 把整张表清空
-        message.error(res.msg || t('common.networkError'));
-        return;
-      }
-      const list = res.data || [];
-      all.push(...list);
-      const total = Number(res.total || 0);
-      if (!list.length || list.length < pageSize || (total > 0 && all.length >= total)) break;
-    }
+    const page = Math.max(1, Number(targetPage) || 1);
+    const res = await api<any>('GET', '/cdn/domains', { page, size: domainsPageSize.value });
     if (seq !== domainsRequestSeq) return;
-    domains.value = all;
+    if (res.code !== 0) {
+      message.error(res.msg || t('common.networkError'));
+      return;
+    }
+    const list = res.data || [];
+    const total = Number(res.total || 0);
+    if (!list.length && total > 0 && page > 1) {
+      if (seq === domainsRequestSeq) {
+        loadBusy.value = false;
+        await loadDomains(page - 1);
+      }
+      return;
+    }
+    domainsPage.value = page;
+    domainsTotal.value = total;
+    domainsSummary.value = res.summary || null;
+    domains.value = list;
     lastDomainsLoadAt = Date.now();
-    const visible = new Set(all.map((r: any) => Number(r.id)));
-    checkedIds.value = checkedIds.value.filter((id) => visible.has(Number(id)));
+    // 服务端分页下保留跨页勾选：selected N 应统计所有页，批量证书/删除不能只作用于当前页。
   } catch (e: any) {
     if (seq === domainsRequestSeq) message.error(e?.message || t('common.networkError'));
   } finally {
-    // 网络异常也必须复位，否则列表永久转圈
     if (seq === domainsRequestSeq) loadBusy.value = false;
   }
 }
+
+const domainsPagination = computed(() => ({
+  page: domainsPage.value,
+  pageSize: domainsPageSize.value,
+  itemCount: domainsTotal.value,
+  onChange: (page: number) => {
+    if (page !== domainsPage.value) void loadDomains(page);
+  },
+}));
 
 async function loadAccounts() {
   const res = await api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] } as any));
@@ -1621,6 +1653,7 @@ async function doDelete(row: any, deleteCloud: boolean, deleteDns: boolean) {
       // 同步移除选中集合中的该行，避免「选中 N」偏高、批量提交携带已删 id
       checkedIds.value = checkedIds.value.filter((k: any) => Number(k) !== Number(row.id));
       message.success(res.msg);
+      await loadDomains(domainsPage.value);
     } else {
       rollbackDomainRow(removed, idx); // 失败回滚
       message.error(res.msg);

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { domainNameNorm } from '../../lib/domainNorm.js';
 import { query, queryOne, table } from '../../db.js';
 import { md5, sameDomain, matchPermission, checkLevel } from '../../auth.js';
 import { getEffectivePermissions } from '../../lib/accounts/visibility.js';
@@ -62,7 +63,7 @@ async function overviewDomains(ctx: McpContext): Promise<number> {
   if (!names.length) return 0;
   const row = await queryOne<{ c: number }>(
     `SELECT COUNT(*) AS c FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id
-      WHERE A.is_hide = 0 AND LOWER(TRIM(A.name)) IN (${names.map(() => '?').join(',')})
+      WHERE A.is_hide = 0 AND ${domainNameNorm('A')} IN (${names.map(() => '?').join(',')})
         AND (B.visibility IS NULL OR B.visibility <> 'private' OR B.owner_uid = ?)`,
     [...names, ctx.uid],
   );
@@ -272,7 +273,7 @@ async function domainList(ctx: McpContext, args: ToolArgs): Promise<any> {
     const perms = await getEffectivePermissions(ctx.user);
     const names = [...new Set(perms.map((p) => String(p.domain || '').trim().toLowerCase().replace(/\.$/, '')).filter(Boolean))];
     if (!names.length) return { total: 0, rows: [] };
-    where.push(`LOWER(TRIM(A.name)) IN (${names.map(() => '?').join(',')})`);
+    where.push(`${domainNameNorm('A')} IN (${names.map(() => '?').join(',')})`);
     params.push(...names);
     where.push('A.is_hide = 0');
   }

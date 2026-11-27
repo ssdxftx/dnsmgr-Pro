@@ -25,6 +25,22 @@ export function normalizeEventNames(input: any): string[] {
   return [...out];
 }
 
+const SUBS_CACHE_TTL_MS = 30_000;
+let subsCache: { at: number; rows: EventSubscription[] } | null = null;
+
+export function invalidateEventSubscriptions(): void {
+  subsCache = null;
+}
+
+async function activeSubscriptions(): Promise<EventSubscription[]> {
+  if (subsCache && Date.now() - subsCache.at < SUBS_CACHE_TTL_MS) return subsCache.rows;
+  const rows = await query<EventSubscription>(
+    `SELECT * FROM ${table('event_subscription')} WHERE active = 1`,
+  );
+  subsCache = { at: Date.now(), rows };
+  return rows;
+}
+
 function subscriptionEvents(value: any): string[] {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) : value;
@@ -73,18 +89,103 @@ export async function deliverToSubscription(sub: EventSubscription, event: strin
     error = String(e?.message || e).slice(0, 300);
   }
   const ok = status >= 200 && status < 300;
-  await query(
-    `INSERT INTO ${table('event_delivery')}
-      (sub_id, event, status, http_status, error, duration_ms, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-    [sub.id, event, ok ? 'success' : 'failed', status, error || null, Date.now() - started],
-  ).catch(() => undefined);
-  await query(
-    `UPDATE ${table('event_subscription')}
-        SET last_status = ?, last_error = ?, last_sent_at = NOW()
-      WHERE id = ?`,
-    [ok ? 1 : 0, error ? error.slice(0, 300) : null, sub.id],
-  ).catch(() => undefined);
+  enqueueDeliveryLog({
+    subId: sub.id,
+    event,
+    status: ok ? 'success' : 'failed',
+    httpStatus: status,
+    error: error || null,
+    durationMs: Date.now() - started,
+  });
+  queueSubscriptionUpdate(sub.id, ok, error || null);
+}
+
+interface DeliveryLogRow {
+  subId: number;
+  event: string;
+  status: string;
+  httpStatus: number;
+  error: string | null;
+  durationMs: number;
+}
+
+const deliveryLogs: DeliveryLogRow[] = [];
+const subscriptionUpdates = new Map<number, { ok: boolean; error: string | null }>();
+let deliveryFlushTimer: NodeJS.Timeout | null = null;
+let deliveryFlushing = false;
+
+function enqueueDeliveryLog(row: DeliveryLogRow): void {
+  deliveryLogs.push(row);
+  scheduleDeliveryFlush(deliveryLogs.length >= 100);
+}
+
+function queueSubscriptionUpdate(subId: number, ok: boolean, error: string | null): void {
+  subscriptionUpdates.set(subId, { ok, error: error ? error.slice(0, 300) : null });
+  scheduleDeliveryFlush(false);
+}
+
+function scheduleDeliveryFlush(immediate: boolean): void {
+  if (deliveryFlushing) return;
+  if (!deliveryFlushTimer) {
+    deliveryFlushTimer = setTimeout(() => {
+      deliveryFlushTimer = null;
+      void flushDeliveryLogs();
+    }, immediate ? 0 : 1000);
+    deliveryFlushTimer.unref?.();
+  } else if (immediate) {
+    // 已排队但还没到 1s 的 flush 直接提前执行，避免批量阈值触发了仍要等计时器。
+    clearTimeout(deliveryFlushTimer);
+    deliveryFlushTimer = setTimeout(() => {
+      deliveryFlushTimer = null;
+      void flushDeliveryLogs();
+    }, 0);
+    deliveryFlushTimer.unref?.();
+  }
+}
+
+async function flushDeliveryLogs(): Promise<void> {
+  if (deliveryFlushing || (!deliveryLogs.length && !subscriptionUpdates.size)) return;
+  deliveryFlushing = true;
+  const logs = deliveryLogs.splice(0, 500);
+  const updates = [...subscriptionUpdates];
+  subscriptionUpdates.clear();
+  try {
+    if (logs.length) {
+      const placeholders = logs.map(() => '(?, ?, ?, ?, ?, ?, NOW())').join(',');
+      await query(
+        `INSERT INTO ${table('event_delivery')}
+          (sub_id, event, status, http_status, error, duration_ms, created_at)
+         VALUES ${placeholders}`,
+        logs.flatMap((r) => [r.subId, r.event, r.status, r.httpStatus, r.error, r.durationMs]),
+      );
+    }
+    for (const [subId, value] of updates) {
+      await query(
+        `UPDATE ${table('event_subscription')}
+            SET last_status = ?, last_error = ?, last_sent_at = NOW()
+          WHERE id = ?`,
+        [value.ok ? 1 : 0, value.error, subId],
+      );
+    }
+  } catch (e: any) {
+    console.error('[events] 投递记录批量写入失败:', e?.message || e);
+    // 失败时放回队列等待重试：投递记录和订阅 last_status 不能因为一次瞬时数据库错误丢失。
+    if (logs.length) deliveryLogs.unshift(...logs.slice(0, Math.max(0, 1000 - deliveryLogs.length)));
+    for (const [subId, value] of updates) if (!subscriptionUpdates.has(subId)) subscriptionUpdates.set(subId, value);
+  } finally {
+    deliveryFlushing = false;
+    if (deliveryLogs.length || subscriptionUpdates.size) scheduleDeliveryFlush(false);
+  }
+}
+
+/** 等待当前队列落库；订阅测试需要立即读取 last_status，不能等 1s 防抖。 */
+export async function flushEventDeliveries(): Promise<void> {
+  if (deliveryFlushTimer) {
+    clearTimeout(deliveryFlushTimer);
+    deliveryFlushTimer = null;
+  }
+  while (deliveryFlushing) await new Promise((resolve) => setTimeout(resolve, 10));
+  await flushDeliveryLogs();
 }
 
 const MAX_CONCURRENT_DELIVERIES = 4;
@@ -114,9 +215,7 @@ function enqueueDelivery(task: () => Promise<void>): void {
 
 export async function emitEvent(event: string, data: any): Promise<void> {
   try {
-    const rows: EventSubscription[] = await query(
-      `SELECT * FROM ${table('event_subscription')} WHERE active = 1`,
-    );
+    const rows = await activeSubscriptions();
     for (const row of rows) {
       const events = subscriptionEvents(row.events);
       if (!events.includes('*') && !events.includes(event)) continue;

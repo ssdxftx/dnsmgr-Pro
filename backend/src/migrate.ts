@@ -1,6 +1,7 @@
 import { query, table, getDbType, columnExists, indexExists, uniqueIndexExists, listColumns } from './db.js';
 import { sqliteIndexName } from './db/sqlite-dialect.js';
 import { setCdnDomainIdColumnAvailable } from './lib/cert/cdnDomainIdColumn.js';
+import { setDomainNormAvailable } from './lib/domainNorm.js';
 import { decryptText, encryptText, isSecretKey } from './lib/secret.js';
 
 // 启动时幂等迁移：为多用户注册系统补齐表结构与字段，已存在则跳过。
@@ -40,6 +41,7 @@ export async function migrate(): Promise<void> {
 
   await migrateBackupAndVault();
   await migrateApiGovernance();
+  await migrateDomainSubcount();
   // 幂等键必须绑定请求内容：只绑定 method+path 时，同一 Key 换 body/query 会拿到旧响应。
   // 必须放在 migrateApiGovernance 之后：幂等表由它创建，新库首次启动时表还不存在。
   await ensureColumn('idempotency_key', 'request_hash', 'char(64) DEFAULT NULL');
@@ -254,6 +256,7 @@ export async function migrate(): Promise<void> {
   // 证书联动查询索引：cdn_domain_id 为 link 中 cdnDomainId 的生成列 + 索引，
   // 替代 link LIKE '%cdnDomainId%' 的前缀通配全表扫描（CDN 列表 / 证书联动轮询热点）
   await ensureCertOrderCdnDomainId();
+  await ensureDomainNameNorm();
 
   // CDN 统计查询/清理索引：查询条件不含唯一索引最左列 route，补 (granularity, ts) 与 (ts)
   await ensureIndex('cdn_stat_data', 'idx_gran_ts', '(`granularity`, `ts`)');
@@ -311,6 +314,14 @@ export async function migrate(): Promise<void> {
   await ensureIndex('cert_deploy', 'idx_due', '(`active`, `islock`, `status`, `retry`)');
   await ensureIndex('cdn_domain', 'idx_route', '(`route`)');
   await ensureIndex('backup_job', 'idx_schedule', '(`schedule_id`, `kind`, `status`)');
+
+  // 通知扫描、任务去重与日志清理热点索引
+  await ensureIndex('cert_order', 'idx_notice', '(`status`, `issend`)');
+  await ensureIndex('cert_deploy', 'idx_notice', '(`status`, `issend`)');
+  await ensureIndex('async_job', 'idx_uid_type_status', '(`uid`, `type`, `status`)');
+  await ensureIndex('async_job', 'idx_status_created', '(`status`, `created_at`)');
+  await ensureIndex('log', 'idx_addtime', '(`addtime`)');
+  await ensureIndex('domain', 'idx_checkstatus_checktime', '(`checkstatus`, `checktime`)');
 }
 
 // cert_order.link 的 cdnDomainId 生成列 + 索引：MySQL 5.7+ 生成列；
@@ -345,6 +356,30 @@ async function ensureCertOrderCdnDomainId(): Promise<void> {
   }
   setCdnDomainIdColumnAvailable(true);
   await ensureIndex('cert_order', 'idx_cdn_domain_id', '(`cdn_domain_id`)');
+}
+
+// 域名规范化生成列：把 LOWER(TRIM(TRAILING '.' FROM name)) 提前算好并建索引，
+// 避免普通用户域名列表/授权查询每次对全表做表达式计算。
+async function ensureDomainNameNorm(): Promise<void> {
+  if (!(await columnExists(table('domain'), 'name_norm'))) {
+    try {
+      if (getDbType() === 'sqlite') {
+        await query(
+          `ALTER TABLE ${table('domain')} ADD COLUMN name_norm TEXT GENERATED ALWAYS AS (LOWER(RTRIM(name, '.'))) VIRTUAL`,
+        );
+      } else {
+        await query(
+          `ALTER TABLE ${table('domain')} ADD COLUMN name_norm varchar(255) GENERATED ALWAYS AS (LOWER(TRIM(TRAILING '.' FROM name))) VIRTUAL`,
+        );
+      }
+    } catch (e: any) {
+      setDomainNormAvailable(false);
+      console.log(`[migrate] 为 domain 添加 name_norm 生成列失败，回退表达式查询：${e?.message || e}`);
+      return;
+    }
+  }
+  setDomainNormAvailable(true);
+  await ensureIndex('domain', 'idx_name_norm', '(`name_norm`)');
 }
 
 async function ensureIndex(tableName: string, indexName: string, columns: string): Promise<void> {
@@ -642,9 +677,38 @@ async function migrateApiGovernance(): Promise<void> {
       KEY idx_event_time (event, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
   );
+  // TTL 清理按 created_at 单列过滤，复合索引无法覆盖，表大后会退化为全表扫描。
+  await ensureIndex('event_delivery', 'idx_created', '(`created_at`)');
+
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('notice_queue')} (
+      id bigint unsigned NOT NULL AUTO_INCREMENT,
+      action tinyint(1) NOT NULL DEFAULT '0',
+      task_json text NOT NULL,
+      result_json varchar(1000) NOT NULL DEFAULT '{}',
+      attempts int(11) NOT NULL DEFAULT '0',
+      created_at datetime NOT NULL,
+      PRIMARY KEY (id),
+      KEY idx_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
 }
 
 // 备份与个人凭证保险库：表结构 + 账户归属字段（幂等）
+// 普通用户子域名授权的记录数展示缓存：避免每次打开域名列表都向云端拉整个 Zone。
+async function migrateDomainSubcount(): Promise<void> {
+  await query(
+    `CREATE TABLE IF NOT EXISTS ${table('domain_subcount')} (
+      did int(11) unsigned NOT NULL,
+      sub varchar(255) NOT NULL,
+      record_count int(11) NOT NULL DEFAULT '0',
+      updated_at datetime NOT NULL,
+      PRIMARY KEY (did, sub),
+      KEY idx_updated (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`
+  );
+}
+
 async function migrateBackupAndVault(): Promise<void> {
   await query(
     `CREATE TABLE IF NOT EXISTS ${table('backup_job')} (

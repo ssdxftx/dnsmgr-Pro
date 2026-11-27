@@ -8,7 +8,7 @@
       <n-grid-item><TelemetryCard :value="successCount" :label="t('backup.successBackups')" tone="primary" :icon="ArchiveOutline" :caption="lastBackupText" /></n-grid-item>
       <n-grid-item><TelemetryCard :value="schedules.length" :label="t('backup.scheduleCount')" tone="info" :icon="TimeOutline" :caption="nextRunText" /></n-grid-item>
       <n-grid-item><TelemetryCard :value="keyReady ? 1 : 0" :label="t('backup.keyTitle')" :tone="keyReady ? 'success' : 'warning'" :icon="KeyOutline" :caption="keyReady ? t('backup.keyReady') : t('backup.keyMissing')" /></n-grid-item>
-      <n-grid-item><TelemetryCard :value="jobs.length" :label="t('backup.totalJobs')" tone="primary" :icon="CloudDownloadOutline" :caption="t('backup.jobsTitle')" /></n-grid-item>
+      <n-grid-item><TelemetryCard :value="jobsTotal" :label="t('backup.totalJobs')" tone="primary" :icon="CloudDownloadOutline" :caption="t('backup.jobsTitle')" /></n-grid-item>
     </n-grid>
 
     <n-card :bordered="false">
@@ -24,7 +24,7 @@
 
     <n-card :bordered="false">
       <template #header>{{ t('backup.jobsTitle') }}</template>
-      <ResponsiveDataTable :columns="jobColumns" :data="jobs" :loading="loading" :empty-text="t('backup.jobsEmpty')" :pagination="{ pageSize: 20 }" />
+      <ResponsiveDataTable :columns="jobColumns" :data="jobs" :loading="loading" :empty-text="t('backup.jobsEmpty')" :pagination="jobsPagination" />
     </n-card>
 
     <n-card :bordered="false">
@@ -256,6 +256,11 @@ const keyReady = ref(false);
 const includeLogs = ref(true);
 const destId = ref(0);
 const jobs = ref<any[]>([]);
+const jobsPage = ref(1);
+const jobsPageSize = 20;
+const jobsTotal = ref(0);
+const jobsSummary = ref<Record<string, number>>({});
+const lastSuccessAt = ref('');
 const destinations = ref<any[]>([]);
 const schedules = ref<any[]>([]);
 
@@ -288,11 +293,16 @@ const remoteDestOptions = computed(() =>
   destinations.value.map((d) => ({ label: `${d.name} (${d.type})`, value: Number(d.id) })),
 );
 
-const successCount = computed(() => jobs.value.filter((j) => j.status === 'success').length);
-const lastBackupText = computed(() => {
-  const job = jobs.value.find((j) => j.status === 'success');
-  return job ? String(job.created_at || '') : t('backup.never');
-});
+const successCount = computed(() => jobsSummary.value.success ?? jobs.value.filter((j) => j.status === 'success').length);
+const lastBackupText = computed(() => lastSuccessAt.value || t('backup.never'));
+const jobsPagination = computed(() => ({
+  page: jobsPage.value,
+  pageSize: jobsPageSize,
+  itemCount: jobsTotal.value,
+  onChange: (page: number) => {
+    if (page !== jobsPage.value) void loadJobs(page);
+  },
+}));
 const nextRunText = computed(() => {
   const next = schedules.value.map((s) => s.next_run).filter(Boolean).sort()[0];
   return next || t('backup.never');
@@ -349,31 +359,32 @@ async function loadMaint() {
   }
 }
 
+async function loadJobs(targetPage = jobsPage.value) {
+  const page = Math.max(1, Number(targetPage) || 1);
+  const res = await api<any>('GET', '/backup/jobs', { page, size: jobsPageSize });
+  if (res.code !== 0) return res;
+  const list = res.data || [];
+  const total = Number(res.total || 0);
+  if (!list.length && total > 0 && page > 1) return loadJobs(page - 1);
+  jobsPage.value = page;
+  jobsTotal.value = total;
+  jobsSummary.value = res.summary || {};
+  lastSuccessAt.value = String(res.last_success_at || '');
+  jobs.value = list;
+  return res;
+}
+
 async function loadAll() {
   loading.value = true;
   try {
-    const loadAllJobs = async () => {
-      const all: any[] = [];
-      for (let page = 1; page <= 50; page++) {
-        const res = await api<any>('GET', '/backup/jobs', { page, size: 200 });
-        if (res.code !== 0) return res;
-        const list = res.data || [];
-        all.push(...list);
-        const total = Number(res.total || 0);
-        if (!list.length || list.length < 200 || (total > 0 && all.length >= total)) break;
-      }
-      return { code: 0, data: all };
-    };
-    const [k, j, d, s] = await Promise.all([
+    const [k, , d, s] = await Promise.all([
       api<any>('GET', '/backup/key/status'),
-      loadAllJobs(),
+      loadJobs(jobsPage.value),
       api<any>('GET', '/backup/destinations'),
       api<any>('GET', '/backup/schedules'),
       loadMaint(),
     ]);
     keyReady.value = !!k?.data?.configured;
-    // 任务分页中途失败时保留旧列表，不被空数组覆盖
-    if (j?.code === 0) jobs.value = j.data || [];
     destinations.value = d?.data || [];
     schedules.value = s?.data || [];
   } catch (e: any) {
@@ -408,6 +419,7 @@ async function startExport() {
     const res = await api<any>('POST', '/backup/export', { scope: 'site', include_logs: includeLogs.value, dest_id: destId.value }, { timeout: 0, headers: passwordHeader(password) });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
+    jobsPage.value = 1;
     await loadAll();
   } catch (e: any) {
     message.error(e?.message || t('backup.loadFailed'));

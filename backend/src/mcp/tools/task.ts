@@ -240,7 +240,7 @@ const tools: ToolDef[] = [
         request: (args) => ({ method: 'POST', path: '/api/dmonitor/clean', body: { days: args.days } }),
       },
       run: {
-        desc: '立即执行一次检测并返回最新检测日志（id 必填）',
+        desc: '提交一次后台检测，返回 job_id；检测日志通过任务日志查询（id 必填）',
         scope: { module: 'monitor', write: true },
         before: (args) => {
           requireArgs(args, ['id']);

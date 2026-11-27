@@ -120,7 +120,7 @@ export default {
     mcpLegacyEnable: '启用 MCP 旧版兼容',
     mcpLegacyHint: '开启后 /mcp 接受 Authorization: Bearer <uid>:<apikey>，彩虹聚合 DNS 旧版 MCP 客户端可零改动接入。该开关与旧版 HTTP API 兼容层相互独立。旧版 apikey 不受作用域、有效期和 IP 白名单约束，请仅在迁移期间开启。',
     statCacheCardTitle: 'CDN 数据统计缓存',
-    statCacheAlert: '开启后系统会按服务商数据粒度定时拉取统计并保存到服务器（近 30 天按天、近 48 小时按小时），打开数据统计页即可快速加载。该功能会在后台持续消耗服务器资源，请按需开启；并可在「用户管理」中为其他用户单独开启查看权限。',
+    statCacheAlert: '默认开启。系统会按服务商数据粒度定时拉取统计并保存到服务器（近 30 天按天、近 48 小时按小时），打开数据统计页即可快速加载。该功能会在后台持续消耗服务器资源，资源紧张时可关闭；并可在「用户管理」中为其他用户单独开启查看权限。',
     statCacheEnable: '开启统计缓存',
     statCacheInterval: '刷新间隔(分钟)',
     statCacheLast: '最近刷新时间',

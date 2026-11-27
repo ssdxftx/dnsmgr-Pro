@@ -10,6 +10,7 @@ import {
   isBasicWanted,
   makeSeries,
   rateSeries,
+  runPool,
   toBreakdown,
   type TimePoint,
   type Timeline,
@@ -125,7 +126,10 @@ export async function fetchEdgeOneDetail(
   const originPoints = new Map<string, TimePoint[]>();
   const cachePoints = new Map<string, TimePoint[]>();
   const statusPoints = new Map<string, TimePoint[]>();
-  let cacheFallback = false;
+  // 旧版缓存指标缺失的站点单独保存降级数据，避免一个站点缺数据时影响其他站点的
+  // dynamic 序列，也避免多站点共用一个全局 fallback 标记。
+  const fallbackCacheHit: TimePoint[] = [];
+  const fallbackCacheTotal: TimePoint[] = [];
 
   const accessMetrics = [
     'l7Flow_flux',
@@ -140,7 +144,9 @@ export async function fetchEdgeOneDetail(
     'l7Flow_avgFirstByteResponseTime',
   ];
 
-  for (const zoneId of zoneIds) {
+  await runPool(
+    zoneIds.map((zoneId) => async () => {
+      let zoneCacheOutFlux = 0;
     if (wantTraffic || wantPerformance) {
       const resp = await call('DescribeTimingL7AnalysisData', { ...base, MetricNames: accessMetrics }, '访问指标', zoneId);
       if (resp) {
@@ -204,13 +210,13 @@ export async function fetchEdgeOneDetail(
         for (const name of ['l7Cache_outFlux', 'l7Cache_request']) {
           const pts = extractEoPoints(resp, name);
           if (pts.length) {
+            if (name === 'l7Cache_outFlux') zoneCacheOutFlux++;
             const key = `${name}:${cacheType}`;
             cachePoints.set(key, [...(cachePoints.get(key) || []), ...pts]);
           }
         }
       }
-      if (!cachePoints.size) {
-        cacheFallback = true;
+      if (!zoneCacheOutFlux) {
         const resp = await call(
           'DescribeTimingL7AnalysisData',
           {
@@ -223,7 +229,7 @@ export async function fetchEdgeOneDetail(
         );
         if (resp) {
           const pts = extractEoPoints(resp, 'l7Flow_outFlux');
-          if (pts.length) cachePoints.set('l7Flow_outFlux:hit', pts);
+          if (pts.length) fallbackCacheHit.push(...pts);
         }
         const totalResp = await call(
           'DescribeTimingL7AnalysisData',
@@ -233,9 +239,7 @@ export async function fetchEdgeOneDetail(
         );
         if (totalResp) {
           const pts = extractEoPoints(totalResp, 'l7Flow_outFlux');
-          if (pts.length) {
-            cachePoints.set('l7Flow_outFlux:total', [...(cachePoints.get('l7Flow_outFlux:total') || []), ...pts]);
-          }
+          if (pts.length) fallbackCacheTotal.push(...pts);
         }
       }
     }
@@ -264,7 +268,9 @@ export async function fetchEdgeOneDetail(
         }
       }
     }
-  }
+    }),
+    4,
+  );
 
   for (const [name, values] of peakAccess) {
     accessPoints.set(
@@ -320,35 +326,30 @@ export async function fetchEdgeOneDetail(
     hit: cachePoints.get('l7Cache_request:hit'),
     miss: cachePoints.get('l7Cache_request:miss'),
   };
-  const hitFluxValues = cacheFlux.hit
-    ? alignByTimestamp(cacheFlux.hit, timeline)
-    : cacheFallback && cachePoints.get('l7Flow_outFlux:hit')
-      ? alignByTimestamp(cachePoints.get('l7Flow_outFlux:hit')!, timeline)
-      : empty();
-  const missFluxValues = cacheFlux.miss
-    ? alignByTimestamp(cacheFlux.miss, timeline)
-    : cacheFallback
-      ? (() => {
-          const totalPoints = cachePoints.get('l7Flow_outFlux:total') || accessPoints.get('l7Flow_outFlux');
-          if (!totalPoints?.length) return empty();
-          return alignByTimestamp(totalPoints, timeline).map((total, i) => {
-            const hit = hitFluxValues[i];
-            return total == null || hit == null ? null : Math.max(0, total - hit);
-          });
-        })()
-      : empty();
-  const dynamicFluxValues = cacheFlux.dynamic
-    ? alignByTimestamp(cacheFlux.dynamic, timeline)
-    : empty();
+  const len = timeline.labels.length;
+  const fallbackHitValues = fallbackCacheHit.length ? alignByTimestamp(fallbackCacheHit, timeline) : empty();
+  const fallbackTotalValues = fallbackCacheTotal.length ? alignByTimestamp(fallbackCacheTotal, timeline) : empty();
+  // 降级站点只有命中与总流量，缺失的那部分按「总量 - 命中」归入 miss；dynamic 保持 0。
+  // 这样原生站点与降级站点可以按站点分别合成，不会因一个站点缺数据丢掉其他站点的 dynamic。
+  const fallbackMissValues = fallbackTotalValues.map((total, i) => {
+    const hit = fallbackHitValues[i];
+    return total == null || hit == null ? null : Math.max(0, total - hit);
+  });
+  const hitFluxValues = combineSeries(
+    [cacheFlux.hit ? alignByTimestamp(cacheFlux.hit, timeline) : empty(), fallbackHitValues],
+    'sum',
+    len,
+  );
+  const missFluxValues = combineSeries(
+    [cacheFlux.miss ? alignByTimestamp(cacheFlux.miss, timeline) : empty(), fallbackMissValues],
+    'sum',
+    len,
+  );
+  const dynamicFluxValues = cacheFlux.dynamic ? alignByTimestamp(cacheFlux.dynamic, timeline) : empty();
   const hitReqValues = cacheReq.hit ? alignByTimestamp(cacheReq.hit, timeline) : empty();
   const missReqValues = cacheReq.miss ? alignByTimestamp(cacheReq.miss, timeline) : empty();
-  const totalFluxValues = cacheFallback
-    ? hitFluxValues.map((hit, i) => {
-        const miss = missFluxValues[i];
-        return hit == null || miss == null ? null : hit + miss;
-      })
-    : combineSeries([hitFluxValues, missFluxValues, dynamicFluxValues], 'sum', timeline.labels.length);
-  const totalReqValues = combineSeries([hitReqValues, missReqValues], 'sum', timeline.labels.length);
+  const totalFluxValues = combineSeries([hitFluxValues, missFluxValues, dynamicFluxValues], 'sum', len);
+  const totalReqValues = combineSeries([hitReqValues, missReqValues], 'sum', len);
   const hitRateFlux = rateSeries(hitFluxValues, totalFluxValues);
   const hitRateReq = rateSeries(hitReqValues, totalReqValues);
 

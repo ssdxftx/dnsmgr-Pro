@@ -4,7 +4,14 @@ import { checkLevel } from '../auth.js';
 import { audit } from '../lib/audit/context.js';
 import { assertUrlAllowed } from '../lib/netGuard.js';
 import { encryptText } from '../lib/secret.js';
-import { deliverToSubscription, newEventSecret, normalizeEventNames, type EventSubscription } from '../lib/events.js';
+import {
+  deliverToSubscription,
+  flushEventDeliveries,
+  invalidateEventSubscriptions,
+  newEventSecret,
+  normalizeEventNames,
+  type EventSubscription,
+} from '../lib/events.js';
 import { clampLimit, clampOffset } from '../lib/util.js';
 
 function parseNames(value: any): string[] {
@@ -18,8 +25,9 @@ function parseNames(value: any): string[] {
 
 function shape(row: any): any {
   const out = { ...row, events: parseNames(row.events) };
+  const secretSet = row.secret_set !== undefined ? !!row.secret_set : !!row.secret;
   delete out.secret;
-  out.secret_set = !!row.secret;
+  out.secret_set = secretSet;
   return out;
 }
 
@@ -49,7 +57,11 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
   };
 
   app.get('/api/events/subscriptions', auth, async () => {
-    const rows = await query(`SELECT * FROM ${table('event_subscription')} ORDER BY id DESC`);
+    const rows = await query(
+      `SELECT id, name, url, events, active, last_status, last_error, last_sent_at, created_at, updated_at,
+              (secret <> '') AS secret_set
+       FROM ${table('event_subscription')} ORDER BY id DESC`,
+    );
     return { code: 0, data: rows.map(shape) };
   });
 
@@ -77,6 +89,7 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
         (name, url, secret, events, active, created_at) VALUES (?, ?, ?, ?, ?, NOW())`,
       [name, url, encryptedSecret, JSON.stringify(events), active],
     );
+    invalidateEventSubscriptions();
     audit(req, {
       targetType: 'event_subscription',
       targetId: Number(res?.insertId || 0),
@@ -131,6 +144,7 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
     sets.push('updated_at = NOW()');
     params.push(id);
     await query(`UPDATE ${table('event_subscription')} SET ${sets.join(', ')} WHERE id = ?`, params);
+    invalidateEventSubscriptions();
     audit(req, {
       targetType: 'event_subscription',
       targetId: id,
@@ -147,6 +161,7 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
     if (!row) return { code: -1, msg: '订阅不存在' };
     await query(`DELETE FROM ${table('event_delivery')} WHERE sub_id = ?`, [id]);
     await query(`DELETE FROM ${table('event_subscription')} WHERE id = ?`, [id]);
+    invalidateEventSubscriptions();
     audit(req, {
       targetType: 'event_subscription',
       targetId: id,
@@ -162,6 +177,7 @@ export default async function eventRoutes(app: FastifyInstance): Promise<void> {
     if (!row) return { code: -1, msg: '订阅不存在' };
     const sub: EventSubscription = { ...row, secret: String(row.secret || '') };
     await deliverToSubscription(sub, 'event.test', { message: 'dnsmgr-pro test event', subscription: id });
+    await flushEventDeliveries();
     const after: any = await queryOne(`SELECT last_status, last_error, last_sent_at FROM ${table('event_subscription')} WHERE id = ?`, [id]);
     return {
       code: after?.last_status === 1 ? 0 : -1,

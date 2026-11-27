@@ -33,10 +33,25 @@ export default async function preheatRoutes(app: FastifyInstance) {
   // 任务列表
   app.get('/api/cdn/preheat-tasks', auth, async (req: any) => {
     if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    // 列表页只需要链接数量：basic=1 时不读取 urls 大字段，编辑时再按 ID 取完整任务。
+    const basic = String(req.query?.basic || '') === '1';
+    const columns = basic
+      ? `id, name, op, cycle, interval_min, run_time, active, last_run, next_run, addtime, owner_uid,
+         (CASE WHEN urls = '' THEN 0 ELSE LENGTH(urls) - LENGTH(REPLACE(urls, CHAR(10), '')) + 1 END) AS url_count`
+      : '*';
     const rows = isSuper(req)
-      ? await query(`SELECT * FROM ${table('cdn_preheat_task')} ORDER BY id DESC`)
-      : await query(`SELECT * FROM ${table('cdn_preheat_task')} WHERE owner_uid = ? ORDER BY id DESC`, [Number(req.user.uid)]);
+      ? await query(`SELECT ${columns} FROM ${table('cdn_preheat_task')} ORDER BY id DESC`)
+      : await query(`SELECT ${columns} FROM ${table('cdn_preheat_task')} WHERE owner_uid = ? ORDER BY id DESC`, [Number(req.user.uid)]);
     return { code: 0, data: rows };
+  });
+
+  // 单个任务详情：列表使用 basic=1 后，编辑弹窗通过该接口获取完整 urls。
+  app.get('/api/cdn/preheat-tasks/:id', auth, async (req: any) => {
+    if (!checkLevel(req.user, 2)) return { code: -1, msg: '无权限' };
+    const id = Number(req.params.id);
+    const row = await loadTask(req, id);
+    if (!row) return { code: -1, msg: '任务不存在' };
+    return { code: 0, data: row };
   });
 
   // 新建任务

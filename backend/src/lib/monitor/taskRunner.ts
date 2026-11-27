@@ -4,7 +4,7 @@ import { configSet } from '../../config.js';
 import { fmtDateTime } from '../util.js';
 import { enqueueAudit, nowStr } from '../audit/store.js';
 import { checkPing, checkTcp, checkCurl, type CheckResult } from './checkUtils.js';
-import { sendNotice } from './msgNotice.js';
+import { enqueueNotice } from './msgNotice.js';
 import { emitEvent } from '../events.js';
 
 function getDnsType(value: string): string {
@@ -283,7 +283,7 @@ async function handle(row: any): Promise<void> {
   // 只在状态真正发生迁移时通知：action=0 表示本轮没有切换，
   // 包括稳定运行和 cycle 确认窗口内的首次失败，不能发“恢复正常”通知。
   if (action > 0 && row.type !== 3) {
-    await sendNotice(action, row, { status: result.status, errmsg: result.errmsg });
+    enqueueNotice(action, row, { status: result.status, errmsg: result.errmsg });
   }
   if (action > 0 && drow) {
     void emitEvent('monitor.record.switched', {

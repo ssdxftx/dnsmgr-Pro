@@ -10,7 +10,7 @@ const routes = [
     path: '/',
     component: () => import('./layouts/MainLayout.vue'),
     children: [
-      { path: '', redirect: '/domains' },
+      { path: '', redirect: '/dashboard' },
       { path: 'dashboard', component: () => import('./views/Dashboard.vue'), meta: { titleKey: 'route.dashboard' } },
       { path: 'my-accounts', redirect: '/backup?tab=vault' },
       { path: 'my-backup', redirect: '/backup?tab=mine' },
@@ -78,14 +78,38 @@ const router = createRouter({
 
 let setupChecked = false;
 let setupInstalled = true;
+const SETUP_CACHE_KEY = 'dnsmgr_setup_installed_at';
+const SETUP_CACHE_TTL = 10 * 60_000;
+
+function readSetupCache(): boolean {
+  try {
+    const at = Number(localStorage.getItem(SETUP_CACHE_KEY) || 0);
+    return Number.isFinite(at) && at > 0 && Date.now() - at < SETUP_CACHE_TTL;
+  } catch {
+    return false;
+  }
+}
+
+function writeSetupCache(): void {
+  try {
+    localStorage.setItem(SETUP_CACHE_KEY, String(Date.now()));
+  } catch {
+    /* ignore */
+  }
+}
 
 export function markSetupInstalled() {
   setupChecked = true;
   setupInstalled = true;
+  writeSetupCache();
 }
 
 router.beforeEach(async (to, from, next) => {
   if (to.path === '/setup') return next();
+  if (!setupChecked && readSetupCache()) {
+    setupChecked = true;
+    setupInstalled = true;
+  }
   if (!setupChecked || (to.path === '/login' && !setupInstalled)) {
     try {
       // 首次安装状态探测必须有超时：后端无响应时不能让所有路由永久挂起
@@ -93,6 +117,7 @@ router.beforeEach(async (to, from, next) => {
       const json = await res.json();
       setupInstalled = json?.data?.installed ?? true;
       setupChecked = true;
+      if (setupInstalled) writeSetupCache();
     } catch {
       // 探测失败时保留未知状态：不得 fail-open 为「已安装」，
       // 也不缓存结果，下一次导航会重新探测。未安装时引导到安装页重试。
@@ -103,6 +128,8 @@ router.beforeEach(async (to, from, next) => {
   if (!setupInstalled) return next('/setup');
   if (to.meta.public) return next();
   if (!getToken()) return next('/login');
+  // 根路径按角色落地：普通用户直接进域名列表，避免先跳管理员 Dashboard 再被守卫弹回。
+  if (to.path === '/dashboard' && to.redirectedFrom?.path === '/' && !isAdminUser(getUser())) return next('/domains');
   // 管理员页面仅管理员可进入（服务端仍会二次校验）
   if (requiresAdmin(to.path) && !isAdminUser(getUser())) {
     const u = getUser();

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import bcrypt from 'bcryptjs';
 import { query, queryOne, table, withTransaction, isDuplicateError } from '../db.js';
-import { checkLevel } from '../auth.js';
+import { checkLevel, invalidateUserPermissions } from '../auth.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { hasOwn, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
@@ -61,6 +61,7 @@ async function savePermissions(uid: number, input: any[]) {
   await withTransaction(async (q) => {
     await applyPermissions(q, uid, input);
   });
+  invalidateUserPermissions(uid);
 }
 
 // 超级管理员（安装服务时创建）受保护：任何其他管理员都不得修改其任何资料；
@@ -343,6 +344,7 @@ export default async function userRoutes(app: FastifyInstance) {
     } else if (Number(row.level) === 1 || permissionProvided) {
       // 从普通用户提升为管理员，或显式提交了空权限时才清空
       await query(`DELETE FROM ${table('permission')} WHERE uid = ?`, [id]);
+      invalidateUserPermissions(id);
     }
     if (repwd) {
       // 改密同时自增 token_version，使该用户已签发的旧 JWT 立即失效

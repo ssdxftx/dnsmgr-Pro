@@ -90,17 +90,26 @@ export async function canAccessDomainAccount(domainId: number, user: any): Promi
   return row.visibility !== 'private' || Number(row.owner_uid) === Number(user?.uid);
 }
 
-/** 列表：管理员看共享 + 自己的私有；普通用户只看自己的私有 */
-export async function listVisibleAccounts(t: AccountTable, user: any): Promise<any[]> {
+/**
+ * 列表：管理员看共享 + 自己的私有；普通用户只看自己的私有。
+ * columns 用于只要 ID/名称的调用方，避免把 config 密文等宽列读进内存。
+ */
+export async function listVisibleAccounts(
+  t: AccountTable,
+  user: any,
+  columns: string[] = ['*'],
+): Promise<any[]> {
+  const cols = columns.includes('*') ? '*' : columns.map((c) => String(c)).filter((c) => /^[A-Za-z0-9_]+$/.test(c)).join(', ');
+  if (!cols) throw new Error('账户查询列不能为空');
   if (checkLevel(user, 2)) {
     return query(
-      `SELECT * FROM ${table(t)}
+      `SELECT ${cols} FROM ${table(t)}
        WHERE visibility = 'shared' OR (visibility = 'private' AND owner_uid = ?)
        ORDER BY id DESC`,
       [user.uid],
     );
   }
-  return query(`SELECT * FROM ${table(t)} WHERE visibility = 'private' AND owner_uid = ? ORDER BY id DESC`, [user.uid]);
+  return query(`SELECT ${cols} FROM ${table(t)} WHERE visibility = 'private' AND owner_uid = ? ORDER BY id DESC`, [user.uid]);
 }
 
 /** 他人私有账户在列表里只显示占位名，绝不回显用户起的名称 */

@@ -115,6 +115,8 @@
           :empty-text="t('audit.empty')"
           :empty-description="t('audit.emptyHint')"
           title-key="target_name"
+          :virtual-scroll="logs.length > 50"
+          :max-height="620"
         />
       </div>
     </n-card>

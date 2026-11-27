@@ -175,6 +175,7 @@
               :data="regCodes"
               :loading="regCodesLoadBusy"
               :row-key="(row: any) => row.id"
+              :pagination="regCodePagination"
             />
           </n-card>
         </n-tab-pane>
@@ -287,7 +288,7 @@
             </n-alert>
             <n-form label-placement="left" label-width="110">
               <n-form-item :label="t('systemSet.statCacheEnable')">
-                <n-switch :value="(cfg.cdn_stats_cache || '0') === '1'" :disabled="saveBusy" @update:value="setStatCache" />
+                <n-switch :value="(cfg.cdn_stats_cache || '1') === '1'" :disabled="saveBusy" @update:value="setStatCache" />
               </n-form-item>
               <n-form-item :label="t('systemSet.statCacheInterval')">
                 <n-input-number v-model:value="statCacheInterval" :min="5" :max="1440" style="width: 180px" />
@@ -467,6 +468,24 @@ const resultText = ref('');
 const genForm = reactive({ count: 1, days: 0, maxUse: 0, remark: '' });
 const regCodes = ref<any[]>([]);
 const regCodesLoadBusy = ref(false);
+const regCodesPage = ref(1);
+const regCodesPageSize = ref(100);
+const regCodesTotal = ref(0);
+const regCodePagination = computed(() => ({
+  page: regCodesPage.value,
+  pageSize: regCodesPageSize.value,
+  itemCount: regCodesTotal.value,
+  showSizePicker: true,
+  pageSizes: [50, 100, 200, 500],
+  onChange: (page: number) => {
+    if (page !== regCodesPage.value) void loadRegCodes(page);
+  },
+  onUpdatePageSize: (size: number) => {
+    regCodesPageSize.value = size;
+    regCodesPage.value = 1;
+    void loadRegCodes(1);
+  },
+}));
 
 const announcements = ref<any[]>([]);
 const announcementsLoadBusy = ref(false);
@@ -927,12 +946,21 @@ function deleteAnnouncement(row: any) {
   });
 }
 
-async function loadRegCodes() {
+async function loadRegCodes(targetPage = regCodesPage.value) {
   regCodesLoadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/register/codes', { limit: 500, offset: 0 });
-    if (res.code === 0) regCodes.value = res.data.list;
-    else message.error(res.msg);
+    const page = Math.max(1, targetPage);
+    const res = await api<any>('GET', '/register/codes', {
+      limit: regCodesPageSize.value,
+      offset: (page - 1) * regCodesPageSize.value,
+    });
+    if (res.code === 0) {
+      regCodes.value = res.data.list || [];
+      regCodesTotal.value = Number(res.data.total || 0);
+      regCodesPage.value = page;
+      // 删除末页最后一条后回退一页，避免停留在空页
+      if (!regCodes.value.length && page > 1 && regCodesTotal.value > 0) await loadRegCodes(page - 1);
+    } else message.error(res.msg);
   } catch (e: any) {
     message.error(e?.message || t('common.networkError'));
   } finally {
@@ -958,7 +986,7 @@ async function doGen() {
       showGen.value = false;
       resultText.value = (res.data.codes || []).join('\n');
       showResult.value = true;
-      loadRegCodes();
+      loadRegCodes(1);
     } else {
       message.error(res.msg);
     }

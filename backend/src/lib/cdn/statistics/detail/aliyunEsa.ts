@@ -5,6 +5,7 @@ import {
   alignByTimestamp,
   isBasicWanted,
   makeSeries,
+  runPool,
   type TimePoint,
   type Timeline,
 } from './shared.js';
@@ -85,30 +86,33 @@ export async function fetchAliyunEsaDetail(
     acc.set(key, merged);
   };
 
-  for (const siteId of siteIds) {
-    requests++;
-    let data: any[] = [];
-    try {
-      const resp = await client.request({
-        Action: 'DescribeSiteTimeSeriesData',
-        SiteId: siteId,
-        StartTime: formatIso(timeline.start),
-        EndTime: formatIso(timeline.end),
-        Interval: intervalSec,
-        Fields: JSON.stringify(fields),
-      });
-      data = resp?.Data || [];
-    } catch (e: any) {
-      errors.push(`站点 ${siteId}: ${e?.message || e}`);
-    }
+  await runPool(
+    siteIds.map((siteId) => async () => {
+      requests++;
+      let data: any[] = [];
+      try {
+        const resp = await client.request({
+          Action: 'DescribeSiteTimeSeriesData',
+          SiteId: siteId,
+          StartTime: formatIso(timeline.start),
+          EndTime: formatIso(timeline.end),
+          Interval: intervalSec,
+          Fields: JSON.stringify(fields),
+        });
+        data = resp?.Data || [];
+      } catch (e: any) {
+        errors.push(`站点 ${siteId}: ${e?.message || e}`);
+      }
 
-    // 同一站点下多个加速域名会命中同一 SiteId：已去重，这里按站点逐项累加
-    for (const key of ['flux', ...wanted.filter((k) => k !== 'flux')]) {
-      const field = ESA_FIELDS[key];
-      if (!field) continue;
-      add(key, alignByTimestamp(pickPoints(data, field, timeline), timeline));
-    }
-  }
+      // 同一站点下多个加速域名会命中同一 SiteId：已去重，这里按站点逐项累加
+      for (const key of ['flux', ...wanted.filter((k) => k !== 'flux')]) {
+        const field = ESA_FIELDS[key];
+        if (!field) continue;
+        add(key, alignByTimestamp(pickPoints(data, field, timeline), timeline));
+      }
+    }),
+    4,
+  );
 
   const series: MetricSeries[] = [];
   const push = (key: string) => {

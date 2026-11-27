@@ -346,35 +346,15 @@ async function loadOptions() {
   if (!isAdmin.value) return;
   const seq = ++optionsSeq;
   const aid = selectedAid.value;
-  const loadAllCdnDomains = async (): Promise<{ code: number; data: any[] }> => {
-    const all: any[] = [];
-    for (let page = 1; page <= 50; page++) {
-      const query: Record<string, any> = { page, size: 500 };
-      if (aid) query.aid = aid;
-      const res = await api<any>('GET', '/cdn/domains', query);
-      if (res.code !== 0) throw new Error(res.msg || '加载加速域名失败');
-      const raw = res.data || [];
-      const list = aid ? raw.filter((x: any) => Number(x.aid) === aid) : raw;
-      all.push(...list);
-      const total = Number(res.total || 0);
-      if (!raw.length || raw.length < 500 || (total > 0 && all.length >= total)) break;
-    }
-    return { code: 0, data: all };
-  };
   const [a, d] = await Promise.all([
     api<any>('GET', '/cdn/accounts').catch(() => ({ code: -1, data: [] })),
-    loadAllCdnDomains().catch(() => ({ code: -1, data: [] })),
+    api<any>('GET', '/cdn/domains/options', { aid: aid || undefined, route: routeKey, limit: 10000 }).catch(() => ({ code: -1, data: [] })),
   ]);
   if (seq !== optionsSeq) return;
-  // 只保留当前服务商的账户，避免选到其他服务商后查询为空
   accountOptions.value = (a.data || [])
     .filter((x: any) => String(x.type) === routeKey)
     .map((x: any) => ({ label: `${x.name}（${x.typename || x.type}）`, value: x.id }));
-  // 域名同样按服务商收敛；已选账户时再按 aid 收敛
-  domainOptions.value = (d.data || [])
-    .filter((x: any) => String(x.route) === routeKey)
-    .filter((x: any) => !aid || Number(x.aid) === aid)
-    .map((x: any) => ({ label: x.name, value: x.name }));
+  domainOptions.value = (d.data || []).map((x: any) => ({ label: x.name, value: x.name }));
 }
 
 function onAccountChange() {

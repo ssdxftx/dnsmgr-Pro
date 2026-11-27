@@ -64,6 +64,8 @@ import apiKeyRoutes from './routes/apiKeys.js';
 import mcpRoutes from './routes/mcp.js';
 import jobRoutes from './routes/jobs.js';
 import { resetStaleJobs } from './lib/jobs.js';
+import { replayNoticeQueue } from './lib/monitor/msgNotice.js';
+import { yieldToEventLoop } from './lib/util.js';
 import eventRoutes from './routes/events.js';
 import observabilityRoutes from './routes/observability.js';
 
@@ -210,10 +212,11 @@ app.addHook('onSend', async (req: any, reply: any, payload: any) => {
 
 // 在线恢复期间只放行读请求与备份接口，写请求统一 503
 app.addHook('onRequest', async (req: any, reply: any) => {
-  // 先同步其他副本写入的维护标志（节流 1s），再判断是否拦截
-  await refreshMaintenance();
+  // 维护模式只拦截写请求：读请求不查库，写请求按 5 秒节流同步其他副本的标志
+  const write = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method);
+  if (write) await refreshMaintenance();
   if (!isMaintenance()) return;
-  if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) return;
+  if (!write) return;
   const url = String(req.raw?.url || '').split('?')[0];
   // 备份接口与登录必须可用，否则重启后无人能拿到令牌退出维护模式
   if (url.startsWith('/api/backup')) return;
@@ -554,6 +557,8 @@ if (installed) {
   // 上一个进程被 kill 时留下的 pending/running 任务永远不会再被推进，
   // 既挡住同类新任务（去重），也让前端一直显示「进行中」：启动时统一标记为失败。
   await resetStaleJobs();
+  // 上次进程退出时未发送完的容灾告警：启动后重放，避免只有内存队列时整批丢失。
+  await replayNoticeQueue();
   // 系统代理配置在启动时应用到全局 fetch；保存设置时还会再次刷新
   await refreshGlobalProxyDispatcher().catch((e: any) =>
     console.error('[dnsmgr-backend] 应用系统代理失败:', e?.message || e),
@@ -641,45 +646,68 @@ if (webDir) {
 }
 
 let auditCleanDay = '';
+
+/**
+ * TTL 清理分批执行：SQLite 把一批删除放到独立 worker，主线程只等待结果；
+ * MySQL 保持原有逐批删除。任一批未删除任何行即表示已清理完毕。
+ */
+async function cleanupBatches(sql: string, params: any[] = [], maxBatches = 20): Promise<void> {
+  const driver = getDriver();
+  if (driver.runWriteBatch) {
+    const perRound = 4;
+    for (let i = 0; i < Math.ceil(maxBatches / perRound); i++) {
+      const results = await driver.runWriteBatch(Array.from({ length: perRound }, () => ({ sql, params })));
+      if (results.some((r) => !r.affectedRows)) break;
+      await yieldToEventLoop();
+    }
+    return;
+  }
+  for (let i = 0; i < maxBatches; i++) {
+    const res: any = await query(sql, params);
+    if (!res?.affectedRows) break;
+    // 分批删除之间让出事件循环，降低同步 SQLite 驱动长时间占用主线程
+    await yieldToEventLoop();
+  }
+}
+
 async function cleanAuditLog(): Promise<void> {
   const now = new Date();
   const day = `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
   if (auditCleanDay === day || now.getHours() < 3) return;
   const days = Math.max(7, Number(await configGet('audit_retain_days', '180')) || 180);
-  for (let i = 0; i < 20; i++) {
-    const res: any = getDbType() === 'sqlite'
-      ? await query(
-        `DELETE FROM ${table('audit_log')} WHERE id IN (SELECT id FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000)`,
-        [days],
-      )
-      : await query(
-        `DELETE FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
-        [days],
-      );
-    if (!res?.affectedRows) break;
-  }
+  await cleanupBatches(
+    getDbType() === 'sqlite'
+      ? `DELETE FROM ${table('audit_log')} WHERE id IN (SELECT id FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000)`
+      : `DELETE FROM ${table('audit_log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
+    [days],
+  );
   // 通知日志只用于近期排障：保留 30 天，避免按监控探测频率无界增长。
-  for (let i = 0; i < 20; i++) {
-    const res: any = getDbType() === 'sqlite'
-      ? await query(
-        `DELETE FROM ${table('notification_log')} WHERE id IN (SELECT id FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000)`,
-      )
-      : await query(
-        `DELETE FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000`,
-      );
-    if (!res?.affectedRows) break;
-  }
+  await cleanupBatches(
+    getDbType() === 'sqlite'
+      ? `DELETE FROM ${table('notification_log')} WHERE id IN (SELECT id FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000)`
+      : `DELETE FROM ${table('notification_log')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) LIMIT 5000`,
+  );
   // 事件投递记录只保留 90 天，否则事件风暴会让表无限增长。
-  for (let i = 0; i < 20; i++) {
-    const res: any = getDbType() === 'sqlite'
-      ? await query(
-        `DELETE FROM ${table('event_delivery')} WHERE id IN (SELECT id FROM ${table('event_delivery')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000)`,
-      )
-      : await query(
-        `DELETE FROM ${table('event_delivery')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000`,
-      );
-    if (!res?.affectedRows) break;
-  }
+  await cleanupBatches(
+    getDbType() === 'sqlite'
+      ? `DELETE FROM ${table('event_delivery')} WHERE id IN (SELECT id FROM ${table('event_delivery')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000)`
+      : `DELETE FROM ${table('event_delivery')} WHERE created_at < DATE_SUB(NOW(), INTERVAL 90 DAY) LIMIT 5000`,
+  );
+  // 操作日志与解析切换日志默认保留 180/90 天，按批清理避免长事务锁表。
+  const logDays = Math.max(7, Number(await configGet('log_retain_days', '180')) || 180);
+  await cleanupBatches(
+    getDbType() === 'sqlite'
+      ? `DELETE FROM ${table('log')} WHERE id IN (SELECT id FROM ${table('log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000)`
+      : `DELETE FROM ${table('log')} WHERE addtime < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
+    [logDays],
+  );
+  const dmLogDays = Math.max(7, Number(await configGet('dmlog_retain_days', '90')) || 90);
+  await cleanupBatches(
+    getDbType() === 'sqlite'
+      ? `DELETE FROM ${table('dmlog')} WHERE id IN (SELECT id FROM ${table('dmlog')} WHERE \`date\` < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000)`
+      : `DELETE FROM ${table('dmlog')} WHERE \`date\` < DATE_SUB(NOW(), INTERVAL ? DAY) LIMIT 5000`,
+    [dmLogDays],
+  );
   auditCleanDay = day;
 }
 
@@ -696,6 +724,7 @@ try {
       let running = false;
       return () => {
         // 恢复/导入期间数据库处于替换窗口，暂停所有后台写入型调度，避免与恢复事务并发
+        refreshMaintenance().catch(() => undefined);
         if (isMaintenance()) return;
         if (running) return;
         running = true;
@@ -727,21 +756,21 @@ try {
     console.log('[dnsmgr-backend] SSL证书续签调度器已启动');
 
     // CDN 数据统计缓存：按服务商数据粒度（近 30 天按天、近 48 小时按小时）定时拉取落库
-    setInterval(
-      distributed('statcache', async () => {
-        if (!(await isStatCacheEnabled())) return;
-        const interval = await getStatCacheIntervalMs();
-        // 以数据库中的上次刷新时间判定，而不是进程内时间戳：
-        // 否则每个副本各跑一遍，上游统计调用量随副本数线性放大。
-        const last = String((await configGet('cdn_stats_cache_last', '')) || '');
-        const lastMs = last ? new Date(last.replace(' ', 'T')).getTime() : 0;
-        if (Number.isFinite(lastMs) && lastMs > 0 && Date.now() - lastMs < interval) return;
-        const r = await refreshAllStatCache();
-        if (r.errors.length) console.error('[cdn-stats-cache] 部分账户刷新失败:', r.errors.join('；'));
-        else console.log(`[cdn-stats-cache] 已刷新 ${r.accounts} 个账户统计`);
-      }, '[cdn-stats-cache] 刷新异常:'),
-      60 * 1000,
-    );
+    const runStatCache = distributed('statcache', async () => {
+      if (!(await isStatCacheEnabled())) return;
+      const interval = await getStatCacheIntervalMs();
+      // 以数据库中的上次刷新时间判定，而不是进程内时间戳：
+      // 否则每个副本各跑一遍，上游统计调用量随副本数线性放大。
+      const last = String((await configGet('cdn_stats_cache_last', '')) || '');
+      const lastMs = last ? new Date(last.replace(' ', 'T')).getTime() : 0;
+      if (Number.isFinite(lastMs) && lastMs > 0 && Date.now() - lastMs < interval) return;
+      const r = await refreshAllStatCache();
+      if (r.errors.length) console.error('[cdn-stats-cache] 部分账户刷新失败:', r.errors.join('；'));
+      else console.log(`[cdn-stats-cache] 已刷新 ${r.accounts} 个账户统计`);
+    }, '[cdn-stats-cache] 刷新异常:');
+    setInterval(runStatCache, 60 * 1000);
+    // 默认开启时启动即预热一次，避免首次打开统计页仍要等一个刷新周期
+    setTimeout(runStatCache, 5000);
     console.log('[dnsmgr-backend] CDN 数据统计缓存调度器已启动');
 
     // 备份目录与临时文件清理（每小时）

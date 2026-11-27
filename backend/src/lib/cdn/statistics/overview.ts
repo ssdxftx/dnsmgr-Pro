@@ -6,6 +6,7 @@ import { getCatalog, listCatalogs } from './catalog/index.js';
 import { fetchDetail } from './detail/index.js';
 import { buildTimeline, combineSeries, aggregate, mergeRateSeries, runPool } from './detail/shared.js';
 import { BASIC_KEYS, basicUnit } from './validate.js';
+import { withAccountLimit } from '../../hostLimit.js';
 
 export interface OverviewAccount {
   id: number;
@@ -135,16 +136,18 @@ export async function buildProviderCard(
             errors: [`账户 #${acct.id} 配置无法解密，请在「CDN 账户」中重新填写凭证`],
             requests: 0,
           })
-        : withTimeout(
-            fetchDetail(catalog, {
-              config: acct.config,
-              domains: acct.domains,
-              timeline,
-              groups: new Set(['overview']),
-              filters: {},
-              top: [],
-            }),
-            8000,
+        : withAccountLimit('cdn:' + acct.id, () =>
+            withTimeout(
+              fetchDetail(catalog, {
+                config: acct.config,
+                domains: acct.domains,
+                timeline,
+                groups: new Set(['overview']),
+                filters: {},
+                top: [],
+              }),
+              8000,
+            ),
           ).catch((e: any) => ({
             series: [],
             breakdowns: [],

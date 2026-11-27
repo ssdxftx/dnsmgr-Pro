@@ -1,9 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
+import { domainNameNorm } from '../lib/domainNorm.js';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
-import { matchPermission, isRecordInScope, checkLevel, md5, permissionMatchesDomain, type SubPermission } from '../auth.js';
+import { matchPermission, isRecordInScope, checkLevel, md5, permissionMatchesDomain, invalidateAllUserPermissions, type SubPermission } from '../auth.js';
 import { localResolve, recordValueMatches } from '../lib/dns/localResolve.js';
 import { detectCloudflareProxy } from '../lib/dns/cloudflare.js';
 import { defaultRecordLine } from '../lib/dns/defaultLine.js';
@@ -12,7 +13,7 @@ import { findVaultDekForRequest } from '../lib/vault/service.js';
 import { audit } from '../lib/audit/context.js';
 import { diffFields } from '../lib/audit/mask.js';
 import { getEffectivePermissions, getVisibleAccount, isLegacyDomainSessionFor } from '../lib/accounts/visibility.js';
-import { asText, clampLimit, clampOffset, fmtDateTime } from '../lib/util.js';
+import { asText, clampLimit, clampOffset, escapeLike, fmtDateTime } from '../lib/util.js';
 import { hitRateLimitDistributed } from '../lib/rateLimit.js';
 import { getSysKey } from '../config.js';
 import { legacyApiAuth } from '../lib/legacyApi.js';
@@ -117,16 +118,50 @@ function evictOldest<K, V extends { at: number }>(map: Map<K, V>, max: number): 
   for (let i = 0; i < drop && i < entries.length; i++) map.delete(entries[i][0]);
 }
 
+const recordPageCache = new Map<string, { at: number; data: any; bytes: number }>();
+const RECORD_PAGE_TTL = 15_000;
+const RECORD_PAGE_MAX = 300;
+const RECORD_PAGE_MAX_BYTES = 8 * 1024 * 1024;
+const RECORD_PAGE_SINGLE_MAX_BYTES = 512 * 1024;
+let recordPageCacheBytes = 0;
+
+function evictRecordPageCache(incomingBytes: number): void {
+  while (
+    recordPageCache.size &&
+    (recordPageCache.size >= RECORD_PAGE_MAX || recordPageCacheBytes + incomingBytes > RECORD_PAGE_MAX_BYTES)
+  ) {
+    let oldestKey: string | undefined;
+    let oldestAt = Number.POSITIVE_INFINITY;
+    for (const [k, v] of recordPageCache) {
+      if (v.at < oldestAt) {
+        oldestAt = v.at;
+        oldestKey = k;
+      }
+    }
+    if (oldestKey === undefined) break;
+    const old = recordPageCache.get(oldestKey);
+    recordPageCacheBytes -= Number(old?.bytes || 0);
+    recordPageCache.delete(oldestKey);
+  }
+}
+
 /** 写操作后立即失效该域名的记录集合/总数缓存，避免普通用户新建后马上修改被判无权限 */
 function invalidateDomainRecordCaches(domainId: number): void {
   const key = 'id:' + Number(domainId || 0);
+  // 子域名计数缓存只在列表展示中使用，记录变更后异步删除，下一次列表重新拉取云端记录。
+  void query(`DELETE FROM ${table('domain_subcount')} WHERE did = ?`, [Number(domainId || 0)]).catch(() => undefined);
   const old = allRecordsCache.get(key);
   if (old) {
     allRecordsCacheBytes -= Number(old.bytes || 0);
     allRecordsCache.delete(key);
   }
-  recordTotalCache.delete(key);
   zoneRecordIdCache.delete(key);
+  for (const cacheKey of [...recordPageCache.keys()]) {
+    if (!cacheKey.startsWith(key + '|')) continue;
+    const page = recordPageCache.get(cacheKey);
+    recordPageCacheBytes -= Number(page?.bytes || 0);
+    recordPageCache.delete(cacheKey);
+  }
 }
 
 const allRecordsCache = new Map<string, { at: number; list: any[]; bytes: number }>();
@@ -162,6 +197,43 @@ function domainCacheKey(d: any): string {
   const id = Number(d?.id || 0);
   if (Number.isFinite(id) && id > 0) return 'id:' + id;
   return 'name:' + Number(d?.aid || 0) + ':' + String(d?.thirdid || '') + ':' + String(d?.name || '');
+}
+
+const SUBCOUNT_TTL = 10 * 60_000;
+const SUBCOUNT_CHUNK = 500;
+
+function subCountKey(did: any, sub: any): string {
+  return Number(did || 0) + ':' + String(sub || '').trim().toLowerCase().replace(/\.+$/, '');
+}
+
+async function loadSubCounts(dids: number[]): Promise<Map<string, { count: number; at: number }>> {
+  const out = new Map<string, { count: number; at: number }>();
+  const uniq = [...new Set(dids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
+  for (let i = 0; i < uniq.length; i += SUBCOUNT_CHUNK) {
+    const chunk = uniq.slice(i, i + SUBCOUNT_CHUNK);
+    const rows: any[] = await query(
+      `SELECT did, sub, record_count, updated_at FROM ${table('domain_subcount')} WHERE did IN (${chunk.map(() => '?').join(',')})`,
+      chunk,
+    );
+    for (const row of rows) {
+      const at = new Date(row.updated_at).getTime();
+      if (!Number.isFinite(at)) continue;
+      out.set(subCountKey(row.did, row.sub), { count: Math.max(0, Number(row.record_count) || 0), at });
+    }
+  }
+  return out;
+}
+
+async function saveSubCounts(did: number, counts: Map<string, number>): Promise<void> {
+  const rows = [...counts.entries()];
+  if (!rows.length) return;
+  const placeholders = rows.map(() => '(?, ?, ?, NOW())').join(',');
+  await query(
+    `INSERT INTO ${table('domain_subcount')} (did, sub, record_count, updated_at)
+     VALUES ${placeholders}
+     ON DUPLICATE KEY UPDATE record_count = VALUES(record_count), updated_at = NOW()`,
+    rows.flatMap(([sub, count]) => [did, sub, count]),
+  );
 }
 
 /** 批量取账户（含 AES 解密配置），避免每条授权各查一次 account */
@@ -254,28 +326,6 @@ async function fetchProviderRecordMap(provider: any): Promise<Map<string, any> |
     if (r.list.length < pageSize) break;
   }
   return map;
-}
-
-const recordTotalCache = new Map<string, { at: number; total: number }>();
-const RECORD_TOTAL_CACHE_MAX = 500;
-
-/** 仅取某域名的记录总数（不带子域名过滤时使用）：只请求 1 条 + 读取分页 total，避免全量拉取；acct 可由调用方批量预取后传入 */
-async function fetchRecordTotal(d: any, acct?: any): Promise<number> {
-  const cacheKey = domainCacheKey(d);
-  const cached = recordTotalCache.get(cacheKey);
-  if (cached && Date.now() - cached.at < RECORDS_TTL) return cached.total;
-  let total = Number(d.recordcount || 0);
-  const acctRow = acct !== undefined ? acct : await queryOne(`SELECT * FROM ${table('account')} WHERE id = ?`, [d.aid]);
-  if (acctRow) {
-    const provider = getDnsProvider(acctRow.type, await accountConfigOf(acctRow), d.name, d.thirdid);
-    if (provider) {
-      const r = await provider.getDomainRecords(1, 1, null, null, null, null, null, null);
-      if (r && typeof (r as any).total === 'number') total = Number((r as any).total);
-    }
-  }
-  if (recordTotalCache.size >= RECORD_TOTAL_CACHE_MAX) evictOldest(recordTotalCache, RECORD_TOTAL_CACHE_MAX);
-  recordTotalCache.set(cacheKey, { at: Date.now(), total });
-  return total;
 }
 
 async function getUserPerms(req: any): Promise<{ admin: boolean; perms: SubPermission[] }> {
@@ -480,7 +530,7 @@ async function clearDomainPermissions(
   const ex = excludeDomainIds.map(Number).filter((n) => Number.isInteger(n) && n > 0);
   const exSql = ex.length ? ` AND id NOT IN (${ex.map(() => '?').join(',')})` : '';
   const remain: any = await run(
-    `SELECT COUNT(*) AS c FROM ${table('domain')} WHERE LOWER(TRIM(TRAILING '.' FROM name)) IN (${list.map(() => '?').join(',')})${exSql}`,
+    `SELECT COUNT(*) AS c FROM ${table('domain')} WHERE ${domainNameNorm()} IN (${list.map(() => '?').join(',')})${exSql}`,
     [...list, ...ex],
   );
   if (Number(remain?.[0]?.c || 0) > 0) return;
@@ -514,16 +564,64 @@ export default async function domainRoutes(app: FastifyInstance) {
     const permNames = acc.admin
       ? []
       : [...new Set(acc.perms.map((p) => domainKey(p.domain)).filter(Boolean))];
-    // 可选分页：默认保持返回全量以兼容现有前端统计；显式传 limit 时下推到 SQL。
-    const pageSize = req.query?.limit !== undefined ? clampLimit(req.query.limit, 200, 1000) : 0;
+    const basic = String(req.query?.basic || '') === '1';
+    // 管理员默认分页，显式 limit=0 才全量；普通用户仍按授权展开，保持原有数据形状。
+    const hasLimit = req.query?.limit !== undefined;
+    const wantFull = hasLimit && Number(req.query.limit) === 0;
+    const pageSize = acc.admin && !basic
+      ? wantFull
+        ? 0
+        : hasLimit
+          ? clampLimit(req.query.limit, 200, 1000)
+          : 500
+      : 0;
     const pageOffset = clampOffset(req.query?.offset);
     const pageSql = pageSize ? ' LIMIT ? OFFSET ?' : '';
     const pageParams = pageSize ? [pageSize, pageOffset] : [];
+    // 管理员关键词检索与私有账户过滤下推到 SQL：避免为了一个关键词把全站域名读入内存再过滤。
+    const adminWhereParts: string[] = [];
+    const adminWhereParams: any[] = [];
+    if (acc.admin) {
+      adminWhereParts.push(`(B.visibility IS NULL OR B.visibility <> 'private' OR B.owner_uid = ?)`);
+      adminWhereParams.push(req.user.uid);
+    }
+    if (acc.admin && kw) {
+      // 用户输入的 % 和 _ 按字面量匹配，避免一个通配符把全站域名算进搜索结果。
+      const like = `%${escapeLike(kw)}%`;
+      adminWhereParts.push(
+        `(A.name LIKE ? ESCAPE '!' OR A.remark LIKE ? ESCAPE '!' OR EXISTS (SELECT 1 FROM ${table('domain_alias')} DA WHERE DA.did = A.id AND DA.name LIKE ? ESCAPE '!'))`,
+      );
+      adminWhereParams.push(like, like, like);
+    }
+    const adminWhere = adminWhereParts.length ? ` WHERE ${adminWhereParts.join(' AND ')}` : '';
     const rows = acc.admin
-      ? await query(`${select} ORDER BY A.id DESC${pageSql}`, pageParams)
+      ? await query(`${select}${adminWhere} ORDER BY A.id DESC${pageSql}`, [...adminWhereParams, ...pageParams])
       : permNames.length
-        ? await query(`${select} WHERE LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)
+        ? await query(`${select} WHERE ${domainNameNorm('A')} IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)
         : [];
+    let pageTotal = rows.length;
+    let pageSummary: Record<string, number> | null = null;
+    if (acc.admin && pageSize) {
+      const agg: any = await queryOne(
+        `SELECT COUNT(*) AS total,
+                SUM(CASE WHEN A.checkstatus = 2 THEN 1 ELSE 0 END) AS queryFailed,
+                SUM(CASE WHEN A.is_notice = 1 THEN 1 ELSE 0 END) AS noticeOn,
+                SUM(CASE WHEN A.checkstatus <> 2 THEN COALESCE(A.recordcount, 0) ELSE 0 END) AS recordTotal,
+                COUNT(DISTINCT CASE WHEN A.cid IS NOT NULL AND A.cid <> 0 THEN A.cid END) AS categoryCount,
+                SUM(CASE WHEN A.expiretime IS NOT NULL AND A.expiretime <> '' AND A.expiretime < NOW() THEN 1 ELSE 0 END) AS expired
+         FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id${adminWhere}`,
+        adminWhereParams,
+      );
+      pageTotal = Number(agg?.total || 0);
+      pageSummary = {
+        total: pageTotal,
+        queryFailed: Number(agg?.queryFailed || 0),
+        noticeOn: Number(agg?.noticeOn || 0),
+        recordTotal: Number(agg?.recordTotal || 0),
+        categoryCount: Number(agg?.categoryCount || 0),
+        expired: Number(agg?.expired || 0),
+      };
+    }
     const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     const visibleRows = (rows as any[]).filter(
@@ -535,13 +633,14 @@ export default async function domainRoutes(app: FastifyInstance) {
     const allowedRows = acc.admin ? visibleRows : visibleRows.filter((r: any) => domainPerms(acc.perms, r).length > 0);
     let data = allowedRows.map((r: any) => ({ ...r, category_name: catMap[r.cid] || '' }));
     // 轻量清单：记录页只需要域名名称，避免为了一个名称下载完整域名对象与云端统计
-    if (String(req.query?.basic || '') === '1') {
+    if (basic) {
       return { code: 0, data: allowedRows.map((r: any) => ({ id: r.id, name: r.name })) };
     }
     if (acc.admin) {
       data = data.map((r: any) => {
         delete r.account_visibility;
         delete r.account_owner;
+        delete r.name_norm;
         return r;
       });
     } else {
@@ -559,8 +658,12 @@ export default async function domainRoutes(app: FastifyInstance) {
         if (row) row.perms.push(p);
         else rowPerms.set(key, { d, perms: [p] });
       }
-      // 批量取账户（一次 IN 查询），替代每条授权各查一次 account（含 AES 解密）
-      const acctMap = await fetchAccountMap([...rowPerms.values()].map(({ d }) => Number(d.aid)));
+      // 只有子域名授权需要云端记录；整域名授权直接读本地记录数，无需取账户配置。
+      const needAccounts = [...rowPerms.values()].some(({ perms }) => perms.some((p) => !!p.sub));
+      const acctMap = needAccounts
+        ? await fetchAccountMap([...rowPerms.values()].map(({ d }) => Number(d.aid)))
+        : new Map<number, any>();
+      const subCountCache = needAccounts ? await loadSubCounts([...rowPerms.keys()]) : new Map<string, { count: number; at: number }>();
       const domainResult = new Map<number, { total: number; counts: Map<string, number>; countOk: boolean }>();
       const entries = [...rowPerms.entries()];
       let cursor = 0;
@@ -569,22 +672,44 @@ export default async function domainRoutes(app: FastifyInstance) {
         while (cursor < entries.length) {
           const [rowId, { d, perms }] = entries[cursor++];
           const acctRow = acctMap.get(Number(d.aid));
-          const hasFull = perms.some((p) => !p.sub);
-          const hasSub = perms.some((p) => !!p.sub);
+          // 整域名授权直接使用本地记录数：列表页不再为每条授权发起一次云端计数。
+          const localTotal = Number(d.recordcount || 0);
+          const subPerms = perms.filter((p) => !!p.sub);
+          const hasSub = subPerms.length > 0;
+          // 私有账户的聚合计数同样不进入持久缓存，避免锁屏/换会话后仍能看到上次的记录规模。
+          const subCountCacheable = !!acctRow && acctRow.visibility !== 'private';
+          if (
+            hasSub &&
+            subCountCacheable &&
+            subPerms.every((p) => {
+              const hit = subCountCache.get(subCountKey(rowId, p.sub));
+              return !!hit && Date.now() - hit.at < SUBCOUNT_TTL;
+            })
+          ) {
+            const counts = new Map<string, number>();
+            for (const p of subPerms) counts.set(String(p.sub), subCountCache.get(subCountKey(rowId, p.sub))?.count || 0);
+            domainResult.set(rowId, { total: localTotal, counts, countOk: true });
+            continue;
+          }
           try {
-            const [total, recordsRes] = await Promise.all([
-              hasFull ? fetchRecordTotal(d, acctRow) : Promise.resolve(0),
-              hasSub ? fetchAllRecords(d, acctRow) : Promise.resolve({ list: [] as any[], ok: true, truncated: false }),
-            ]);
+            const recordsRes = hasSub
+              ? await fetchAllRecords(d, acctRow)
+              : { list: [] as any[], ok: true, truncated: false };
             // 只保留每个子域名的计数，不把完整记录数组挂在 domainResult 上跨域名累积。
             const counts = new Map<string, number>();
+            const updates = new Map<string, number>();
             if (hasSub) {
-              for (const p of perms) {
-                if (!p.sub) continue;
-                counts.set(String(p.sub), (recordsRes.list || []).filter((r: any) => isRecordInScope(r.Name, p.sub)).length);
+              for (const p of subPerms) {
+                const count = (recordsRes.list || []).filter((r: any) => isRecordInScope(r.Name, p.sub)).length;
+                counts.set(String(p.sub), count);
+                updates.set(String(p.sub), count);
+              }
+              // 只在完整拉取成功后落库；失败/截断时保留旧缓存并标记不可信。
+              if (subCountCacheable && recordsRes.ok && !recordsRes.truncated) {
+                await saveSubCounts(rowId, updates).catch(() => undefined);
               }
             }
-            domainResult.set(rowId, { total, counts, countOk: recordsRes.ok && !recordsRes.truncated });
+            domainResult.set(rowId, { total: localTotal, counts, countOk: recordsRes.ok && !recordsRes.truncated });
           } catch {
             // 单个域名云端拉取失败时降级为库内记录数，并标记「记录数不可信」，避免把失败伪装成 0 条
             domainResult.set(rowId, { total: Number(d.recordcount || 0), counts: new Map(), countOk: false });
@@ -602,6 +727,7 @@ export default async function domainRoutes(app: FastifyInstance) {
           : res?.total ?? Number(d.recordcount || 0);
         // 普通用户不需要知道底层云账号别名，剔除避免信息泄露
         const dSafe = { ...d };
+        delete dSafe.name_norm;
         delete dSafe.account_type;
         delete dSafe.account_name;
         delete dSafe.account_visibility;
@@ -651,7 +777,9 @@ export default async function domainRoutes(app: FastifyInstance) {
       }
       data = localHits.sort((a: any, b: any) => Number(b.id) - Number(a.id));
     }
-    return pageSize && acc.admin ? { code: 0, data, size: pageSize, offset: pageOffset } : { code: 0, data };
+    return pageSize && acc.admin
+      ? { code: 0, data, total: pageTotal, size: pageSize, offset: pageOffset, summary: pageSummary }
+      : { code: 0, data };
   });
 
   // 解析记录搜索：按主机记录（子域名）或备注跨域模糊检索，返回可编辑的解析记录条目
@@ -669,7 +797,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     const targets = acc.admin
       ? ((await query(`${select} ORDER BY A.id DESC`)) as any[])
       : permNames.length
-        ? ((await query(`${select} WHERE LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)) as any[])
+        ? ((await query(`${select} WHERE ${domainNameNorm('A')} IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)) as any[])
         : [];
     // 批量取账户，避免逐个域名查 account
     const acctMap = await fetchAccountMap(targets.map((t: any) => Number(t.aid)));
@@ -680,7 +808,7 @@ export default async function domainRoutes(app: FastifyInstance) {
     });
     const LIMIT = 200;
     // 单次搜索最多扫描的域名数：避免一个不匹配关键词把全部域名的记录全量拉一遍
-    const MAX_SCAN_DOMAINS = 100;
+    const MAX_SCAN_DOMAINS = 30;
     const scanTargets = visibleTargets.slice(0, MAX_SCAN_DOMAINS);
     const out: any[] = [];
     let cursor = 0;
@@ -855,6 +983,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       ]);
       return Number(ins?.insertId || 0);
     });
+    invalidateAllUserPermissions();
     invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
@@ -884,12 +1013,14 @@ export default async function domainRoutes(app: FastifyInstance) {
       await clearDomainPermissions([row?.name || ''], q, [Number(id)]);
       await q(`DELETE FROM ${table('domain')} WHERE id = ?`, [id]);
       await q(`DELETE FROM ${table('domain_alias')} WHERE did = ?`, [id]);
+      await q(`DELETE FROM ${table('domain_subcount')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('cert_cname')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('dmtask')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('optimizeip')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('sctask')} WHERE did = ?`, [id]);
       await q(`DELETE FROM ${table('dns_check_task')} WHERE did = ?`, [id]);
     });
+    invalidateAllUserPermissions();
     invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
@@ -967,11 +1098,13 @@ export default async function domainRoutes(app: FastifyInstance) {
       await q(`DELETE FROM ${table('domain')} WHERE id IN (${ph})`, ids);
       await q(`DELETE FROM ${table('cert_cname')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('domain_alias')} WHERE did IN (${ph})`, ids);
+      await q(`DELETE FROM ${table('domain_subcount')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('dmtask')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('optimizeip')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('sctask')} WHERE did IN (${ph})`, ids);
       await q(`DELETE FROM ${table('dns_check_task')} WHERE did IN (${ph})`, ids);
     });
+    invalidateAllUserPermissions();
     invalidateDomainNamesCache();
     audit(req, {
       targetType: 'domain',
@@ -1001,20 +1134,58 @@ export default async function domainRoutes(app: FastifyInstance) {
     const sortName = String(q.sortName || '').trim();
     const sortField = sortFields.has(sortName) && dnsProviders[info.account.type]?.sort ? sortName : null;
     const sortOrder = String(q.sortOrder || '').toLowerCase() === 'desc' ? 'desc' : 'asc';
-    const res = await provider.getDomainRecords(
-      page,
-      pageSize,
-      q.keyword || null,
-      q.subdomain || null,
-      q.value || null,
-      q.type || null,
-      q.line || null,
-      q.status || null,
-      sortField,
-      sortField ? sortOrder : null,
-      q.groupid || null,
-    );
-    if (res === false) return { code: -1, msg: provider.getError() };
+    const cacheable = info.account.visibility !== 'private';
+    const pageCacheKey = cacheable
+      ? [
+          domainCacheKey(info.domain),
+          page,
+          pageSize,
+          q.keyword || '',
+          q.subdomain || '',
+          q.value || '',
+          q.type || '',
+          q.line || '',
+          q.status || '',
+          sortField || '',
+          sortField ? sortOrder : '',
+          q.groupid || '',
+        ].join('|')
+      : '';
+    let raw: any = null;
+    if (cacheable) {
+      const hit = recordPageCache.get(pageCacheKey);
+      if (hit && Date.now() - hit.at < RECORD_PAGE_TTL) raw = hit.data;
+    }
+    if (!raw) {
+      raw = await provider.getDomainRecords(
+        page,
+        pageSize,
+        q.keyword || null,
+        q.subdomain || null,
+        q.value || null,
+        q.type || null,
+        q.line || null,
+        q.status || null,
+        sortField,
+        sortField ? sortOrder : null,
+        q.groupid || null,
+      );
+      if (raw === false) return { code: -1, msg: provider.getError() };
+      if (cacheable) {
+        const bytes = Buffer.byteLength(JSON.stringify(raw));
+        if (bytes <= RECORD_PAGE_SINGLE_MAX_BYTES) {
+          evictRecordPageCache(bytes);
+          const prev = recordPageCache.get(pageCacheKey);
+          if (prev) {
+            recordPageCacheBytes -= Number(prev.bytes || 0);
+            recordPageCache.delete(pageCacheKey);
+          }
+          recordPageCache.set(pageCacheKey, { at: Date.now(), data: raw, bytes });
+          recordPageCacheBytes += bytes;
+        }
+      }
+    }
+    const res: any = { ...raw, list: Array.isArray(raw.list) ? [...raw.list] : [] };
     const rawPageCount = Array.isArray(res.list) ? res.list.length : 0;
     if (!acc.admin) {
       res.list = filterRecords(acc, info.domain, res.list);
@@ -1769,7 +1940,7 @@ export default async function domainRoutes(app: FastifyInstance) {
       const conds: string[] = [];
       const args: any[] = [];
       if (explicitNames.size) {
-        conds.push(`LOWER(TRIM(TRAILING '.' FROM A.name)) IN (${[...explicitNames].map(() => '?').join(',')})`);
+        conds.push(`${domainNameNorm('A')} IN (${[...explicitNames].map(() => '?').join(',')})`);
         args.push(...explicitNames);
       }
       if (scopedIds.size) {
@@ -1777,7 +1948,7 @@ export default async function domainRoutes(app: FastifyInstance) {
         args.push(...scopedIds);
       }
       for (const x of aidNames) {
-        conds.push(`(A.aid = ? AND LOWER(TRIM(TRAILING '.' FROM A.name)) = ?)`);
+        conds.push(`(A.aid = ? AND ${domainNameNorm('A')} = ?)`);
         args.push(x.aid, x.name);
       }
       if (!conds.length) return { total: 0, rows: [] };

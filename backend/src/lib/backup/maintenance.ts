@@ -12,7 +12,7 @@ export interface RestoreStatus {
 
 let maintenance = false;
 let lastRefresh = 0;
-const REFRESH_MS = 1000;
+const REFRESH_MS = 5000;
 let status: RestoreStatus = {
   running: false,
   stage: '',

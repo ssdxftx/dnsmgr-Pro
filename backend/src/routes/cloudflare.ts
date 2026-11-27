@@ -38,6 +38,13 @@ async function runLimited<T, R>(items: T[], limit: number, fn: (item: T, index: 
   return results;
 }
 
+// 自定义主机名列表是轮询页面的高频读：10 秒 L1 缓存，写操作后立即失效。
+const HOSTNAMES_TTL_MS = 10_000;
+const hostnamesCache = new Map<number, { at: number; data: any[] }>();
+function invalidateHostnames(domainId: number): void {
+  hostnamesCache.delete(Number(domainId));
+}
+
 async function enhanceConfig(acct: any): Promise<Record<string, any>> {
   try {
     return await loadAccountConfig(acct);
@@ -458,9 +465,14 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
   app.get('/api/cloudflare/domains/:domainId/hostnames', auth, async (req: any) => {
     try {
       admin(req);
-      const ctx = await getCloudflareDomainContext(Number(req.params.domainId), req.user);
+      const domainId = Number(req.params.domainId);
+      const ctx = await getCloudflareDomainContext(domainId, req.user);
+      const cached = hostnamesCache.get(domainId);
+      if (cached && Date.now() - cached.at < HOSTNAMES_TTL_MS) return { code: 0, data: cached.data };
       const rows = await ctx.service.listCustomHostnames(ctx.domain.thirdid);
-      return { code: 0, data: rows.map((row) => formatCustomHostnameRow(row)) };
+      const data = rows.map((row) => formatCustomHostnameRow(row));
+      hostnamesCache.set(domainId, { at: Date.now(), data });
+      return { code: 0, data };
     } catch (e: any) {
       return unwrap(e);
     }
@@ -481,6 +493,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       if (origin) validateCustomOrigin(origin);
 
       const result = await ctx.service.createCustomHostname(ctx.domain.thirdid, hostname, origin || null, sslMethod, minTlsVersion);
+      invalidateHostnames(Number(req.params.domainId));
       await addLog(req.user.uid, ctx.domain.name, '创建自定义主机名', `${hostname}${origin ? ' -> ' + origin : ''} (验证: ${sslMethod}, TLS: ${minTlsVersion})`);
       return { code: 0, msg: '创建自定义主机名成功', data: formatCustomHostnameRow(result) };
     } catch (e: any) {
@@ -530,6 +543,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         }
       });
 
+      invalidateHostnames(Number(req.params.domainId));
       let message = `批量添加完成：成功 ${addedCount} 个`;
       if (failedHostnames.length) message += `，失败 ${failedHostnames.length} 个：${failedHostnames.join('; ')}`;
       if (warnings.length) message += `，警告 ${warnings.length} 条：${warnings.join('; ')}`;
@@ -564,6 +578,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         custom_origin_server: origin || null,
         ssl: extractCustomHostnameSslPayload(current, sslMethod, minTlsVersion),
       });
+      invalidateHostnames(Number(req.params.domainId));
       await addLog(req.user.uid, ctx.domain.name, '编辑自定义主机名', `${hostname} -> ${origin || '清空源站'} (验证: ${sslMethod}, TLS: ${minTlsVersion})`);
       return { code: 0, msg: '更新自定义主机名成功', data: formatCustomHostnameRow(result) };
     } catch (e: any) {
@@ -585,6 +600,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
         custom_origin_server: origin || null,
         ssl: extractCustomHostnameSslPayload(current),
       });
+      invalidateHostnames(Number(req.params.domainId));
       await addLog(req.user.uid, ctx.domain.name, '刷新自定义主机名验证', hostname);
       return { code: 0, msg: '已向 Cloudflare 重新发起验证', data: formatCustomHostnameRow(result) };
     } catch (e: any) {
@@ -600,6 +616,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
       const hostname = String(req.query.hostname ?? '').trim();
       if (!hostnameId) throw new EnhanceError('缺少 hostname_id');
       await ctx.service.deleteCustomHostname(ctx.domain.thirdid, hostnameId);
+      invalidateHostnames(Number(req.params.domainId));
       await addLog(req.user.uid, ctx.domain.name, '删除自定义主机名', hostname);
       return { code: 0, msg: '删除自定义主机名成功' };
     } catch (e: any) {
@@ -641,6 +658,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
           warnings.push(`${hostname || id}（日志写入失败）`);
         }
       });
+      invalidateHostnames(Number(req.params.domainId));
       let message = `批量删除完成：成功 ${deletedCount} 个`;
       if (failures.length) message += `，失败 ${failures.length} 个：${failures.join('; ')}`;
       if (warnings.length) message += `，警告 ${warnings.length} 条`;
@@ -703,6 +721,7 @@ export default async function cloudflareRoutes(app: FastifyInstance) {
           warnings.push(`${hostname || hostnameId}（日志写入失败）`);
         }
       });
+      invalidateHostnames(Number(req.params.domainId));
       let message = `批量修改完成：成功 ${updatedCount} 个`;
       if (failures.length) message += `，失败 ${failures.length} 个：${failures.join('; ')}`;
       if (warnings.length) message += `，警告 ${warnings.length} 条`;

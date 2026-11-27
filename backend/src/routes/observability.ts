@@ -89,8 +89,15 @@ export default async function observabilityRoutes(app: FastifyInstance): Promise
     }
     const whereSql = where.length ? ' WHERE ' + where.join(' AND ') : '';
     const total = Number((await queryOne(`SELECT COUNT(*) AS c FROM ${table('notification_log')}${whereSql}`, params))?.c || 0);
+    // detail 是最大 8KB 的 JSON：调用方未明确要求时默认返回，MCP 等只需要摘要的场景传 detail=0。
+    const withDetail = String(req.query?.detail ?? '1') !== '0';
+    const columns = withDetail
+      ? `id, module, event, status, message, detail, created_at,
+         (detail IS NOT NULL AND detail <> '') AS has_detail`
+      : `id, module, event, status, message, created_at,
+         (detail IS NOT NULL AND detail <> '') AS has_detail`;
     const rows = await query(
-      `SELECT * FROM ${table('notification_log')}${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      `SELECT ${columns} FROM ${table('notification_log')}${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, limit, offset],
     );
     return {
@@ -98,13 +105,15 @@ export default async function observabilityRoutes(app: FastifyInstance): Promise
       data: {
         total,
         list: rows.map((r: any) => {
-          let detail: any = null;
-          try {
-            detail = r.detail ? JSON.parse(String(r.detail)) : null;
-          } catch {
-            detail = null;
+          const out: any = { ...r, has_detail: !!r.has_detail };
+          if (withDetail) {
+            try {
+              out.detail = r.detail ? JSON.parse(String(r.detail)) : null;
+            } catch {
+              out.detail = null;
+            }
           }
-          return { ...r, detail };
+          return out;
         }),
       },
     };

@@ -6,6 +6,7 @@ import { canAccessDomainAccount } from '../lib/accounts/visibility.js';
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { loadAccountConfig } from '../lib/accounts/taskConfig.js';
 import { runMonitorTask } from '../lib/monitor/taskRunner.js';
+import { createJob, runJobInBackground } from '../lib/jobs.js';
 import { fmtDateTime, fmtTimestamp, hasOwn, escapeLike, clampLimit, clampOffset } from '../lib/util.js';
 
 // 容灾监控接口仅管理员可用
@@ -282,9 +283,19 @@ export default async function dmonitorRoutes(app: FastifyInstance) {
     const task: any = await queryOne(`SELECT * FROM ${table('dmtask')} WHERE id = ?`, [id]);
     if (!task) return { code: -1, msg: '任务不存在' };
     if (!(await canAccessDomainAccount(task.did, req.user))) return { code: -1, msg: '无权限操作该域名的私有账户' };
-    await runMonitorTask(task);
-    const last: any = await queryOne(`SELECT * FROM ${table('dmlog')} WHERE taskid = ? ORDER BY id DESC LIMIT 1`, [id]);
-    return { code: 0, msg: '已执行一次检测', data: last || null };
+    // 单次探测可能包含 DNS 查询、多轮确认和通知渠道超时，不能占用 HTTP 请求。
+    // 按任务 ID 全局去重：同一任务被不同用户同时触发时也只保留一个后台执行。
+    const jobId = await createJob(Number(req.user.uid), `dmonitor.run:${id}`, 1, { task_id: id }, { dedupeGlobal: true });
+    if (!jobId) return { code: -1, msg: '该任务正在检测，或后台任务已达并发上限，请稍后再试' };
+    runJobInBackground(jobId, async (progress) => {
+      const fresh: any = await queryOne(`SELECT * FROM ${table('dmtask')} WHERE id = ?`, [id]);
+      if (!fresh) throw new Error('任务不存在');
+      await runMonitorTask(fresh);
+      const last: any = await queryOne(`SELECT * FROM ${table('dmlog')} WHERE taskid = ? ORDER BY id DESC LIMIT 1`, [id]);
+      await progress(1, 0, { last: last || null });
+      return { last: last || null };
+    });
+    return { code: 0, msg: '已提交后台检测', data: { job_id: jobId } };
   });
 
   app.post('/api/dmonitor/tasks/:id/active', auth, async (req: any) => {

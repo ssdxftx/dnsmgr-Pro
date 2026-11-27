@@ -220,6 +220,7 @@ const operationsTools: ToolDef[] = [
     properties: {
       module: str('notifications：按模块筛选'),
       event: str('notifications：按事件筛选'),
+      detail: bool('notifications：是否返回完整详情，默认 false'),
       force: bool('check_update：是否强制刷新更新检查缓存'),
       ...paging(),
     },
@@ -244,7 +245,7 @@ const operationsTools: ToolDef[] = [
         request: (args) => ({
           method: 'GET',
           path: '/api/notifications/logs',
-          query: { module: args.module, event: args.event, offset: args.offset, limit: args.limit },
+          query: { module: args.module, event: args.event, offset: args.offset, limit: args.limit, detail: args.detail ? 1 : 0 },
         }),
         after: (data) => listResponse(data),
       },

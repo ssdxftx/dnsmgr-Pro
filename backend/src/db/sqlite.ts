@@ -4,6 +4,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DatabaseSync } from 'node:sqlite';
+import { Worker } from 'node:worker_threads';
 import { resolveSqliteFile, type DbConfig } from '../config-loader.js';
 import { detectDataPersistence } from '../lib/persistence.js';
 import type { ColumnInfo, DbDriver, LockOutcome, QueryFn, TransactionFn, WriteResult } from './types.js';
@@ -242,6 +243,84 @@ function runStatement(db: DatabaseSync, sql: string, params: any[] = []): any {
   }
 }
 
+// 独立 worker：只读打开 SQLite 文件，在主线程之外执行大表分页查询。
+// 用 eval 源码而不是单独文件，避免 tsx 开发模式与 dist 产物之间的加载差异。
+const SNAPSHOT_WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads');
+const { DatabaseSync } = require('node:sqlite');
+let db;
+try {
+  db = new DatabaseSync(workerData.file, { readOnly: true });
+  db.exec('PRAGMA busy_timeout = 5000');
+} catch (e) {
+  parentPort.postMessage({ bootError: String((e && e.message) || e) });
+  process.exit(0);
+}
+function normalize(row) {
+  if (!row || typeof row !== 'object') return row;
+  const out = {};
+  for (const [key, value] of Object.entries(row)) {
+    out[key] = value instanceof Uint8Array && !Buffer.isBuffer(value) ? Buffer.from(value) : value;
+  }
+  return out;
+}
+parentPort.on('message', (msg) => {
+  try {
+    if (/^\s*(BEGIN|COMMIT|ROLLBACK)\b/i.test(msg.sql)) {
+      db.exec(msg.sql);
+      parentPort.postMessage({ id: msg.id, rows: [] });
+      return;
+    }
+    const statement = db.prepare(msg.sql);
+    const rows = statement.all(...msg.params).map(normalize);
+    parentPort.postMessage({ id: msg.id, rows });
+  } catch (e) {
+    parentPort.postMessage({ id: msg.id, error: String((e && e.message) || e) });
+  }
+});
+`;
+
+
+// 独立 worker：用独立连接执行批量写。主线程持有 writeMutex 时调用，
+// 读写仍可在 WAL 下继续，但批量写的同步 SQLite 调用不再阻塞事件循环。
+const WRITE_WORKER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads');
+const { DatabaseSync } = require('node:sqlite');
+let db;
+try {
+  db = new DatabaseSync(workerData.file);
+  db.exec('PRAGMA busy_timeout = 5000');
+  db.exec('PRAGMA synchronous = FULL');
+  db.exec('PRAGMA foreign_keys = ON');
+} catch (e) {
+  parentPort.postMessage({ bootError: String((e && e.message) || e) });
+  process.exit(0);
+}
+parentPort.on('message', (msg) => {
+  try {
+    db.exec('BEGIN IMMEDIATE');
+    const results = [];
+    for (const item of msg.statements) {
+      const statement = db.prepare(item.sql);
+      const result = statement.run(...item.params);
+      results.push({
+        insertId: Number(result.lastInsertRowid || 0),
+        affectedRows: Number(result.changes || 0),
+      });
+    }
+    db.exec('COMMIT');
+    parentPort.postMessage({ id: msg.id, results });
+  } catch (e) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // 忽略回滚失败
+    }
+    parentPort.postMessage({ id: msg.id, error: String((e && e.message) || e) });
+  }
+});
+`;
+
 export function createSqliteDriver(cfg: DbConfig): DbDriver {
   const file = resolveSqliteFile(cfg);
   // 按数据文件所在目录检测，避免 DB_FILE 指向数据目录之外的网络文件系统时漏判
@@ -270,6 +349,26 @@ export function createSqliteDriver(cfg: DbConfig): DbDriver {
   const locks = new Set<string>();
   // SQLite 只有一个写者：写入串行化，避免并发写触发 SQLITE_BUSY 阻塞事件循环
   const writeMutex = new AsyncMutex();
+
+  function runBatchOnMain(statements: Array<{ sql: string; params: any[] }>): WriteResult[] {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      const results = statements.map((item) => {
+        const statement = db.prepare(item.sql);
+        const result = statement.run(...item.params);
+        return { insertId: Number(result.lastInsertRowid || 0), affectedRows: Number(result.changes || 0) };
+      });
+      db.exec('COMMIT');
+      return results;
+    } catch (e) {
+      try {
+        db.exec('ROLLBACK');
+      } catch {
+        // 忽略回滚失败
+      }
+      throw normalizeSqliteError(e);
+    }
+  }
 
   async function query<T = any>(sql: string, params: any[] = []): Promise<T[]> {
     const tx = txStore.getStore();
@@ -308,7 +407,7 @@ export function createSqliteDriver(cfg: DbConfig): DbDriver {
     });
   }
 
-  async function readSnapshot<T>(
+  async function readSnapshotSync<T>(
     fn: (read: (sql: string, params?: any[]) => Promise<any[]>) => Promise<T>,
   ): Promise<T> {
     const snapshot = openDatabase(file, true);
@@ -328,6 +427,134 @@ export function createSqliteDriver(cfg: DbConfig): DbDriver {
     } finally {
       snapshot.close();
     }
+  }
+
+  /**
+   * SQLite 是同步驱动：备份导出这类大表扫描放在主线程会让 HTTP 请求整段停顿。
+   * 这里用独立 worker 的只读连接执行快照查询，主线程只负责组装结果；
+   * worker 内保持同一个 BEGIN 事务，多表仍然来自一致快照。
+   */
+  async function readSnapshot<T>(
+    fn: (read: (sql: string, params?: any[]) => Promise<any[]>) => Promise<T>,
+  ): Promise<T> {
+    if (file === ':memory:') return readSnapshotSync(fn);
+
+    let worker: Worker;
+    try {
+      worker = new Worker(SNAPSHOT_WORKER_SOURCE, { eval: true, workerData: { file } });
+    } catch {
+      return readSnapshotSync(fn);
+    }
+
+    let seq = 0;
+    let broken: Error | null = null;
+    let timedOut = false;
+    const pending = new Map<number, { resolve: (rows: any[]) => void; reject: (e: any) => void }>();
+    const failAll = (err: any) => {
+      broken = err instanceof Error ? err : new Error(String(err));
+      for (const p of pending.values()) p.reject(broken);
+      pending.clear();
+    };
+    const timeoutMs = Math.max(
+      60_000,
+      Number(process.env.DNSMGR_SNAPSHOT_TIMEOUT_MS || 15 * 60_000) || 15 * 60_000,
+    );
+    const timer = setTimeout(() => {
+      timedOut = true;
+      failAll(new Error('SQLite 快照读取超时'));
+    }, timeoutMs);
+    timer.unref?.();
+    worker.on('message', (msg: any) => {
+      if (msg?.bootError) {
+        failAll(new Error(msg.bootError));
+        return;
+      }
+      const wait = pending.get(Number(msg?.id));
+      if (!wait) return;
+      pending.delete(Number(msg.id));
+      if (msg.error) wait.reject(new Error(String(msg.error)));
+      else wait.resolve(Array.isArray(msg.rows) ? msg.rows : []);
+    });
+    worker.on('error', failAll);
+    worker.on('exit', (code) => {
+      if (!broken) failAll(new Error(`SQLite 快照 worker 已退出（code ${code}）`));
+    });
+
+    const rpc = (sql: string, params: any[] = []) =>
+      new Promise<any[]>((resolve, reject) => {
+        if (broken) return reject(broken);
+        const id = ++seq;
+        pending.set(id, { resolve, reject });
+        worker.postMessage({ id, sql, params });
+      });
+    const read = (sql: string, params: any[] = []) => {
+      const expanded = expandParams(sql, params);
+      return rpc(translateSql(expanded.sql), expanded.params);
+    };
+
+    let began = false;
+    try {
+      await read('BEGIN');
+      began = true;
+      const out = await fn(read);
+      await read('COMMIT');
+      return out;
+    } catch (e) {
+      if (began) await read('ROLLBACK').catch(() => undefined);
+      // worker 启动失败/异常退出发生在 BEGIN 之前时回退主线程只读连接；
+      // 如果已经开始读取或已经超时，则不能重跑，避免重复扫描或绕过超时保护。
+      if (!began && !timedOut) return await readSnapshotSync(fn);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+      await worker.terminate().catch(() => undefined);
+    }
+  }
+
+  /**
+   * 批量写在独立 worker 中执行，主线程释放事件循环；主连接写锁在等待期间保持，
+   * 因此不会与其它写请求并发触发 SQLITE_BUSY。`:memory:` 无法跨连接共享，回退主线程。
+   */
+  async function runWriteBatch(statements: Array<{ sql: string; params?: any[] }>): Promise<WriteResult[]> {
+    if (!statements.length) return [];
+    // runWriteBatch 自带 BEGIN/COMMIT 且等待 writeMutex；嵌套在 withTransaction 内会自锁。
+    if (txStore.getStore()) throw new Error('runWriteBatch 不能在数据库事务内调用');
+    const payload = statements.map((item) => {
+      const expanded = expandParams(item.sql, item.params || []);
+      return { sql: translateSql(expanded.sql), params: expanded.params };
+    });
+    return writeMutex.run(async () => {
+      if (file === ':memory:') return runBatchOnMain(payload);
+      let worker: Worker;
+      try {
+        worker = new Worker(WRITE_WORKER_SOURCE, { eval: true, workerData: { file } });
+      } catch {
+        return runBatchOnMain(payload);
+      }
+      return new Promise<WriteResult[]>((resolve, reject) => {
+        let settled = false;
+        let timer: NodeJS.Timeout | undefined;
+        const finish = (fn: () => void) => {
+          if (settled) return;
+          settled = true;
+          if (timer) clearTimeout(timer);
+          // 等待 worker 真正退出再释放 writeMutex，否则它可能还持有 SQLite 写锁。
+          void worker.terminate().catch(() => undefined).finally(fn);
+        };
+        timer = setTimeout(() => finish(() => reject(new Error('SQLite 批量写 worker 超时'))), 60_000);
+        timer.unref?.();
+        worker.on('message', (msg: any) => {
+          if (msg?.bootError) return finish(() => reject(new Error(msg.bootError)));
+          if (msg?.error) return finish(() => reject(normalizeSqliteError(new Error(String(msg.error)))));
+          finish(() => resolve(Array.isArray(msg?.results) ? msg.results : []));
+        });
+        worker.on('error', (e) => finish(() => reject(normalizeSqliteError(e))));
+        worker.on('exit', (code) => {
+          if (!settled) finish(() => reject(new Error(`SQLite 批量写 worker 已退出（code ${code}）`)));
+        });
+        worker.postMessage({ id: 1, statements: payload });
+      });
+    });
   }
 
   async function withLock<T>(
@@ -397,6 +624,7 @@ export function createSqliteDriver(cfg: DbConfig): DbDriver {
     queryOne,
     withTransaction,
     readSnapshot,
+    runWriteBatch,
     withLock,
     listColumns,
     tableExists,

@@ -36,16 +36,27 @@ async function failStaleJobs(): Promise<void> {
  * 创建后台任务；返回 0 表示拒绝（已有同类任务在执行，或全局并发已达上限）。
  * 去重是必要的：连点按钮 / 脚本刷接口会各自起一个 worker，每个 worker 都在跑证书签发或到期扫描。
  */
-export async function createJob(uid: number, type: string, total: number, detail?: any): Promise<number> {
+export async function createJob(
+  uid: number,
+  type: string,
+  total: number,
+  detail?: any,
+  opts: { dedupeGlobal?: boolean } = {},
+): Promise<number> {
   // 「查重 + 全局并发上限 + 插入」必须串行，否则双击/多副本会在 SELECT 与 INSERT 之间各插一行。
   // 全局并发额度按所有任务统计，锁必须使用同一个全局键；按 uid+type 分锁时不同任务仍会并发越过上限。
   const outcome = await withDistributedLockResult('dnsmgr:job:create', async () => {
     // 先清理失联任务，避免旧行永久占用同类任务去重名额和全局并发额度。
     await failStaleJobs();
-    const existing: any = await queryOne(
-      `SELECT id FROM ${table('async_job')} WHERE uid = ? AND type = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1`,
-      [uid, type],
-    );
+    const existing: any = opts.dedupeGlobal
+      ? await queryOne(
+          `SELECT id FROM ${table('async_job')} WHERE type = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1`,
+          [type],
+        )
+      : await queryOne(
+          `SELECT id FROM ${table('async_job')} WHERE uid = ? AND type = ? AND status IN ('pending', 'running') ORDER BY id DESC LIMIT 1`,
+          [uid, type],
+        );
     if (existing) return 0;
     const active: any = await queryOne(
       `SELECT COUNT(*) AS c FROM ${table('async_job')} WHERE status IN ('pending', 'running')`,
@@ -150,9 +161,14 @@ export function runJobInBackground(
       heartbeat.unref?.();
       let done = 0;
       let failed = 0;
+      let lastProgressWrite = 0;
       const progress = async (nextDone: number, nextFailed: number, result?: any) => {
         done = Math.max(0, Number(nextDone) || 0);
         failed = Math.max(0, Number(nextFailed) || 0);
+        // 批量任务可能每处理一条就回调一次：进度写库节流到 1 秒，最终结果仍由收尾写入。
+        const now = Date.now();
+        if (now - lastProgressWrite < 1000) return;
+        lastProgressWrite = now;
         await updateJob(id, { done, failed, result }).catch(() => undefined);
       };
       let timeoutTimer: NodeJS.Timeout | undefined;

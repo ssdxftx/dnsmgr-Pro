@@ -146,7 +146,7 @@ export default async function systemRoutes(app: FastifyInstance) {
 
   // 立即刷新 CDN 数据统计缓存
   app.post('/api/system/stat-cache-refresh', auth, async () => {
-    if ((await configGet('cdn_stats_cache', '0')) !== '1') return { code: -1, msg: '请先开启统计缓存' };
+    if ((await configGet('cdn_stats_cache', '1')) === '0') return { code: -1, msg: '请先开启统计缓存' };
     const r = await refreshAllStatCache();
     return { code: 0, msg: `已刷新 ${r.accounts} 个账户` + (r.errors.length ? `，部分失败：${r.errors.join('；')}` : '') };
   });

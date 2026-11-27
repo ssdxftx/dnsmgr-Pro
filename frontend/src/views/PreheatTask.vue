@@ -125,12 +125,14 @@ const columns = computed(() => [
   },
   {
     title: t('preheat.linksCol'),
-    key: 'urls',
+    key: 'url_count',
     width: 120,
     ellipsis: { tooltip: true },
     render: (row: any) => {
-      const list = String(row.urls || '').split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean);
-      return t('preheat.linkCount', { count: list.length });
+      const count = row.url_count !== undefined
+        ? Number(row.url_count) || 0
+        : String(row.urls || '').split(/\r?\n/).map((s: string) => s.trim()).filter(Boolean).length;
+      return t('preheat.linkCount', { count });
     },
   },
   {
@@ -191,7 +193,7 @@ const columns = computed(() => [
 async function load() {
   loadBusy.value = true;
   try {
-    const res = await api<any>('GET', '/cdn/preheat-tasks');
+    const res = await api<any>('GET', '/cdn/preheat-tasks', { basic: 1 });
     if (res.code === 0) tasks.value = res.data || [];
   } finally {
     loadBusy.value = false;
@@ -210,15 +212,27 @@ function openAdd() {
   showEdit.value = true;
 }
 
-function openEdit(row: any) {
-  editingId.value = row.id;
-  form.name = row.name || '';
-  form.urls = row.urls || '';
-  form.op = row.op === 'purge' ? 'purge' : 'preheat';
-  form.cycle = row.cycle === 'interval' ? 'interval' : 'daily';
-  form.runTime = normalizeHm(row.run_time);
-  form.intervalMin = Number(row.interval_min) || 60;
-  form.active = row.active == 1;
+async function openEdit(row: any) {
+  let detail = row;
+  try {
+    const res = await api<any>('GET', `/cdn/preheat-tasks/${row.id}`);
+    if (res.code === 0 && res.data) detail = res.data;
+    else if (res.code !== 0) {
+      message.error(res.msg || t('common.networkError'));
+      return;
+    }
+  } catch (e: any) {
+    message.error(e?.message || t('common.networkError'));
+    return;
+  }
+  editingId.value = detail.id;
+  form.name = detail.name || '';
+  form.urls = detail.urls || '';
+  form.op = detail.op === 'purge' ? 'purge' : 'preheat';
+  form.cycle = detail.cycle === 'interval' ? 'interval' : 'daily';
+  form.runTime = normalizeHm(detail.run_time);
+  form.intervalMin = Number(detail.interval_min) || 60;
+  form.active = detail.active == 1;
   showEdit.value = true;
 }
 

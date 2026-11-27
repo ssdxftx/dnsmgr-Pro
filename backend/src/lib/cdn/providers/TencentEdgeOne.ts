@@ -1246,10 +1246,8 @@ export class TencentEdgeOne implements CdnProvider {
     return all;
   }
 
-  async listRules(zoneId: string): Promise<RuleItem[] | false> {
-    const rules = await this.listAllL7Rules(zoneId);
-    if (rules === false) return false;
-    return rules.map((r: any) => ({
+  private mapL7Rule(r: any): RuleItem {
+    return {
       ...r,
       ruleId: String(r.RuleId || ''),
       ruleName: r.RuleName || '',
@@ -1259,7 +1257,26 @@ export class TencentEdgeOne implements CdnProvider {
       priority: Number(r.RulePriority || 0),
       branches: r.Branches || [],
       description: r.Description || [],
-    }));
+    };
+  }
+
+  async listRules(zoneId: string): Promise<RuleItem[] | false> {
+    const rules = await this.listAllL7Rules(zoneId);
+    if (rules === false) return false;
+    return rules.map((r: any) => this.mapL7Rule(r));
+  }
+
+  async listRulesPaged(zoneId: string, page = 1, size = 20): Promise<PagedResult<RuleItem> | false> {
+    const safeSize = Math.max(1, Math.min(200, Math.floor(size) || 20));
+    const safePage = Math.max(1, Math.floor(page) || 1);
+    const data = await this.send('DescribeL7AccRules', {
+      ZoneId: zoneId,
+      Offset: (safePage - 1) * safeSize,
+      Limit: safeSize,
+    });
+    if (!data) return false;
+    const list = (data.Rules || []).map((r: any) => this.mapL7Rule(r));
+    return { total: Number(data.TotalCount ?? list.length), list };
   }
 
   // 组装 CreateL7AccRules/ModifyL7AccRule 的 RuleEngineItem（RuleId 由调用方按需追加）

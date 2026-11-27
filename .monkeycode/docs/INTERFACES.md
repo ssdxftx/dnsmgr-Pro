@@ -121,7 +121,7 @@ API Key 自助管理端点（需要登录会话或具备 `apikeys` 作用域的 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | DELETE | `/api/backup/remote/:destId?name=...` | 删除远端备份归档 |
-| POST | `/api/dmonitor/tasks/:id/run` | 立即执行一次容灾检测 |
+| POST | `/api/dmonitor/tasks/:id/run` | 提交后台容灾检测，返回 `job_id` |
 | POST | `/api/schedule/tasks/:id/run` | 立即执行一次定时切换 |
 | POST | `/api/expire/scan` | 触发域名到期扫描与提醒，返回 `job_id` |
 | POST | `/api/cert/orders/batch/process` | 批量推进证书订单，返回 `job_id` |

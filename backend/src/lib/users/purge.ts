@@ -1,5 +1,6 @@
 import { unlink } from 'node:fs/promises';
 import { table, withTransaction } from '../../db.js';
+import { invalidateUserPermissions } from '../../auth.js';
 import type { TransactionFn } from '../../db/types.js';
 import { resolveArchivePath } from '../backup/archive.js';
 import { deleteRemote } from '../backup/destinations.js';
@@ -114,6 +115,7 @@ export async function purgePrivateAssets(
   await delByIds(q, 'cert_deploy', 'oid', certOrderIds);
   await delByIds(q, 'cert_order', 'id', certOrderIds);
   await delByIds(q, 'domain', 'id', domainIds);
+  await delByIds(q, 'domain_subcount', 'did', domainIds);
   if (domainNames.length) {
     // 必须限定 uid：项目允许不同账户接入同名域名，仅按域名删除会误删其他租户的授权
     await q(`DELETE FROM ${table('permission')} WHERE uid = ? AND LOWER(domain) IN (${marks(domainNames)})`, [uid, ...domainNames]);
@@ -147,5 +149,6 @@ export async function purgeUserData(uid: number): Promise<void> {
     await q(`DELETE FROM ${table('user')} WHERE id = ?`, [uid]);
     return files;
   });
+  invalidateUserPermissions(uid);
   await removeBackupFiles(backupFiles);
 }

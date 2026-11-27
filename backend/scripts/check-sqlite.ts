@@ -147,6 +147,24 @@ const accountInsert: any = await db.query(
 assert(Number(accountInsert.insertId) > 0, 'INSERT 返回 insertId');
 await db.query('INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())', [accountInsert.insertId, 'example.com', 'x', 0]);
 await db.query('INSERT INTO dnsmgr_domain (aid, name, thirdid, recordcount, addtime) VALUES (?, ?, ?, ?, NOW())', [accountInsert.insertId, 'example.net', 'y', 0]);
+assert(await db.columnExists('dnsmgr_domain', 'name_norm'), '域名规范化生成列已创建');
+assert((await db.queryOne<any>(`SELECT name_norm FROM dnsmgr_domain WHERE name = 'example.com'`))?.name_norm === 'example.com', '域名规范化列与名称一致');
+assert(await db.tableExists('dnsmgr_notice_queue'), '告警通知持久化队列表已创建');
+assert(await db.tableExists('dnsmgr_domain_subcount'), '子域名计数缓存表已创建');
+await db.query(
+  `INSERT INTO dnsmgr_domain_subcount (did, sub, record_count, updated_at) VALUES (?, ?, ?, NOW())
+   ON DUPLICATE KEY UPDATE record_count = VALUES(record_count), updated_at = NOW()`,
+  [1, 'www', 2],
+);
+await db.query(
+  `INSERT INTO dnsmgr_domain_subcount (did, sub, record_count, updated_at) VALUES (?, ?, ?, NOW())
+   ON DUPLICATE KEY UPDATE record_count = VALUES(record_count), updated_at = NOW()`,
+  [1, 'www', 3],
+);
+assert(
+  Number((await db.queryOne<any>(`SELECT record_count FROM dnsmgr_domain_subcount WHERE did = 1 AND sub = 'www'`))?.record_count) === 3,
+  '子域名计数缓存 upsert 正确',
+);
 
 const Fastify = (await import('fastify')).default;
 const legacyApp = Fastify({ logger: false });
@@ -446,6 +464,26 @@ const opStatus = await optimizeApp.inject({ method: 'GET', url: '/optimizeip/sta
 assert(opStatus.statusCode === 200 && opStatus.body === 'ok', '/optimizeip/status 返回 ok');
 await optimizeApp.close();
 
-await db.getDriver().close();
+const sqliteDriver = db.getDriver();
+assert(typeof sqliteDriver.runWriteBatch === 'function', 'SQLite 提供独立 worker 批量写');
+const batchResults = await sqliteDriver.runWriteBatch!([
+  { sql: 'UPDATE dnsmgr_config SET value = ? WHERE `key` = ?', params: ['three', 'check_key'] },
+  { sql: 'UPDATE dnsmgr_config SET value = ? WHERE `key` = ?', params: ['four', 'check_key'] },
+]);
+assert(batchResults.length === 2 && batchResults.every((r) => r.affectedRows === 1), '批量写 worker 返回受影响行数');
+assert((await db.queryOne<any>('SELECT value FROM dnsmgr_config WHERE `key` = ?', ['check_key']))?.value === 'four', '批量写 worker 写入生效');
+let batchRolledBack = false;
+try {
+  await sqliteDriver.runWriteBatch!([
+    { sql: 'UPDATE dnsmgr_config SET value = ? WHERE `key` = ?', params: ['rolled-back', 'check_key'] },
+    { sql: 'INSERT INTO dnsmgr_no_such_table (id) VALUES (1)' },
+  ]);
+} catch {
+  batchRolledBack = true;
+}
+assert(batchRolledBack, '批量写 worker 失败时抛出错误');
+assert((await db.queryOne<any>('SELECT value FROM dnsmgr_config WHERE `key` = ?', ['check_key']))?.value === 'four', '批量写 worker 失败时整批回滚');
+
+await sqliteDriver.close();
 assert(!fs.existsSync(path.join(dir, 'dnsmgr.sqlite.lock')), '关闭驱动后释放单实例锁');
 console.log('\nSQLite 自检全部通过');

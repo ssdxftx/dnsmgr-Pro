@@ -6,7 +6,8 @@ import { matchPermission, permissionMatchesDomain } from '../../auth.js';
 import { getEffectivePermissions } from '../accounts/visibility.js';
 import { configGet } from '../../config.js';
 import { sendMail } from '../monitor/msgNotice.js';
-import { calcDailyNextRun, fmtDateTime } from '../util.js';
+import { calcDailyNextRun, fmtDateTime, mapPool } from '../util.js';
+import { withAccountLimit } from '../hostLimit.js';
 
 import { loadAccountConfig } from '../accounts/taskConfig.js';
 
@@ -60,6 +61,26 @@ async function fetchAllRecords(provider: any): Promise<{ list: any[]; error?: st
   return { list };
 }
 
+// 同一域名在多个检测任务/子域名列表之间共享 45 秒记录快照，避免每轮重复拉整个 Zone。
+const RECORDS_TTL_MS = 45_000;
+const recordsCache = new Map<number, { at: number; list: any[] }>();
+
+async function fetchDomainRecords(did: number, provider: any): Promise<{ list: any[]; error?: string }> {
+  const hit = recordsCache.get(did);
+  if (hit && Date.now() - hit.at < RECORDS_TTL_MS) return { list: hit.list };
+  const res = await fetchAllRecords(provider);
+  if (!res.error) {
+    recordsCache.set(did, { at: Date.now(), list: res.list });
+    if (recordsCache.size > 500) {
+      const stale = Date.now() - RECORDS_TTL_MS;
+      for (const [key, value] of recordsCache) {
+        if (value.at < stale) recordsCache.delete(key);
+      }
+    }
+  }
+  return res;
+}
+
 /** 某域名的可选检测子域名（记录中的非 @ 子域名前缀） */
 export async function listSubDomains(did: number): Promise<string[]> {
   const d: any = await queryOne(`SELECT * FROM ${table('domain')} WHERE id = ?`, [did]);
@@ -68,7 +89,7 @@ export async function listSubDomains(did: number): Promise<string[]> {
   if (!acct) return [];
   const provider: any = getDnsProvider(acct.type, await loadAccountConfig(acct), d.name, d.thirdid);
   if (!provider) return [];
-  const { list } = await fetchAllRecords(provider);
+  const { list } = await withAccountLimit('dns:' + acct.id, () => fetchDomainRecords(did, provider));
   const subs = new Set<string>();
   for (const r of list) {
     const name = String(r.Name ?? '').trim();
@@ -112,7 +133,7 @@ export async function checkDomainRecords(
     }
   }
 
-  const fetched = await fetchAllRecords(provider);
+  const fetched = await withAccountLimit('dns:' + acct.id, () => fetchDomainRecords(did, provider));
   if (fetched.error) return { total: 0, issues: [], proxied: [], error: fetched.error };
   const list = fetched.list;
 
@@ -202,20 +223,24 @@ function splitTypes(s: string | null): string[] | undefined {
   return arr.length ? arr : undefined;
 }
 
+const DNSCHECK_BATCH = Math.max(1, Math.min(500, Number(process.env.DNSMGR_DNSCHECK_BATCH || 50) || 50));
+const DNSCHECK_CONCURRENCY = Math.max(1, Math.min(20, Number(process.env.DNSMGR_DNSCHECK_CONCURRENCY || 4) || 4));
+
 /** 调度器入口：执行到期检测任务，发现劫持发邮件提醒 */
 export async function executeCheckTasks(): Promise<number> {
   const rows: any[] = await query(
-    `SELECT * FROM ${table('dns_check_task')} WHERE active = 1 AND (next_run IS NULL OR next_run <= NOW())`,
+    `SELECT * FROM ${table('dns_check_task')} WHERE active = 1 AND (next_run IS NULL OR next_run <= NOW()) ORDER BY next_run ASC, id ASC LIMIT ${DNSCHECK_BATCH}`,
   );
   let run = 0;
-  for (const t of rows) {
+  // 到期任务有界并发：单个任务内部已经限制了本地解析并发，任务之间再串行会让整轮周期很长。
+  await mapPool(rows, DNSCHECK_CONCURRENCY, async (t) => {
     const next = calcNextRun(t.cycle, t.interval_min, t.run_time);
     // 原子领取：仅当任务仍处于到期状态时才更新成功，避免并发调度重复执行
     const claim: any = await query(
       `UPDATE ${table('dns_check_task')} SET last_run = NOW(), next_run = ? WHERE id = ? AND active = 1 AND (next_run IS NULL OR next_run <= NOW())`,
       [fmtDateTime(next), t.id],
     );
-    if (!claim || !claim.affectedRows) continue;
+    if (!claim || !claim.affectedRows) return;
     // 逐条隔离：单个域名检测/通知异常不应中断其余任务（next_run 已推进，异常不隔离会静默漏掉整轮）
     try {
       const { issues, error } = await checkDomainRecords(t.did, splitTypes(t.types), t.uid, t.sub);
@@ -228,7 +253,7 @@ export async function executeCheckTasks(): Promise<number> {
         );
         console.error('[dnscheck] 任务 ' + t.id + ' 云端解析获取失败:', error);
         run++;
-        continue;
+        return;
       }
       // 结果落库，供前端展示真实异常数（此前只发邮件，页面无从得知）
       const issueCount = issues ? issues.length : 0;
@@ -243,7 +268,7 @@ export async function executeCheckTasks(): Promise<number> {
     } catch (e: any) {
       console.error('[dnscheck] 任务 ' + t.id + ' 执行失败:', e?.message || e);
     }
-  }
+  });
   return run;
 }
 

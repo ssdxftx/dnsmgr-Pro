@@ -114,6 +114,11 @@ export function appendLog(file: string, line: string): void {
   });
 }
 
+/** 把事件循环让给 HTTP/调度任务：用于同步数据库驱动下的长循环，降低单次连续阻塞时长 */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /** 有界并发映射：保持结果与输入同序，用于云厂商批量只读请求，避免串行 N+1 或无上限 Promise.all */
 export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, index: number) => Promise<R>): Promise<R[]> {
   const results = new Array<R>(items.length);

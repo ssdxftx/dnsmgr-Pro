@@ -9,6 +9,7 @@ import { cnameEquals, normalizeHost, shortRecordName, siteCoversDomain } from '.
 import { getDnsProvider } from '../lib/dns/factory.js';
 import { certConfig } from '../lib/cert/factory.js';
 import { getCdnAccountEpoch } from '../lib/cdn/cacheEpoch.js';
+import { clearZonesCache, getCachedZones, setCachedZones } from '../lib/cdn/zonesCache.js';
 import {
   ensureWildcardOrder,
   ensureExactOrder,
@@ -31,8 +32,9 @@ import { kickOrderProcessing } from '../lib/cert/certTaskService.js';
 import type { CdnProvider } from '../lib/cdn/types.js';
 import { queryByRoute, hasCdnStatistics, type StatisticsDomain } from '../lib/cdn/statistics/index.js';
 import { ensureSections, mergeResult } from '../lib/cdn/statistics/util.js';
-import { asText, clampLimit, clampOffset } from '../lib/util.js';
+import { asText, clampLimit, clampOffset, escapeLike } from '../lib/util.js';
 import { createJob, runJobInBackground } from '../lib/jobs.js';
+import { withAccountLimit } from '../lib/hostLimit.js';
 
 // 统计区间上限（31 天）：区间越大生成的标签越多，超长区间可一次性产出数万个标签
 const MAX_STAT_RANGE_MS = 31 * 86400_000;
@@ -41,7 +43,7 @@ import { getCatalog, listCatalogs } from '../lib/cdn/statistics/catalog/index.js
 import type { DetailResponse, MetricSeries, ProviderCard, BreakdownItem } from '../lib/cdn/statistics/catalog/result.js';
 import { buildOverview, type OverviewAccount } from '../lib/cdn/statistics/overview.js';
 import { fetchDetail } from '../lib/cdn/statistics/detail/index.js';
-import { aggregate, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
+import { aggregate, alignStatQueryRange, buildTimeline, combineSeries, mergeRateSeries, runPool } from '../lib/cdn/statistics/detail/shared.js';
 import { getCachedDetail, setCachedDetail } from '../lib/cdn/statistics/detail/cache.js';
 import { parseGroups, parseFilters, parseTop, BASIC_KEYS, basicUnit } from '../lib/cdn/statistics/validate.js';
 import { checkLevel, matchPermission } from '../auth.js';
@@ -105,6 +107,16 @@ function safeJson(s: any): Record<string, any> {
   return {};
 }
 
+const accountConfigCache = new Map<string, { at: number; config: Record<string, any> }>();
+const ACCOUNT_CONFIG_TTL = 5 * 60_000;
+const ACCOUNT_CONFIG_MAX = 100;
+let accountConfigEpoch = getCdnAccountEpoch();
+
+function sharedAccountConfigKey(acct: any): string {
+  const raw = typeof acct?.config === 'string' ? acct.config : JSON.stringify(acct?.config ?? null);
+  return `${Number(acct?.id || 0)}:${raw}`;
+}
+
 /** 账户配置读取：私有账户需用保险库 DEK 解密，未解锁时明确报错而非静默当成空配置 */
 async function accountConfigOf(acct: any): Promise<Record<string, any>> {
   if (acct?.visibility === 'private') {
@@ -115,7 +127,21 @@ async function accountConfigOf(acct: any): Promise<Record<string, any>> {
     if (state === 'error') throw new ConfigDecryptError('私有账户凭证无法解密，请重新填写');
     return config;
   }
-  return safeJson(acct?.config);
+  const epoch = getCdnAccountEpoch();
+  if (epoch !== accountConfigEpoch) {
+    accountConfigCache.clear();
+    accountConfigEpoch = epoch;
+  }
+  const key = sharedAccountConfigKey(acct);
+  const hit = accountConfigCache.get(key);
+  if (hit && Date.now() - hit.at < ACCOUNT_CONFIG_TTL) return hit.config;
+  const config = safeJson(acct?.config);
+  if (!accountConfigCache.has(key) && accountConfigCache.size >= ACCOUNT_CONFIG_MAX) {
+    const oldest = accountConfigCache.keys().next().value;
+    if (oldest !== undefined) accountConfigCache.delete(oldest);
+  }
+  accountConfigCache.set(key, { at: Date.now(), config });
+  return config;
 }
 
 /** 校验用户能否把加速域名接入到该 DNS 域名：管理员放行；普通用户需有非只读授权且记录名在授权范围内 */
@@ -464,6 +490,18 @@ function fmtStatTime(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer) clearTimeout(timer);
+    }),
+    new Promise<T>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label}超时`)), ms);
+    }),
+  ]);
+}
+
 /** 跨账户合并同一指标的序列：sum 累加、max 取大、rate 按流量/请求加权 */
 function mergeDetailSeries(list: MetricSeries[]): MetricSeries[] {
   const map = new Map<string, MetricSeries>();
@@ -689,6 +727,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return provider;
   }
 
+  async function zonesOf(aid: number, provider: any): Promise<any[] | false> {
+    const cached = getCachedZones(aid);
+    if (cached) return cached;
+    const zones = await provider.getZones();
+    if (zones !== false) setCachedZones(aid, zones);
+    return zones;
+  }
+
   // ===== CDN 线路切换（首期：EdgeOne <-> 阿里云 ESA） =====
 
   function switchPartnerOf(type: string): string {
@@ -750,6 +796,51 @@ export default async function cdnRoutes(app: FastifyInstance) {
     return { ...base, provider, zone };
   }
 
+  // 轻量域名清单：站点设置/统计筛选只需要 id/name 等少量字段，避免拉取整表宽列
+  app.get('/api/cdn/domains/options', auth, async (req: any) => {
+    const q = req.query || {};
+    const conds: string[] = [];
+    const params: any[] = [];
+    if (Number(q.aid || 0)) {
+      conds.push('aid = ?');
+      params.push(Number(q.aid));
+    }
+    if (q.zone_id !== undefined && q.zone_id !== null && String(q.zone_id) !== '') {
+      conds.push('zone_id = ?');
+      params.push(String(q.zone_id));
+    }
+    const route = String(q.route || '').trim();
+    if (route) {
+      conds.push('route = ?');
+      params.push(route);
+    }
+    const kw = String(q.kw || '').trim();
+    if (kw) {
+      conds.push("name LIKE ? ESCAPE '!'");
+      params.push(`%${escapeLike(kw)}%`);
+    }
+    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user, ['id']);
+    const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
+    if (!allowedAids.size) return { code: 0, data: [] };
+    const qAid = Number(q.aid || 0);
+    if (qAid && !allowedAids.has(qAid)) return { code: 0, data: [] };
+    if (!conds.some((c) => c.startsWith('aid ='))) {
+      conds.push(`aid IN (${[...allowedAids].map(() => '?').join(',')})`);
+      params.push(...allowedAids);
+    }
+    const where = conds.length ? ` WHERE ${conds.join(' AND ')}` : '';
+    const limit = clampLimit(q.limit, 2000, 10000);
+    const offset = clampOffset(q.offset);
+    const rows = await query(
+      `SELECT id, name, aid, route, zone_id, status
+         FROM ${table('cdn_domain')}${where}
+        ORDER BY name ASC, id ASC LIMIT ? OFFSET ?`,
+      [...params, limit, offset],
+    );
+    const totalRow: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('cdn_domain')}${where}`, params);
+    return { code: 0, data: rows, total: Number(totalRow?.c || 0) };
+  });
+
   // 列表
   app.get('/api/cdn/domains', auth, async (req: any) => {
     const q = req.query || {};
@@ -764,7 +855,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       conds.push('zone_id = ?');
       params.push(String(q.zone_id));
     }
-    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
+    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user, ['id', 'type']);
     const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
     if (!allowedAids.size) return { code: 0, data: [] };
     // 显式传 aid 时也必须先通过可见性校验，避免用 aid 绕过账户归属过滤
@@ -782,7 +873,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
       `SELECT * FROM ${table('cdn_domain')}${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
       [...params, pageSize, pageOffset],
     );
-    const totalRow: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('cdn_domain')}${where}`, params);
+    const totalRow: any = await queryOne(
+      `SELECT COUNT(*) AS c,
+              SUM(CASE WHEN status = 'offline' THEN 1 ELSE 0 END) AS stopped,
+              SUM(CASE WHEN cert_mode = 'none' AND (https_enabled IS NULL OR https_enabled = 0) THEN 1 ELSE 0 END) AS cert_pending
+         FROM ${table('cdn_domain')}${where}`,
+      params,
+    );
     const typeNames = Object.fromEntries(Object.entries(cdnConfig).map(([k, v]) => [k, v.name]));
     const cdnAccounts = visibleAccounts;
     const freeAids = new Set(cdnAccounts.filter((a: any) => cdnConfig[a.type]?.freecert).map((a: any) => a.id));
@@ -851,7 +948,19 @@ export default async function cdnRoutes(app: FastifyInstance) {
       can_certapply: certAids.has(r.aid) ? 1 : 0,
       can_certlink: linkAids.has(r.aid) ? 1 : 0,
     }));
-    return { code: 0, data, total: Number(totalRow?.c || 0), size: pageSize };
+    const total = Number(totalRow?.c || 0);
+    const stopped = Number(totalRow?.stopped || 0);
+    return {
+      code: 0,
+      data,
+      total,
+      size: pageSize,
+      summary: {
+        enabled: Math.max(0, total - stopped),
+        stopped,
+        certPending: Number(totalRow?.cert_pending || 0),
+      },
+    };
   });
 
   // 站点列表（按账户 + 站点聚合）
@@ -861,7 +970,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const acct = await getVisibleAccount('cdn_account', aid, req.user);
       if (!acct) return reply.code(404).send({ code: -1, msg: 'CDN账户不存在' });
     }
-    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user);
+    const visibleAccounts = await listVisibleAccounts('cdn_account', req.user, ['id']);
     const allowedAids = new Set(visibleAccounts.map((a: any) => Number(a.id)));
     if (!allowedAids.size) return { code: 0, data: [] };
     const rows = await query(
@@ -902,7 +1011,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       // 该类型不支持站点枚举时回退到本地聚合，避免页面空白
       return { code: 0, data: (rows as any[]).filter((r) => Number(r.aid) === aid).map(localItem), cloud: false };
     }
-    const zones = await provider.getZones();
+    const zones = await zonesOf(aid, provider);
     if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
     const localByKey = new Map<string, any>();
     for (const r of rows as any[]) localByKey.set(`${r.aid}::${r.zone_id}`, r);
@@ -989,23 +1098,28 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const aid = Number((req.params as any).aid);
     const provider: any = await cdnForZone(aid, null);
     if (!provider || typeof provider.getZones !== 'function') return { code: -1, msg: '该 CDN 类型不支持站点管理' };
-    const zones = await provider.getZones();
-    if (zones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
+    const rawZones = await zonesOf(aid, provider);
+    if (rawZones === false) return { code: -1, msg: '获取站点列表失败，' + provider.getError() };
+    // 缓存里的站点对象不能在响应中原地写入暂停状态：否则 30s TTL 内其他请求会读到
+    // 本次补齐的 paused 值（包括请求超时被记为 false 的值）。
+    const zones = (rawZones as any[]).map((z) => ({ ...z }));
     // 尽力补齐暂停状态：provider 已在列表里返回布尔 paused 时直接沿用，避免逐站再查一次（N+1）。
     // 缺失状态时用 4 并发补齐，站点多时不再串行等待。
     if (typeof provider.getZonePaused === 'function') {
       const pending = (zones as any[]).filter((z) => z.zoneId && typeof z.paused !== 'boolean');
       await runPool(
-        pending.map((z) => async () => {
-          try {
-            // 并发补齐时每个任务使用独立 provider：getZonePaused 会把失败信息写入 this.error，
-            // 复用同一实例会让并发请求互相覆盖错误，返回给用户的失败原因不可信。
-            const p: any = await cdnForZone(aid, null);
-            z.paused = p && typeof p.getZonePaused === 'function' ? (await p.getZonePaused(String(z.zoneId))) === true : false;
-          } catch {
-            z.paused = false;
-          }
-        }),
+        pending.map((z) => () =>
+          withAccountLimit('cdn:' + aid, async () => {
+            try {
+              // 并发补齐时每个任务使用独立 provider：getZonePaused 会把失败信息写入 this.error，
+              // 复用同一实例会让并发请求互相覆盖错误，返回给用户的失败原因不可信。
+              const p: any = await cdnForZone(aid, null);
+              z.paused = p && typeof p.getZonePaused === 'function' ? (await p.getZonePaused(String(z.zoneId))) === true : false;
+            } catch {
+              z.paused = false;
+            }
+          }),
+        ),
         4,
       );
     }
@@ -1059,6 +1173,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       instanceId: b.instanceId,
     });
     if (zone === false) return { code: -1, msg: '创建站点失败，' + provider.getError() };
+    clearZonesCache(aid);
     audit(req, {
       targetType: 'cdn_zone',
       targetId: (zone as any)?.zoneId,
@@ -1113,6 +1228,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!provider || typeof provider.setZonePaused !== 'function') return { code: -1, msg: '该 CDN 类型不支持暂停/启用' };
     const paused = b.paused === true || b.paused === 'true' || b.paused === 1;
     if (!(await provider.setZonePaused(zoneId, paused))) return { code: -1, msg: '操作失败，' + provider.getError() };
+    clearZonesCache(aid);
     audit(req, {
       targetType: 'cdn_zone',
       targetId: zoneId,
@@ -1132,6 +1248,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.bindZoneToPlan !== 'function') return { code: -1, msg: '该 CDN 类型不支持套餐绑定' };
     if (!(await provider.bindZoneToPlan(zoneId, planId))) return { code: -1, msg: '绑定套餐失败，' + provider.getError() };
+    clearZonesCache(aid);
     audit(req, {
       targetType: 'cdn_zone',
       targetId: zoneId,
@@ -1180,6 +1297,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (!(await provider.modifyZone(zoneId, { type: b.type, area: b.area, aliasZoneName: b.aliasZoneName, vanityNs: b.vanityNs }))) {
         return { code: -1, msg: '站点属性更新失败，' + provider.getError() };
       }
+      clearZonesCache(aid);
       audit(req, {
         targetType: 'cdn_zone',
         targetId: zoneId,
@@ -1211,6 +1329,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       changed = true;
     }
     if (!changed) return { code: -1, msg: '无可更新项或该 CDN 类型不支持' };
+    clearZonesCache(aid);
     return { code: 0, msg: '更新成功' };
   });
 
@@ -2274,6 +2393,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       return { code: -1, msg: '该站点下仍有已接入的加速域名，请先删除/迁移这些域名后再删除站点' };
     }
     if (!(await provider.deleteZone(zoneId))) return { code: -1, msg: '删除失败，' + provider.getError() };
+    clearZonesCache(aid);
     return { code: 0, msg: '站点已删除' };
   });
 
@@ -2651,6 +2771,21 @@ export default async function cdnRoutes(app: FastifyInstance) {
     if (!zoneId) return { code: -1, msg: '缺少 zoneId' };
     const provider: any = await cdnForZone(aid, zoneId);
     if (!provider || typeof provider.listRules !== 'function') return { code: -1, msg: '该 CDN 类型不支持规则引擎' };
+    const q = req.query || {};
+    const wantsPage = q.page != null || q.size != null;
+    if (wantsPage) {
+      const page = clampLimit(q.page, 1, 10000);
+      const size = clampLimit(q.size, 20, 200);
+      if (typeof provider.listRulesPaged === 'function') {
+        const paged = await provider.listRulesPaged(zoneId, page, size);
+        if (paged === false) return { code: -1, msg: '获取规则失败，' + provider.getError() };
+        if (paged) return { code: 0, data: paged };
+      }
+      const all = await provider.listRules(zoneId);
+      if (all === false) return { code: -1, msg: '获取规则失败，' + provider.getError() };
+      const offset = (page - 1) * size;
+      return { code: 0, data: { total: all.length, list: all.slice(offset, offset + size) } };
+    }
     const list = await provider.listRules(zoneId);
     if (list === false) return { code: -1, msg: '获取规则失败，' + provider.getError() };
     return { code: 0, data: list };
@@ -3843,7 +3978,10 @@ export default async function cdnRoutes(app: FastifyInstance) {
               try {
                 // 同上：不要复用列表请求的 provider，避免并发错误状态串台
                 const p: any = await cdnForZone(aid, null);
-                z.paused = p && typeof p.getZonePaused === 'function' ? (await p.getZonePaused(String(z.zoneId))) === true : false;
+                z.paused =
+                  p && typeof p.getZonePaused === 'function'
+                    ? (await withAccountLimit('cdn:' + aid, () => p.getZonePaused(String(z.zoneId)))) === true
+                    : false;
               } catch {
                 z.paused = false;
               }
@@ -4400,7 +4538,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     let sync: any = { code: -1, added: 0 };
     const syncOutcome = await withDistributedLockResult(
       `dnsmgr:cdn-sync:${Number(aid)}`,
-      () => syncFromCloud(aid, did, req.user),
+      () => withAccountLimit('cdn:' + Number(aid), () => syncFromCloud(aid, did, req.user)),
       5,
     );
     if (syncOutcome.locked && syncOutcome.result) sync = syncOutcome.result;
@@ -4718,7 +4856,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       }
       let r: any;
       try {
-        r = await fn.call(provider, row.name);
+        r = await withAccountLimit('cdn:' + Number(row.aid), () => fn.call(provider, row.name));
       } catch (e: any) {
         r = { status: 'failed', message: e?.message || String(e) };
       }
@@ -4824,7 +4962,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
         await emit({ id, name: row.name, status: 'failed', message: '该厂商暂不支持联动证书申请' });
         continue;
       }
-      const scope = await provider.getCertScope(row.name);
+      let scope: any = null;
+      try {
+        scope = await withAccountLimit('cdn:' + Number(row.aid), () => provider.getCertScope(row.name));
+      } catch (e: any) {
+        await emit({ id, name: row.name, status: 'failed', message: e?.message || '获取加速站点失败' });
+        continue;
+      }
       if (!scope) {
         await emit({ id, name: row.name, status: 'failed', message: '未找到该域名对应的加速站点，请先在对应云控制台创建站点' });
         continue;
@@ -4855,7 +4999,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
         continue;
       }
       const order = await ensureWildcardOrder(aid, scope.domains);
-      const deploy: any = await ensureCertDeploy(provider, row, scope, Number(order.id)).catch(() => false);
+      const deploy: any = await withAccountLimit('cdn:' + Number(row.aid), () =>
+        ensureCertDeploy(provider, row, scope, Number(order.id)),
+      ).catch(() => false);
       const status = Number(order.status);
       if (status !== 3) {
         // 新建/待处理订单立即在后台开始申请，无需手动点「处理」
@@ -4880,7 +5026,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (deploy?.taskId) {
         let err = '';
         try {
-          await new CertDeployService(deploy.taskId).process(true);
+          await withAccountLimit('cdn:' + Number(row.aid), () => new CertDeployService(deploy.taskId).process(true));
         } catch (e: any) {
           err = e?.message || String(e);
         }
@@ -5257,7 +5403,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
     // 同一账户的同步串行化：同步会遍历整个账户，did 只做过滤，不能作为锁粒度
     const outcome = await withDistributedLockResult(
       `dnsmgr:cdn-sync:${Number(aid || 0)}`,
-      () => syncFromCloud(Number(aid || 0), Number(did || 0), req.user),
+      () => withAccountLimit('cdn:' + Number(aid || 0), () => syncFromCloud(Number(aid || 0), Number(did || 0), req.user)),
       5,
     );
     if (!outcome.locked || !outcome.result) return { code: -1, msg: '该账户正在同步，请稍后再试' };
@@ -5303,13 +5449,14 @@ export default async function cdnRoutes(app: FastifyInstance) {
   app.get('/api/cdn/statistics/overview', statAuth, async (req: any) => {
     try {
       const q = req.query || {};
-      const start = parseStatTime(q.startTime);
-      const end = parseStatTime(q.endTime);
+      let start = parseStatTime(q.startTime);
+      let end = parseStatTime(q.endTime);
       if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
       const latest = Date.now() - 5 * 60 * 1000;
       if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
       if (end.getTime() - start.getTime() > MAX_STAT_RANGE_MS) return { code: -1, msg: '统计区间最长 31 天' };
+      ({ start, end } = alignStatQueryRange(start, end));
 
       const isAdmin = checkLevel(req.user, 2);
       const cacheEnabled = await isStatCacheEnabled();
@@ -5318,7 +5465,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const dataUntil = fmtStatTime(end);
 
       const routeStats = new Map<string, { accounts: number; domains: number }>();
-      const visibleAccts = await listVisibleAccounts('cdn_account', req.user);
+      const visibleAccts = await listVisibleAccounts('cdn_account', req.user, ['id', 'visibility', 'owner_uid']);
       // 统计账户集合 = 全部共享账户 + 当前用户自己的私有账户；
       // 其他用户的私有账户既无法解密也不应计入，避免私有凭证解密失败或数据串户
       const sharedRows = (await query(`SELECT id FROM ${table('cdn_account')} WHERE visibility = 'shared'`)) as any[];
@@ -5435,25 +5582,27 @@ export default async function cdnRoutes(app: FastifyInstance) {
         for (const a of acctRows.filter((x) => x.type === catalog.route)) {
           const localCount = domRows.filter((d) => Number(d.aid) === Number(a.id)).length;
           if (localCount) continue;
-          siteTasks.push(async () => {
-            try {
-              const provider: any = getCdnProvider(a.type, await accountConfigOf(a));
-              if (!provider || typeof provider.getZones !== 'function') return;
-              const zones = await provider.getZones();
-              if (!Array.isArray(zones)) return;
-              const list = zones
-                .map((z: any) => ({
-                  name: String(z?.zoneName || z?.name || ''),
-                  route: String(a.type),
-                  zoneId: String(z?.zoneId || ''),
-                  serviceArea: z?.area,
-                }))
-                .filter((d: any) => d.zoneId);
-              if (list.length) cloudSites.set(Number(a.id), list);
-            } catch {
-              // 云端不可达时保持「未接入」，不影响其他服务商
-            }
-          });
+          siteTasks.push(() =>
+            withAccountLimit('cdn:' + a.id, async () => {
+              try {
+                const provider: any = getCdnProvider(a.type, await accountConfigOf(a));
+                if (!provider || typeof provider.getZones !== 'function') return;
+                const zones = await provider.getZones();
+                if (!Array.isArray(zones)) return;
+                const list = zones
+                  .map((z: any) => ({
+                    name: String(z?.zoneName || z?.name || ''),
+                    route: String(a.type),
+                    zoneId: String(z?.zoneId || ''),
+                    serviceArea: z?.area,
+                  }))
+                  .filter((d: any) => d.zoneId);
+                if (list.length) cloudSites.set(Number(a.id), list);
+              } catch {
+                // 云端不可达时保持「未接入」，不影响其他服务商
+              }
+            }),
+          );
         }
       }
       // 有界并发枚举站点，避免账户多时逐个等待上游
@@ -5506,14 +5655,15 @@ export default async function cdnRoutes(app: FastifyInstance) {
       const route = String(q.route || '').trim();
       const catalog = getCatalog(route);
       if (!catalog) return { code: -1, msg: '未知的服务商' };
-      const start = parseStatTime(q.startTime);
-      const end = parseStatTime(q.endTime);
+      let start = parseStatTime(q.startTime);
+      let end = parseStatTime(q.endTime);
       if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
       // 区间上限：buildTimeline 会按区间生成标签，1970→now 一次就能产出两万多个标签把内存打满
       if (end.getTime() - start.getTime() > MAX_STAT_RANGE_MS) return { code: -1, msg: '统计区间最长 31 天' };
       const latest = Date.now() - catalog.delayMinutes * 60 * 1000;
       if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
+      ({ start, end } = alignStatQueryRange(start, end));
 
       const isAdmin = checkLevel(req.user, 2);
       const cacheEnabled = await isStatCacheEnabled();
@@ -5580,18 +5730,24 @@ export default async function cdnRoutes(app: FastifyInstance) {
         params.push(...domainNames);
       }
       const rows: any[] = await query(
-        `SELECT * FROM ${table('cdn_domain')} WHERE ${where.join(' AND ')}`,
+        `SELECT aid, name, route, zone_id, service_area FROM ${table('cdn_domain')} WHERE ${where.join(' AND ')}`,
         params,
       );
       if (!rows.length) return { code: 0, data: emptyDetail('没有匹配的加速域名') };
 
+      // 一次 IN 查询取齐账户配置，避免每个域名各查一次 cdn_account（含解密字段）。
+      const accountIds = [...new Set(rows.map((row) => Number(row.aid)).filter((id) => id > 0))];
       const accountCache = new Map<number, any>();
+      if (accountIds.length) {
+        const accountRows: any[] = await query(
+          `SELECT id, visibility, config FROM ${table('cdn_account')} WHERE id IN (${accountIds.map(() => '?').join(',')})`,
+          accountIds,
+        );
+        for (const acct of accountRows) accountCache.set(Number(acct.id), acct);
+      }
       const accounts = new Map<number, OverviewAccount>();
       for (const row of rows) {
         const accountId = Number(row.aid);
-        if (!accountCache.has(accountId)) {
-          accountCache.set(accountId, await queryOne(`SELECT * FROM ${table('cdn_account')} WHERE id = ?`, [accountId]));
-        }
         const acct = accountCache.get(accountId);
         // 私有账户不提供统计（含管理员视图），避免跨用户读取私有凭证下的流量数据
         if (!acct || acct.visibility === 'private') continue;
@@ -5615,9 +5771,13 @@ export default async function cdnRoutes(app: FastifyInstance) {
                   errors: [`账户 #${acct.id} 配置无法解密，请在「CDN 账户」中重新填写凭证`],
                   requests: 0,
                 })
-              : fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }).catch(
-                  (e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 }),
-                ),
+              : withAccountLimit('cdn:' + acct.id, () =>
+                  withTimeout(
+                    fetchDetail(catalog, { config: acct.config, domains: acct.domains, timeline, groups, filters, top }),
+                    30_000,
+                    '统计查询',
+                  ),
+                ).catch((e: any) => ({ series: [], breakdowns: [], errors: [String(e?.message || e)], requests: 0 })),
         ),
         4,
       );
@@ -5652,8 +5812,8 @@ export default async function cdnRoutes(app: FastifyInstance) {
     try {
       const q = req.query || {};
       const type = ['Resource', 'Visits', 'HttpCodeStatus', 'All'].includes(String(q.type)) ? String(q.type) : 'All';
-      const start = parseStatTime(q.startTime);
-      const end = parseStatTime(q.endTime);
+      let start = parseStatTime(q.startTime);
+      let end = parseStatTime(q.endTime);
       if (!start || !end) return { code: -1, msg: '时间参数无效，格式：2026-01-01 00:00:00' };
       // 厂商统计有约 10 分钟延迟：结束时间统一回退，避免最后一个桶被截断
       const latest = Date.now() - EO_DATA_DELAY_MS;
@@ -5661,6 +5821,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       if (end.getTime() > latest && start.getTime() < latest) end.setTime(latest);
       if (end.getTime() <= start.getTime()) return { code: -1, msg: '结束时间需大于开始时间' };
       if (end.getTime() - start.getTime() > MAX_STAT_RANGE_MS) return { code: -1, msg: '统计区间最长 31 天' };
+      ({ start, end } = alignStatQueryRange(start, end));
 
       const domainNames = String(q.domains || '')
         .split(',')
@@ -5741,7 +5902,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
           continue;
         }
         try {
-          const part = await queryByRoute(group.route, group.config, group.domains, start, end, type);
+          const part = await withAccountLimit('cdn:' + Number(group.aid), () =>
+            queryByRoute(group.route, group.config, group.domains, start, end, type),
+          );
           if (!part.labels.length) continue;
           merged = merged ? mergeResult(merged, part) : part;
         } catch (e: any) {
@@ -5760,7 +5923,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
 
   // 按域名分组分发刷新/预热操作
   async function dispatchCacheOp(op: 'purge' | 'preheat', type: string, urls: string[], user: any) {
-    const grouped = new Map<string, { route: string; provider: any; urls: string[] }>();
+    const grouped = new Map<string, { route: string; aid: number; provider: any; urls: string[] }>();
     const failed: { url: string; msg: string }[] = [];
     const domains = dedupe(urls.map((u) => domainFromUrl(u)).filter(Boolean));
     // 一次 IN 查询预取本次涉及的全部加速域名，避免每个 URL 都做一次点查
@@ -5810,7 +5973,7 @@ export default async function cdnRoutes(app: FastifyInstance) {
       // 按「账户 + 站点(zone)」分组：同一账户下不同站点的 provider 实例（站点上下文）不同，
       // 若仅按账户分组，会把 URL 提交到首个域名所属的站点，导致跨站点误刷
       const key = `${row.route}#${row.aid}#${row.zone_id || ''}`;
-      if (!grouped.has(key)) grouped.set(key, { route: row.route, provider, urls: [] });
+      if (!grouped.has(key)) grouped.set(key, { route: row.route, aid: Number(row.aid), provider, urls: [] });
       grouped.get(key)!.urls.push(url);
     }
 
@@ -5826,7 +5989,9 @@ export default async function cdnRoutes(app: FastifyInstance) {
         if (typeof fn !== 'function') {
           errMsg = '该厂商暂不支持此操作';
         } else {
-          taskId = op === 'purge' ? await g.provider[op](g.urls, type) : await g.provider[op](g.urls);
+          taskId = await withAccountLimit('cdn:' + Number(g.aid), () =>
+            op === 'purge' ? g.provider[op](g.urls, type) : g.provider[op](g.urls),
+          );
           if (taskId === false) errMsg = g.provider.getError?.() || '提交失败';
         }
       } catch (e: any) {
@@ -5898,8 +6063,17 @@ const MAX_CACHE_OP_URLS = 100;
     const size = clampLimit(req.query.size, 200, 200);
     const offset = (page - 1) * size;
     const rows = await query(`SELECT * FROM ${table('cdn_cache_task')} ORDER BY id DESC LIMIT ? OFFSET ?`, [size, offset]);
-    const totalRow: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('cdn_cache_task')}`);
-    return { code: 0, data: rows, total: Number(totalRow?.c || 0), page, size };
+    const totalRow: any = await queryOne(
+      `SELECT COUNT(*) AS c, COUNT(DISTINCT type) AS types, COUNT(DISTINCT status) AS statuses FROM ${table('cdn_cache_task')}`,
+    );
+    return {
+      code: 0,
+      data: rows,
+      total: Number(totalRow?.c || 0),
+      summary: { types: Number(totalRow?.types || 0), statuses: Number(totalRow?.statuses || 0) },
+      page,
+      size,
+    };
   });
 
   app.get('/api/cdn/cache-tasks/:id', adminAuth, async (req: any) => {

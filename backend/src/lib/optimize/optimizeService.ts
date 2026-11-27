@@ -1,7 +1,7 @@
 import { query, queryOne, table } from '../../db.js';
 import { configGet, configSet } from '../../config.js';
 import { getDnsProvider } from '../dns/factory.js';
-import { fmtDateTime } from '../util.js';
+import { fmtDateTime, mapPool } from '../util.js';
 
 // 通用线路代码 -> 各 DNS 服务商线路值
 import { fetchWithProxy } from '../http.js';
@@ -156,6 +156,9 @@ async function getIpAddress2(cdnType: number, ipType: string): Promise<Record<st
   return res;
 }
 
+const OPTIMIZE_BATCH = Math.max(1, Math.min(500, Number(process.env.DNSMGR_OPTIMIZE_BATCH || 50) || 50));
+const OPTIMIZE_CONCURRENCY = Math.max(1, Math.min(20, Number(process.env.DNSMGR_OPTIMIZE_CONCURRENCY || 3) || 3));
+
 export async function executeAll(): Promise<boolean> {
   const minute = parseInt((await configGet('optimize_ip_min', '30')) || '30');
   const last = await configGet('optimize_ip_time', null, true);
@@ -165,10 +168,23 @@ export async function executeAll(): Promise<boolean> {
   }
   // 每轮优选开始清空 IP 缓存，确保本轮使用最新优选结果（仅本轮内共享，避免逐任务重复拉取）
   clearIpCache();
-  const list = await query(`SELECT * FROM ${table('optimizeip')} WHERE active = 1`);
-  if (list.length === 0) return false;
+  // 大批量任务会跨多个一分钟周期处理；用 cycle 标记本轮起点，全部任务都刷新过
+  // updatetime 后才写入 optimize_ip_time，避免任务数正好是批大小整数倍时永远不结束。
+  const cycleKey = 'optimize_ip_cycle';
+  let cycleAt = (await configGet(cycleKey, '')) || '';
+  if (!cycleAt) {
+    cycleAt = fmtDateTime();
+    await configSet(cycleKey, cycleAt);
+  }
+  const list = await query(
+    `SELECT * FROM ${table('optimizeip')} WHERE active = 1 ORDER BY updatetime ASC, id ASC LIMIT ${OPTIMIZE_BATCH}`,
+  );
+  if (list.length === 0) {
+    await configSet(cycleKey, '');
+    return false;
+  }
   console.log('开始执行IP优选任务，共获取到' + list.length + '个待执行任务');
-  for (const row of list) {
+  await mapPool(list, OPTIMIZE_CONCURRENCY, async (row) => {
     try {
       const result = await executeOne(row);
       await query(`UPDATE ${table('optimizeip')} SET status = 1, errmsg = NULL, updatetime = ? WHERE id = ?`, [fmtDateTime(), row.id]);
@@ -177,8 +193,21 @@ export async function executeAll(): Promise<boolean> {
       await query(`UPDATE ${table('optimizeip')} SET status = 2, errmsg = ?, updatetime = ? WHERE id = ?`, [e.message || String(e), fmtDateTime(), row.id]);
       console.log('优选任务' + row.id + '执行失败：' + e.message);
     }
+  });
+  // 触发批量上限时保留上次时间，让下一分钟继续处理剩余任务，避免大批量任务等到下个周期。
+  const finishCycle = async () => {
+    await configSet('optimize_ip_time', fmtDateTime());
+    await configSet(cycleKey, '');
+  };
+  if (list.length < OPTIMIZE_BATCH) {
+    await finishCycle();
+  } else {
+    const pending: any = await queryOne(
+      `SELECT COUNT(*) AS c FROM ${table('optimizeip')} WHERE active = 1 AND (updatetime IS NULL OR updatetime < ?)`,
+      [cycleAt],
+    );
+    if (!Number(pending?.c || 0)) await finishCycle();
   }
-  await configSet('optimize_ip_time', fmtDateTime());
   return true;
 }
 

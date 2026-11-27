@@ -49,18 +49,15 @@ function prefetchRoutes() {
   const run = () => {
     if (document.hidden) return;
     const admin = isAdminUser(getUser());
-    // 跳过登录/安装页、带参数的详情页以及图表/二维码等重 chunk；
-    // 最多预取 12 个静态高频路由，且限制 2 并发，避免与用户当前导航争抢带宽。
+    const prefetchPaths = ['/dashboard', '/domains', '/cdn-domains'];
     const candidates = router
       .getRoutes()
       .filter((r) => {
-        if (!r.path.startsWith('/') || r.path.includes(':')) return false;
-        if (['/setup', '/login', '/register', '/totp'].includes(r.path)) return false;
+        if (!prefetchPaths.includes(r.path)) return false;
         if (requiresAdmin(r.path) && !admin) return false;
         const comp: any = (r.components as any)?.default;
         return typeof comp === 'function';
-      })
-      .slice(0, 12);
+      });
     let cursor = 0;
     const worker = async () => {
       while (cursor < candidates.length) {

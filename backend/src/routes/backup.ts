@@ -171,18 +171,33 @@ export default async function backupRoutes(app: FastifyInstance) {
     const size = clampLimit(req.query?.size, 200, 200);
     const offset = (clampLimit(req.query?.page, 1, 10000) - 1) * size;
     const pageOffset = Math.min(offset, 1_000_000);
-    let rows: any[];
+    const mineOnly = !(admin && !mine);
+    const whereSql = mineOnly ? ' WHERE owner_uid = ?' : '';
+    const whereParams = mineOnly ? [req.user.uid] : [];
+    // 列表不返回 checksum 与 meta（表统计 JSON）：详情/下载接口才需要。
+    const rows = await query(
+      `SELECT id, kind, scope, owner_uid, status, file_name, file_size, dest, dest_id,
+              include_logs, schedule_id, error, created_at, finished_at
+       FROM ${table('backup_job')}${whereSql} ORDER BY id DESC LIMIT ? OFFSET ?`,
+      [...whereParams, size, pageOffset],
+    );
+    const statusRows: any[] = await query(
+      `SELECT status, COUNT(*) AS c FROM ${table('backup_job')}${whereSql} GROUP BY status`,
+      whereParams,
+    );
+    const summary: Record<string, number> = {};
     let total = 0;
-    if (admin && !mine) {
-      rows = await query(`SELECT * FROM ${table('backup_job')} ORDER BY id DESC LIMIT ? OFFSET ?`, [size, pageOffset]);
-      const c: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('backup_job')}`);
-      total = Number(c?.c || 0);
-    } else {
-      rows = await query(`SELECT * FROM ${table('backup_job')} WHERE owner_uid = ? ORDER BY id DESC LIMIT ? OFFSET ?`, [req.user.uid, size, pageOffset]);
-      const c: any = await queryOne(`SELECT COUNT(*) AS c FROM ${table('backup_job')} WHERE owner_uid = ?`, [req.user.uid]);
-      total = Number(c?.c || 0);
+    for (const r of statusRows) {
+      const count = Number(r.c || 0);
+      total += count;
+      summary[String(r.status || '')] = count;
     }
-    return { code: 0, data: rows, total, size };
+    // 最近一次成功备份跨分页查询，避免前端只在当前 20 条里找状态导致显示「从未备份」。
+    const lastSuccess: any = await queryOne(
+      `SELECT created_at FROM ${table('backup_job')}${mineOnly ? ' WHERE owner_uid = ? AND status = ?' : ' WHERE status = ?'} ORDER BY id DESC LIMIT 1`,
+      mineOnly ? [req.user.uid, 'success'] : ['success'],
+    );
+    return { code: 0, data: rows, total, size, summary, last_success_at: lastSuccess?.created_at || '' };
   });
 
   app.get('/api/backup/jobs/:id/download', auth, async (req: any, reply: any) => {
@@ -498,7 +513,10 @@ export default async function backupRoutes(app: FastifyInstance) {
   // ===== 目的地 =====
   app.get('/api/backup/destinations', auth, async (req: any, reply: any) => {
     if (!isAdmin(req.user)) return reply.code(403).send({ code: -1, msg: '无权限' });
-    const rows = await query<any>(`SELECT * FROM ${table('backup_destination')} ORDER BY id DESC`);
+    const rows = await query<any>(
+      `SELECT id, name, type, config, enabled, last_test_at, last_test_ok, last_test_msg, addtime
+       FROM ${table('backup_destination')} ORDER BY id DESC`,
+    );
     return {
       code: 0,
       data: rows.map((r) => ({ ...r, config: maskConfig(decryptConfig(r.config) || {}) })),

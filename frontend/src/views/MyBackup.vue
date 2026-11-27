@@ -4,7 +4,7 @@
 
     <n-alert v-if="loadError" type="error" :show-icon="true">
       {{ t('common.loadFailedHint') }}
-      <n-button size="tiny" type="primary" style="margin-left: 8px" @click="load">{{ t('common.retry') }}</n-button>
+      <n-button size="tiny" type="primary" style="margin-left: 8px" @click="load()">{{ t('common.retry') }}</n-button>
     </n-alert>
 
     <n-alert v-else-if="vault.initialized === false" type="warning">
@@ -61,7 +61,7 @@
 
     <n-card :bordered="false">
       <template #header>{{ t('myBackup.jobsTitle') }}</template>
-      <ResponsiveDataTable :columns="columns" :data="jobs" :loading="loading" :empty-text="t('myBackup.jobsEmpty')" :pagination="{ pageSize: 20 }" />
+      <ResponsiveDataTable :columns="columns" :data="jobs" :loading="loading" :empty-text="t('myBackup.jobsEmpty')" :pagination="jobsPagination" />
     </n-card>
   </div>
 </template>
@@ -83,7 +83,18 @@ const dialog = useDialog();
 
 const vault = ref<any>({});
 const jobs = ref<any[]>([]);
+const jobsPage = ref(1);
+const jobsPageSize = 20;
+const jobsTotal = ref(0);
 const loading = ref(false);
+const jobsPagination = computed(() => ({
+  page: jobsPage.value,
+  pageSize: jobsPageSize,
+  itemCount: jobsTotal.value,
+  onChange: (page: number) => {
+    if (page !== jobsPage.value) void load(page);
+  },
+}));
 const exporting = ref(false);
 const importing = ref(false);
 const exportPass = ref('');
@@ -134,26 +145,27 @@ function statusText(s: string) {
   return s === 'success' ? t('backup.statusSuccess') : s === 'failed' ? t('backup.statusFailed') : t('backup.statusRunning');
 }
 
-async function load() {
+async function load(targetPage = jobsPage.value) {
   loading.value = true;
   loadError.value = false;
   try {
-    const loadAllJobs = async () => {
-      const all: any[] = [];
-      for (let page = 1; page <= 50; page++) {
-        const res = await api<any>('GET', '/backup/jobs', { mine: 1, page, size: 200 });
-        if (res.code !== 0) return res;
-        all.push(...(res.data || []));
-        const total = Number(res.total || 0);
-        const list = res.data || [];
-        if (!list.length || list.length < 200 || (total > 0 && all.length >= total)) break;
-      }
-      return { code: 0, data: all };
-    };
-    const [v, j] = await Promise.all([api<any>('GET', '/vault/status'), loadAllJobs()]);
+    const page = Math.max(1, Number(targetPage) || 1);
+    const [v, j] = await Promise.all([
+      api<any>('GET', '/vault/status'),
+      api<any>('GET', '/backup/jobs', { mine: 1, page, size: jobsPageSize }),
+    ]);
     if (v.code !== 0 || j.code !== 0) throw new Error(v.msg || j.msg || 'load failed');
     vault.value = v?.data || {};
-    jobs.value = (j?.data || []).filter((x: any) => x.scope === 'user');
+    const list = j?.data || [];
+    const total = Number(j?.total || 0);
+    if (!list.length && total > 0 && page > 1) {
+      loading.value = false;
+      await load(page - 1);
+      return;
+    }
+    jobsPage.value = page;
+    jobsTotal.value = total;
+    jobs.value = list;
   } catch {
     loadError.value = true;
   } finally {
@@ -176,6 +188,7 @@ async function doExport() {
     }, { timeout: 0 });
     if (res.code !== 0) return message.error(res.msg);
     message.success(t('backup.exportDone'));
+    jobsPage.value = 1;
     await load();
   } catch (e: any) {
     message.error(e?.message || t('backup.loadFailed'));
@@ -223,7 +236,10 @@ async function doImport(dryRun: boolean, confirmed = false) {
     if (json.code !== 0) return message.error(json.msg);
     report.value = json.data;
     message.success(json.msg);
-    if (!dryRun) await load();
+    if (!dryRun) {
+      jobsPage.value = 1;
+      await load();
+    }
   } catch (e: any) {
     message.error(e?.message || t('backup.loadFailed'));
   } finally {

@@ -120,7 +120,7 @@ export default {
     mcpLegacyEnable: 'Enable MCP Legacy Compatibility',
     mcpLegacyHint: 'When enabled, /mcp accepts Authorization: Bearer <uid>:<apikey>, so legacy Rainbow DNS MCP clients can connect without changes. This switch is independent of the legacy HTTP API compatibility layer. Legacy apikey is not constrained by scopes, expiry or IP allowlists; enable it only during migration.',
     statCacheCardTitle: 'CDN Statistics Cache',
-    statCacheAlert: 'When enabled, the system periodically pulls statistics by provider granularity and stores them on the server (daily for the last 30 days, hourly for the last 48 hours), so the statistics page loads quickly. This feature continuously consumes server resources in the background, so enable it only when needed. Viewing permission can also be granted per user in User Management.',
+    statCacheAlert: 'Enabled by default. The system periodically pulls statistics by provider granularity and stores them on the server (daily for the last 30 days, hourly for the last 48 hours), so the statistics page loads quickly. This feature continuously consumes server resources in the background; disable it when resources are tight. Viewing permission can also be granted per user in User Management.',
     statCacheEnable: 'Enable Statistics Cache',
     statCacheInterval: 'Refresh Interval (minutes)',
     statCacheLast: 'Last Refresh Time',

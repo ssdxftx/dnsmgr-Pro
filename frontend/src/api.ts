@@ -47,7 +47,7 @@ export function setUser(u: any) {
 export interface ApiOptions {
   /** 调用方取消信号：组件卸载 / 参数切换时中止旧请求，避免旧响应覆盖新结果 */
   signal?: AbortSignal;
-  /** GET 缓存：true = 默认 5s，数字 = 指定毫秒；false / 省略 = 不缓存 */
+  /** GET 缓存：true = 默认 15s，数字 = 指定毫秒；false = 禁用；省略 = 仅参考数据默认缓存 */
   cache?: boolean | number;
   /** 跳过缓存读取，强制重新请求 */
   force?: boolean;
@@ -57,18 +57,44 @@ export interface ApiOptions {
   timeout?: number;
 }
 
-// 默认 GET 缓存 15s：写操作会整体失效，跨页读取全量列表时减少重复请求
+// 默认 GET 缓存 15s：只对参考数据生效，写操作按资源前缀失效
 const GET_DEFAULT_TTL = 15000;
 const GET_CACHE_MAX = 200;
+const DEFAULT_CACHE_PATHS = new Set([
+  '/api/cdn/providers',
+  '/api/cdn/accounts',
+  '/api/cdn/zones',
+  '/api/cdn/domains/options',
+  '/api/dns/accounts',
+  '/api/cert/accounts',
+]);
 const getCache = new Map<string, { at: number; data: any }>();
 const inflight = new Map<string, Promise<any>>();
-const getControllers = new Set<AbortController>();
+const getControllers = new Map<AbortController, string>();
+const prefixVersions = new Map<string, number>();
 let cacheEpoch = 0;
 
-// 写操作/登录态变更后中止所有仍在进行的 GET，避免旧响应在写完成后回写页面。
-function abortInflightGets(): void {
-  for (const controller of getControllers) controller.abort();
-  getControllers.clear();
+function isDefaultCacheable(url: string): boolean {
+  const path = url.split('?')[0];
+  if (DEFAULT_CACHE_PATHS.has(path)) return true;
+  return url.startsWith('/api/domains?') && /(?:^|[?&])basic=1(?:&|$)/.test(url);
+}
+
+function cacheVersion(url: string): string {
+  const parts = [String(cacheEpoch)];
+  for (const [prefix, version] of prefixVersions) {
+    if (url.startsWith(prefix)) parts.push(`${prefix}#${version}`);
+  }
+  return parts.join('|');
+}
+
+// 写操作/登录态变更后中止相关 GET，避免旧响应在写完成后回写页面。
+function abortInflightGets(prefix?: string): void {
+  for (const [controller, key] of [...getControllers.entries()]) {
+    if (prefix && !key.startsWith(prefix)) continue;
+    controller.abort();
+    getControllers.delete(controller);
+  }
 }
 
 // 缓存超限时淘汰最旧的一批，避免无上限增长
@@ -79,19 +105,39 @@ function evictGetCache(): void {
   for (let i = 0; i < drop && i < entries.length; i++) getCache.delete(entries[i][0]);
 }
 
-/** 失效 GET 缓存：写操作后调用；传入前缀仅失效该前缀下的项，省略则整体清空。
- *  同时自增 cacheEpoch，用于阻止「写之前发出、写之后返回」的 GET 把旧值写回缓存。 */
+/** 失效 GET 缓存：写操作后调用；传入前缀仅失效该前缀下的项，省略则整体清空。 */
 export function invalidateApiCache(prefix?: string): void {
-  cacheEpoch++;
-  // 写操作后必须同时丢弃 in-flight：否则写成功后新发起的 GET 仍可能加入
-  // 写之前发出的旧请求并拿到写前数据（虽不写缓存，但会覆盖 UI）。
-  inflight.clear();
-  abortInflightGets();
   if (!prefix) {
+    cacheEpoch++;
     getCache.clear();
+    inflight.clear();
+    abortInflightGets();
     return;
   }
+  prefixVersions.set(prefix, (prefixVersions.get(prefix) || 0) + 1);
   for (const key of [...getCache.keys()]) if (key.startsWith(prefix)) getCache.delete(key);
+  for (const key of [...inflight.keys()]) if (key.startsWith(prefix)) inflight.delete(key);
+  abortInflightGets(prefix);
+}
+
+function writeInvalidationPrefixes(url: string): string[] | null {
+  const path = url.split('?')[0];
+  if (/^\/cdn\/accounts(?:\/|$)/.test(path)) return ['/api/cdn/accounts', '/api/cdn/zones', '/api/cdn/domains'];
+  if (/^\/cdn\/domains(?:\/|$)/.test(path)) return ['/api/cdn/domains', '/api/cdn/zones', '/api/domains'];
+  if (/^\/cdn\/zones(?:\/|$)/.test(path)) return ['/api/cdn/zones', '/api/cdn/domains'];
+  if (/^\/domains(?:\/|$)/.test(path)) return ['/api/domains'];
+  if (/^\/dns\/accounts(?:\/|$)/.test(path)) return ['/api/dns/accounts', '/api/domains'];
+  if (/^\/cert\/accounts(?:\/|$)/.test(path)) return ['/api/cert/accounts'];
+  return null;
+}
+
+function invalidateAfterWrite(url: string): void {
+  const prefixes = writeInvalidationPrefixes(url);
+  if (!prefixes) {
+    invalidateApiCache();
+    return;
+  }
+  for (const prefix of prefixes) invalidateApiCache(prefix);
 }
 
 export async function api<T = any>(method: string, url: string, body?: any, opts: ApiOptions = {}): Promise<T> {
@@ -115,7 +161,16 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
     payload = JSON.stringify(body);
   }
 
-  const ttl = opts.cache === true ? GET_DEFAULT_TTL : typeof opts.cache === 'number' ? opts.cache : 0;
+  const ttl =
+    opts.cache === true
+      ? GET_DEFAULT_TTL
+      : typeof opts.cache === 'number'
+        ? opts.cache
+        : opts.cache === false
+          ? 0
+          : isGet && isDefaultCacheable(fullUrl)
+            ? GET_DEFAULT_TTL
+            : 0;
   const cacheKey = fullUrl;
 
   // 命中缓存直接返回，避免跨页重复拉取同一份数据
@@ -144,7 +199,7 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
       }
       opts.signal.addEventListener('abort', onAbort);
     }
-    if (isGet) getControllers.add(controller);
+    if (isGet) getControllers.set(controller, cacheKey);
     let res: Response;
     try {
       res = await fetch(fullUrl, { method: upper, headers, body: payload, signal: controller.signal });
@@ -182,19 +237,18 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
     }
   };
 
-  let epochAtStart = cacheEpoch;
+  let epochAtStart = cacheVersion(fullUrl);
   let task!: Promise<T>;
   task = (async (): Promise<T> => {
     for (let attempt = 0; ; attempt++) {
       try {
         const data = await doFetch();
-        // 若期间发生过写操作（cacheEpoch 变化），不把可能过期的 GET 结果交给调用方。
-        // 如果已有同 key 的新请求，则复用新请求结果；否则重新拉取一次，避免页面误报错误。
-        if (isGet && cacheEpoch !== epochAtStart) {
+        // 相关资源在请求期间被写操作失效时，不把旧结果交给调用方。
+        if (isGet && cacheVersion(fullUrl) !== epochAtStart) {
           const replacement = inflight.get(cacheKey);
           if (replacement && replacement !== task) return replacement;
           if (attempt < 2) {
-            epochAtStart = cacheEpoch;
+            epochAtStart = cacheVersion(fullUrl);
             continue;
           }
           throw Object.assign(new Error('stale'), { name: 'AbortError' });
@@ -208,9 +262,9 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
         if (isGet && e?.name === 'AbortError') {
           const replacement = inflight.get(cacheKey);
           if (replacement && replacement !== task) return replacement;
-          // 写操作会主动中止所有在途 GET：在调用方未取消的前提下自动重试新数据
-          if (!opts.signal?.aborted && cacheEpoch !== epochAtStart && attempt < 2) {
-            epochAtStart = cacheEpoch;
+          // 写操作会主动中止相关在途 GET：在调用方未取消的前提下自动重试新数据
+          if (!opts.signal?.aborted && cacheVersion(fullUrl) !== epochAtStart && attempt < 2) {
+            epochAtStart = cacheVersion(fullUrl);
             continue;
           }
         }
@@ -227,7 +281,7 @@ export async function api<T = any>(method: string, url: string, body?: any, opts
     }).catch(() => {});
   } else if (!isGet) {
     // 写操作成功后失效 GET 缓存，保证后续读取拿到最新数据
-    task.then((data) => { if ((data as any)?.code === 0) invalidateApiCache(); }).catch(() => {});
+    task.then((data) => { if ((data as any)?.code === 0) invalidateAfterWrite(url); }).catch(() => {});
   }
   return task;
 }

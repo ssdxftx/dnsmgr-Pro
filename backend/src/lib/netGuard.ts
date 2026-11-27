@@ -2,6 +2,7 @@ import { lookup } from 'node:dns/promises';
 import dns from 'node:dns';
 import net from 'node:net';
 import { Agent, ProxyAgent, fetch as undiciFetch } from 'undici';
+import { withHostLimit } from './hostLimit.js';
 import { getConfiguredProxyAgent } from './proxy.js';
 
 // SSRF 防护：默认禁止请求内网/回环/链路本地/云元数据地址。
@@ -383,7 +384,7 @@ export async function safeFetch(
   const resolve: PinResolver = privateFetchAllowed()
     ? async () => null
     : (u) => resolveForPin(u.hostname, isPrivateIp, '禁止访问内网地址');
-  return followFetch(raw, init, maxRedirects, resolve, opts.useProxy !== false, opts);
+  return withHostLimit(raw, () => followFetch(raw, init, maxRedirects, resolve, opts.useProxy !== false, opts));
 }
 
 // 跳转时会随请求转发的敏感凭据头，跨主机跳转时必须剥离，避免被 302 带到攻击者/元数据地址

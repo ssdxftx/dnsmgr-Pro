@@ -343,36 +343,49 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
 
   let attempted = 0;
   let delivered = 0;
-  if ((await configGet('notice_mail')) === '1') {
+  const [mailOn, wxOn, tgOn, qqOn, webOn, customOn] = await Promise.all([
+    configGet('notice_mail'),
+    configGet('notice_wxtpl'),
+    configGet('notice_tgbot'),
+    configGet('notice_qqbot'),
+    configGet('notice_webhook'),
+    configGet('notice_custom_webhook'),
+  ]);
+  const jobs: Promise<void>[] = [];
+  const settle = (task: Promise<any>) =>
+    task.then((ok) => { if (ok === true) delivered += 1; }).catch(() => undefined);
+  const plain = () => stripTags(mailContent.replace(/<br\/>/g, '\n'));
+  if (mailOn === '1') {
     const to = (await configGet('mail_recv')) || (await configGet('mail_name')) || '';
     if (to) {
       attempted += 1;
-      if ((await sendMail(to, mailTitle, mailContent)) === true) delivered += 1;
+      jobs.push(settle(sendMail(to, mailTitle, mailContent)));
     }
   }
-  if ((await configGet('notice_wxtpl')) === '1') {
+  if (wxOn === '1') {
     attempted += 1;
     const content = stripTags(mailContent.replace(/<br\/>/g, '\n\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**'));
-    if ((await sendWechat(mailTitle, content)) === true) delivered += 1;
+    jobs.push(settle(sendWechat(mailTitle, content)));
   }
-  if ((await configGet('notice_tgbot')) === '1') {
+  if (tgOn === '1') {
     attempted += 1;
-    const content = stripTags(mailContent.replace(/<br\/>/g, '\n'));
-    if ((await sendTelegram(`<strong>${mailTitle}</strong>\n${content}`)) === true) delivered += 1;
+    jobs.push(settle(sendTelegram(`<strong>${mailTitle}</strong>\n${plain()}`)));
   }
-  if ((await configGet('notice_qqbot')) === '1') {
+  if (qqOn === '1') {
     attempted += 1;
-    if ((await sendQqbot(mailTitle, mailContent)) === true) delivered += 1;
+    jobs.push(settle(sendQqbot(mailTitle, mailContent)));
   }
-  if ((await configGet('notice_webhook')) === '1') {
+  if (webOn === '1') {
     attempted += 1;
     const content = mailContent.replace(/<br\/>/g, '\n').replace(/<b>/g, '**').replace(/<\/b>/g, '**');
-    if ((await sendWebhook(mailTitle, content)) === true) delivered += 1;
+    jobs.push(settle(sendWebhook(mailTitle, content)));
   }
-  if ((await configGet('notice_custom_webhook')) === '1') {
+  if (customOn === '1') {
     attempted += 1;
-    if ((await sendCustomWebhook(mailTitle, mailContent)) === true) delivered += 1;
+    jobs.push(settle(sendCustomWebhook(mailTitle, mailContent)));
   }
+  // 渠道并行发送：单渠道超时不再串行叠加，最坏耗时从 6×15 秒降到单渠道量级。
+  await Promise.all(jobs);
   // 没有任何渠道启用时不写通知日志，避免每次探测都插入一条假的“已发送”。
   // 有渠道但全部失败时记录失败，便于 observability 页面排查。
   if (attempted > 0) {
@@ -383,6 +396,106 @@ export async function sendNotice(action: number, task: NoticeTask, result: Check
       delivered,
     });
   }
+}
+
+const NOTICE_CONCURRENCY = Math.max(1, Math.min(8, Number(process.env.DNSMGR_NOTICE_CONCURRENCY || 2) || 2));
+const NOTICE_QUEUE_MAX = Math.max(10, Math.min(5000, Number(process.env.DNSMGR_NOTICE_QUEUE_MAX || 500) || 500));
+const NOTICE_MAX_ATTEMPTS = 3;
+const NOTICE_RETENTION_DAYS = 7;
+
+interface QueuedNotice {
+  action: number;
+  task: NoticeTask;
+  result: CheckResultLike;
+  dbId: number;
+  persisted: Promise<number>;
+}
+
+const noticeQueue: QueuedNotice[] = [];
+let noticeActive = 0;
+
+async function persistNotice(action: number, task: NoticeTask, result: CheckResultLike): Promise<number> {
+  try {
+    const res: any = await query(
+      `INSERT INTO ${table('notice_queue')} (action, task_json, result_json, attempts, created_at)
+       VALUES (?, ?, ?, 0, NOW())`,
+      [action, JSON.stringify(task), JSON.stringify(result)],
+    );
+    return Number(res?.insertId || 0);
+  } catch (e: any) {
+    console.error('[notice] 通知队列持久化失败:', e?.message || e);
+    return 0;
+  }
+}
+
+async function removePersistedNotice(id: number): Promise<void> {
+  if (!id) return;
+  await query(`DELETE FROM ${table('notice_queue')} WHERE id = ?`, [id]).catch(() => undefined);
+}
+
+function pumpNotices(): void {
+  while (noticeActive < NOTICE_CONCURRENCY && noticeQueue.length) {
+    const job = noticeQueue.shift()!;
+    noticeActive++;
+    void (async () => {
+      const dbId = job.dbId || (await job.persisted.catch(() => 0));
+      // 发送成功或所有渠道都已完成尝试后删除；进程中途崩溃时保留记录，下次启动重放。
+      await sendNotice(job.action, job.task, job.result);
+      await removePersistedNotice(dbId);
+    })()
+      .catch((e: any) => console.error('[notice] 告警通知发送失败:', e?.message || e))
+      .finally(() => {
+        noticeActive--;
+        pumpNotices();
+      });
+  }
+}
+
+/**
+ * 进程重启后重放未完成的告警通知。最多重试 3 次，避免某条坏数据在每次重启时反复发送；
+ * 正常发送完成会立即删除记录，因此稳态下该表只保留崩溃窗口内的少量行。
+ */
+export async function replayNoticeQueue(): Promise<void> {
+  try {
+    await query(
+      `DELETE FROM ${table('notice_queue')} WHERE created_at < DATE_SUB(NOW(), INTERVAL ? DAY)`,
+      [NOTICE_RETENTION_DAYS],
+    );
+    const rows: any[] = await query(
+      `SELECT id, action, task_json, result_json, attempts FROM ${table('notice_queue')} ORDER BY id ASC LIMIT 200`,
+    );
+    for (const row of rows) {
+      const id = Number(row.id || 0);
+      if (!id) continue;
+      if (Number(row.attempts || 0) >= NOTICE_MAX_ATTEMPTS) {
+        await removePersistedNotice(id);
+        continue;
+      }
+      try {
+        const task = JSON.parse(String(row.task_json || '{}'));
+        const result = JSON.parse(String(row.result_json || '{}'));
+        if (!task || typeof task !== 'object') throw new Error('任务数据不完整');
+        await query(`UPDATE ${table('notice_queue')} SET attempts = attempts + 1 WHERE id = ?`, [id]);
+        noticeQueue.push({ action: Number(row.action) || 0, task, result, dbId: id, persisted: Promise.resolve(id) });
+      } catch {
+        await removePersistedNotice(id);
+      }
+    }
+    if (noticeQueue.length) pumpNotices();
+  } catch (e: any) {
+    console.error('[notice] 通知队列重放失败:', e?.message || e);
+  }
+}
+
+/** 探测流程只入队，邮件/Webhook 的 15 秒级超时不再拖住容灾任务执行。 */
+export function enqueueNotice(action: number, task: NoticeTask, result: CheckResultLike): void {
+  if (noticeQueue.length >= NOTICE_QUEUE_MAX) {
+    console.error('[notice] 告警通知队列已满，丢弃本次通知');
+    return;
+  }
+  const persisted = persistNotice(action, task, result);
+  noticeQueue.push({ action, task, result, dbId: 0, persisted });
+  pumpNotices();
 }
 
 export async function sendExpireNotice(day: number, list: { name: string; expiretime: string }[]): Promise<number> {

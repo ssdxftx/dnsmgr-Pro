@@ -9,7 +9,7 @@ import { query, table, listColumns } from '../../db.js';
 import { isGeneratedColumn } from '../../db/types.js';
 import { getSysKey } from '../../config.js';
 import { APP_VERSION } from '../version.js';
-import { fmtDateTime } from '../util.js';
+import { fmtDateTime, yieldToEventLoop } from '../util.js';
 import { deriveKek, deriveSysKek, KDF_PARAMS, kdfParamsFromStored, unwrapDek, wrapDek } from '../vault/keys.js';
 import { archiveFileName, backupsDir, ensureDataDirs, resolveArchivePath, tmpDir, writeArchive, type ArchiveStats, type ArchiveTableChunk } from './archive.js';
 import { ensureBackupKey, getBackupKey } from './key.js';
@@ -308,6 +308,8 @@ async function tableChunk(
         yield encodeRow(r, columns);
       }
       if (page.length < pageSize) return;
+      // SQLite 是同步驱动：分页之间让出事件循环，避免整表导出期间 HTTP 请求持续停顿
+      await yieldToEventLoop();
       if (pk) last = page[page.length - 1][pk];
       else offset += pageSize;
     }

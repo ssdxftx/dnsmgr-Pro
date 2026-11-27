@@ -211,6 +211,8 @@ export interface CdnProvider {
   // EO：规则引擎可选匹配项/动作元数据（DescribeRulesSetting）
   getRulesSetting?(): Promise<Record<string, any> | false>;
   listRules?(zoneId: string): Promise<RuleItem[] | false>;
+  // 规则较多时由服务端分页，避免一次拉全量再在前端切片
+  listRulesPaged?(zoneId: string, page?: number, size?: number): Promise<PagedResult<RuleItem> | false>;
   createRule?(zoneId: string, params: Record<string, any>): Promise<string | false>;
   updateRule?(zoneId: string, ruleId: string, params: Record<string, any>): Promise<boolean>;
   deleteRules?(zoneId: string, ruleIds: string[]): Promise<boolean>;

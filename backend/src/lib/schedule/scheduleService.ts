@@ -1,7 +1,7 @@
 import { query, queryOne, table } from '../../db.js';
 import { configSet } from '../../config.js';
 import { getDnsProvider } from '../dns/factory.js';
-import { fmtDateTime } from '../util.js';
+import { fmtDateTime, mapPool } from '../util.js';
 import { enqueueAudit, nowStr } from '../audit/store.js';
 
 function getDnsType(value: string): string {
@@ -15,6 +15,24 @@ class PermanentTaskError extends Error {}
 
 /** 连续失败达到该次数后自动停用，避免普通错误每分钟无限重试 */
 const MAX_TRANSIENT_RETRIES = 5;
+/** 单轮最多处理的任务数：到期任务再多也不能让一次调度长时间占用主线程 */
+const SCHEDULE_BATCH = Math.max(1, Math.min(500, Number(process.env.DNSMGR_SCHEDULE_BATCH || 50) || 50));
+/** 任务间有界并发：原子领取保证同一任务不会被重复执行 */
+const SCHEDULE_CONCURRENCY = Math.max(1, Math.min(20, Number(process.env.DNSMGR_SCHEDULE_CONCURRENCY || 4) || 4));
+
+// 同一域名的多个切换任务仍按顺序执行，避免并发改同一条解析记录互相覆盖。
+const domainChains = new Map<number, Promise<unknown>>();
+async function runForDomain(did: number, fn: () => Promise<void>): Promise<void> {
+  const key = Number(did);
+  const prev = domainChains.get(key) || Promise.resolve();
+  const next = prev.catch(() => undefined).then(fn);
+  domainChains.set(key, next);
+  try {
+    await next;
+  } finally {
+    if (domainChains.get(key) === next) domainChains.delete(key);
+  }
+}
 
 import { decryptConfig } from '../secret.js';
 import { loadAccountConfig } from '../accounts/taskConfig.js';
@@ -51,20 +69,20 @@ export async function executeAll(): Promise<boolean> {
     }
   }
   const list = await query(
-    `SELECT * FROM ${table('sctask')} WHERE nexttime > 0 AND nexttime <= ? AND active = 1`,
+    `SELECT * FROM ${table('sctask')} WHERE nexttime > 0 AND nexttime <= ? AND active = 1 ORDER BY nexttime ASC, id ASC LIMIT ${SCHEDULE_BATCH}`,
     [now]
   );
   if (list.length === 0) return false;
   console.log('开始执行定时切换解析任务，共获取到' + list.length + '个待执行任务');
-  for (const row of list) {
+  await mapPool(list, SCHEDULE_CONCURRENCY, async (row) => {
     // 原子认领：仅当任务仍到期时才置 nexttime=0，避免并发/多实例重复执行同一任务
     const claim: any = await query(
       `UPDATE ${table('sctask')} SET nexttime = 0 WHERE id = ? AND nexttime > 0 AND nexttime <= ? AND active = 1`,
       [row.id, now]
     );
-    if (!claim || !claim.affectedRows) continue;
+    if (!claim || !claim.affectedRows) return;
     try {
-      await executeOne(row);
+      await runForDomain(Number(row.did), () => executeOne(row));
       // 单次任务执行完即停用，避免 UI 长期显示“启用中”且不可再次调度
       if (Number(row.type) !== 1) {
         await query(`UPDATE ${table('sctask')} SET active = 0, nexttime = 0, retry = 0 WHERE id = ?`, [row.id]).catch(() => undefined);
@@ -91,7 +109,7 @@ export async function executeAll(): Promise<boolean> {
         }
       }
     }
-  }
+  });
   await configSet('schedule_time', fmtDateTime());
   return true;
 }

@@ -35,13 +35,15 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, defineAsyncComponent } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { NCard, NSelect } from 'naive-ui';
 import { BarChartOutline } from '@vicons/ionicons5';
 import EmptyState from '../EmptyState.vue';
-import MetricChart from './MetricChart.vue';
 import BreakdownTable from './BreakdownTable.vue';
+
+// ECharts chunk 较大：等图表真正渲染时再加载，统计页首屏不被图表库拖慢
+const MetricChart = defineAsyncComponent(() => import('./MetricChart.vue'));
 import type { ChartConfig } from '../../lib/statistics/catalog';
 import type { MetricUnit } from '../../lib/statistics/format';
 
