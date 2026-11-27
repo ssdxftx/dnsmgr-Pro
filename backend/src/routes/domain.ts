@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import net from 'node:net';
 import { randomUUID } from 'node:crypto';
-import { domainNameNorm } from '../lib/domainNorm.js';
+import { domainNameNorm, setDomainNormAvailable } from '../lib/domainNorm.js';
 import { query, queryOne, table, withTransaction } from '../db.js';
 import { getDnsProvider, dnsProviders } from '../lib/dns/factory.js';
 import { matchPermission, isRecordInScope, checkLevel, md5, permissionMatchesDomain, invalidateAllUserPermissions, type SubPermission } from '../auth.js';
@@ -42,6 +42,22 @@ function legacyEmpty(value: any): boolean {
 
 function domainKey(v: any): string {
   return String(v ?? '').trim().toLowerCase().replace(/\.$/, '');
+}
+
+/**
+ * 规范化列可能在运行期失效：例如从旧库恢复数据后 domain.name_norm 不再存在，
+ * 而进程内的 available 标记仍为 true。查询报未知列时回退表达式并重试一次，
+ * 避免整个域名列表直接 500。
+ */
+async function queryByDomainNames<T = any>(buildSql: () => string, params: any[]): Promise<T[]> {
+  try {
+    return await query<T>(buildSql(), params);
+  } catch (e: any) {
+    if (!/name_norm|unknown column/i.test(String(e?.message || e))) throw e;
+    setDomainNormAvailable(false);
+    console.warn(`[domains] 规范化列不可用，回退表达式查询：${e?.message || e}`);
+    return await query<T>(buildSql(), params);
+  }
 }
 
 /** 拼接完整记录名：主机记录为 @ 或空时指向根域名，避免出现 @.example.com */
@@ -211,10 +227,17 @@ async function loadSubCounts(dids: number[]): Promise<Map<string, { count: numbe
   const uniq = [...new Set(dids.map((id) => Number(id)).filter((id) => Number.isFinite(id) && id > 0))];
   for (let i = 0; i < uniq.length; i += SUBCOUNT_CHUNK) {
     const chunk = uniq.slice(i, i + SUBCOUNT_CHUNK);
-    const rows: any[] = await query(
-      `SELECT did, sub, record_count, updated_at FROM ${table('domain_subcount')} WHERE did IN (${chunk.map(() => '?').join(',')})`,
-      chunk,
-    );
+    let rows: any[] = [];
+    try {
+      rows = await query(
+        `SELECT did, sub, record_count, updated_at FROM ${table('domain_subcount')} WHERE did IN (${chunk.map(() => '?').join(',')})`,
+        chunk,
+      );
+    } catch (e: any) {
+      // 缓存表缺失/损坏时按无缓存处理，列表仍可回源云端计算，不能因此整体失败。
+      console.warn(`[domains] 读取子域名计数缓存失败：${e?.message || e}`);
+      return out;
+    }
     for (const row of rows) {
       const at = new Date(row.updated_at).getTime();
       if (!Number.isFinite(at)) continue;
@@ -597,32 +620,55 @@ export default async function domainRoutes(app: FastifyInstance) {
     const rows = acc.admin
       ? await query(`${select}${adminWhere} ORDER BY A.id DESC${pageSql}`, [...adminWhereParams, ...pageParams])
       : permNames.length
-        ? await query(`${select} WHERE ${domainNameNorm('A')} IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)
+        ? await queryByDomainNames(
+            () => `${select} WHERE ${domainNameNorm('A')} IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`,
+            permNames,
+          )
         : [];
     let pageTotal = rows.length;
     let pageSummary: Record<string, number> | null = null;
     if (acc.admin && pageSize) {
-      const agg: any = await queryOne(
-        `SELECT COUNT(*) AS total,
-                SUM(CASE WHEN A.checkstatus = 2 THEN 1 ELSE 0 END) AS queryFailed,
-                SUM(CASE WHEN A.is_notice = 1 THEN 1 ELSE 0 END) AS noticeOn,
-                SUM(CASE WHEN A.checkstatus <> 2 THEN COALESCE(A.recordcount, 0) ELSE 0 END) AS recordTotal,
-                COUNT(DISTINCT CASE WHEN A.cid IS NOT NULL AND A.cid <> 0 THEN A.cid END) AS categoryCount,
-                SUM(CASE WHEN A.expiretime IS NOT NULL AND A.expiretime <> '' AND A.expiretime < NOW() THEN 1 ELSE 0 END) AS expired
-         FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id${adminWhere}`,
-        adminWhereParams,
-      );
-      pageTotal = Number(agg?.total || 0);
-      pageSummary = {
-        total: pageTotal,
-        queryFailed: Number(agg?.queryFailed || 0),
-        noticeOn: Number(agg?.noticeOn || 0),
-        recordTotal: Number(agg?.recordTotal || 0),
-        categoryCount: Number(agg?.categoryCount || 0),
-        expired: Number(agg?.expired || 0),
-      };
+      try {
+        const agg: any = await queryOne(
+          `SELECT COUNT(*) AS total,
+                  SUM(CASE WHEN A.checkstatus = 2 THEN 1 ELSE 0 END) AS queryFailed,
+                  SUM(CASE WHEN A.is_notice = 1 THEN 1 ELSE 0 END) AS noticeOn,
+                  SUM(CASE WHEN A.checkstatus <> 2 THEN COALESCE(A.recordcount, 0) ELSE 0 END) AS recordTotal,
+                  COUNT(DISTINCT CASE WHEN A.cid IS NOT NULL AND A.cid <> 0 THEN A.cid END) AS categoryCount,
+                  SUM(CASE WHEN A.expiretime IS NOT NULL AND A.expiretime <> '' AND A.expiretime < NOW() THEN 1 ELSE 0 END) AS expired
+           FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id${adminWhere}`,
+          adminWhereParams,
+        );
+        pageTotal = Number(agg?.total || 0);
+        pageSummary = {
+          total: pageTotal,
+          queryFailed: Number(agg?.queryFailed || 0),
+          noticeOn: Number(agg?.noticeOn || 0),
+          recordTotal: Number(agg?.recordTotal || 0),
+          categoryCount: Number(agg?.categoryCount || 0),
+          expired: Number(agg?.expired || 0),
+        };
+      } catch (e: any) {
+        // 汇总统计失败不能连累列表：例如旧库缺少某列或日期格式脏数据。
+        // 至少用 COUNT(*) 保住分页总数，其余指标交给前端按当前页降级计算。
+        console.warn(`[domains] 汇总统计失败，列表继续返回：${e?.message || e}`);
+        try {
+          const countRow: any = await queryOne(
+            `SELECT COUNT(*) AS total FROM ${table('domain')} A LEFT JOIN ${table('account')} B ON A.aid = B.id${adminWhere}`,
+            adminWhereParams,
+          );
+          pageTotal = Number(countRow?.total || 0);
+        } catch {
+          pageTotal = rows.length;
+        }
+      }
     }
-    const categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
+    let categories: any[] = [];
+    try {
+      categories = await query(`SELECT id, name FROM ${table('domain_category')} ORDER BY sort ASC`);
+    } catch (e: any) {
+      console.warn(`[domains] 读取域名分类失败，列表继续返回：${e?.message || e}`);
+    }
     const catMap = Object.fromEntries(categories.map((c: any) => [c.id, c.name]));
     const visibleRows = (rows as any[]).filter(
       (r) =>
@@ -797,7 +843,10 @@ export default async function domainRoutes(app: FastifyInstance) {
     const targets = acc.admin
       ? ((await query(`${select} ORDER BY A.id DESC`)) as any[])
       : permNames.length
-        ? ((await query(`${select} WHERE ${domainNameNorm('A')} IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`, permNames)) as any[])
+        ? ((await queryByDomainNames(
+            () => `${select} WHERE ${domainNameNorm('A')} IN (${permNames.map(() => '?').join(',')}) ORDER BY A.id DESC`,
+            permNames,
+          )) as any[])
         : [];
     // 批量取账户，避免逐个域名查 account
     const acctMap = await fetchAccountMap(targets.map((t: any) => Number(t.aid)));

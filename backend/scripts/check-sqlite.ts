@@ -179,6 +179,18 @@ const legacyRes = await legacyApp.inject({
 assert(legacyRes.statusCode === 200 && JSON.parse(legacyRes.body).total === 2, '旧版域名列表接口可用');
 await legacyApp.close();
 
+const apiApp = Fastify({ logger: false });
+apiApp.decorate('authenticate', async (req: any) => {
+  req.user = { uid: 1000, username: 'admin', level: 2, is_super: 1, type: 'session', jti: 'check-domains', token_version: 0 };
+});
+await apiApp.register((await import('../src/routes/domain.js')).default);
+const domainsRes = await apiApp.inject({ method: 'GET', url: '/api/domains?limit=20&offset=0' });
+const domainsBody: any = JSON.parse(domainsRes.body);
+assert(domainsRes.statusCode === 200 && domainsBody.code === 0, '管理端域名列表分页接口可用');
+assert(domainsBody.data.length === 2 && domainsBody.total === 2, '管理端域名列表返回分页数据与总数');
+assert(domainsBody.summary?.total === 2 && domainsBody.summary?.queryFailed === 0, '管理端域名列表汇总统计正确');
+await apiApp.close();
+
 const grouped = await db.query<any>("SELECT GROUP_CONCAT(name ORDER BY id ASC SEPARATOR ',') AS names FROM dnsmgr_domain");
 assert(grouped[0].names === 'example.com,example.net', 'GROUP_CONCAT + ORDER BY 翻译正确');
 const trimmed = await db.query<any>("SELECT LOWER(TRIM(TRAILING '.' FROM ?)) AS value", ['Example.COM.']);
